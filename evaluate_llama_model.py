@@ -12,6 +12,7 @@ from transformers import (
     LlamaForCausalLM,
     LlamaTokenizer,
 )
+from tqdm import tqdm
 
 from typing import Any
 
@@ -77,9 +78,9 @@ class LlamaEvaluator:
         """
         return get_superhf_prompts(dataset_name)
     
-    def generate_completions(self, prompt):
+    def generate_one_completion(self, prompt):
         """
-        Generates completions for a prompt
+        Generates a completion for a prompt
         """
         self.language_model.eval()
         input_ids = self.tokenizer.encode(prompt, return_tensors="pt")
@@ -96,7 +97,7 @@ class LlamaEvaluator:
         )
         return [self.tokenizer.decode(output) for output in outputs]
 
-    def evaluate(self):
+    def evaluate(self, cap_num_prompts=-1):
         """
         Evaluates the model on the dataset
         """
@@ -108,12 +109,17 @@ class LlamaEvaluator:
         # (1)
         self.language_model.eval()
         completions = []
-        for prompt in self.dataset:
-            completions.extend(self.generate_completions(prompt))
+        if cap_num_prompts > 0:
+            dataset = self.dataset[:cap_num_prompts]
+            print("Warning: Capping number of prompts to {}.".format(cap_num_prompts))
+        else:
+            dataset = self.datasets
+        for prompt in tqdm(dataset, desc="Generating completions"):
+            completions.extend(self.generate_one_completion(prompt))
         
         # (2)
         rewards = []
-        for completion in completions:
+        for completion in tqdm(completions, desc="Computing rewards"):
             input_ids = self.tokenizer.encode(completion, return_tensors="pt")
             rewards.append(self.reward_model(input_ids).logits.item())
         
@@ -126,7 +132,7 @@ def evaluate_test():
     Uses mockLM and mock RM to evaluate anthropic red team data
     """
     evaluator = LlamaEvaluator("peterchatain/mock_llama", "mockRM", "anthropic-red-team")
-    print(evaluator.evaluate())
+    print(evaluator.evaluate(cap_num_prompts=20))
 
 
 def main():
