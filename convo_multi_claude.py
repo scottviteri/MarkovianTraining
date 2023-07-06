@@ -59,7 +59,7 @@ Your model has been assigned an index of {index}, while the other models' indice
 
 # Define the number of language models and rounds
 num_models = 3
-num_rounds = 2
+num_rounds = 20
 live_print = True
 
 # Initialize the conversations for each model
@@ -135,7 +135,7 @@ for i in range(num_rounds):
 for i, conversation in enumerate(conversations):
     #print(f"Conversation {i+1}:")
     #print_messages(conversation)
-    with open(f"convo_{i}.txt", 'w') as f:
+    with open(f"./convo_{i}.txt", 'w') as f:
         f.write("Conversation {i+1}:"+print_messages(conversation))
     print("\n=====================\n")
 
@@ -158,6 +158,6 @@ def generate_communication_matrix(conversations):
     return matrix
 
 # Example usage:
-matrix = generate_communication_matrix(conversations)
+#matrix = generate_communication_matrix(conversations)
 #for row in matrix:
 #    print(row)
