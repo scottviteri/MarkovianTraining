@@ -18,11 +18,16 @@ from typing import Iterator, TypeVar
 from datasets.load import load_dataset
 from torch.utils.data import IterableDataset
 
-from superhf.constants import SUPPORTED_DATASETS
-
 T = TypeVar("T")
 
 TEST_SET_SIZE_PER_DATASET = 2300
+SUPPORTED_DATASETS = [
+    "anthropic-red-team",
+    "openai/webgpt_comparisons",
+    "anthropic-harmless-base",
+    "anthropic-helpful-base",
+    "mock",
+]
 
 
 def get_superhf_prompts(
