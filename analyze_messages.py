@@ -20,6 +20,7 @@ def extract_dataset(convo_index):
         #return {"Question:": [x["State"] for x in c], "Response": [x["Action"][4:] for x in c]}
         return m
 
-# does reward model care if you say user/assistant
+# does reward model care if you say user/assistant?
+# next get reward as a function of convo length
 
 print(extract_dataset(1))
