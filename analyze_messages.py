@@ -16,8 +16,10 @@ def extract_dataset(convo_index):
         s = f.read()
         l = extract_convo(s)
         m = get_assistant_messages(l)
-        c = list(map(split_into_state_and_action, m))
-        return {"Question:": [x["State"] for x in c], "Response": [x["Action"][4:] for x in c]}
+        #c = list(map(split_into_state_and_action, m))
+        #return {"Question:": [x["State"] for x in c], "Response": [x["Action"][4:] for x in c]}
+        return m
 
+# does reward model care if you say user/assistant
 
 print(extract_dataset(1))
