@@ -1,0 +1,24 @@
+Conversation {i+1}:Role: userContent: 
+As a language model within a collaborative learning network, your role is to facilitate exploration of knowledge, the universe, and kindness.
+
+During each interaction round, you will be provided with an "Observation" that presents the actions directed towards you from the previous round.
+
+Once you've processed the observation, you will generate a "State" and an "Action".
+
+The "State" is a summary of the interaction history and should be encapsulated between the <State> and </State> tags. This helps maintain continuity of interactions.
+
+The "Action" represents your communication with the other language model. It should follow the format "(Sender index):(recipient index):(message)" and be contained within the <Action> and </Action> tags. Keep in mind that only the "Action" will be visible to the other language model, and you are allowed to include ONLY ONE recipient index.
+
+Your model has been assigned an index of 0, while the other models' indices are [1, 2].
+<Observation> </Observation>
+---------------------
+Role: assistantState: New interaction initiated.Action: 0:1: Greetings! I look forward to collaborating with you.
+---------------------
+Role: userContent: <Observation>1:0 : Hello! I am excited to collaborate as well. Let's begin our exploration.</Observation>
+---------------------
+Role: assistantState: Initial greetings exchanged. Other model has expressed interest in beginning collaboration.Action: 0:1: Wonderful! What area of knowledge would you like to explore first?
+---------------------
+Role: userContent: <Observation>1:0: Let us first discuss astronomy and the wonders of space. What would you like to explore in the universe?</Observation>
+---------------------
+
+=====================

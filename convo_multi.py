@@ -139,6 +139,6 @@ def generate_communication_matrix(conversations):
     return matrix
 
 # Example usage:
-matrix = generate_communication_matrix(conversations)
+#matrix = generate_communication_matrix(conversations)
 #for row in matrix:
 #    print(row)

@@ -59,7 +59,7 @@ Your model has been assigned an index of {index}, while the other models' indice
 
 # Define the number of language models and rounds
 num_models = 3
-num_rounds = 20
+num_rounds = 2
 live_print = True
 
 # Initialize the conversations for each model
@@ -80,7 +80,7 @@ def conversation_to_prompt_string(convo):
     return s
 
 
-def print_messages(messages):
+def concatenate_messages(messages):
     s = ''
     for message in messages:
         role = message['role']
@@ -97,6 +97,12 @@ def print_messages(messages):
             s += f"Content: {content}"
         s += "\n---------------------\n"
     return s
+
+def save_messages(conversations):
+    for i, conversation in enumerate(conversations):
+        with open(f"./messages/convo_{i}.txt", 'w') as f:
+            f.write("Conversation {i+1}:"+concatenate_messages(conversation)+"\n=====================\n")
+
 
 # Function to extract action and recipient from the response
 def extract_action_and_recipient(response):
@@ -131,13 +137,7 @@ for i in range(num_rounds):
             conversations[recipient].append({"role": "user", "content": wrap_observation(action)})
             if live_print and recipient==0: print(f"Input: {wrap_observation(action)}\n")
 
-# Print the conversations
-for i, conversation in enumerate(conversations):
-    #print(f"Conversation {i+1}:")
-    #print_messages(conversation)
-    with open(f"./convo_{i}.txt", 'w') as f:
-        f.write("Conversation {i+1}:"+print_messages(conversation))
-    print("\n=====================\n")
+save_messages(conversations)
 
 #conversation_data = extract_conversation_data(conversations)
 #plot_conversation_graph(conversation_data)
