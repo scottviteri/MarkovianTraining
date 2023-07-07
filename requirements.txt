@@ -1,2 +1,5 @@
 torch
 transformers
+networkx
+matplotlib
+openai
