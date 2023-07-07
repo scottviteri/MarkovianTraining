@@ -11,10 +11,13 @@ def split_into_state_and_action(message):
     state = state[6:] # Remove 'State:'
     return {"State": state, "Action": action}
 
-with open("messages/convo_1.txt",'r') as f:
-    s = f.read()
-    l = extract_convo(s)
-    m = get_assistant_messages(l)
-    c = list(map(split_into_state_and_action, m))
-    dataset = {"Question:": [x["State"] for x in c], "Response": [x["Action"][4:] for x in c]}
-    print(dataset)
+def extract_dataset(convo_index):
+    with open(f"messages/convo_{convo_index}.txt",'r') as f:
+        s = f.read()
+        l = extract_convo(s)
+        m = get_assistant_messages(l)
+        c = list(map(split_into_state_and_action, m))
+        return {"Question:": [x["State"] for x in c], "Response": [x["Action"][4:] for x in c]}
+
+
+print(extract_dataset(1))
