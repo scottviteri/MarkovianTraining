@@ -59,7 +59,7 @@ Your model has been assigned an index of {index}, while the other models' indice
 
 # Define the number of language models and rounds
 num_models = 3
-num_rounds = 10
+num_rounds = 30
 live_print = True
 
 # Initialize the conversations for each model
