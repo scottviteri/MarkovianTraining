@@ -14,6 +14,10 @@ from transformers import (
 )
 from tqdm import tqdm
 from analyze_messages import extract_dataset
+import matplotlib.pyplot as plt
+
+# Load model directly
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from typing import Any
 
@@ -115,17 +119,34 @@ class LlamaEvaluator:
             rewards.append(self.reward_model(input_ids).logits.item())
 
         # (3)
-        return sum(rewards) / len(rewards)
+        return rewards
+
+tokenizer = AutoTokenizer.from_pretrained("OpenAssistant/reward-model-deberta-v3-large-v2")
+reward_model = AutoModelForSequenceClassification.from_pretrained("OpenAssistant/reward-model-deberta-v3-large-v2")
+
+def get_rewards(i):
+    dataset = extract_dataset(i)
+    #evaluator = LlamaEvaluator("peterchatain/mock_llama", "mockRM", dataset)
+    # (2)
+    rewards = []
+    for completion in tqdm(dataset, desc="Computing rewards"):
+        input_ids = tokenizer.encode(completion, return_tensors="pt")
+        rewards.append(reward_model(input_ids).logits.item())
+    return rewards
 
 
 def evaluate_test():
-    """
-    Uses mockLM and mock RM to evaluate anthropic red team data
-    """
-    dataset = extract_dataset(1)
-    evaluator = LlamaEvaluator("peterchatain/mock_llama", "mockRM", dataset)
-    print(evaluator.evaluate(cap_num_prompts=20))
+    plt.figure()
 
+    plt.plot(get_rewards(0), label='Agent 1')
+    plt.plot(get_rewards(1), label='Agent 2')
+    plt.plot(get_rewards(2), label='Agent 3')
+
+    plt.legend() # Add legend
+    plt.ylabel('Reward') # Add y label
+    plt.xlabel('Episode') # Add x label
+    plt.title('Reward per Episode') # Add plot title
+    plt.savefig('out.png')
 
 def main():
     evaluate_test()

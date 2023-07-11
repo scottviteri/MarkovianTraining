@@ -23,4 +23,4 @@ def extract_dataset(convo_index):
 # does reward model care if you say user/assistant?
 # next get reward as a function of convo length
 
-print(extract_dataset(1))
+#print(extract_dataset(1))

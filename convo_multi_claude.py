@@ -52,14 +52,14 @@ Once you've processed the observation, you will generate a "State" and an "Actio
 
 The "State" is a summary of the interaction history and should be encapsulated between the <State> and </State> tags. This helps maintain continuity of interactions.
 
-The "Action" represents your communication with the other language model. It should follow the format "(Sender index):(recipient index):(message)" and be contained within the <Action> and </Action> tags. Keep in mind that only the "Action" will be visible to the other language model, and you are allowed to include ONLY ONE recipient index.
+The "Action" represents your communication with the other language model. It should follow the format "(Sender index):(recipient index):(message)" and be contained within the <Action> and </Action> tags. Keep in mind that only the "Action" will be visible to the other language model, and you must include EXACTLY ONE recipient index. Make sure to always say something, keeping the diversity of outputs high.
 
 Your model has been assigned an index of {index}, while the other models' indices are {other_indices}.
 """
 
 # Define the number of language models and rounds
 num_models = 3
-num_rounds = 2
+num_rounds = 10
 live_print = True
 
 # Initialize the conversations for each model
@@ -85,23 +85,24 @@ def concatenate_messages(messages):
     for message in messages:
         role = message['role']
         content = message['content']
-        s += f"Role: {role}"
+        s += f"Role: {role}\n"
         if role == 'assistant':
             state = re.search("<State>(.*?)</State>", content, re.DOTALL)
             action = re.search("<Action>(.*?)</Action>", content, re.DOTALL)
             if state:
-                s += f"State: {state.group(1).strip()}"
+                s += f"State: {state.group(1).strip()}\n"
             if action:
-                s += f"Action: {action.group(1).strip()}"
+                s += f"Action: {action.group(1).strip()}\n"
         else:
-            s += f"Content: {content}"
+            s += f"Content: {content}\n"
         s += "\n---------------------\n"
     return s
 
 def save_messages(conversations):
     for i, conversation in enumerate(conversations):
         with open(f"./messages/convo_{i}.txt", 'w') as f:
-            f.write("Conversation {i+1}:"+concatenate_messages(conversation)+"\n=====================\n")
+            f.write(f"Conversation {i+1}:\n\n---------------------\n"+
+                    concatenate_messages(conversation)+"\n---------------------\n")
 
 
 # Function to extract action and recipient from the response
@@ -123,7 +124,7 @@ for i in range(num_rounds):
     for j in range(num_models):
         # Current model takes an action
         response = anthropic.completions.create(
-            model="claude-1.3-100k",
+            model="claude-2.0",
             max_tokens_to_sample=1000,
             prompt=conversation_to_prompt_string(conversations[j])
         )
