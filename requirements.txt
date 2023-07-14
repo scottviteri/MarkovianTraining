@@ -3,3 +3,5 @@ transformers
 networkx
 matplotlib
 openai
+peft
+sentencepiece
