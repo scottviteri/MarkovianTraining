@@ -1,12 +1,13 @@
 """
-A file demonstrating how to use multiple adapters for generating text
+A file demonstrating how to use multiple adapters for generating text.
+
+This is used for testing purposes to understand how multi adapters work
 
 TODO:
-    1. Fix tokenizer special tokens
+    1. Fix tokenizer special tokens and somehow verify they are correct
 """
 
 import timeit
-import torch
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -24,6 +25,9 @@ from typing import Any, List
 
 class MultipleLlamas:
     def __init__(self, language_model_name, agent_names: List[str], verbose=False):
+        """
+        A class for testing out how multi adapters work
+        """
         self.verbose = verbose
         self.tokenizer, self.language_model = self.load_language_model(language_model_name, agent_names)
 
@@ -135,7 +139,7 @@ def test_one_adapter_creation(num_tests=1):
     """
     This test ensure that despite multiple adapters being created, only the active one is used.
     """
-    for _ in range(num_tests):
+    for _ in tqdm(range(num_tests)):
         time_1 = run_mock_llama_test(["agent1", "agent2"], [["agent1"]])[0]
         time_2 = run_mock_llama_test(["agent1", "large_lora_r"], [["agent1"]])[0]
         time_3 = run_mock_llama_test(["agent1", "large_lora_r"], [["large_lora_r"]])[0]
@@ -151,7 +155,7 @@ def test_set_adapter(num_tests=1):
     mean that adapters are stacked on top of each other.
     e.g. model.generate() should only utilize the active adapter, and not all the adapters that have been set.
     """
-    for _ in range(num_tests):
+    for _ in tqdm(range(num_tests)):
         times_dict = run_mock_llama_test(["agent1", "large_lora_r", "agent2"], [["agent1"], ["agent2"], ["large_lora_r"], ["agent2", "agent1"]])
         print(times_dict)
 
