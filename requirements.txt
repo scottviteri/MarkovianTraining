@@ -5,3 +5,4 @@ matplotlib
 openai
 peft
 sentencepiece
+datasets
