@@ -9,35 +9,10 @@ import networkx as nx
 
 anthropic = Anthropic()
 
-
-def extract_conversation_data(conversations):
-    conversation_data = []
-    for i in range(len(conversations[0])):
-        for j in range(len(conversations)):
-            message = conversations[j][i]
-            if message['role'] == 'assistant':
-                content = message['content']
-                action = re.search("<Action>(.*?)</Action>", content, re.DOTALL)
-                if action:
-                    sender, recipient, _ = action.group(1).strip().split(':')
-                    conversation_data.append((i, int(sender), int(recipient)))
-    return conversation_data
-
-def plot_conversation_graph(conversation_data):
-    G = nx.MultiDiGraph()
-    for round_num, sender, recipient in conversation_data:
-        G.add_edge(sender, recipient, label=round_num)
-    pos = nx.spring_layout(G)
-    edge_labels = {(u, v): d['label'] for u, v, d in G.edges(data=True)}
-    nx.draw_networkx_nodes(G, pos, node_color='lightblue', node_size=500)
-    nx.draw_networkx_edges(G, pos, arrowstyle='-|>', arrowsize=20)
-    nx.draw_networkx_labels(G, pos)
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
-    plt.show()
-
-# Example usage:
-# conversation_data = extract_conversation_data(conversations)
-# plot_conversation_graph(conversation_data)
+#l = []
+#for i in [0,1,2]:
+#    with open(f"/home/scottviteri/Projects/CollaborativeTraining/messages/convo_{i}.txt", 'r') as f:
+#        l.append(f.read())
 
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -58,8 +33,8 @@ Your model has been assigned an index of {index}, while the other models' indice
 """
 
 # Define the number of language models and rounds
-num_models = 3
-num_rounds = 30
+num_models = 2
+num_rounds = 3
 live_print = True
 
 # Initialize the conversations for each model
@@ -119,46 +94,54 @@ def extract_action_and_recipient(response):
 def wrap_observation(observation):
     return f"<Observation>{observation}</Observation>"
 
-# Conversation loop
-for i in range(num_rounds):
-    for j in range(num_models):
-        # Current model takes an action
-        response = anthropic.completions.create(
-            model="claude-2.0",
-            max_tokens_to_sample=1000,
-            prompt=conversation_to_prompt_string(conversations[j])
-        )
-        full_response = response.completion
-        action, recipient = extract_action_and_recipient(full_response)
-        conversations[j].append({"role": "assistant", "content": full_response})
-        if live_print and j==0: print(f"Output: {full_response}\n")
+def run_convo():
+    # Conversation loop
+    for i in range(num_rounds):
+        for j in range(num_models):
+            # Current model takes an action
+            response = anthropic.completions.create(
+                model="claude-2.0",
+                max_tokens_to_sample=1000,
+                prompt=conversation_to_prompt_string(conversations[j])
+            )
+            full_response = response.completion
+            action, recipient = extract_action_and_recipient(full_response)
+            conversations[j].append({"role": "assistant", "content": full_response})
+            if live_print and j==0: print(f"Output: {full_response}\n")
 
-        # If an action was taken, send it to the recipient
-        if recipient is not None:
-            conversations[recipient].append({"role": "user", "content": wrap_observation(action)})
-            if live_print and recipient==0: print(f"Input: {wrap_observation(action)}\n")
+            # If an action was taken, send it to the recipient
+            if recipient is not None:
+                conversations[recipient].append({"role": "user", "content": wrap_observation(action)})
+                if live_print and recipient==0: print(f"Input: {wrap_observation(action)}\n")
 
-save_messages(conversations)
+#save_messages(conversations)
 
 #conversation_data = extract_conversation_data(conversations)
 #plot_conversation_graph(conversation_data)
 
-def generate_communication_matrix(conversations):
-    num_models = len(conversations)
-    num_rounds = len(conversations[0])
-    matrix = [[None]*num_models for _ in range(num_rounds)]
-    for i in range(num_rounds):
-        for j in range(num_models):
-            message = conversations[j][i]
-            if message['role'] == 'assistant':
-                content = message['content']
-                action = re.search("<Action>(.*?)</Action>", content, re.DOTALL)
-                if action:
-                    _, recipient, _ = action.group(1).strip().split(':')
-                    matrix[i][j] = int(recipient)
-    return matrix
+def extract_convo(s):
+    return s[19:].split('---------------------\n')
 
-# Example usage:
-#matrix = generate_communication_matrix(conversations)
-#for row in matrix:
-#    print(row)
+def get_assistant_messages(messages):
+     return list(map(lambda x:x[15:], filter(lambda x: x[:15]=="Role: assistant", messages)))
+
+# ["State: Greeted by model 0. Ready to collaborate.Action: 1:0 : Hello! I am excited to collaborate as well. Let's begin our exploration.\n", 'State: Have now been greeted by models 0 and 2 (Claude). Ready to explore areas of knowledge with model 0.Action: 1:0: Let us first discuss astronomy and the wonders of space. What would you like to explore in the universe?\n']
+
+def split_into_state_and_action(message):
+    state, action = message.split("Action: ")
+    state = state[6:] # Remove 'State:'
+    return {"State": state, "Action": action}
+
+def extract_dataset(convo_index):
+    with open(f"messages/convo_{convo_index}.txt",'r') as f:
+        s = f.read()
+        l = extract_convo(s)
+        m = get_assistant_messages(l)
+        #c = list(map(split_into_state_and_action, m))
+        #return {"Question:": [x["State"] for x in c], "Response": [x["Action"][4:] for x in c]}
+        return m
+
+# does reward model care if you say user/assistant?
+# next get reward as a function of convo length
+
+#print(extract_dataset(1))
