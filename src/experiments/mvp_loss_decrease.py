@@ -42,7 +42,7 @@ def main():
 
     # convert from shape (1, num_tokens) to (num_tokens/1024, 1024)
     tokens_tensor = dataset_1_tokenized['input_ids'].squeeze()
-    size = tokens_tensor.shape[1]
+    size = tokens_tensor.shape[0]
     size = (size//1024)*(1024)
     tokens_tensor = tokens_tensor[0:size]
     reshaped_tensor = tokens_tensor.view(-1, 1024)  # Change 1024 to your desired sequence length
