@@ -17,20 +17,45 @@
 """
 
 import torch
-from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+from transformers import AutoModelForCausalLM, AutoTokenizer
+# from llama import Llama
 from datasets import load_dataset
+import numpy as np
 
 def main():
-    causal_lm = GPT2LMHeadModel.from_pretrained("gpt2")
+    causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
     print("Loaded causal LM")
     print(causal_lm)
-    causal_lm_tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
 
     # load dataset
-    # here we load a small dataset from https://huggingface.co/datasets/allenai/c4
-    c4_subset = load_dataset("allenai/c4", data_files="en/c4-train.00000-of-01024.json.gz")
-    print("Loaded dataset")
-    print(c4_subset)
+    textbook_1_path = "data/st_patrick_biography.txt"
+    dataset = load_dataset("text", data_files=textbook_1_path)
+    print(dataset)
+
+    # collapse dataset into one big string
+    dataset_1 = dataset["train"]
+    text = "\n".join(dataset_1["text"])
+
+    # tokenize dataset
+    dataset_1_tokenized = causal_lm_tokenizer(text, return_tensors="pt")
+
+    # convert from shape (1, num_tokens) to (num_tokens/1024, 1024)
+    tokens_tensor = dataset_1_tokenized['input_ids'].squeeze()
+    size = tokens_tensor.shape[1]
+    size = (size//1024)*(1024)
+    tokens_tensor = tokens_tensor[0:size]
+    reshaped_tensor = tokens_tensor.view(-1, 1024)  # Change 1024 to your desired sequence length
+
+    print(reshaped_tensor.shape)  # Should print torch.Size([num_tokens/1024, 1024])
+
+    # make a pytorch data loader for the dataset
+    dataset_1_loader = torch.utils.data.DataLoader(reshaped_tensor, batch_size=1, shuffle=True)
+
+    for batch in dataset_1_loader:
+        print(batch.shape)
+        break
+    
 
 
 if __name__ == "__main__":
