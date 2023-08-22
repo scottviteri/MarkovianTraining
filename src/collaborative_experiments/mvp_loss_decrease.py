@@ -84,10 +84,11 @@ def create_helpful_message_2(tokens, tokens_to_grab=MSG_CONTEXT_LENGTH):
 def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=False):
     # make labels from the batch, one hot encoded of shape (batch_size, seq_len, vocab_size)
     # e.g. [[4, 1, 5]] -> [[[0, 0, 0, 0, 1, 0], [0, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 1]]]
+    batch = batch.to(device)
     labels = torch.nn.functional.one_hot(batch, num_classes=causal_lm.config.vocab_size).to(torch.float32)
     outputs_original = causal_lm(input_ids=batch.to(device)) # maybe I don't want past_ke_values to be returned? what is that?
     # at this point outputs_original is logits and past_key_values
-    logits = outputs_original.logits.to("cpu").detach()
+    logits = outputs_original.logits.detach()#to("cpu")
     loss = loss_fn(logits, labels)
     if verbose: tqdm.write(f"{loss}")
 
@@ -97,7 +98,7 @@ def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=Fal
     # Use gather to pick the probabilities corresponding to the correct token at each position
     correct_probs = probs.gather(-1, batch.unsqueeze(-1)).squeeze(-1).detach() # shape (batch_size, seq_len)
     correct_probs_all += correct_probs.mean(dim=0)
-    return loss
+    return loss.to("cpu")
 
 def display_results(fname, n_examples, correct_probs_all):
     correct_probs_all /= n_examples
@@ -120,6 +121,8 @@ def display_results(fname, n_examples, correct_probs_all):
         )
     )
     fig.show()
+    # save
+    fig.write_html(f"results/{fname}.html")
 
 
 # to decompose this all I need is
@@ -134,7 +137,7 @@ class ExperimentConfig:
 
 
 def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device):
-    correct_probs_all = torch.zeros(config.expected_length)
+    correct_probs_all = torch.zeros(config.expected_length).to(device)
     losses = []
 
     for batch in tqdm(dataset_1_loader, desc="Main Training Loop"):
@@ -142,7 +145,7 @@ def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device):
         loss = train_step(batch, causal_lm, loss_fn, device, correct_probs_all)
         losses.append(loss)
 
-    display_results(config.name, n_examples=len(dataset_1_loader), correct_probs_all=correct_probs_all)
+    display_results(config.name, n_examples=len(dataset_1_loader), correct_probs_all=correct_probs_all.to("cpu"))
     return losses
 
 
@@ -176,7 +179,7 @@ def main():
     # plot the losses on the same graph
     df = pd.DataFrame(losses_dict)
     df["position"] = df.index
-    df = df.melt(id_vars=["position"], value_vars=["loss_original", "loss_helpful"])
+    df = df.melt(id_vars=["position"], value_vars=list(losses_dict.keys()))
     fig = px.line(df, x="position", y="value", color="variable")
     fig.update_layout(title="Losses")
     fig.show()
