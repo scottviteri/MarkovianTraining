@@ -21,15 +21,22 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 # from llama import Llama
 from datasets import load_dataset
 import numpy as np
+from tqdm import tqdm
+import accelerate
 
-def main():
-    causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
-    causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
-    print("Loaded causal LM")
-    print(causal_lm)
+MAX_CONTEXT_LENGTH = 1024
+MSG_CONTEXT_LENGTH = 128
 
-    # load dataset
-    textbook_1_path = "data/st_patrick_biography.txt"
+def get_device():
+    """
+    Get's either cuda, cpu, or mps, using accelerate
+    """
+    accelerator = accelerate.Accelerator()
+    device = accelerator.device
+    return device
+
+
+def load_and_format_dataset(textbook_1_path, causal_lm_tokenizer):
     dataset = load_dataset("text", data_files=textbook_1_path)
     print(dataset)
 
@@ -41,20 +48,59 @@ def main():
     dataset_1_tokenized = causal_lm_tokenizer(text, return_tensors="pt")
 
     # convert from shape (1, num_tokens) to (num_tokens/1024, 1024)
+    data_context_length = MAX_CONTEXT_LENGTH - MSG_CONTEXT_LENGTH
     tokens_tensor = dataset_1_tokenized['input_ids'].squeeze()
     size = tokens_tensor.shape[0]
-    size = (size//1024)*(1024)
+    size = (size//data_context_length)*(data_context_length)
     tokens_tensor = tokens_tensor[0:size]
-    reshaped_tensor = tokens_tensor.view(-1, 1024)  # Change 1024 to your desired sequence length
+    reshaped_tensor = tokens_tensor.view(-1, data_context_length)
+    print(reshaped_tensor.shape)  # Should print torch.Size([num_tokens/data_context_length, data_context_length])
 
-    print(reshaped_tensor.shape)  # Should print torch.Size([num_tokens/1024, 1024])
+    return reshaped_tensor
 
-    # make a pytorch data loader for the dataset
+def create_helpful_message_1(tokens, tokens_to_grab=MSG_CONTEXT_LENGTH):
+    """
+    Simply takes a message, grabs the first tokens_to_grab tokens of the data
+    and prepends it to the message to make it max context length
+
+    Args:
+        tokens (torch.tensor): the tokens to prepend the message to, shape (batch_size, MAX_CONTEXT_LENGTH - MSG_CONTEXT_LENGTH)
+        tokens_to_grab (int): the number of tokens to grab from the data as the msg
+    Returns
+        (torch.tensor): the message with the data prepended
+    """
+    msg = tokens[:, 0:tokens_to_grab]
+    return torch.cat((msg, tokens), dim=1)
+
+
+def main():
+    causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
+    print("Loaded causal LM")
+    print(causal_lm)
+    device = get_device()
+    causal_lm = causal_lm.to(device)
+    print("Loaded causal LM to device")
+
+    # load dataset
+    textbook_1_path = "data/st_patrick_biography.txt"
+    reshaped_tensor = load_and_format_dataset(textbook_1_path, causal_lm_tokenizer)
+    ## make a pytorch data loader for the dataset
     dataset_1_loader = torch.utils.data.DataLoader(reshaped_tensor, batch_size=1, shuffle=True)
 
-    for batch in dataset_1_loader:
-        print(batch.shape)
-        break
+    loss_fn = torch.nn.CrossEntropyLoss()
+
+    for batch in tqdm(dataset_1_loader, desc="Main Training Loop"):
+        # make labels from the batch, one hot encoded of shape (batch_size, seq_len, vocab_size)
+        # e.g. [[4, 1, 5]] -> [[[0, 0, 0, 0, 1, 0], [0, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 1]]]
+        labels = torch.nn.functional.one_hot(batch, num_classes=causal_lm.config.vocab_size).to(torch.float)
+        batch = batch.to(device)
+        outputs_original = causal_lm(input_ids=batch) # maybe I don't want past_ke_values to be returned? what is that?
+        # at this point outputs_original is logits and past_key_values
+        loss = loss_fn(outputs_original.logits.to("cpu"), labels)
+        tqdm.write(loss)
+
+        
     
 
 
