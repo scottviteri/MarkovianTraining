@@ -4,3 +4,4 @@ plotly
 networkx
 matplotlib
 openai
+pytest
