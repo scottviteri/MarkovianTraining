@@ -17,12 +17,14 @@
 """
 
 import torch
+import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 # from llama import Llama
 from datasets import load_dataset
-import numpy as np
 from tqdm import tqdm
 import accelerate
+import plotly.express as px
+import pandas as pd
 
 MAX_CONTEXT_LENGTH = 1024
 MSG_CONTEXT_LENGTH = 128
@@ -90,18 +92,36 @@ def main():
 
     loss_fn = torch.nn.CrossEntropyLoss()
 
+    correct_probs_all = torch.zeros(reshaped_tensor.shape[1])
+
     for batch in tqdm(dataset_1_loader, desc="Main Training Loop"):
         # make labels from the batch, one hot encoded of shape (batch_size, seq_len, vocab_size)
         # e.g. [[4, 1, 5]] -> [[[0, 0, 0, 0, 1, 0], [0, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 1]]]
-        labels = torch.nn.functional.one_hot(batch, num_classes=causal_lm.config.vocab_size).to(torch.float)
-        batch = batch.to(device)
-        outputs_original = causal_lm(input_ids=batch) # maybe I don't want past_ke_values to be returned? what is that?
+        labels = torch.nn.functional.one_hot(batch, num_classes=causal_lm.config.vocab_size).to(torch.float32)
+        outputs_original = causal_lm(input_ids=batch.to(device)) # maybe I don't want past_ke_values to be returned? what is that?
         # at this point outputs_original is logits and past_key_values
-        loss = loss_fn(outputs_original.logits.to("cpu"), labels)
+        logits = outputs_original.logits.to("cpu")
+        loss = loss_fn(logits, labels)
         tqdm.write(f"{loss}")
 
+        # Compute softmax over the last dimension to get probabilities
+        probs = F.softmax(logits, dim=-1) # shape (batch_size, seq_len, vocab_size)
+
+        # Use gather to pick the probabilities corresponding to the correct token at each position
+        correct_probs = probs.gather(-1, batch.unsqueeze(-1)).squeeze(-1) # shape (batch_size, seq_len)
+        correct_probs_all += correct_probs.mean(dim=0)
         
-    
+    correct_probs_all /= len(dataset_1_loader)
+    print(correct_probs_all.shape)
+    print(correct_probs_all)
+
+    # plot correct_probs_all using plotly
+    df = pd.DataFrame(correct_probs_all.numpy())
+    df.columns = ["prob"]
+    df["position"] = df.index
+    fig = px.line(df, x="position", y="prob")
+    fig.show()
+
 
 
 if __name__ == "__main__":
