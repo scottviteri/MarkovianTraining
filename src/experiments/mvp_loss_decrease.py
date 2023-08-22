@@ -98,7 +98,7 @@ def main():
         outputs_original = causal_lm(input_ids=batch) # maybe I don't want past_ke_values to be returned? what is that?
         # at this point outputs_original is logits and past_key_values
         loss = loss_fn(outputs_original.logits.to("cpu"), labels)
-        tqdm.write(loss)
+        tqdm.write(f"{loss}")
 
         
     
