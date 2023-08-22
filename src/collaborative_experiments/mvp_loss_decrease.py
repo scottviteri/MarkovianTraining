@@ -1,4 +1,8 @@
 """
+for llama use
+```
+torchrun --nproc_per_node 1 src/collaborative_experiments/mvp_loss_decrease.py
+```
 # Experiment outline:
 ## Goal:
     1. Measure a decrease in the loss of a model on a particular high quality dataset 
@@ -17,17 +21,24 @@
 """
 
 import os
+import sys
+import time
+from pathlib import Path
+import json
 
 import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
-# from llama import Llama
+from llama import Llama
 from datasets import load_dataset
 from tqdm import tqdm
 import accelerate
 import plotly.express as px
 import pandas as pd
 import numpy as np
+
+from llama.model import ModelArgs, Transformer
+from llama.tokenizer import Tokenizer
 
 from collaborative_experiments.constants import MAX_CONTEXT_LENGTH, MSG_CONTEXT_LENGTH
 
@@ -45,7 +56,8 @@ def get_device():
     device = accelerator.device
     return device
 
-def load_and_format_dataset(textbook_1_path, causal_lm_tokenizer):
+def load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, debug=False):
+    data_context_length = MAX_CONTEXT_LENGTH - MSG_CONTEXT_LENGTH
     dataset = load_dataset("text", data_files=textbook_1_path)
     print(dataset)
 
@@ -57,13 +69,21 @@ def load_and_format_dataset(textbook_1_path, causal_lm_tokenizer):
     dataset_1_tokenized = causal_lm_tokenizer(text, return_tensors="pt")
 
     # convert from shape (1, num_tokens) to (num_tokens/1024, 1024)
-    data_context_length = MAX_CONTEXT_LENGTH - MSG_CONTEXT_LENGTH
     tokens_tensor = dataset_1_tokenized['input_ids'].squeeze()
     size = tokens_tensor.shape[0]
     size = (size//data_context_length)*(data_context_length)
     tokens_tensor = tokens_tensor[0:size]
     reshaped_tensor = tokens_tensor.view(-1, data_context_length)
     print(reshaped_tensor.shape)  # Should print torch.Size([num_tokens/data_context_length, data_context_length])
+    # turn all values to be the same 11
+    if debug: 
+        reshaped_tensor.fill_(50)# shape (2, data_context_length)
+        reshaped_tensor = reshaped_tensor[0:2]
+        for i in range(reshaped_tensor.shape[1] // 3):
+            reshaped_tensor[0, i*3 + 1] += 2
+            reshaped_tensor[1, i*3 + 1] += 2
+            reshaped_tensor[0, i*3 + 2] += 3
+            reshaped_tensor[1, i*3 + 2] += 3
 
     return reshaped_tensor
 
@@ -88,7 +108,7 @@ def create_helpful_message_2(tokens, tokens_to_grab=MSG_CONTEXT_LENGTH):
     msg = tokens[:, 0:tokens_to_grab]
     return torch.cat((msg, tokens[:, 0:-tokens_to_grab]), dim=1)
 
-def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=False):
+def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=False, debug=False):
     # make labels from the batch, one hot encoded of shape (batch_size, seq_len, vocab_size)
     # e.g. [[4, 1, 5]] -> [[[0, 0, 0, 0, 1, 0], [0, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 1]]]
     batch = batch.to(device)
@@ -105,6 +125,13 @@ def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=Fal
     # Use gather to pick the probabilities corresponding to the correct token at each position
     correct_probs = probs.gather(-1, batch.unsqueeze(-1)).squeeze(-1).detach() # shape (batch_size, seq_len)
     correct_probs_all += correct_probs.mean(dim=0)
+    if debug:
+        # get one sentence
+        # print the tokens that it assigns max probability to
+        # print the actual sentence
+        sentence_tokens = batch[0]
+        sentence_probs = probs[0]
+        sentence_correct_probs = correct_probs[0]
     return loss.to("cpu")
 
 def display_results(fname, n_examples, correct_probs_all):
@@ -134,7 +161,6 @@ def display_results(fname, n_examples, correct_probs_all):
     # save
     fig.write_html(f"results/{fname}.html")
 
-
 def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device):
     correct_probs_all = torch.zeros(config.expected_length).to(device)
     losses = []
@@ -147,21 +173,65 @@ def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device):
     # display_results(config.name, n_examples=len(dataset_1_loader), correct_probs_all=correct_probs_all.to("cpu"))
     return losses, correct_probs_all.to("cpu")
 
+def load_llama_model(
+        ckpt_dir: str = "../llama/llama-2-7b",
+        tokenizer_path: str = "../llama/tokenizer.model",
+        temperature: float = 0.6,
+        top_p: float = 0.9,
+        max_seq_len: int = 1024,
+        max_gen_len: int = 64,
+        max_batch_size: int = 8,
+        device: str = "mps"
+    ):
+    os.environ["RANK"] = "0"
+    # generator = Llama.build(
+    #     ckpt_dir=ckpt_dir,
+    #     tokenizer_path=tokenizer_path,
+    #     max_seq_len=max_seq_len,
+    #     max_batch_size=max_batch_size,
+    # ) # fails for strange reasons
+    # return generator.model, generator.tokenizer
+    start_time = time.time()
+    checkpoints = sorted(Path(ckpt_dir).glob("*.pth"))
+    for chkpt_path in checkpoints:
+        checkpoint = torch.load(chkpt_path, map_location="cpu")
+    with open(Path(ckpt_dir) / "params.json", "r") as f:
+        params = json.loads(f.read())
 
-def main():
-    causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
-    causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
+    model_args: ModelArgs = ModelArgs(
+        max_seq_len=max_seq_len,
+        max_batch_size=max_batch_size,
+        **params,
+    )
+    tokenizer = Tokenizer(model_path=tokenizer_path)
+    if device == "cuda":
+        torch.set_default_tensor_type(torch.cuda.HalfTensor)
+    elif device == "mps":
+        torch.set_default_tensor_type(torch.HalfTensor)
+    else:
+        torch.set_default_tensor_type(torch.BFloat16Tensor)
+    model = Transformer(model_args) 
+    model.load_state_dict(checkpoint, strict=False)
+    print(f"Loaded in {time.time() - start_time:.2f} seconds")
+    return model, tokenizer
+
+def main(save_dir="results_debug", debug=False, BATCH_SIZE = 1, model_name="llama"):
+    device = get_device()
+    if model_name == "llama":
+        causal_lm, causal_lm_tokenizer = load_llama_model(device=device)
+    else:
+        causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
     print("Loaded causal LM")
     print(causal_lm)
-    device = get_device()
     causal_lm = causal_lm.to(device)
     print("Loaded causal LM to device")
 
     # load dataset
+    # https://www.gutenberg.org/ebooks/71431
     textbook_1_path = "data/st_patrick_biography.txt"
-    reshaped_tensor = load_and_format_dataset(textbook_1_path, causal_lm_tokenizer)
+    reshaped_tensor = load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, debug=debug)
     ## make a pytorch data loader for the dataset
-    BATCH_SIZE = 8
     dataset_1_loader = torch.utils.data.DataLoader(reshaped_tensor, batch_size=BATCH_SIZE, shuffle=True)
 
     loss_fn = torch.nn.CrossEntropyLoss()
@@ -176,13 +246,13 @@ def main():
     for experiment in tqdm(experiments, desc="Experiment"):
         losses, correct_probs_all = run_experiment(experiment, dataset_1_loader, causal_lm, loss_fn, device)
         losses_dict[experiment.name] = losses
-        correct_probs_all_dict[experiment.name] = correct_probs_all.numpy()
+        correct_probs_all_dict[experiment.name] = correct_probs_all.clone().numpy() / (len(dataset_1_loader) * BATCH_SIZE)
     
     for exp_name, losses in losses_dict.items():
         print(f"experiment {exp_name} had avg loss of {np.mean(losses)}")
 
-    if not os.path.exists("results"):
-        os.makedirs("results")
+    if not os.path.exists(f"{save_dir}"):
+        os.makedirs(f"{save_dir}")
     # plot the losses on the same graph
     df = pd.DataFrame(losses_dict)
     df["batch_index"] = df.index
@@ -190,7 +260,7 @@ def main():
     fig = px.line(df, x="batch_index", y="value", color="variable")
     fig.update_layout(title=f"Losses, batch_size {BATCH_SIZE}")
     fig.show()
-    fig.write_html("results/losses.html")
+    fig.write_html(f"{save_dir}/losses.html")
 
     # plot the per token posisions on the same graph
     # normalize the lengths of the different experiments by padding to the max one with zeros
@@ -204,7 +274,7 @@ def main():
     fig = px.line(df, x="position", y="value", color="variable")
     fig.update_layout(title="Probability of correct token at each position")
     fig.show()
-    fig.write_html("results/probability_of_correct_token_at_each_position.html")
+    fig.write_html(f"{save_dir}/probability_of_correct_token_at_each_position.html")
 
 if __name__ == "__main__":
     main()
