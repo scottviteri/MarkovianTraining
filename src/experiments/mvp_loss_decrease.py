@@ -108,7 +108,12 @@ def main():
         probs = F.softmax(logits, dim=-1) # shape (batch_size, seq_len, vocab_size)
 
         # Use gather to pick the probabilities corresponding to the correct token at each position
-        correct_probs = probs.gather(-1, batch.unsqueeze(-1)).squeeze(-1) # shape (batch_size, seq_len)
+        correct_probs = probs.gather(-1, batch.unsqueeze(-1)).squeeze(-1).detach() # shape (batch_size, seq_len)
+        df = pd.DataFrame(correct_probs.mean(dim=0).numpy())
+        df.columns = ["prob"]
+        df["position"] = df.index
+        fig = px.line(df, x="position", y="prob")
+        fig.show()
         correct_probs_all += correct_probs.mean(dim=0)
         
     correct_probs_all /= len(dataset_1_loader)
