@@ -5,3 +5,4 @@ networkx
 matplotlib
 openai
 pytest
+# make sure to install llama from llama_fork for mac os

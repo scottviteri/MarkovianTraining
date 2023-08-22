@@ -13,12 +13,28 @@
             "justMyCode": true
         },
         {
+            "name": "Python: Current File all code",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
             "name": "Llama Evaluation",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/evaluate_llama_model.py",
             "console": "integratedTerminal",
             "justMyCode": true
-        }
+        },
+        {
+            "name": "Run with llama",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/collaborative_experiments/mvp_loss_decrease.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
     ]
 }
