@@ -1,5 +1,7 @@
 torch
 transformers
+plotly
 networkx
 matplotlib
 openai
+pytest
