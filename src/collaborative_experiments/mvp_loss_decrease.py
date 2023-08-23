@@ -56,7 +56,7 @@ def get_device():
     device = accelerator.device
     return device
 
-def load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, debug=False):
+def load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, debug=False, reduced_data=0):
     data_context_length = MAX_CONTEXT_LENGTH - MSG_CONTEXT_LENGTH
     dataset = load_dataset("text", data_files=textbook_1_path)
     print(dataset)
@@ -84,6 +84,8 @@ def load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, debug=False):
             reshaped_tensor[1, i*3 + 1] += 2
             reshaped_tensor[0, i*3 + 2] += 3
             reshaped_tensor[1, i*3 + 2] += 3
+    elif reduced_data > 0:
+        reshaped_tensor = reshaped_tensor[0:reduced_data]
 
     return reshaped_tensor
 
@@ -215,10 +217,16 @@ def load_llama_model(
     print(f"Loaded in {time.time() - start_time:.2f} seconds")
     return model, tokenizer
 
-def main(save_dir="results_debug", debug=False, BATCH_SIZE = 1, model_name="llama"):
+def main(save_dir="results_debug", debug=False, BATCH_SIZE = 1, model_name="gpt-neo", reduced_data=20):
     device = get_device()
     if model_name == "llama":
         causal_lm, causal_lm_tokenizer = load_llama_model(device=device)
+    elif model_name == "gpt2":
+        causal_lm = AutoModelForCausalLM.from_pretrained("gpt2")
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    elif model_name == "gpt-neo":
+        causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-2.7B")
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
     else:
         causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
@@ -230,7 +238,7 @@ def main(save_dir="results_debug", debug=False, BATCH_SIZE = 1, model_name="llam
     # load dataset
     # https://www.gutenberg.org/ebooks/71431
     textbook_1_path = "data/st_patrick_biography.txt"
-    reshaped_tensor = load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, debug=debug)
+    reshaped_tensor = load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, debug=debug, reduced_data=reduced_data)
     ## make a pytorch data loader for the dataset
     dataset_1_loader = torch.utils.data.DataLoader(reshaped_tensor, batch_size=BATCH_SIZE, shuffle=True)
 
