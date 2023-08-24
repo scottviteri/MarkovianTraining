@@ -1,8 +1,8 @@
 """
 A file for testing the functions used in the mvp_loss_decrease.py file.
 """
-
 import pytest
+import tabulate
 import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -42,16 +42,46 @@ def test_create_helpful_message_1(tokens):
     assert torch.equal(actual_output[0, :MSG_CONTEXT_LENGTH], tokens_input[:MSG_CONTEXT_LENGTH]), "The tokens do not match as expected."
     assert actual_output.shape[1] == MAX_CONTEXT_LENGTH, "The output shape is not as expected."
 
-def test_train_setup(causal_lm, causal_lm_tokenizer):
+def test_train_step(causal_lm, causal_lm_tokenizer):
     # visualizes it
-    # batch, causal_lm, loss_fn, device, correct_probs_all
     sentence = "Hello, my name is john. I like apples. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     tokens = causal_lm_tokenizer.encode(sentence, return_tensors="pt")
-    tokens = tokens.to(get_device())
-    len_of_tokens = tokens.shape[1]
+    device = get_device()
+    tokens = tokens.to(device) # (1, 24) == (1, seq_len)
 
-    correct_probs_all = torch.zeros(correct_probs.shape[1]).to(device) # (seq_len,)
-    assert False
+    correct_probs_all = torch.zeros(tokens.shape[1]).to(device) # (seq_len,)
+
+    # batch, causal_lm, loss_fn, device, correct_probs_all
+    loss_fn = torch.nn.CrossEntropyLoss(reduction=None)
+    loss, logits = train_step(tokens, causal_lm, loss_fn, device, correct_probs_all, pytest=True)
+    # logits have shape (batch_size, seq_len, vocab_size)
+    # loss should have shape (batch_size, seq_len)
+
+    decoded_sentence = []
+    for token in tokens:
+        decoded_sentence.append(causal_lm_tokenizer.decode(token))
+    predicted_tokens = []
+    predicted_token_ids = []
+    for token in logits[0]:
+        prediced_token_id = torch.argmax(token)
+        predicted_token_ids.append(prediced_token_id)
+        predicted_tokens.append(causal_lm_tokenizer.decode(prediced_token_id))
+    losses = []
+    for loss_item in loss[0]:
+        losses.append(loss_item.item())
+    
+    # use tabulate to print a table of all this
+    table = [
+        ["Token", "Predicted Token", "Predicted Token ID", "Loss"],
+    ]
+    for i in range(len(decoded_sentence)):
+        table.append([decoded_sentence[i], predicted_tokens[i], predicted_token_ids[i], losses[i]])
+    print(tabulate.tabulate(table, headers="firstrow"))
+    # save results to a file
+    with open("tests/test_train_step.txt", "w") as f:
+        f.write(tabulate.tabulate(table, headers="firstrow"))
+
+
 
 if __name__ == "__main__":
     tokens_1 = torch.tensor([list(range(1024))])
