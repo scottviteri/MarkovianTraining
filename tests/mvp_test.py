@@ -75,6 +75,8 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     table = [
         ["Token", "Predicted Token", "Predicted Token ID", "Loss"],
     ]
+    if len(decoded_sentence) != len(predicted_tokens) or len(decoded_sentence) != len(predicted_token_ids) or len(decoded_sentence) != len(losses):
+        raise ValueError("The lengths of the lists are not the same.")
     for i in range(len(decoded_sentence)):
         table.append([decoded_sentence[i], predicted_tokens[i], predicted_token_ids[i], losses[i]])
     print(tabulate.tabulate(table, headers="firstrow"))
