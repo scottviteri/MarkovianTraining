@@ -36,5 +36,25 @@
             "console": "integratedTerminal",
             "justMyCode": false
         },
+        {
+            "name": "Run MVP experiment",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/collaborative_experiments/mvp_loss_decrease.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--save_dir",
+                "results",
+                "--model_name",
+                "gpt-neo",
+                "--reduced_data",
+                "0",
+                "--debug",
+                "False",
+                "--BATCH_SIZE",
+                "1"
+            ]
+        },
     ]
 }
