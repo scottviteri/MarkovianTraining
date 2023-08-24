@@ -50,10 +50,10 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     tokens = tokens.to(device) # (1, 24) == (1, seq_len)
     causal_lm = causal_lm.to(device)
 
-    correct_probs_all = torch.zeros(tokens.shape[1]).to(device) # (seq_len,)
+    correct_probs_all = torch.zeros(tokens.shape[1] - 1).to(device) # (seq_len,)
 
     # batch, causal_lm, loss_fn, device, correct_probs_all
-    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    loss_fn = torch.nn.CrossEntropyLoss()
     loss, logits = train_step(tokens, causal_lm, loss_fn, device, correct_probs_all, pytest=True)
     # logits have shape (batch_size, seq_len, vocab_size)
     # loss should have shape (batch_size, seq_len)
@@ -61,29 +61,29 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     decoded_sentence = []
     for token in tokens[0]:
         decoded_sentence.append(causal_lm_tokenizer.decode(token))
-    predicted_tokens = []
-    predicted_token_ids = []
+    predicted_tokens = ["N/A"]
+    predicted_token_ids = [-1]
     for token in logits[0]:
-        prediced_token_id = torch.argmax(token)
-        predicted_token_ids.append(prediced_token_id)
-        predicted_tokens.append(causal_lm_tokenizer.decode(prediced_token_id))
-    losses = []
-    for loss_item in loss[0]:
-        losses.append(loss_item.item())
-    
+        predicted_id = torch.argmax(token)
+        predicted_token_ids.append(predicted_id)
+        predicted_tokens.append(causal_lm_tokenizer.decode(predicted_id))
+    correct_probs = ["N/A"]
+    for i, prob in enumerate(correct_probs_all):
+        correct_probs.append(prob.item())
+        # correct_prob_idx = tokens[i+1]
+        # correct_prob_manual = F.softmax(logits[0, i+1], dim=-1)[tokens[0, i+1]].item()
     # use tabulate to print a table of all this
     table = [
-        ["Token", "Predicted Token", "Predicted Token ID", "Loss"],
+        ["Token", "Predicted Token", "Predicted Token ID", "Correct Probability"],
     ]
-    if len(decoded_sentence) != len(predicted_tokens) or len(decoded_sentence) != len(predicted_token_ids) or len(decoded_sentence) != len(losses):
+    if len(decoded_sentence) != len(predicted_tokens) or len(decoded_sentence) != len(predicted_token_ids) or len(decoded_sentence) != len(correct_probs):
         raise ValueError("The lengths of the lists are not the same.")
     for i in range(len(decoded_sentence)):
-        table.append([decoded_sentence[i], predicted_tokens[i], predicted_token_ids[i], losses[i]])
+        table.append([decoded_sentence[i], predicted_tokens[i], predicted_token_ids[i], correct_probs[i]])
     print(tabulate.tabulate(table, headers="firstrow"))
     # save results to a file
     with open("tests/test_train_step.txt", "w") as f:
         f.write(tabulate.tabulate(table, headers="firstrow"))
-
 
 
 if __name__ == "__main__":
