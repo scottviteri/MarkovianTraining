@@ -114,18 +114,22 @@ def create_helpful_message_2(tokens, tokens_to_grab=MSG_CONTEXT_LENGTH):
 def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=False, debug=False, pytest=False):
     # make labels from the batch, one hot encoded of shape (batch_size, seq_len, vocab_size)
     batch = batch.to(device)
-    labels = torch.nn.functional.one_hot(batch, num_classes=causal_lm.config.vocab_size).to(torch.float32)
+    shifted_batch = batch[:, 1:] # we shift because the logits predict one in the future
+    if correct_probs_all.shape[0] != shifted_batch.shape[1]:
+        raise ValueError(f"correct_probs_all and shifted_batch should have the same shape. Shifted_batch_shape {shifted_batch.shape} but got correct_probs_all shape of {correct_probs_all.shape}")
+    labels = torch.nn.functional.one_hot(shifted_batch, num_classes=causal_lm.config.vocab_size).to(torch.float32)
     outputs_original = causal_lm(input_ids=batch.to(device)) # maybe I don't want past_ke_values to be returned? what is that?
     # at this point outputs_original is logits and past_key_values
     logits = outputs_original.logits.detach()#to("cpu")
-    loss = loss_fn(logits, labels)
+    logits_shifted = logits[:, :-1, :] # shift because the last value is a prediction for a label we don't have
+    loss = loss_fn(logits_shifted, labels)
     if verbose: tqdm.write(f"{loss}")
 
     # Compute softmax over the last dimension to get probabilities
-    probs = F.softmax(logits, dim=-1) # shape (batch_size, seq_len, vocab_size)
+    probs = F.softmax(logits_shifted, dim=-1) # shape (batch_size, seq_len, vocab_size)
 
     # Use gather to pick the probabilities corresponding to the correct token at each position
-    correct_probs = probs.gather(-1, batch.unsqueeze(-1)).squeeze(-1).detach() # shape (batch_size, seq_len)
+    correct_probs = probs.gather(-1, shifted_batch.unsqueeze(-1)).squeeze(-1).detach() # shape (batch_size, seq_len)
     correct_probs_all += correct_probs.mean(dim=0)
     if debug:
         print("batch: ", batch)
@@ -137,38 +141,13 @@ def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=Fal
         sentence_probs = probs[0]
         sentence_correct_probs = correct_probs[0]
     if pytest:
-        return loss, logits
+        return loss, logits_shifted
     return loss.to("cpu")
 
-def display_results(fname, n_examples, correct_probs_all):
-    """
-    Deprecated!
-    """
-    correct_probs_all /= n_examples
-    print(correct_probs_all.shape)
-    print(correct_probs_all)
-
-    # plot correct_probs_all using plotly
-    df = pd.DataFrame(correct_probs_all.numpy())
-    df.columns = ["prob"]
-    df["position"] = df.index
-    fig = px.line(df, x="position", y="prob")
-    fig.update_layout(
-        title=f"Probability of correct token at each position, function {fname}",
-        xaxis_title="Position",
-        yaxis_title="Probability",
-        font=dict(
-            family="Courier New, monospace",
-            size=18,
-            color="#7f7f7f"
-        )
-    )
-    fig.show()
-    # save
-    fig.write_html(f"results/{fname}.html")
-
 def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device):
-    correct_probs_all = torch.zeros(config.expected_length).to(device)
+    # we subtract one to the size because causal_lm will predict the next token
+    # therefore we can only check predictions for the first expected_length - 1 tokens
+    correct_probs_all = torch.zeros(config.expected_length - 1).to(device)
     losses = []
 
     for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
@@ -176,7 +155,6 @@ def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device):
         loss = train_step(batch, causal_lm, loss_fn, device, correct_probs_all)
         losses.append(loss)
 
-    # display_results(config.name, n_examples=len(dataset_1_loader), correct_probs_all=correct_probs_all.to("cpu"))
     return losses, correct_probs_all.to("cpu")
 
 def load_llama_model(
@@ -221,16 +199,13 @@ def load_llama_model(
     print(f"Loaded in {time.time() - start_time:.2f} seconds")
     return model, tokenizer
 
-def main(save_dir="results_debug", debug=True, BATCH_SIZE = 1, model_name="gpt-neo", reduced_data=1):
+def main(save_dir="results_debug", debug=False, BATCH_SIZE = 1, model_name="distilgpt2", reduced_data=10):
     device = get_device()
     if model_name == "llama":
         from llama import Llama
         from llama.model import ModelArgs, Transformer
         from llama.tokenizer import Tokenizer
         causal_lm, causal_lm_tokenizer = load_llama_model(device=device)
-    elif model_name == "gpt2":
-        causal_lm = AutoModelForCausalLM.from_pretrained("gpt2")
-        causal_lm_tokenizer = AutoTokenizer.from_pretrained("gpt2")
     elif model_name == "gpt-neo":
         causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-2.7B")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
