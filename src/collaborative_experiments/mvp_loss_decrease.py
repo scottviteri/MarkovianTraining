@@ -42,7 +42,7 @@ from collaborative_experiments.constants import MAX_CONTEXT_LENGTH, MSG_CONTEXT_
 class ExperimentConfig:
     def __init__(self, msg_fn, expected_length, name):
         self.msg_fn = msg_fn
-        self.expected_length = expected_length
+        self.expected_length = expected_length # measured in number of tokens
         self.name = name
 
 def get_device():
@@ -52,6 +52,16 @@ def get_device():
     accelerator = accelerate.Accelerator()
     device = accelerator.device
     return device
+
+def tile_a_tensor(reshaped_tensor):
+    reshaped_tensor.fill_(50)# shape (2, data_context_length)
+    reshaped_tensor = reshaped_tensor[0:2]
+    for i in range(reshaped_tensor.shape[1] // 3):
+        reshaped_tensor[0, i*3 + 1] += 1
+        reshaped_tensor[1, i*3 + 1] += 1
+        reshaped_tensor[0, i*3 + 2] += 2
+        reshaped_tensor[1, i*3 + 2] += 2
+    return reshaped_tensor
 
 def load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, debug=False, reduced_data=0):
     data_context_length = MAX_CONTEXT_LENGTH - MSG_CONTEXT_LENGTH
@@ -74,13 +84,7 @@ def load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, debug=False, r
     print(reshaped_tensor.shape)  # Should print torch.Size([num_tokens/data_context_length, data_context_length])
     # turn all values to be the same 11
     if debug: 
-        reshaped_tensor.fill_(50)# shape (2, data_context_length)
-        reshaped_tensor = reshaped_tensor[0:2]
-        for i in range(reshaped_tensor.shape[1] // 3):
-            reshaped_tensor[0, i*3 + 1] += 1
-            reshaped_tensor[1, i*3 + 1] += 1
-            reshaped_tensor[0, i*3 + 2] += 2
-            reshaped_tensor[1, i*3 + 2] += 2
+        reshaped_tensor = tile_a_tensor(reshaped_tensor)
     elif reduced_data > 0:
         reshaped_tensor = reshaped_tensor[0:reduced_data]
 
@@ -216,7 +220,7 @@ def load_llama_model(
     print(f"Loaded in {time.time() - start_time:.2f} seconds")
     return model, tokenizer
 
-def main(save_dir="results_debug", debug=False, BATCH_SIZE = 1, model_name="gpt-neo", reduced_data=20):
+def main(save_dir="results_debug", debug=True, BATCH_SIZE = 1, model_name="gpt-neo", reduced_data=1):
     device = get_device()
     if model_name == "llama":
         from llama import Llama
