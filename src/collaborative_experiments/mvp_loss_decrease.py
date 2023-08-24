@@ -243,6 +243,9 @@ def main(save_dir="results_debug", debug=False, BATCH_SIZE = 1, model_name="dist
 
     if not os.path.exists(f"{save_dir}"):
         os.makedirs(f"{save_dir}")
+    save_dir = os.path.join(save_dir, f"{model_name}")
+    if not os.path.exists(f"{save_dir}"):
+        os.makedirs(f"{save_dir}")
     # plot the losses on the same graph
     df = pd.DataFrame(losses_dict)
     df["batch_index"] = df.index
