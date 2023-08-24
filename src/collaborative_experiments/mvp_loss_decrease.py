@@ -113,7 +113,6 @@ def create_helpful_message_2(tokens, tokens_to_grab=MSG_CONTEXT_LENGTH):
 
 def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=False, debug=False):
     # make labels from the batch, one hot encoded of shape (batch_size, seq_len, vocab_size)
-    # e.g. [[4, 1, 5]] -> [[[0, 0, 0, 0, 1, 0], [0, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 1]]]
     batch = batch.to(device)
     labels = torch.nn.functional.one_hot(batch, num_classes=causal_lm.config.vocab_size).to(torch.float32)
     outputs_original = causal_lm(input_ids=batch.to(device)) # maybe I don't want past_ke_values to be returned? what is that?
