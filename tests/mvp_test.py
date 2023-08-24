@@ -48,17 +48,18 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     tokens = causal_lm_tokenizer.encode(sentence, return_tensors="pt")
     device = get_device()
     tokens = tokens.to(device) # (1, 24) == (1, seq_len)
+    causal_lm = causal_lm.to(device)
 
     correct_probs_all = torch.zeros(tokens.shape[1]).to(device) # (seq_len,)
 
     # batch, causal_lm, loss_fn, device, correct_probs_all
-    loss_fn = torch.nn.CrossEntropyLoss(reduction=None)
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     loss, logits = train_step(tokens, causal_lm, loss_fn, device, correct_probs_all, pytest=True)
     # logits have shape (batch_size, seq_len, vocab_size)
     # loss should have shape (batch_size, seq_len)
 
     decoded_sentence = []
-    for token in tokens:
+    for token in tokens[0]:
         decoded_sentence.append(causal_lm_tokenizer.decode(token))
     predicted_tokens = []
     predicted_token_ids = []

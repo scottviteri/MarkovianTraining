@@ -1,0 +1,26 @@
+Token    Predicted Token      Predicted Token ID     Loss
+-------  -----------------  --------------------  -------
+Hello    The                                 383  -0
+,        and                                 290  -0
+my       name                               1438  -0
+name     is                                  318  -0
+is       J                                   449  -0
+john     .                                    13  -0
+.                                            198  -0
+I        am                                  716  -0
+like     to                                  284  -0
+apples   and                                 290  -0
+.        I                                   314  -0
+a        lot                                1256  40.2521
+aaaa     a                                    64  -0
+aaaa     aaaa                              24794  64.6622
+aaaa     aaaa                              24794  -0
+aaaa     aaaa                              24794  -0
+aaaa     aaaa                              24794  -0
+aaaa     aaaa                              24794  -0
+aaaa     aaaa                              24794  -0
+aaaa     aaaa                              24794  -0
+aaaa     aaaa                              24794  -0
+aaaa     aaaa                              24794  -0
+aaaa     aaaa                              24794  -0
+aaaa     aaaa                              24794  -0
