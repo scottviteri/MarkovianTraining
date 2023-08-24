@@ -11,16 +11,18 @@ from collaborative_experiments.mvp_loss_decrease import (
     get_device,
     load_and_format_dataset,
     create_helpful_message_1,
+    create_helpful_message_2,
+    train_step,
 )
 from collaborative_experiments.constants import MAX_CONTEXT_LENGTH, MSG_CONTEXT_LENGTH
 
 @pytest.fixture
 def causal_lm_tokenizer():
-    return AutoTokenizer.from_pretrained("gpt2")
+    return AutoTokenizer.from_pretrained("distilgpt2")
 
 @pytest.fixture
 def causal_lm():
-    return AutoModelForCausalLM.from_pretrained("gpt2")
+    return AutoModelForCausalLM.from_pretrained("distilgpt2")
 
 @pytest.fixture
 def tokens():
@@ -39,6 +41,17 @@ def test_create_helpful_message_1(tokens):
     # Check that the first MSG_CONTEXT_LENGTH tokens of the output are the same as expected
     assert torch.equal(actual_output[0, :MSG_CONTEXT_LENGTH], tokens_input[:MSG_CONTEXT_LENGTH]), "The tokens do not match as expected."
     assert actual_output.shape[1] == MAX_CONTEXT_LENGTH, "The output shape is not as expected."
+
+def test_train_setup(causal_lm, causal_lm_tokenizer):
+    # visualizes it
+    # batch, causal_lm, loss_fn, device, correct_probs_all
+    sentence = "Hello, my name is john. I like apples. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    tokens = causal_lm_tokenizer.encode(sentence, return_tensors="pt")
+    tokens = tokens.to(get_device())
+    len_of_tokens = tokens.shape[1]
+
+    correct_probs_all = torch.zeros(correct_probs.shape[1]).to(device) # (seq_len,)
+    assert False
 
 if __name__ == "__main__":
     tokens_1 = torch.tensor([list(range(1024))])
