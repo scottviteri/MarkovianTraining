@@ -111,7 +111,7 @@ def create_helpful_message_2(tokens, tokens_to_grab=MSG_CONTEXT_LENGTH):
     msg = tokens[:, 0:tokens_to_grab]
     return torch.cat((msg, tokens[:, 0:-tokens_to_grab]), dim=1)
 
-def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=False, debug=False):
+def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=False, debug=False, pytest=False):
     # make labels from the batch, one hot encoded of shape (batch_size, seq_len, vocab_size)
     batch = batch.to(device)
     labels = torch.nn.functional.one_hot(batch, num_classes=causal_lm.config.vocab_size).to(torch.float32)
@@ -136,6 +136,8 @@ def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=Fal
         sentence_tokens = batch[0]
         sentence_probs = probs[0]
         sentence_correct_probs = correct_probs[0]
+    if pytest:
+        return loss, logits
     return loss.to("cpu")
 
 def display_results(fname, n_examples, correct_probs_all):
