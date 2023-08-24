@@ -29,7 +29,6 @@ import json
 import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from llama import Llama
 from datasets import load_dataset
 from tqdm import tqdm
 import accelerate
@@ -37,8 +36,6 @@ import plotly.express as px
 import pandas as pd
 import numpy as np
 
-from llama.model import ModelArgs, Transformer
-from llama.tokenizer import Tokenizer
 
 from collaborative_experiments.constants import MAX_CONTEXT_LENGTH, MSG_CONTEXT_LENGTH
 
@@ -80,10 +77,10 @@ def load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, debug=False, r
         reshaped_tensor.fill_(50)# shape (2, data_context_length)
         reshaped_tensor = reshaped_tensor[0:2]
         for i in range(reshaped_tensor.shape[1] // 3):
-            reshaped_tensor[0, i*3 + 1] += 2
-            reshaped_tensor[1, i*3 + 1] += 2
-            reshaped_tensor[0, i*3 + 2] += 3
-            reshaped_tensor[1, i*3 + 2] += 3
+            reshaped_tensor[0, i*3 + 1] += 1
+            reshaped_tensor[1, i*3 + 1] += 1
+            reshaped_tensor[0, i*3 + 2] += 2
+            reshaped_tensor[1, i*3 + 2] += 2
     elif reduced_data > 0:
         reshaped_tensor = reshaped_tensor[0:reduced_data]
 
@@ -128,6 +125,8 @@ def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=Fal
     correct_probs = probs.gather(-1, batch.unsqueeze(-1)).squeeze(-1).detach() # shape (batch_size, seq_len)
     correct_probs_all += correct_probs.mean(dim=0)
     if debug:
+        print("batch: ", batch)
+        print("correct probs: ", correct_probs)
         # get one sentence
         # print the tokens that it assigns max probability to
         # print the actual sentence
@@ -220,6 +219,9 @@ def load_llama_model(
 def main(save_dir="results_debug", debug=False, BATCH_SIZE = 1, model_name="gpt-neo", reduced_data=20):
     device = get_device()
     if model_name == "llama":
+        from llama import Llama
+        from llama.model import ModelArgs, Transformer
+        from llama.tokenizer import Tokenizer
         causal_lm, causal_lm_tokenizer = load_llama_model(device=device)
     elif model_name == "gpt2":
         causal_lm = AutoModelForCausalLM.from_pretrained("gpt2")
@@ -285,4 +287,5 @@ def main(save_dir="results_debug", debug=False, BATCH_SIZE = 1, model_name="gpt-
     fig.write_html(f"{save_dir}/probability_of_correct_token_at_each_position.html")
 
 if __name__ == "__main__":
-    main()
+    import fire
+    fire.Fire(main)
