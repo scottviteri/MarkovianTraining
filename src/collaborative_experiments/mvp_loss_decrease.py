@@ -75,9 +75,23 @@ def tile_a_tensor(reshaped_tensor):
 
 
 def load_and_format_dataset(
-    textbook_1_path, causal_lm_tokenizer, debug=False, reduced_data=0
+    textbook_1_path, causal_lm_tokenizer, debug=False, reduced_data=0, train_context_length=MAX_CONTEXT_LENGTH, msg_context_length=MSG_CONTEXT_LENGTH
 ):
-    data_context_length = MAX_CONTEXT_LENGTH - MSG_CONTEXT_LENGTH
+    """
+    Takes input data as a string and then tokenizes it.
+    Changes the size of each batch of data to be train_context_length - msg_context_length
+    because msg_context_length will be prepended to the data getting us back to
+    train_context_length
+
+    Args:
+        train_context_length (int): the length of the batch that we will train on
+        msg_context_length (int): the length of the message that we will prepend to the data
+
+    Returns:
+        (torch.tensor): the data as a tensor of shape (n_batches, data_context_length)
+    """
+    data_context_length = train_context_length - msg_context_length
+    assert data_context_length > 0, f"train_context_length {train_context_length} must be greater than msg_context_length {msg_context_length}"
     dataset = load_dataset("text", data_files=textbook_1_path)
     print(dataset)
 
@@ -132,7 +146,7 @@ def create_helpful_message_2(tokens, tokens_to_grab=MSG_CONTEXT_LENGTH):
     return torch.cat((msg, tokens[:, 0:-tokens_to_grab]), dim=1)
 
 
-@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(10))
+@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
 def create_openai_helpful_message(tokens, causal_lm_tokenizer, causal_lm, system_prompt=None, user_prompt=None, print_msg=False):
     # Convert tokens to text
     text = causal_lm_tokenizer.decode(tokens[0])
@@ -237,19 +251,22 @@ def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device):
     correct_probs_all = torch.zeros(config.expected_length - 1).to(device)
     losses = []
 
-    if False and "openai" in config.name:
+    if "openai" in config.name:
         all_batches = []
         for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
-            all_batches.append(batch)
+            all_batches.extend(batch)
+        all_batches_dataloader = torch.utils.data.DataLoader(
+            all_batches, batch_size=1, shuffle=False
+        )
         with ThreadPoolExecutor(max_workers=10) as executor:
             updated_batchs = list(tqdm(executor.map(
-                config.msg_fn, all_batches, chunksize=1
-            ), total=len(all_batches)))  # this is a generator
+                config.msg_fn, all_batches_dataloader, chunksize=1
+            ), total=len(all_batches), desc=f"Experiment {config.name}"))
         # update data_loader with the new batches
         dataset_1_loader = torch.utils.data.DataLoader(
             updated_batchs, batch_size=1, shuffle=False
         )
-        config.msg_fn = lambda x: x
+        config.msg_fn = lambda x: x[0]
         
     
     for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
@@ -309,6 +326,8 @@ def main(
     BATCH_SIZE=1,
     model_name="distilgpt2",
     reduced_data=10,
+    train_context_length=MAX_CONTEXT_LENGTH,
+    msg_context_length=MSG_CONTEXT_LENGTH,
 ):
     device = get_device()
     if model_name == "llama":
@@ -332,7 +351,8 @@ def main(
     # https://www.gutenberg.org/ebooks/71431
     textbook_1_path = "data/st_patrick_biography.txt"
     reshaped_tensor = load_and_format_dataset(
-        textbook_1_path, causal_lm_tokenizer, debug=debug, reduced_data=reduced_data
+        textbook_1_path, causal_lm_tokenizer, debug=debug, reduced_data=reduced_data,
+        train_context_length=train_context_length, msg_context_length=msg_context_length
     )
     ## make a pytorch data loader for the dataset
     dataset_1_loader = torch.utils.data.DataLoader(
