@@ -261,7 +261,7 @@ def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device):
         with ThreadPoolExecutor(max_workers=10) as executor:
             updated_batchs = list(tqdm(executor.map(
                 config.msg_fn, all_batches_dataloader, chunksize=1
-            ), total=len(all_batches), desc=f"Experiment {config.name}"))
+            ), total=len(all_batches), desc=f"Reformating exp {config.name} for multi-threading"))
         # update data_loader with the new batches
         dataset_1_loader = torch.utils.data.DataLoader(
             updated_batchs, batch_size=1, shuffle=False
