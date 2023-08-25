@@ -37,6 +37,13 @@ import pandas as pd
 import numpy as np
 import openai
 
+from concurrent.futures import ThreadPoolExecutor
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_random_exponential,
+)  # for exponential backoff
+
 from collaborative_experiments.constants import MAX_CONTEXT_LENGTH, MSG_CONTEXT_LENGTH
 
 
@@ -125,7 +132,8 @@ def create_helpful_message_2(tokens, tokens_to_grab=MSG_CONTEXT_LENGTH):
     return torch.cat((msg, tokens[:, 0:-tokens_to_grab]), dim=1)
 
 
-def create_openai_helpful_message(tokens, causal_lm_tokenizer, causal_lm, system_prompt=None, user_prompt=None):
+@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(10))
+def create_openai_helpful_message(tokens, causal_lm_tokenizer, causal_lm, system_prompt=None, user_prompt=None, print_msg=False):
     # Convert tokens to text
     text = causal_lm_tokenizer.decode(tokens[0])
     # Make a chat completion call to GPT-3.5
@@ -163,7 +171,7 @@ def create_openai_helpful_message(tokens, causal_lm_tokenizer, causal_lm, system
     decoded_main_tokens = causal_lm_tokenizer.decode(
         tokens[:, : -summary_tokens.shape[1]][0]
     )
-    print("Prepend string: ", prepend_string, "\nMain string: ", decoded_main_tokens)
+    if print_msg: print("Prepend string: ", prepend_string, "\nMain string: ", decoded_main_tokens)
     return new_tokens
 
 
@@ -229,6 +237,21 @@ def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device):
     correct_probs_all = torch.zeros(config.expected_length - 1).to(device)
     losses = []
 
+    if False and "openai" in config.name:
+        all_batches = []
+        for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
+            all_batches.append(batch)
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            updated_batchs = list(tqdm(executor.map(
+                config.msg_fn, all_batches, chunksize=1
+            ), total=len(all_batches)))  # this is a generator
+        # update data_loader with the new batches
+        dataset_1_loader = torch.utils.data.DataLoader(
+            updated_batchs, batch_size=1, shuffle=False
+        )
+        config.msg_fn = lambda x: x
+        
+    
     for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
         batch = config.msg_fn(batch)
         loss = train_step(batch, causal_lm, loss_fn, device, correct_probs_all)
@@ -320,17 +343,17 @@ def main(
 
     experiments = []
     experiments.append(
-        ExperimentConfig(lambda x: x, reshaped_tensor.shape[1], "original")
-    )
-    # system_prompt = ""
-    user_prompt = "Please generate a succinct summary of the following text in about 64 words: "
-    experiments.append(
         ExperimentConfig(
             lambda x: create_openai_helpful_message(x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt),
             reshaped_tensor.shape[1],
             "openai_helpful_message",
         )
     )
+    experiments.append(
+        ExperimentConfig(lambda x: x, reshaped_tensor.shape[1], "original")
+    )
+    # system_prompt = ""
+    user_prompt = "Please generate a succinct summary of the following text in about 64 words: "
     experiments.append(
         ExperimentConfig(
             create_helpful_message_2, reshaped_tensor.shape[1], "helpful_message_2"
