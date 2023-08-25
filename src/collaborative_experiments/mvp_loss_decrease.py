@@ -118,26 +118,32 @@ def create_openai_helpful_message(tokens, causal_lm_tokenizer, causal_lm):
     # Make a chat completion call to GPT-3.5
     response = openai.ChatCompletion.create(
       model="gpt-3.5-turbo",
+      #messages=[
+      #      {"role": "system", "content": "You are a helpful assistant that can generate a prepend string to make the following text as likely as possible."},
+      #      {"role": "user", "content": f"Please generate a prepend string for the following text: {text}"},
+      #  ]
       messages=[
-            {"role": "system", "content": "You are a helpful assistant that can generate a prepend string to make the following text as likely as possible."},
-            {"role": "user", "content": f"Please generate a prepend string for the following text: {text}"},
-        ]
+          {"role":"system", "content":"You are a language model's assistant, and your job is to make prepend text that makes the following text as predictable as possible. Do not be afraid to copy surprising parts of the text verbatim."},
+          {"role":"user", "content": f"Please generate a prepend string for the following text: {text}"}
+      ]
     )
     # Get the prepend string from the response
     prepend_string = response.choices[0].message['content']
-    print("Prepend string:", prepend_string)
     # Convert the summary back to tokens
     summary_tokens = causal_lm_tokenizer.encode(prepend_string, return_tensors="pt")
-    print("Prepend String Length: ", summary_tokens.shape[1])
     # Ensure the length of the summary is at most a quarter the length of tokens
     quarter_length = tokens.shape[1] // 4
     if summary_tokens.shape[1] > quarter_length:
         summary_tokens = summary_tokens[:, :quarter_length]
     # Prepend the summary tokens to the original tokens
     new_tokens = torch.cat((summary_tokens, tokens[:, :-summary_tokens.shape[1]]), dim=1)
+    # Decode the summary tokens for printing
+    decoded_main_tokens = causal_lm_tokenizer.decode(tokens[:, :-summary_tokens.shape[1]][0])
+    print("Prepend string: ", prepend_string, "\nMain string: ", decoded_main_tokens)
     return new_tokens
 
 def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=False, debug=False, pytest=False):
+
     # make labels from the batch, one hot encoded of shape (batch_size, seq_len, vocab_size)
     batch = batch.to(device)
     shifted_batch = batch[:, 1:] # we shift because the logits predict one in the future
