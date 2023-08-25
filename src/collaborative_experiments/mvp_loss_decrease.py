@@ -35,7 +35,7 @@ import accelerate
 import plotly.express as px
 import pandas as pd
 import numpy as np
-
+import openai
 
 from collaborative_experiments.constants import MAX_CONTEXT_LENGTH, MSG_CONTEXT_LENGTH
 
@@ -108,8 +108,34 @@ def create_helpful_message_2(tokens, tokens_to_grab=MSG_CONTEXT_LENGTH):
     """
     Same as 1 except keeps the shape the same
     """
+    tokens_to_grab = int(tokens.shape[1]/2) if tokens_to_grab is None else tokens_to_grab
     msg = tokens[:, 0:tokens_to_grab]
     return torch.cat((msg, tokens[:, 0:-tokens_to_grab]), dim=1)
+
+def create_openai_helpful_message(tokens, causal_lm_tokenizer, causal_lm):
+    # Convert tokens to text
+    text = causal_lm_tokenizer.decode(tokens[0])
+    # Make a chat completion call to GPT-3.5
+    response = openai.ChatCompletion.create(
+      model="gpt-3.5-turbo",
+      messages=[
+            {"role": "system", "content": "You are a helpful assistant that can generate a prepend string to make the following text as likely as possible."},
+            {"role": "user", "content": f"Please generate a prepend string for the following text: {text}"},
+        ]
+    )
+    # Get the prepend string from the response
+    prepend_string = response.choices[0].message['content']
+    print("Prepend string:", prepend_string)
+    # Convert the summary back to tokens
+    summary_tokens = causal_lm_tokenizer.encode(prepend_string, return_tensors="pt")
+    print("Prepend String Length: ", summary_tokens.shape[1])
+    # Ensure the length of the summary is at most a quarter the length of tokens
+    quarter_length = tokens.shape[1] // 4
+    if summary_tokens.shape[1] > quarter_length:
+        summary_tokens = summary_tokens[:, :quarter_length]
+    # Prepend the summary tokens to the original tokens
+    new_tokens = torch.cat((summary_tokens, tokens[:, :-summary_tokens.shape[1]]), dim=1)
+    return new_tokens
 
 def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=False, debug=False, pytest=False):
     # make labels from the batch, one hot encoded of shape (batch_size, seq_len, vocab_size)
@@ -247,6 +273,11 @@ def main(save_dir="results_debug", debug=False, BATCH_SIZE = 1, model_name="dist
     if not os.path.exists(f"{save_dir}"):
         os.makedirs(f"{save_dir}")
     # plot the losses on the same graph
+
+    # Convert tensors to numpy arrays
+    for key in losses_dict:
+        losses_dict[key] = [loss.item() for loss in losses_dict[key]]
+
     df = pd.DataFrame(losses_dict)
     df["batch_index"] = df.index
     df = df.melt(id_vars=["batch_index"], value_vars=list(losses_dict.keys()))
