@@ -6,12 +6,14 @@ import tabulate
 import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from collections import defaultdict
 
 from collaborative_experiments.mvp_loss_decrease import (
     get_device,
     load_and_format_dataset,
     create_helpful_message_1,
     create_helpful_message_2,
+    create_openai_helpful_message,
     train_step,
 )
 from collaborative_experiments.constants import MAX_CONTEXT_LENGTH, MSG_CONTEXT_LENGTH
@@ -85,7 +87,8 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     with open("tests/test_train_step.txt", "w") as f:
         f.write(tabulate.tabulate(table, headers="firstrow"))
 
-def test_variable_context_lengths(causal_lm_tokenizer):
+@pytest.mark.parametrize("msg_fn", [create_helpful_message_1, create_openai_helpful_message])
+def test_variable_context_lengths(causal_lm_tokenizer, msg_fn):
     """
     This test verifies that load_and_format_dataset handles different msg_context_lengths and total_context lengths properly.
     And then verifies that helpful_message_one does the proper thing with this. 
@@ -98,21 +101,23 @@ def test_variable_context_lengths(causal_lm_tokenizer):
     print(dataset_tensor.shape)
     data_sample = dataset_tensor[-1, :]
     print(data_sample.shape) # [32,]
-    # convert data sample to a list of strings
     data_sample_str = [causal_lm_tokenizer.decode(token) for token in data_sample]
-    # print(data_sample_str)
-    transformed_sample = create_helpful_message_1(data_sample.unsqueeze(dim=0), tokens_to_grab=msg_context_length)
+    if msg_fn.__name__ == "create_openai_helpful_message":
+        transformed_sample = msg_fn(data_sample.unsqueeze(dim=0), causal_lm_tokenizer=causal_lm_tokenizer)
+    else:
+        transformed_sample = msg_fn(data_sample.unsqueeze(dim=0), tokens_to_grab=msg_context_length)
     transformed_sample_str = [causal_lm_tokenizer.decode(token) for token in transformed_sample[0]]
     print(transformed_sample.shape) # [1, 64]
     # print(transformed_sample_str)
 
-
-    assert transformed_sample.shape[0] == 1
-    assert transformed_sample.shape[1] == train_context_length
-
-    logging_dict = {}
-    logging_dict["data_sample_str"] = ["-"] * msg_context_length + data_sample_str
-    logging_dict["transformed_sample_str"] = transformed_sample_str
+    logging_dict = defaultdict(list)
+    diff_in_size = len(transformed_sample_str) - len(data_sample_str)
+    if diff_in_size <= 0:
+        logging_dict["data_sample_str"] = ["-"] * diff_in_size
+    else:
+        logging_dict["transformed_sample_str"] = ["-"] * (-diff_in_size)
+    logging_dict["data_sample_str"] += data_sample_str
+    logging_dict["transformed_sample_str"] += transformed_sample_str
 
     table = [
         ["Original", "Transformed Token"],
@@ -121,8 +126,15 @@ def test_variable_context_lengths(causal_lm_tokenizer):
         table.append([logging_dict["data_sample_str"][i], logging_dict["transformed_sample_str"][i]])
     print(tabulate.tabulate(table, headers="firstrow"))
     # save results to a file
-    with open("tests/test_variable_context_lengths.txt", "w") as f:
+    with open(f"tests/test_variable_context_lengths_{msg_fn.__name__}.txt", "w") as f:
         f.write(tabulate.tabulate(table, headers="firstrow"))
+
+    assert transformed_sample.shape[0] == 1
+    if msg_fn.__name__ == "create_openai_helpful_message":
+        assert transformed_sample.shape[1] >= train_context_length - msg_context_length
+        assert transformed_sample.shape[1] <= train_context_length + train_context_length//4
+    else:
+        assert transformed_sample.shape[1] == train_context_length
 
 def test_ability_to_log():
     print("fhjaldksfkladsj;fkladsjfl;kadjs")
