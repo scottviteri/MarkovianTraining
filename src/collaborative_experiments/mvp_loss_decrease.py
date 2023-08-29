@@ -85,10 +85,10 @@ def load_and_format_dataset(
 
     Args:
         train_context_length (int): the length of the batch that we will train on
-        msg_context_length (int): the length of the message that we will prepend to the data
+        msg_context_length (int): the length of the message that we will prepend to the data. Must be < train_context_length
 
     Returns:
-        (torch.tensor): the data as a tensor of shape (n_batches, data_context_length)
+        (torch.tensor): the data as a tensor of shape (n_batches, data_context_length) where data_context_length = train_context_length - msg_context_length
     """
     data_context_length = train_context_length - msg_context_length
     assert data_context_length > 0, f"train_context_length {train_context_length} must be greater than msg_context_length {msg_context_length}"
@@ -365,18 +365,18 @@ def main(
     experiments.append(
         ExperimentConfig(
             lambda x: create_openai_helpful_message(x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt),
-            reshaped_tensor.shape[1],
+            msg_context_length,
             "openai_helpful_message",
         )
     )
     experiments.append(
-        ExperimentConfig(lambda x: x, reshaped_tensor.shape[1], "original")
+        ExperimentConfig(lambda x: x, msg_context_length, "original")
     )
     # system_prompt = ""
     user_prompt = "Please generate a succinct summary of the following text in about 64 words: "
     experiments.append(
         ExperimentConfig(
-            create_helpful_message_2, reshaped_tensor.shape[1], "helpful_message_2"
+            create_helpful_message_2, msg_context_length, "helpful_message_2"
         )
     )
 
