@@ -85,6 +85,48 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     with open("tests/test_train_step.txt", "w") as f:
         f.write(tabulate.tabulate(table, headers="firstrow"))
 
+def test_variable_context_lengths(causal_lm_tokenizer):
+    """
+    This test verifies that load_and_format_dataset handles different msg_context_lengths and total_context lengths properly.
+    And then verifies that helpful_message_one does the proper thing with this. 
+    """
+    train_context_length = 64
+    msg_context_length = 32
+    dataset_path =  "data/st_patrick_biography.txt"
+    dataset_tensor = load_and_format_dataset(dataset_path, causal_lm_tokenizer, reduced_data=2, train_context_length=train_context_length, msg_context_length=msg_context_length)
+    # ^ hase shape [10, 32]
+    print(dataset_tensor.shape)
+    data_sample = dataset_tensor[-1, :]
+    print(data_sample.shape) # [32,]
+    # convert data sample to a list of strings
+    data_sample_str = [causal_lm_tokenizer.decode(token) for token in data_sample]
+    # print(data_sample_str)
+    transformed_sample = create_helpful_message_1(data_sample.unsqueeze(dim=0), tokens_to_grab=msg_context_length)
+    transformed_sample_str = [causal_lm_tokenizer.decode(token) for token in transformed_sample[0]]
+    print(transformed_sample.shape) # [1, 64]
+    # print(transformed_sample_str)
+
+
+    assert transformed_sample.shape[0] == 1
+    assert transformed_sample.shape[1] == train_context_length
+
+    logging_dict = {}
+    logging_dict["data_sample_str"] = ["-"] * msg_context_length + data_sample_str
+    logging_dict["transformed_sample_str"] = transformed_sample_str
+
+    table = [
+        ["Original", "Transformed Token"],
+    ]
+    for i in range(len(logging_dict["data_sample_str"])):
+        table.append([logging_dict["data_sample_str"][i], logging_dict["transformed_sample_str"][i]])
+    print(tabulate.tabulate(table, headers="firstrow"))
+    # save results to a file
+    with open("tests/test_variable_context_lengths.txt", "w") as f:
+        f.write(tabulate.tabulate(table, headers="firstrow"))
+
+def test_ability_to_log():
+    print("fhjaldksfkladsj;fkladsjfl;kadjs")
+
 
 if __name__ == "__main__":
     tokens_1 = torch.tensor([list(range(1024))])
