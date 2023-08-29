@@ -1,0 +1,34 @@
+Original      Transformed Token
+------------  -------------------
+the           share
+United        it
+States        freely
+and           without
+              any
+most          limitations
+other         .
+parts         The
+of            the
+the           United
+world         States
+at            and
+no
+cost          most
+and           other
+with          parts
+almost        of
+no            the
+restrictions  world
+              at
+what          no
+soever        cost
+.             and
+You           with
+may           almost
+copy          no
+it            restrictions
+,
+give          what
+it            soever
+away          .
+or            You
