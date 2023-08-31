@@ -7,7 +7,6 @@ import json
 
 from datasets import load_dataset
 import accelerate
-from llama import Llama, Tokenizer, ModelArgs, Transformer
 
 from collaborative_experiments.constants import DEFAULT_MAX_CONTEXT_LENGTH, DEFAULT_MSG_CONTEXT_LENGTH
 
@@ -88,6 +87,7 @@ def load_llama_model(
     max_batch_size: int = 8,
     device: str = "mps",
 ):
+    from llama import Llama, Tokenizer, ModelArgs, Transformer
     os.environ["RANK"] = "0"
     # generator = Llama.build(
     #     ckpt_dir=ckpt_dir,
