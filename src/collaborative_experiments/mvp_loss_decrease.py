@@ -290,7 +290,8 @@ def main(
 
     # load dataset
     # https://www.gutenberg.org/ebooks/71431
-    textbook_1_path = "data/st_patrick_biography.txt"
+    current_path = os.path.dirname(os.path.realpath(__file__))
+    textbook_1_path = os.path.join(current_path, "../../data/st_patrick_biography.txt")
     reshaped_tensor = load_and_format_dataset(
         textbook_1_path,
         causal_lm_tokenizer,
