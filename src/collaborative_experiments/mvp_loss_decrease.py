@@ -225,7 +225,7 @@ def batched_create_openai_msgs(dataset_1_loader, config):
     all_batches_dataloader = torch.utils.data.DataLoader(
         all_batches, batch_size=1, shuffle=False
     )
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=20) as executor:
         messages_batched = list(
             tqdm(
                 executor.map(config.msg_fn, all_batches_dataloader, chunksize=1),
@@ -236,7 +236,7 @@ def batched_create_openai_msgs(dataset_1_loader, config):
     return messages_batched
 
 
-def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=True):
+def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=True, verbose=False):
     # we subtract one to the size because causal_lm will predict the next token
     # therefore we can only check predictions for the first expected_length - 1 tokens
     correct_probs_all = torch.zeros(config.expected_length - 1).to(device)
@@ -249,7 +249,14 @@ def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device, batched
 
     for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
         batch_dict = {}
-        batch_dict["msg"] = config.msg_fn(batch) 
+        batch_dict["msg"] = config.msg_fn(batch)
+        if verbose:
+            tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
+            helpful_msg_decoded = "msg: " + tokenizer.decode(batch_dict["msg"][0])
+            tqdm.write(helpful_msg_decoded)
+            tqdm.write(f"---end-helpful-msg-{config.name}--")
+            tqdm.write("content: " + tokenizer.decode(batch[0]))
+            tqdm.write(f"---end-content--{config.name}--")
         batch_dict["content"] = batch
         loss, correct_probs = train_step(batch=batch_dict, causal_lm=causal_lm, loss_fn=loss_fn, device=device)
         correct_probs_all += correct_probs.mean(dim=0)
@@ -300,10 +307,15 @@ def main(
     loss_fn = torch.nn.CrossEntropyLoss()
 
     experiments = []
+    # user_prompt = "Your job is to compress the following text, such that you can reconstruct it later. Do not worry about human legibility and you are allowed to use unicode. Finish with </End compressed text> <example>This is called a covariant transformation law, because the covector components transform by the same matrix as the change of basis matrix. The components of a more general tensor are transformed by some combination of covariant and contravariant transformations, with one transformation law for each index. If the transformation matrix of an index is the inverse matrix of the basis transformation, then the index is called contravariant and is conventionally denoted with an upper index (superscript). If the transformation matrix of an index is the basis transformation itself, then the index is called covariant and is denoted with a lower index (subscript).CovTransLaw:covector=ΔbasisMat. Tensor=comb(cov&contra); 1law/idx. InvMat=basisTrans→contra&↑. BasisTrans=cov&↓</example><Begin text to compress:>"
+    user_prompt = "Create a compressed version of the following text such that you will be able to reconstruct it verbatim. You can use human legible text, or unicode / non human legible text."
+    system_prompt = (
+        ""
+    )
     experiments.append(
         ExperimentConfig(
             lambda x: create_openai_helpful_message(
-                x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt
+                x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt, system_prompt=system_prompt
             ),
             reshaped_tensor.shape[1],
             "openai_helpful_message",
@@ -311,10 +323,6 @@ def main(
     )
     experiments.append(
         ExperimentConfig(lambda x: torch.zeros((x.shape[0], 0), dtype=x.dtype, device=x.device), reshaped_tensor.shape[1], "original")
-    )
-    # system_prompt = ""
-    user_prompt = (
-        "Please generate a succinct summary of the following text in about 64 words: "
     )
     experiments.append(
         ExperimentConfig(
@@ -328,7 +336,7 @@ def main(
     correct_probs_all_dict = {}
     for experiment in tqdm(experiments, desc="Experiment"):
         losses, correct_probs_all = run_experiment(
-            experiment, dataset_1_loader, causal_lm, loss_fn, device
+            experiment, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=False, verbose=True
         )
         losses_dict[experiment.name] = losses
         correct_probs_all_dict[experiment.name] = correct_probs_all.clone().numpy() / (
