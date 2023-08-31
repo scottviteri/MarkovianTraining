@@ -62,6 +62,38 @@ class ExperimentConfig:
         self.expected_length = expected_length  # measured in number of tokens
         self.name = name
 
+class MockConfig:
+    def __init__(self):
+        self.vocab_size = None
+
+class MockOutput:
+    def __init__(self, logits):
+        self.logits = logits
+
+class mockCausalGPT2(torch.nn.Module):
+    def __init__(self, causal_lm_tokenizer):
+        super().__init__()
+        self.dummy = torch.nn.Parameter(torch.tensor([1.0]))
+        self.config = MockConfig()
+        self.config.vocab_size = causal_lm_tokenizer.vocab_size
+
+    def forward(self, input_ids):
+        """
+        Sets the first token to be 1.0 and the rest to be 0.0
+        Args:
+            input_ids (torch.tensor): shape (batch_size, seq_len)
+        Returns:
+            output.logits (torch.tensor): shape (batch_size, seq_len, vocab_size)
+        """
+        batch_size, seq_len = input_ids.shape
+        vocab_size = self.config.vocab_size
+        logits = torch.zeros((batch_size, seq_len, vocab_size), device=input_ids.device).to(torch.float32)
+        # Set the first token of every sequence to have its first value as 1.0
+        logits[:, 0, 0] = 1.0
+
+        return MockOutput(logits)
+
+        
 
 def create_helpful_message_1(tokens, tokens_to_grab=DEFAULT_MSG_CONTEXT_LENGTH):
     """
@@ -273,13 +305,17 @@ def main(
     reduced_data=10,
     train_context_length=DEFAULT_MAX_CONTEXT_LENGTH,
     msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH,
+    list_of_experiments="All"
 ):
-    device = get_device()
+    device = get_device(model_name)
     if model_name == "llama":
         causal_lm, causal_lm_tokenizer = load_llama_model(device=device)
     elif model_name == "gpt-neo":
         causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-2.7B")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
+    elif model_name == "mock":
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
+        causal_lm = mockCausalGPT2(causal_lm_tokenizer)
     else:
         causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
@@ -313,25 +349,29 @@ def main(
     system_prompt = (
         ""
     )
-    experiments.append(
-        ExperimentConfig(
-            lambda x: create_openai_helpful_message(
-                x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt, system_prompt=system_prompt
-            ),
-            reshaped_tensor.shape[1],
-            "openai_helpful_message",
+    if list_of_experiments == "all" or "openai" in list_of_experiments:
+        experiments.append(
+            ExperimentConfig(
+                lambda x: create_openai_helpful_message(
+                    x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt, system_prompt=system_prompt
+                ),
+                reshaped_tensor.shape[1],
+                "openai_helpful_message",
+            )
         )
-    )
+        print("Added openai experiment")
     experiments.append(
         ExperimentConfig(lambda x: torch.zeros((x.shape[0], 0), dtype=x.dtype, device=x.device), reshaped_tensor.shape[1], "original")
     )
-    experiments.append(
-        ExperimentConfig(
-            lambda x: create_helpful_message_1(x, msg_context_length),
-            reshaped_tensor.shape[1],
-            "helpful_message_1",
+    if list_of_experiments == "all" or "helpful_1" in list_of_experiments:
+        experiments.append(
+            ExperimentConfig(
+                lambda x: create_helpful_message_1(x, msg_context_length),
+                reshaped_tensor.shape[1],
+                "helpful_message_1",
+            )
         )
-    )
+        print("Added helpful message 1 experiment")
 
     losses_dict = {}
     correct_probs_all_dict = {}
