@@ -1,8 +1,10 @@
 torch
 transformers
+plotly
 networkx
 matplotlib
 openai
 peft
 sentencepiece
 datasets
+pytest

@@ -9,12 +9,6 @@ import networkx as nx
 
 anthropic = Anthropic()
 
-#l = []
-#for i in [0,1,2]:
-#    with open(f"/home/scottviteri/Projects/CollaborativeTraining/messages/convo_{i}.txt", 'r') as f:
-#        l.append(f.read())
-
-
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # System prompt for each language model
@@ -37,47 +31,42 @@ num_models = 2
 num_rounds = 3
 live_print = True
 
+def wrap(wrap_string, text): return f"<{wrap_string}>{text}</{wrap_string}>"
+def wrap_obs(obs): return wrap("Observation", obs)
+def wrap_state(s): return wrap("State", s)
+def wrap_action(a): return wrap("Action", a)
+def wrap_system(sys): return wrap("System", sys)
+
 # Initialize the conversations for each model
 conversations = []
 for i in range(num_models):
     other_indices = [j for j in range(num_models) if j != i]
     model_prompt = prompt.format(index=i, other_indices=other_indices)
-    conversations.append([{"role": "user", "content": model_prompt + "<Observation> </Observation>"}])
+    conversations.append([{"role":"system", "content":model_prompt},
+                          {"role": "user", "observation": wrap_obs("")}])
 if live_print: print(f"Input: <Observation> </Observation>\n")
 
 def conversation_to_prompt_string(convo):
     s = ''
     for d in convo:
         if d["role"] == "user":
-            s += HUMAN_PROMPT + d["content"] + AI_PROMPT
+            s += HUMAN_PROMPT + d["obs"] + AI_PROMPT
         else:
-            s += d["content"]
+            s += wrap_state(d["state"])
+            s += wrap_action(d["action"])
     return s
 
+def save_conversation(conversation):
+    index = re.search(r'Your model has been assigned an index of (\d+)', conversation[0]["content"]).group(1)
+    with open(f"./messages/convo_{index}.txt", 'w') as f:
+        json.dump(conversation, f)
 
-def concatenate_messages(messages):
-    s = ''
-    for message in messages:
-        role = message['role']
-        content = message['content']
-        s += f"Role: {role}\n"
-        if role == 'assistant':
-            state = re.search("<State>(.*?)</State>", content, re.DOTALL)
-            action = re.search("<Action>(.*?)</Action>", content, re.DOTALL)
-            if state:
-                s += f"State: {state.group(1).strip()}\n"
-            if action:
-                s += f"Action: {action.group(1).strip()}\n"
-        else:
-            s += f"Content: {content}\n"
-        s += "\n---------------------\n"
-    return s
 
-def save_messages(conversations):
-    for i, conversation in enumerate(conversations):
-        with open(f"./messages/convo_{i}.txt", 'w') as f:
-            f.write(f"Conversation {i+1}:\n\n---------------------\n"+
-                    concatenate_messages(conversation)+"\n---------------------\n")
+def save_conversations(conversations):
+    for c in conversations: save_conversation(c)
+
+#def load_conversation(index):
+
 
 
 # Function to extract action and recipient from the response
@@ -89,10 +78,6 @@ def extract_action_and_recipient(response):
         return action, recipient
     else:
         return "", None
-
-# Function to wrap observation in tags
-def wrap_observation(observation):
-    return f"<Observation>{observation}</Observation>"
 
 def run_convo():
     # Conversation loop
