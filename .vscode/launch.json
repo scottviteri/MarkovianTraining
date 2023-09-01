@@ -19,6 +19,14 @@
             "program": "${workspaceFolder}/evaluate_llama_model.py",
             "console": "integratedTerminal",
             "justMyCode": true
+        },
+        {
+            "name": "Multi Adapters test",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/tests/peft_multi_adapters.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
         }
     ]
 }

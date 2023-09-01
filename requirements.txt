@@ -4,4 +4,7 @@ plotly
 networkx
 matplotlib
 openai
+peft
+sentencepiece
+datasets
 pytest
