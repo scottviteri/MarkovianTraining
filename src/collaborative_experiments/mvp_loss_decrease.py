@@ -1,4 +1,8 @@
 """
+for llama use
+```
+torchrun --nproc_per_node 1 src/collaborative_experiments/mvp_loss_decrease.py
+```
 # Experiment outline:
 ## Goal:
     1. Measure a decrease in the loss of a model on a particular high quality dataset 
@@ -17,194 +21,409 @@
 """
 
 import os
-
 import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
-# from llama import Llama
-from datasets import load_dataset
 from tqdm import tqdm
-import accelerate
 import plotly.express as px
 import pandas as pd
 import numpy as np
+import openai
 
-from collaborative_experiments.constants import MAX_CONTEXT_LENGTH, MSG_CONTEXT_LENGTH
+# from jaxtyping import Array, Int, Float
+
+from concurrent.futures import ThreadPoolExecutor
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_random_exponential,
+)  # for exponential backoff
+
+from collaborative_experiments.constants import (
+    DEFAULT_MAX_CONTEXT_LENGTH,
+    DEFAULT_MSG_CONTEXT_LENGTH,
+)
+from collaborative_experiments.utils import (
+    get_device,
+    load_and_format_dataset,
+    load_llama_model,
+)
+
+import logging
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 class ExperimentConfig:
     def __init__(self, msg_fn, expected_length, name):
         self.msg_fn = msg_fn
-        self.expected_length = expected_length
+        self.expected_length = expected_length  # measured in number of tokens
         self.name = name
 
-def get_device():
+class MockConfig:
+    def __init__(self):
+        self.vocab_size = None
+
+class MockOutput:
+    def __init__(self, logits):
+        self.logits = logits
+
+class mockCausalGPT2(torch.nn.Module):
+    def __init__(self, causal_lm_tokenizer):
+        super().__init__()
+        self.dummy = torch.nn.Parameter(torch.tensor([1.0]))
+        self.config = MockConfig()
+        self.config.vocab_size = causal_lm_tokenizer.vocab_size
+
+    def forward(self, input_ids):
+        """
+        Sets the first token to be 1.0 and the rest to be 0.0
+        Args:
+            input_ids (torch.tensor): shape (batch_size, seq_len)
+        Returns:
+            output.logits (torch.tensor): shape (batch_size, seq_len, vocab_size)
+        """
+        batch_size, seq_len = input_ids.shape
+        vocab_size = self.config.vocab_size
+        logits = torch.zeros((batch_size, seq_len, vocab_size), device=input_ids.device).to(torch.float32)
+        # Set the first token of every sequence to have its first value as 1.0
+        logits[:, 0, 0] = 1.0
+
+        return MockOutput(logits)
+
+        
+
+def create_helpful_message_1(tokens, tokens_to_grab=DEFAULT_MSG_CONTEXT_LENGTH):
     """
-    Get's either cuda, cpu, or mps, using accelerate
+    Returns the first tokens_to_grab tokens of the input tokens
     """
-    accelerator = accelerate.Accelerator()
-    device = accelerator.device
-    return device
+    msg = tokens[:, :tokens_to_grab]
+    return msg
 
-def load_and_format_dataset(textbook_1_path, causal_lm_tokenizer):
-    dataset = load_dataset("text", data_files=textbook_1_path)
-    print(dataset)
 
-    # collapse dataset into one big string
-    dataset_1 = dataset["train"]
-    text = "\n".join(dataset_1["text"])
+@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+def create_openai_helpful_message(
+    tokens,
+    causal_lm_tokenizer,
+    causal_lm=None,
+    system_prompt=None,
+    user_prompt=None,
+    print_msg=False,
+):
+    # Convert tokens to text
+    text = causal_lm_tokenizer.decode(tokens[0])
+    # Make a chat completion call to GPT-3.5
+    if system_prompt is None:
+        system_prompt = "You are a language model's assistant, and your job is to make 'prepend text that makes the following text as predictable as possible. Do not be afraid to copy surprising parts of the text verbatim."
+    if user_prompt is None:
+        user_prompt = "Please generate a prepend string for the following text: "
+    user_prompt += text
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+            {
+                "role": "user",
+                "content": user_prompt,
+            },
+        ],
+    )
+    # Get the prepend string from the response
+    prepend_string = response.choices[0].message["content"]
+    # Convert the summary back to tokens
+    summary_tokens = causal_lm_tokenizer.encode(prepend_string, return_tensors="pt")
+    # Ensure the length of the summary is at most a quarter the length of tokens
+    quarter_length = tokens.shape[1] // 4
+    if summary_tokens.shape[1] > quarter_length:
+        summary_tokens = summary_tokens[:, :quarter_length]
+    # Prepend the summary tokens to the original tokens
+    new_tokens = torch.cat(
+        (summary_tokens, tokens[:, : -summary_tokens.shape[1]]), dim=1
+    )
+    # Decode the summary tokens for printing
+    decoded_main_tokens = causal_lm_tokenizer.decode(
+        tokens[:, : -summary_tokens.shape[1]][0]
+    )
+    if print_msg:
+        print(
+            "Prepend string: ", prepend_string, "\nMain string: ", decoded_main_tokens
+        )
+    return new_tokens
 
-    # tokenize dataset
-    dataset_1_tokenized = causal_lm_tokenizer(text, return_tensors="pt")
 
-    # convert from shape (1, num_tokens) to (num_tokens/1024, 1024)
-    data_context_length = MAX_CONTEXT_LENGTH - MSG_CONTEXT_LENGTH
-    tokens_tensor = dataset_1_tokenized['input_ids'].squeeze()
-    size = tokens_tensor.shape[0]
-    size = (size//data_context_length)*(data_context_length)
-    tokens_tensor = tokens_tensor[0:size]
-    reshaped_tensor = tokens_tensor.view(-1, data_context_length)
-    print(reshaped_tensor.shape)  # Should print torch.Size([num_tokens/data_context_length, data_context_length])
-
-    return reshaped_tensor
-
-def create_helpful_message_1(tokens, tokens_to_grab=MSG_CONTEXT_LENGTH):
+def combine_msg_and_data(msg, tokens, msg_context_length, tokenizer=None):
     """
-    Simply takes a message, grabs the first tokens_to_grab tokens of the data
-    and prepends it to the message to make it max context length
+    batch contains a 'data' key and a 'msg' key. It formats the example to include the helpful message
+    at the start and truncates the helpful message if needed.
 
-    Args:
-        tokens (torch.tensor): the tokens to prepend the message to, shape (batch_size, MAX_CONTEXT_LENGTH - MSG_CONTEXT_LENGTH)
-        tokens_to_grab (int): the number of tokens to grab from the data as the msg
-    Returns
-        (torch.tensor): the message with the data prepended
+    msg shape (batch_size, seq_len_1)
+    tokens shape (batch_size, seq_len_2)
     """
-    msg = tokens[:, 0:tokens_to_grab]
+    if msg.shape[1] > msg_context_length:
+        msg = msg[:, 0:msg_context_length]
+        logger.info(
+            "msg was too long, truncated to {msg_context_length} from {msg.shape[1]}".format(
+                msg_context_length=msg_context_length, msg=msg.shape[1]
+            )
+        )
+    elif msg.shape[1] < msg_context_length:
+        logger.warning(
+            "msg was too short, padded to {msg_context_length} from {msg.shape[1]}".format(
+                msg_context_length=msg_context_length, msg=msg.shape[1]
+            )
+        )
+        padding = (
+            torch.zeros((msg.shape[0], msg_context_length - msg.shape[1]))
+            + tokenizer.pad_token_id
+        )
+        tokens = torch.cat((msg, tokens.clone(), padding), dim=1)
     return torch.cat((msg, tokens), dim=1)
 
-def create_helpful_message_2(tokens, tokens_to_grab=MSG_CONTEXT_LENGTH):
-    """
-    Same as 1 except keeps the shape the same
-    """
-    msg = tokens[:, 0:tokens_to_grab]
-    return torch.cat((msg, tokens[:, 0:-tokens_to_grab]), dim=1)
 
-def train_step(batch, causal_lm, loss_fn, device, correct_probs_all, verbose=False):
-    # make labels from the batch, one hot encoded of shape (batch_size, seq_len, vocab_size)
-    # e.g. [[4, 1, 5]] -> [[[0, 0, 0, 0, 1, 0], [0, 1, 0, 0, 0, 0], [0, 0, 0, 0, 0, 1]]]
-    batch = batch.to(device)
-    labels = torch.nn.functional.one_hot(batch, num_classes=causal_lm.config.vocab_size).to(torch.float32)
-    outputs_original = causal_lm(input_ids=batch.to(device)) # maybe I don't want past_ke_values to be returned? what is that?
-    # at this point outputs_original is logits and past_key_values
-    logits = outputs_original.logits.detach()#to("cpu")
-    loss = loss_fn(logits, labels)
-    if verbose: tqdm.write(f"{loss}")
+def train_step(
+    batch,
+    causal_lm,
+    loss_fn,
+    device,
+    verbose=False,
+    debug=False,
+    pytest=False,
+):
+    """
+    Args:
+        batch (dict): a dictionary with a 'msg' key and a 'content' key. The 'msg' key is a tensor of shape (batch_size, msg_context_length)
+            and the 'content' key is a tensor of shape (batch_size, data_context_length)
+    Returns:
+        loss (torch.tensor): a tensor of shape (batch_size, data_context_length - 1)
+        correct_probs (torch.tensor): a tensor of shape (batch_size, data_context_length - 1)
+        if pytest, returns logits_shifted (torch.tensor): a tensor of shape (batch_size, data_context_length - 1, vocab_size)
+    """
+    msg = batch["msg"] # shape (batch_size, msg_context_length)
+    content = batch["content"] # shape (batch_size, data_context_length)
+    msg_length = msg.shape[1]
+
+    # Get the logits for content
+    model_input = torch.cat((msg, content), dim=1)
+    model_input = model_input.to(device)
+    outputs_original = causal_lm(
+        input_ids=model_input
+    )  
+    logits = outputs_original.logits.detach()  # to("cpu")
+    logits_shifted = logits[
+        :, msg_length:-1, :
+    ]  # negative one because prediction shifts things by one
+    # should be shape (b, data_context_length - 1, vocab_size)
+
+    # now create one hot labels to get the loss with.
+    shifted_model_input = model_input[
+        :, msg_length + 1:
+    ]  # we shift 1 more because the logits predict one in the future
+    labels = torch.nn.functional.one_hot(
+        shifted_model_input, num_classes=causal_lm.config.vocab_size
+    ).to(torch.float32)
+    loss = loss_fn(logits_shifted[:, ], labels) # only calculate loss on content
+    if verbose:
+        tqdm.write(f"{loss}")
 
     # Compute softmax over the last dimension to get probabilities
-    probs = F.softmax(logits, dim=-1) # shape (batch_size, seq_len, vocab_size)
+    probs = F.softmax(logits_shifted, dim=-1)  # shape (model_input_size, seq_len, vocab_size)
 
     # Use gather to pick the probabilities corresponding to the correct token at each position
-    correct_probs = probs.gather(-1, batch.unsqueeze(-1)).squeeze(-1).detach() # shape (batch_size, seq_len)
-    correct_probs_all += correct_probs.mean(dim=0)
-    return loss.to("cpu")
+    correct_probs = (
+        probs.gather(-1, shifted_model_input.unsqueeze(-1)).squeeze(-1).detach()
+    )  # shape (model_input_size, seq_len)
+    if debug:
+        print("model_input: ", model_input)
+        print("correct probs: ", correct_probs)
+        # get one sentence
+        # print the tokens that it assigns max probability to
+        # print the actual sentence
+        sentence_tokens = model_input[0]
+        sentence_probs = probs[0]
+        sentence_correct_probs = correct_probs[0]
+    if pytest:
+        return loss, correct_probs, logits_shifted
+    return loss.to("cpu"), correct_probs
 
-def display_results(fname, n_examples, correct_probs_all):
-    """
-    Deprecated!
-    """
-    correct_probs_all /= n_examples
-    print(correct_probs_all.shape)
-    print(correct_probs_all)
-
-    # plot correct_probs_all using plotly
-    df = pd.DataFrame(correct_probs_all.numpy())
-    df.columns = ["prob"]
-    df["position"] = df.index
-    fig = px.line(df, x="position", y="prob")
-    fig.update_layout(
-        title=f"Probability of correct token at each position, function {fname}",
-        xaxis_title="Position",
-        yaxis_title="Probability",
-        font=dict(
-            family="Courier New, monospace",
-            size=18,
-            color="#7f7f7f"
-        )
+def batched_create_openai_msgs(dataset_1_loader, config):
+    all_batches = []
+    for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
+        all_batches.extend(batch)
+    all_batches_dataloader = torch.utils.data.DataLoader(
+        all_batches, batch_size=1, shuffle=False
     )
-    fig.show()
-    # save
-    fig.write_html(f"results/{fname}.html")
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        messages_batched = list(
+            tqdm(
+                executor.map(config.msg_fn, all_batches_dataloader, chunksize=1),
+                total=len(all_batches),
+                desc=f"Reformating exp {config.name} for multi-threading",
+            )
+        )
+    return messages_batched
 
 
-def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device):
-    correct_probs_all = torch.zeros(config.expected_length).to(device)
+def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=True, verbose=False):
+    # we subtract one to the size because causal_lm will predict the next token
+    # therefore we can only check predictions for the first expected_length - 1 tokens
+    correct_probs_all = torch.zeros(config.expected_length - 1).to(device)
     losses = []
 
+    if batched_openai and "openai" in config.name:
+        messages_batched = iter(batched_create_openai_msgs(dataset_1_loader, config))
+        # function is now an iterator over messages_batched, ignores the batch
+        config.msg_fn = lambda x: messages_batched.__next__()
+
     for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
-        batch = config.msg_fn(batch)
-        loss = train_step(batch, causal_lm, loss_fn, device, correct_probs_all)
+        batch_dict = {}
+        batch_dict["msg"] = config.msg_fn(batch)
+        if verbose:
+            tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
+            helpful_msg_decoded = "msg: " + tokenizer.decode(batch_dict["msg"][0])
+            tqdm.write(helpful_msg_decoded)
+            tqdm.write(f"---end-helpful-msg-{config.name}--")
+            tqdm.write("content: " + tokenizer.decode(batch[0]))
+            tqdm.write(f"---end-content--{config.name}--")
+        batch_dict["content"] = batch
+        loss, correct_probs = train_step(batch=batch_dict, causal_lm=causal_lm, loss_fn=loss_fn, device=device)
+        correct_probs_all += correct_probs.mean(dim=0)
         losses.append(loss)
 
-    # display_results(config.name, n_examples=len(dataset_1_loader), correct_probs_all=correct_probs_all.to("cpu"))
     return losses, correct_probs_all.to("cpu")
 
 
-def main():
-    causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
-    causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
+def main(
+    save_dir="results_debug",
+    debug=False,
+    BATCH_SIZE=1,
+    model_name="distilgpt2",
+    reduced_data=10,
+    train_context_length=DEFAULT_MAX_CONTEXT_LENGTH,
+    msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH,
+    list_of_experiments="All"
+):
+    device = get_device(model_name)
+    if model_name == "llama":
+        causal_lm, causal_lm_tokenizer = load_llama_model(device=device)
+    elif model_name == "gpt-neo":
+        causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-2.7B")
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
+    elif model_name == "mock":
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
+        causal_lm = mockCausalGPT2(causal_lm_tokenizer)
+    else:
+        causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
     print("Loaded causal LM")
     print(causal_lm)
-    device = get_device()
     causal_lm = causal_lm.to(device)
     print("Loaded causal LM to device")
 
     # load dataset
-    textbook_1_path = "data/st_patrick_biography.txt"
-    reshaped_tensor = load_and_format_dataset(textbook_1_path, causal_lm_tokenizer)
+    # https://www.gutenberg.org/ebooks/71431
+    current_path = os.path.dirname(os.path.realpath(__file__))
+    textbook_1_path = os.path.join(current_path, "../../data/st_patrick_biography.txt")
+    reshaped_tensor = load_and_format_dataset(
+        textbook_1_path,
+        causal_lm_tokenizer,
+        debug=debug,
+        reduced_data=reduced_data,
+        train_context_length=train_context_length,
+        msg_context_length=msg_context_length,
+    )
     ## make a pytorch data loader for the dataset
-    BATCH_SIZE = 8
-    dataset_1_loader = torch.utils.data.DataLoader(reshaped_tensor, batch_size=BATCH_SIZE, shuffle=True)
+    dataset_1_loader = torch.utils.data.DataLoader(
+        reshaped_tensor, batch_size=BATCH_SIZE, shuffle=True
+    )
 
     loss_fn = torch.nn.CrossEntropyLoss()
 
     experiments = []
-    experiments.append(ExperimentConfig(lambda x: x, reshaped_tensor.shape[1], "original"))
-    experiments.append(ExperimentConfig(create_helpful_message_1, MAX_CONTEXT_LENGTH, "helpful_message_1"))
-    experiments.append(ExperimentConfig(create_helpful_message_2, reshaped_tensor.shape[1], "helpful_message_2"))
+    # user_prompt = "Your job is to compress the following text, such that you can reconstruct it later. Do not worry about human legibility and you are allowed to use unicode. Finish with </End compressed text> <example>This is called a covariant transformation law, because the covector components transform by the same matrix as the change of basis matrix. The components of a more general tensor are transformed by some combination of covariant and contravariant transformations, with one transformation law for each index. If the transformation matrix of an index is the inverse matrix of the basis transformation, then the index is called contravariant and is conventionally denoted with an upper index (superscript). If the transformation matrix of an index is the basis transformation itself, then the index is called covariant and is denoted with a lower index (subscript).CovTransLaw:covector=ΔbasisMat. Tensor=comb(cov&contra); 1law/idx. InvMat=basisTrans→contra&↑. BasisTrans=cov&↓</example><Begin text to compress:>"
+    user_prompt = "Create a compressed version of the following text such that you will be able to reconstruct it verbatim. You can use human legible text, or unicode / non human legible text."
+    system_prompt = (
+        ""
+    )
+    if list_of_experiments == "all" or "openai" in list_of_experiments:
+        experiments.append(
+            ExperimentConfig(
+                lambda x: create_openai_helpful_message(
+                    x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt, system_prompt=system_prompt
+                ),
+                reshaped_tensor.shape[1],
+                "openai_helpful_message",
+            )
+        )
+        print("Added openai experiment")
+    experiments.append(
+        ExperimentConfig(lambda x: torch.zeros((x.shape[0], 0), dtype=x.dtype, device=x.device), reshaped_tensor.shape[1], "original")
+    )
+    if list_of_experiments == "all" or "helpful_1" in list_of_experiments:
+        experiments.append(
+            ExperimentConfig(
+                lambda x: create_helpful_message_1(x, msg_context_length),
+                reshaped_tensor.shape[1],
+                "helpful_message_1",
+            )
+        )
+        print("Added helpful message 1 experiment")
 
     losses_dict = {}
     correct_probs_all_dict = {}
     for experiment in tqdm(experiments, desc="Experiment"):
-        losses, correct_probs_all = run_experiment(experiment, dataset_1_loader, causal_lm, loss_fn, device)
+        losses, correct_probs_all = run_experiment(
+            experiment, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=False, verbose=True
+        )
         losses_dict[experiment.name] = losses
-        correct_probs_all_dict[experiment.name] = correct_probs_all.numpy()
-    
+        correct_probs_all_dict[experiment.name] = correct_probs_all.clone().numpy() / (
+            len(dataset_1_loader) * BATCH_SIZE
+        )
+
     for exp_name, losses in losses_dict.items():
         print(f"experiment {exp_name} had avg loss of {np.mean(losses)}")
 
-    if not os.path.exists("results"):
-        os.makedirs("results")
-    # plot the losses on the same graph
+    if not os.path.exists(f"{save_dir}"):
+        os.makedirs(f"{save_dir}")
+    save_dir = os.path.join(save_dir, f"{model_name}")
+    if not os.path.exists(f"{save_dir}"):
+        os.makedirs(f"{save_dir}")
+    for key in losses_dict:
+        losses_dict[key] = [loss.item() for loss in losses_dict[key]]
+
     df = pd.DataFrame(losses_dict)
     df["batch_index"] = df.index
     df = df.melt(id_vars=["batch_index"], value_vars=list(losses_dict.keys()))
     fig = px.line(df, x="batch_index", y="value", color="variable")
     fig.update_layout(title=f"Losses, batch_size {BATCH_SIZE}")
     fig.show()
-    fig.write_html("results/losses.html")
+    fig.write_html(f"{save_dir}/losses.html")
 
     # plot the per token posisions on the same graph
     # normalize the lengths of the different experiments by padding to the max one with zeros
     max_len = max([len(x) for x in correct_probs_all_dict.values()])
     for exp_name, correct_probs_all in correct_probs_all_dict.items():
         if len(correct_probs_all) < max_len:
-            correct_probs_all_dict[exp_name] = np.pad(correct_probs_all, (0, max_len - len(correct_probs_all)), "constant", constant_values=0)
+            correct_probs_all_dict[exp_name] = np.pad(
+                correct_probs_all,
+                (0, max_len - len(correct_probs_all)),
+                "constant",
+                constant_values=0,
+            )
     df = pd.DataFrame(correct_probs_all_dict)
     df["position"] = df.index
     df = df.melt(id_vars=["position"], value_vars=list(correct_probs_all_dict.keys()))
     fig = px.line(df, x="position", y="value", color="variable")
     fig.update_layout(title="Probability of correct token at each position")
     fig.show()
-    fig.write_html("results/probability_of_correct_token_at_each_position.html")
+    fig.write_html(f"{save_dir}/probability_of_correct_token_at_each_position.html")
+
 
 if __name__ == "__main__":
-    main()
+    import fire
+
+    fire.Fire(main)
