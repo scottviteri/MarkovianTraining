@@ -111,6 +111,7 @@ def create_openai_helpful_message(
     system_prompt=None,
     user_prompt=None,
     print_msg=False,
+    msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH,
 ):
     # Convert tokens to text
     text = causal_lm_tokenizer.decode(tokens[0])
@@ -136,54 +137,18 @@ def create_openai_helpful_message(
     # Get the prepend string from the response
     prepend_string = response.choices[0].message["content"]
     # Convert the summary back to tokens
-    summary_tokens = causal_lm_tokenizer.encode(prepend_string, return_tensors="pt")
-    # Ensure the length of the summary is at most a quarter the length of tokens
-    quarter_length = tokens.shape[1] // 4
-    if summary_tokens.shape[1] > quarter_length:
-        summary_tokens = summary_tokens[:, :quarter_length]
-    # Prepend the summary tokens to the original tokens
-    new_tokens = torch.cat(
-        (summary_tokens, tokens[:, : -summary_tokens.shape[1]]), dim=1
-    )
+    msg_tokens = causal_lm_tokenizer.encode(prepend_string, return_tensors="pt")
     # Decode the summary tokens for printing
     decoded_main_tokens = causal_lm_tokenizer.decode(
-        tokens[:, : -summary_tokens.shape[1]][0]
+        tokens[:, : -msg_tokens.shape[1]][0]
     )
     if print_msg:
         print(
             "Prepend string: ", prepend_string, "\nMain string: ", decoded_main_tokens
         )
-    return new_tokens
-
-
-def combine_msg_and_data(msg, tokens, msg_context_length, tokenizer=None):
-    """
-    batch contains a 'data' key and a 'msg' key. It formats the example to include the helpful message
-    at the start and truncates the helpful message if needed.
-
-    msg shape (batch_size, seq_len_1)
-    tokens shape (batch_size, seq_len_2)
-    """
-    if msg.shape[1] > msg_context_length:
-        msg = msg[:, 0:msg_context_length]
-        logger.info(
-            "msg was too long, truncated to {msg_context_length} from {msg.shape[1]}".format(
-                msg_context_length=msg_context_length, msg=msg.shape[1]
-            )
-        )
-    elif msg.shape[1] < msg_context_length:
-        logger.warning(
-            "msg was too short, padded to {msg_context_length} from {msg.shape[1]}".format(
-                msg_context_length=msg_context_length, msg=msg.shape[1]
-            )
-        )
-        padding = (
-            torch.zeros((msg.shape[0], msg_context_length - msg.shape[1]))
-            + tokenizer.pad_token_id
-        )
-        tokens = torch.cat((msg, tokens.clone(), padding), dim=1)
-    return torch.cat((msg, tokens), dim=1)
-
+    if msg_tokens.shape[1] > msg_context_length:
+        msg_tokens = msg_tokens[:, :msg_context_length]
+    return msg_tokens
 
 def train_step(
     batch,
@@ -305,7 +270,7 @@ def main(
     reduced_data=10,
     train_context_length=DEFAULT_MAX_CONTEXT_LENGTH,
     msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH,
-    list_of_experiments="All"
+    list_of_experiments="all"
 ):
     device = get_device(model_name)
     if model_name == "llama":
@@ -345,7 +310,7 @@ def main(
 
     experiments = []
     # user_prompt = "Your job is to compress the following text, such that you can reconstruct it later. Do not worry about human legibility and you are allowed to use unicode. Finish with </End compressed text> <example>This is called a covariant transformation law, because the covector components transform by the same matrix as the change of basis matrix. The components of a more general tensor are transformed by some combination of covariant and contravariant transformations, with one transformation law for each index. If the transformation matrix of an index is the inverse matrix of the basis transformation, then the index is called contravariant and is conventionally denoted with an upper index (superscript). If the transformation matrix of an index is the basis transformation itself, then the index is called covariant and is denoted with a lower index (subscript).CovTransLaw:covector=ΔbasisMat. Tensor=comb(cov&contra); 1law/idx. InvMat=basisTrans→contra&↑. BasisTrans=cov&↓</example><Begin text to compress:>"
-    user_prompt = "Create a compressed version of the following text such that you will be able to reconstruct it verbatim. You can use human legible text, or unicode / non human legible text."
+    user_prompt = "Create a succinct, compressed version of the following text such that you will be able to reconstruct it verbatim. You can use human legible text, or unicode / non human legible text. Use only 64 tokens."
     system_prompt = (
         ""
     )
@@ -353,7 +318,8 @@ def main(
         experiments.append(
             ExperimentConfig(
                 lambda x: create_openai_helpful_message(
-                    x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt, system_prompt=system_prompt
+                    x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt, system_prompt=system_prompt,
+                    msg_context_length=msg_context_length
                 ),
                 reshaped_tensor.shape[1],
                 "openai_helpful_message",
