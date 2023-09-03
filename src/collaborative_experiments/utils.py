@@ -34,23 +34,19 @@ def tile_a_tensor(reshaped_tensor):
 
 
 def load_and_format_dataset(
-    textbook_1_path, causal_lm_tokenizer, debug=False, reduced_data=0, train_context_length=DEFAULT_MAX_CONTEXT_LENGTH, msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH
+    textbook_1_path, causal_lm_tokenizer, debug=False, reduced_data=0, train_context_length=DEFAULT_MAX_CONTEXT_LENGTH
 ):
     """
     Takes input data as a string and then tokenizes it.
-    Changes the size of each batch of data to be train_context_length - msg_context_length
-    because msg_context_length will be prepended to the data getting us back to
-    train_context_length
+    Changes the size of each batch of data to be train_context_length
 
     Args:
         train_context_length (int): the length of the batch that we will train on
-        msg_context_length (int): the length of the message that we will prepend to the data. Must be < train_context_length
 
     Returns:
-        (torch.tensor): the data as a tensor of shape (n_batches, data_context_length) where data_context_length = train_context_length - msg_context_length
+        (torch.tensor): the data as a tensor of shape (n_batches, train_context_length)
     """
-    data_context_length = train_context_length - msg_context_length
-    assert data_context_length > 0, f"train_context_length {train_context_length} must be greater than msg_context_length {msg_context_length}"
+    assert train_context_length > 0, f"train_context_length {train_context_length} must be greater than 0"
     dataset = load_dataset("text", data_files=textbook_1_path)
     print(dataset)
 
@@ -61,21 +57,21 @@ def load_and_format_dataset(
     # tokenize dataset
     dataset_1_tokenized = causal_lm_tokenizer(text, return_tensors="pt")
 
-    # convert from shape (1, num_tokens) to (num_tokens/data_context_length, data_context_length)
+    # convert from shape (1, num_tokens) to (num_tokens/train_context_length, train_context_length)
+    # chops off the end of the data
     tokens_tensor = dataset_1_tokenized["input_ids"].squeeze()
     size = tokens_tensor.shape[0]
-    size = (size // data_context_length) * (data_context_length)
+    size = (size // train_context_length) * (train_context_length)
     tokens_tensor = tokens_tensor[0:size]
-    reshaped_tensor = tokens_tensor.view(-1, data_context_length)
+    reshaped_tensor = tokens_tensor.view(-1, train_context_length)
     print(
         reshaped_tensor.shape
-    )  # Should print torch.Size([num_tokens/data_context_length, data_context_length])
+    )  # Should print torch.Size([num_tokens/train_context_length, train_context_length])
     # turn all values to be the same 11
     if debug:
         reshaped_tensor = tile_a_tensor(reshaped_tensor)
     elif reduced_data > 0:
         reshaped_tensor = reshaped_tensor[0:reduced_data]
-
     return reshaped_tensor
 
 
