@@ -29,6 +29,7 @@ import plotly.express as px
 import pandas as pd
 import numpy as np
 import openai
+import wandb
 
 # from jaxtyping import Array, Int, Float
 
@@ -247,13 +248,15 @@ def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device, batched
     for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
         batch_dict = {}
         batch_dict["msg"] = config.msg_fn(batch)
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
+        helpful_msg_decoded = tokenizer.decode(batch_dict["msg"][0])
         if verbose:
-            tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
-            helpful_msg_decoded = "msg: " + tokenizer.decode(batch_dict["msg"][0])
-            tqdm.write(helpful_msg_decoded)
+            tqdm.write("msg: " + helpful_msg_decoded)
             tqdm.write(f"---end-helpful-msg-{config.name}--")
             tqdm.write("content: " + tokenizer.decode(batch[0]))
             tqdm.write(f"---end-content--{config.name}--")
+        wandb.log({f"{config.name}_msg_decoded": helpful_msg_decoded})
+        wandb.log({f"{{config.name}}_content": tokenizer.decode(batch[0])})
         batch_dict["content"] = batch
         loss, correct_probs = train_step(batch=batch_dict, causal_lm=causal_lm, loss_fn=loss_fn, device=device)
         correct_probs_all += correct_probs.mean(dim=0)
@@ -270,8 +273,12 @@ def main(
     reduced_data=10,
     train_context_length=DEFAULT_MAX_CONTEXT_LENGTH,
     msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH,
-    list_of_experiments="all"
+    list_of_experiments="all",
+    verbose=True,
 ):
+    if BATCH_SIZE != 1:
+        raise NotImplementedError("Only implemented for batch size 1, not {}".format(BATCH_SIZE))
+    wandb.init(project="collaborative_training", config={"run_finished": False, "model_name": model_name, "save_dir": save_dir, "list_of_experiments": list_of_experiments, "reduced_data": reduced_data, "train_context_length": train_context_length, "msg_context_length": msg_context_length, "batch_size": BATCH_SIZE, "debug": debug})
     device = get_device(model_name)
     if model_name == "llama":
         causal_lm, causal_lm_tokenizer = load_llama_model(device=device)
@@ -314,6 +321,7 @@ def main(
     system_prompt = (
         ""
     )
+    wandb.config.update({"user_prompt": user_prompt, "system_prompt": system_prompt})
     if list_of_experiments == "all" or "openai" in list_of_experiments:
         experiments.append(
             ExperimentConfig(
@@ -343,8 +351,10 @@ def main(
     correct_probs_all_dict = {}
     for experiment in tqdm(experiments, desc="Experiment"):
         losses, correct_probs_all = run_experiment(
-            experiment, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=False, verbose=True
+            experiment, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=False, verbose=verbose
         )
+        # wandb.log({f"{experiment.name}_losses": losses})
+        # wandb.log({f"{experiment.name}_correct_probs_all": correct_probs_all})
         losses_dict[experiment.name] = losses
         correct_probs_all_dict[experiment.name] = correct_probs_all.clone().numpy() / (
             len(dataset_1_loader) * BATCH_SIZE
@@ -361,6 +371,7 @@ def main(
     for key in losses_dict:
         losses_dict[key] = [loss.item() for loss in losses_dict[key]]
 
+    wandb.log({"losses_dict": losses_dict})
     df = pd.DataFrame(losses_dict)
     df["batch_index"] = df.index
     df = df.melt(id_vars=["batch_index"], value_vars=list(losses_dict.keys()))
@@ -368,9 +379,11 @@ def main(
     fig.update_layout(title=f"Losses, batch_size {BATCH_SIZE}")
     fig.show()
     fig.write_html(f"{save_dir}/losses.html")
+    wandb.log({"losses_html": fig})
 
     # plot the per token posisions on the same graph
     # normalize the lengths of the different experiments by padding to the max one with zeros
+    wandb.log({"correct_probs_all_dict": correct_probs_all_dict})
     max_len = max([len(x) for x in correct_probs_all_dict.values()])
     for exp_name, correct_probs_all in correct_probs_all_dict.items():
         if len(correct_probs_all) < max_len:
@@ -387,6 +400,10 @@ def main(
     fig.update_layout(title="Probability of correct token at each position")
     fig.show()
     fig.write_html(f"{save_dir}/probability_of_correct_token_at_each_position.html")
+    wandb.log({"probability_of_correct_token_at_each_position_html": fig})
+
+    wandb.config.update({"run_finished": True})
+    wandb.finish()
 
 
 if __name__ == "__main__":
