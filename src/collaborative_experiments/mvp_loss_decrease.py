@@ -56,6 +56,8 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+LOGGING_DICT_WANDB = {}
+
 
 class ExperimentConfig:
     def __init__(self, msg_fn, expected_length, name):
@@ -245,7 +247,11 @@ def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device, batched
         # function is now an iterator over messages_batched, ignores the batch
         config.msg_fn = lambda x: messages_batched.__next__()
 
-    for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
+    if config.name == "original":
+        LOGGING_DICT_WANDB[f"{config.name}_content"] = []
+    else:
+        LOGGING_DICT_WANDB[f"{config.name}_msg_decoded"] = []
+    for i, batch in enumerate(tqdm(dataset_1_loader, desc=f"Experiment {config.name}")):
         batch_dict = {}
         batch_dict["msg"] = config.msg_fn(batch)
         tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
@@ -255,11 +261,16 @@ def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device, batched
             tqdm.write(f"---end-helpful-msg-{config.name}--")
             tqdm.write("content: " + tokenizer.decode(batch[0]))
             tqdm.write(f"---end-content--{config.name}--")
-        wandb.log({f"{config.name}_msg_decoded": helpful_msg_decoded})
-        wandb.log({f"{{config.name}}_content": tokenizer.decode(batch[0])})
+        if config.name == "original":
+            LOGGING_DICT_WANDB[f"{config.name}_content"].append(tokenizer.decode(batch[0]))
+        else:
+            LOGGING_DICT_WANDB[f"{config.name}_msg_decoded"].append(helpful_msg_decoded)
+        
         batch_dict["content"] = batch
         loss, correct_probs = train_step(batch=batch_dict, causal_lm=causal_lm, loss_fn=loss_fn, device=device)
         correct_probs_all += correct_probs.mean(dim=0)
+        wandb.log({f"{config.name}_loss": loss.item()}, commit=False)
+        wandb.log({f"{config.name}_correct_probs": correct_probs.mean(dim=0)})
         losses.append(loss)
 
     return losses, correct_probs_all.to("cpu")
@@ -278,7 +289,7 @@ def main(
 ):
     if BATCH_SIZE != 1:
         raise NotImplementedError("Only implemented for batch size 1, not {}".format(BATCH_SIZE))
-    wandb.init(project="collaborative_training", config={"run_finished": False, "model_name": model_name, "save_dir": save_dir, "list_of_experiments": list_of_experiments, "reduced_data": reduced_data, "train_context_length": train_context_length, "msg_context_length": msg_context_length, "batch_size": BATCH_SIZE, "debug": debug})
+    wandb.init(project="collaborative_training", config={"run_finished_succesfully": False, "model_name": model_name, "save_dir": save_dir, "list_of_experiments": list_of_experiments, "reduced_data": reduced_data, "train_context_length": train_context_length, "msg_context_length": msg_context_length, "batch_size": BATCH_SIZE, "debug": debug})
     device = get_device(model_name)
     if model_name == "llama":
         causal_lm, causal_lm_tokenizer = load_llama_model(device=device)
@@ -306,7 +317,6 @@ def main(
         debug=debug,
         reduced_data=reduced_data,
         train_context_length=train_context_length,
-        msg_context_length=msg_context_length,
     )
     ## make a pytorch data loader for the dataset
     dataset_1_loader = torch.utils.data.DataLoader(
@@ -353,8 +363,6 @@ def main(
         losses, correct_probs_all = run_experiment(
             experiment, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=False, verbose=verbose
         )
-        # wandb.log({f"{experiment.name}_losses": losses})
-        # wandb.log({f"{experiment.name}_correct_probs_all": correct_probs_all})
         losses_dict[experiment.name] = losses
         correct_probs_all_dict[experiment.name] = correct_probs_all.clone().numpy() / (
             len(dataset_1_loader) * BATCH_SIZE
@@ -363,6 +371,12 @@ def main(
     for exp_name, losses in losses_dict.items():
         print(f"experiment {exp_name} had avg loss of {np.mean(losses)}")
 
+    # Convert LOGGING_DICT_WANDB to a DataFrame reference
+    logging_df = pd.DataFrame(LOGGING_DICT_WANDB)
+    # Log the DataFrame to wandb as a table
+    wandb.log({"LOGGING_DICT_WANDB": wandb.Table(dataframe=logging_df)})
+    
+    
     if not os.path.exists(f"{save_dir}"):
         os.makedirs(f"{save_dir}")
     save_dir = os.path.join(save_dir, f"{model_name}")
@@ -379,7 +393,7 @@ def main(
     fig.update_layout(title=f"Losses, batch_size {BATCH_SIZE}")
     fig.show()
     fig.write_html(f"{save_dir}/losses.html")
-    wandb.log({"losses_html": fig})
+    wandb.log({"losses_html": wandb.Plotly(fig)})
 
     # plot the per token posisions on the same graph
     # normalize the lengths of the different experiments by padding to the max one with zeros
@@ -400,9 +414,9 @@ def main(
     fig.update_layout(title="Probability of correct token at each position")
     fig.show()
     fig.write_html(f"{save_dir}/probability_of_correct_token_at_each_position.html")
-    wandb.log({"probability_of_correct_token_at_each_position_html": fig})
+    wandb.log({"probability_of_correct_token_at_each_position_html": wandb.Plotly(fig)})
 
-    wandb.config.update({"run_finished": True})
+    wandb.config.update({"run_finished_succesfully": True}, allow_val_change=True)
     wandb.finish()
 
 
