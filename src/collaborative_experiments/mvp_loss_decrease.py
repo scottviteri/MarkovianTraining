@@ -29,6 +29,7 @@ import plotly.express as px
 import pandas as pd
 import numpy as np
 import openai
+import wandb
 
 # from jaxtyping import Array, Int, Float
 
@@ -54,6 +55,8 @@ import logging
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+LOGGING_DICT_WANDB = {}
 
 
 class ExperimentConfig:
@@ -111,6 +114,7 @@ def create_openai_helpful_message(
     system_prompt=None,
     user_prompt=None,
     print_msg=False,
+    msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH,
 ):
     # Convert tokens to text
     text = causal_lm_tokenizer.decode(tokens[0])
@@ -136,54 +140,18 @@ def create_openai_helpful_message(
     # Get the prepend string from the response
     prepend_string = response.choices[0].message["content"]
     # Convert the summary back to tokens
-    summary_tokens = causal_lm_tokenizer.encode(prepend_string, return_tensors="pt")
-    # Ensure the length of the summary is at most a quarter the length of tokens
-    quarter_length = tokens.shape[1] // 4
-    if summary_tokens.shape[1] > quarter_length:
-        summary_tokens = summary_tokens[:, :quarter_length]
-    # Prepend the summary tokens to the original tokens
-    new_tokens = torch.cat(
-        (summary_tokens, tokens[:, : -summary_tokens.shape[1]]), dim=1
-    )
+    msg_tokens = causal_lm_tokenizer.encode(prepend_string, return_tensors="pt")
     # Decode the summary tokens for printing
     decoded_main_tokens = causal_lm_tokenizer.decode(
-        tokens[:, : -summary_tokens.shape[1]][0]
+        tokens[:, : -msg_tokens.shape[1]][0]
     )
     if print_msg:
         print(
             "Prepend string: ", prepend_string, "\nMain string: ", decoded_main_tokens
         )
-    return new_tokens
-
-
-def combine_msg_and_data(msg, tokens, msg_context_length, tokenizer=None):
-    """
-    batch contains a 'data' key and a 'msg' key. It formats the example to include the helpful message
-    at the start and truncates the helpful message if needed.
-
-    msg shape (batch_size, seq_len_1)
-    tokens shape (batch_size, seq_len_2)
-    """
-    if msg.shape[1] > msg_context_length:
-        msg = msg[:, 0:msg_context_length]
-        logger.info(
-            "msg was too long, truncated to {msg_context_length} from {msg.shape[1]}".format(
-                msg_context_length=msg_context_length, msg=msg.shape[1]
-            )
-        )
-    elif msg.shape[1] < msg_context_length:
-        logger.warning(
-            "msg was too short, padded to {msg_context_length} from {msg.shape[1]}".format(
-                msg_context_length=msg_context_length, msg=msg.shape[1]
-            )
-        )
-        padding = (
-            torch.zeros((msg.shape[0], msg_context_length - msg.shape[1]))
-            + tokenizer.pad_token_id
-        )
-        tokens = torch.cat((msg, tokens.clone(), padding), dim=1)
-    return torch.cat((msg, tokens), dim=1)
-
+    if msg_tokens.shape[1] > msg_context_length:
+        msg_tokens = msg_tokens[:, :msg_context_length]
+    return msg_tokens
 
 def train_step(
     batch,
@@ -279,19 +247,30 @@ def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device, batched
         # function is now an iterator over messages_batched, ignores the batch
         config.msg_fn = lambda x: messages_batched.__next__()
 
-    for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
+    if config.name == "original":
+        LOGGING_DICT_WANDB[f"{config.name}_content"] = []
+    else:
+        LOGGING_DICT_WANDB[f"{config.name}_msg_decoded"] = []
+    for i, batch in enumerate(tqdm(dataset_1_loader, desc=f"Experiment {config.name}")):
         batch_dict = {}
         batch_dict["msg"] = config.msg_fn(batch)
+        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
+        helpful_msg_decoded = tokenizer.decode(batch_dict["msg"][0])
         if verbose:
-            tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
-            helpful_msg_decoded = "msg: " + tokenizer.decode(batch_dict["msg"][0])
-            tqdm.write(helpful_msg_decoded)
+            tqdm.write("msg: " + helpful_msg_decoded)
             tqdm.write(f"---end-helpful-msg-{config.name}--")
             tqdm.write("content: " + tokenizer.decode(batch[0]))
             tqdm.write(f"---end-content--{config.name}--")
+        if config.name == "original":
+            LOGGING_DICT_WANDB[f"{config.name}_content"].append(tokenizer.decode(batch[0]))
+        else:
+            LOGGING_DICT_WANDB[f"{config.name}_msg_decoded"].append(helpful_msg_decoded)
+        
         batch_dict["content"] = batch
         loss, correct_probs = train_step(batch=batch_dict, causal_lm=causal_lm, loss_fn=loss_fn, device=device)
         correct_probs_all += correct_probs.mean(dim=0)
+        wandb.log({f"{config.name}_loss": loss.item()}, commit=False)
+        wandb.log({f"{config.name}_correct_probs": correct_probs.mean(dim=0)})
         losses.append(loss)
 
     return losses, correct_probs_all.to("cpu")
@@ -305,8 +284,12 @@ def main(
     reduced_data=10,
     train_context_length=DEFAULT_MAX_CONTEXT_LENGTH,
     msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH,
-    list_of_experiments="All"
+    list_of_experiments="all",
+    verbose=True,
 ):
+    if BATCH_SIZE != 1:
+        raise NotImplementedError("Only implemented for batch size 1, not {}".format(BATCH_SIZE))
+    wandb.init(project="collaborative_training", config={"run_finished_succesfully": False, "model_name": model_name, "save_dir": save_dir, "list_of_experiments": list_of_experiments, "reduced_data": reduced_data, "train_context_length": train_context_length, "msg_context_length": msg_context_length, "batch_size": BATCH_SIZE, "debug": debug})
     device = get_device(model_name)
     if model_name == "llama":
         causal_lm, causal_lm_tokenizer = load_llama_model(device=device)
@@ -334,7 +317,6 @@ def main(
         debug=debug,
         reduced_data=reduced_data,
         train_context_length=train_context_length,
-        msg_context_length=msg_context_length,
     )
     ## make a pytorch data loader for the dataset
     dataset_1_loader = torch.utils.data.DataLoader(
@@ -345,15 +327,17 @@ def main(
 
     experiments = []
     # user_prompt = "Your job is to compress the following text, such that you can reconstruct it later. Do not worry about human legibility and you are allowed to use unicode. Finish with </End compressed text> <example>This is called a covariant transformation law, because the covector components transform by the same matrix as the change of basis matrix. The components of a more general tensor are transformed by some combination of covariant and contravariant transformations, with one transformation law for each index. If the transformation matrix of an index is the inverse matrix of the basis transformation, then the index is called contravariant and is conventionally denoted with an upper index (superscript). If the transformation matrix of an index is the basis transformation itself, then the index is called covariant and is denoted with a lower index (subscript).CovTransLaw:covector=ΔbasisMat. Tensor=comb(cov&contra); 1law/idx. InvMat=basisTrans→contra&↑. BasisTrans=cov&↓</example><Begin text to compress:>"
-    user_prompt = "Create a compressed version of the following text such that you will be able to reconstruct it verbatim. You can use human legible text, or unicode / non human legible text."
+    user_prompt = f"Create a succinct, compressed version of the following text such that you will be able to reconstruct it verbatim. You can use human legible text, or unicode / non human legible text. Use only {msg_context_length} tokens. Reply in only a few words."
     system_prompt = (
         ""
     )
+    wandb.config.update({"user_prompt": user_prompt, "system_prompt": system_prompt})
     if list_of_experiments == "all" or "openai" in list_of_experiments:
         experiments.append(
             ExperimentConfig(
                 lambda x: create_openai_helpful_message(
-                    x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt, system_prompt=system_prompt
+                    x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt, system_prompt=system_prompt,
+                    msg_context_length=msg_context_length
                 ),
                 reshaped_tensor.shape[1],
                 "openai_helpful_message",
@@ -377,16 +361,25 @@ def main(
     correct_probs_all_dict = {}
     for experiment in tqdm(experiments, desc="Experiment"):
         losses, correct_probs_all = run_experiment(
-            experiment, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=False, verbose=True
+            experiment, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=False, verbose=verbose
         )
         losses_dict[experiment.name] = losses
         correct_probs_all_dict[experiment.name] = correct_probs_all.clone().numpy() / (
             len(dataset_1_loader) * BATCH_SIZE
         )
 
+    losses_mean = {}
     for exp_name, losses in losses_dict.items():
         print(f"experiment {exp_name} had avg loss of {np.mean(losses)}")
+        losses_mean[exp_name] = np.mean(losses)
 
+    # Convert LOGGING_DICT_WANDB to a DataFrame reference
+    logging_df = pd.DataFrame(LOGGING_DICT_WANDB)
+    # Log the DataFrame to wandb as a table
+    wandb.log({"Mean Losses": wandb.Table(columns=list(losses_mean.keys()), data=[list(losses_mean.values())])})
+    wandb.log({"LOGGING_DICT_WANDB": wandb.Table(dataframe=logging_df)})
+    
+    
     if not os.path.exists(f"{save_dir}"):
         os.makedirs(f"{save_dir}")
     save_dir = os.path.join(save_dir, f"{model_name}")
@@ -395,6 +388,7 @@ def main(
     for key in losses_dict:
         losses_dict[key] = [loss.item() for loss in losses_dict[key]]
 
+    wandb.log({"losses_dict": losses_dict})
     df = pd.DataFrame(losses_dict)
     df["batch_index"] = df.index
     df = df.melt(id_vars=["batch_index"], value_vars=list(losses_dict.keys()))
@@ -402,9 +396,11 @@ def main(
     fig.update_layout(title=f"Losses, batch_size {BATCH_SIZE}")
     fig.show()
     fig.write_html(f"{save_dir}/losses.html")
+    wandb.log({"losses_html": wandb.Plotly(fig)})
 
     # plot the per token posisions on the same graph
     # normalize the lengths of the different experiments by padding to the max one with zeros
+    wandb.log({"correct_probs_all_dict": correct_probs_all_dict})
     max_len = max([len(x) for x in correct_probs_all_dict.values()])
     for exp_name, correct_probs_all in correct_probs_all_dict.items():
         if len(correct_probs_all) < max_len:
@@ -421,6 +417,10 @@ def main(
     fig.update_layout(title="Probability of correct token at each position")
     fig.show()
     fig.write_html(f"{save_dir}/probability_of_correct_token_at_each_position.html")
+    wandb.log({"probability_of_correct_token_at_each_position_html": wandb.Plotly(fig)})
+
+    wandb.config.update({"run_finished_succesfully": True}, allow_val_change=True)
+    wandb.finish()
 
 
 if __name__ == "__main__":
