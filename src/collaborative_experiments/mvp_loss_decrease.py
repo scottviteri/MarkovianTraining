@@ -150,6 +150,10 @@ def create_openai_helpful_message(
         )
     if msg_tokens.shape[1] > msg_context_length:
         msg_tokens = msg_tokens[:, :msg_context_length]
+    if msg_tokens.shape[1] < msg_context_length:
+        padding_length = msg_context_length - msg_tokens.shape[1]
+        padding = torch.full((1, padding_length), causal_lm_tokenizer.pad_token_id, device=msg_tokens.device)
+        msg_tokens = torch.cat([padding, msg_tokens], dim=1)
     return msg_tokens
 
 def train_step(
