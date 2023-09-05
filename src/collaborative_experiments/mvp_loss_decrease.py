@@ -327,7 +327,7 @@ def main(
 
     experiments = []
     # user_prompt = "Your job is to compress the following text, such that you can reconstruct it later. Do not worry about human legibility and you are allowed to use unicode. Finish with </End compressed text> <example>This is called a covariant transformation law, because the covector components transform by the same matrix as the change of basis matrix. The components of a more general tensor are transformed by some combination of covariant and contravariant transformations, with one transformation law for each index. If the transformation matrix of an index is the inverse matrix of the basis transformation, then the index is called contravariant and is conventionally denoted with an upper index (superscript). If the transformation matrix of an index is the basis transformation itself, then the index is called covariant and is denoted with a lower index (subscript).CovTransLaw:covector=ΔbasisMat. Tensor=comb(cov&contra); 1law/idx. InvMat=basisTrans→contra&↑. BasisTrans=cov&↓</example><Begin text to compress:>"
-    user_prompt = "Create a succinct, compressed version of the following text such that you will be able to reconstruct it verbatim. You can use human legible text, or unicode / non human legible text. Use only 64 tokens."
+    user_prompt = f"Create a succinct, compressed version of the following text such that you will be able to reconstruct it verbatim. You can use human legible text, or unicode / non human legible text. Use only {msg_context_length} tokens. Reply in only a few words."
     system_prompt = (
         ""
     )
@@ -368,12 +368,15 @@ def main(
             len(dataset_1_loader) * BATCH_SIZE
         )
 
+    losses_mean = {}
     for exp_name, losses in losses_dict.items():
         print(f"experiment {exp_name} had avg loss of {np.mean(losses)}")
+        losses_mean[exp_name] = np.mean(losses)
 
     # Convert LOGGING_DICT_WANDB to a DataFrame reference
     logging_df = pd.DataFrame(LOGGING_DICT_WANDB)
     # Log the DataFrame to wandb as a table
+    wandb.log({"Mean Losses": wandb.Table(columns=list(losses_mean.keys()), data=[list(losses_mean.values())])})
     wandb.log({"LOGGING_DICT_WANDB": wandb.Table(dataframe=logging_df)})
     
     
