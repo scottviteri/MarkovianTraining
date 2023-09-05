@@ -11,7 +11,7 @@ import accelerate
 from collaborative_experiments.constants import DEFAULT_MAX_CONTEXT_LENGTH, DEFAULT_MSG_CONTEXT_LENGTH
 
 
-def get_device(model_name):
+def get_device(model_name=""):
     """
     Get's either cuda, cpu, or mps, using accelerate
     """
