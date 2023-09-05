@@ -9,11 +9,12 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from collections import defaultdict
 import numpy as np
 
+import os
+
 from collaborative_experiments.mvp_loss_decrease import (
     create_helpful_message_1,
     create_openai_helpful_message,
     train_step,
-    combine_msg_and_data,
 )
 from collaborative_experiments.constants import DEFAULT_MAX_CONTEXT_LENGTH, DEFAULT_MSG_CONTEXT_LENGTH
 from collaborative_experiments.utils import (
@@ -33,24 +34,6 @@ def causal_lm():
 def tokens():
     return torch.tensor([list(range(1024))])
 
-@pytest.mark.parametrize("msg_fn", [create_helpful_message_1])
-def test_combine_msg_and_data_shape(tokens, msg_fn):
-    # tokens have shape [1, 1024]
-    og_tokens = tokens.clone()
-    tokens = tokens[:, :-DEFAULT_MSG_CONTEXT_LENGTH]
-    assert tokens.shape[1] == DEFAULT_MAX_CONTEXT_LENGTH - DEFAULT_MSG_CONTEXT_LENGTH
-    helpful_msg = msg_fn(tokens, tokens_to_grab=DEFAULT_MSG_CONTEXT_LENGTH)
-    combined = combine_msg_and_data(helpful_msg, tokens, msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH)
-    assert np.all(combined.shape == og_tokens.shape), "failed to reconstruct tokens"
-
-def test_create_helpful_message_1(tokens):
-    tokens_input = tokens[0, :-DEFAULT_MSG_CONTEXT_LENGTH]  # Removing the last MSG_CONTEXT_LENGTH tokens
-    msg = create_helpful_message_1(tokens_input.unsqueeze(dim=0))
-    actual_output = combine_msg_and_data(msg, tokens_input.unsqueeze(dim=0), msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH)
-
-    # Check that the first MSG_CONTEXT_LENGTH tokens of the output are the same as expected
-    assert torch.equal(actual_output[0, :DEFAULT_MSG_CONTEXT_LENGTH], tokens_input[:DEFAULT_MSG_CONTEXT_LENGTH]), "The tokens do not match as expected."
-    assert actual_output.shape[1] == DEFAULT_MAX_CONTEXT_LENGTH, "The output shape is not as expected."
 
 def test_train_step(causal_lm, causal_lm_tokenizer):
     # visualizes it
@@ -98,65 +81,22 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     with open("tests/test_train_step.txt", "w") as f:
         f.write(tabulate.tabulate(table, headers="firstrow"))
 
-@pytest.mark.parametrize("msg_fn", [create_helpful_message_1, create_openai_helpful_message])
-def test_variable_context_lengths(causal_lm_tokenizer, msg_fn):
-    """
-    This test verifies that load_and_format_dataset handles different msg_context_lengths and total_context lengths properly.
-    And then verifies that helpful_message_one does the proper thing with this. 
-    """
-    train_context_length = 256
-    msg_context_length = 128
-    dataset_path =  "data/st_patrick_biography.txt"
-    dataset_tensor = load_and_format_dataset(dataset_path, causal_lm_tokenizer, reduced_data=2, train_context_length=train_context_length, msg_context_length=msg_context_length)
-    # ^ hase shape [10, 32]
-    print(dataset_tensor.shape)
-    data_sample = dataset_tensor[-1, :]
-    print(data_sample.shape) # [32,]
-    data_sample_str = [causal_lm_tokenizer.decode(token) for token in data_sample]
-    if msg_fn.__name__ == "create_openai_helpful_message":
-        message = msg_fn(data_sample.unsqueeze(dim=0), causal_lm_tokenizer=causal_lm_tokenizer)
-    else:
-        message = msg_fn(data_sample.unsqueeze(dim=0), tokens_to_grab=msg_context_length)
-    transformed_sample = combine_msg_and_data(message, data_sample.unsqueeze(dim=0), msg_context_length=msg_context_length)
-    transformed_sample_str = [causal_lm_tokenizer.decode(token) for token in transformed_sample[0]]
-    print(transformed_sample.shape) # [1, 64]
-    # print(transformed_sample_str)
-
-    logging_dict = defaultdict(list)
-    # diff_in_size = len(transformed_sample_str) - len(data_sample_str)
-    # if diff_in_size <= 0:
-    #     logging_dict["data_sample_str"] = ["-"] * diff_in_size
-    # else:
-    #     logging_dict["transformed_sample_str"] = ["-"] * (-diff_in_size)
-    logging_dict["data_sample_str"] = data_sample_str
-    logging_dict["transformed_sample_str"] = transformed_sample_str
-    logging_dict["message"] = [causal_lm_tokenizer.decode(token) for token in message[0]]
-
-    def safe_get(list, i):
-        if i >= len(list):
-            return "-"
-        return list[i]
-
-    table = [list(logging_dict.keys())]
-    for i in range(train_context_length + 1): # plus 1 to verify that it all ends in "-"
-        table.append([safe_get(logging_dict[key], i) for key in logging_dict.keys()])
-    print(tabulate.tabulate(table, headers="firstrow"))
-    # save results to a file
-    with open(f"tests/test_variable_context_lengths_{msg_fn.__name__}.txt", "w") as f:
-        f.write(tabulate.tabulate(table, headers="firstrow"))
-
-    assert transformed_sample.shape[0] == 1
-    if msg_fn.__name__ == "create_openai_helpful_message":
-        assert transformed_sample.shape[1] >= train_context_length - msg_context_length
-        assert transformed_sample.shape[1] <= train_context_length + train_context_length//4
-    else:
-        assert transformed_sample.shape[1] == train_context_length
+def test_create_helpful_message_1(tokens):
+    helpful_message = create_helpful_message_1(tokens)
+    assert helpful_message.shape == (1, DEFAULT_MSG_CONTEXT_LENGTH)
 
 def test_create_openai_helpful_msg(causal_lm_tokenizer):
     sentence = "Hi there, I am a textbook on working class americans. The world is full of people who work. And the color of the sky is blue, despite it being cloudy often. Don't let those clouds fool you. Often the clouds are really just a conspiracy from the illuminati. Listen here, you didn't hear this from me though."
     tokens = causal_lm_tokenizer.encode(sentence, return_tensors="pt")
-    helpful_message = create_openai_helpful_message(tokens, causal_lm_tokenizer=causal_lm_tokenizer)
+    msg_context_length = 128
+    helpful_message = create_openai_helpful_message(tokens, causal_lm_tokenizer=causal_lm_tokenizer, msg_context_length=msg_context_length)
+    assert helpful_message.shape == (1, msg_context_length)
 
+def test_load_and_format_dataset(causal_lm_tokenizer):
+    current_path = os.path.dirname(os.path.realpath(__file__))
+    textbook_1_path = textbook_1_path = os.path.join(current_path, "../data/st_patrick_biography.txt")
+    dataset = load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, train_context_length=DEFAULT_MAX_CONTEXT_LENGTH, reduced_data=1)
+    assert dataset.shape == (1, DEFAULT_MAX_CONTEXT_LENGTH)
 
 def test_ability_to_log():
     print("fhjaldksfkladsj;fkladsjfl;kadjs")

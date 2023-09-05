@@ -110,7 +110,6 @@ def create_helpful_message_1(tokens, tokens_to_grab=DEFAULT_MSG_CONTEXT_LENGTH):
 def create_openai_helpful_message(
     tokens,
     causal_lm_tokenizer,
-    causal_lm=None,
     system_prompt=None,
     user_prompt=None,
     print_msg=False,
@@ -336,7 +335,7 @@ def main(
         experiments.append(
             ExperimentConfig(
                 lambda x: create_openai_helpful_message(
-                    x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt, system_prompt=system_prompt,
+                    x, causal_lm_tokenizer, user_prompt=user_prompt, system_prompt=system_prompt,
                     msg_context_length=msg_context_length
                 ),
                 reshaped_tensor.shape[1],
