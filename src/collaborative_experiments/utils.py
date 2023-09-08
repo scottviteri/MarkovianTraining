@@ -4,6 +4,7 @@ import sys
 import time
 from pathlib import Path
 import json
+import fire
 
 from datasets import load_dataset
 import accelerate
@@ -31,6 +32,25 @@ def tile_a_tensor(reshaped_tensor):
         reshaped_tensor[0, i * 3 + 2] += 2
         reshaped_tensor[1, i * 3 + 2] += 2
     return reshaped_tensor
+
+
+def download_wiki_dataset():
+    # need to run ./wiki/download.py --data_dir data/wikipedia
+    # then python ./wiki/convert_format.py
+    # then count tokens with ./wiki/token_count.py
+    lan = "en"
+    date = "20220120"
+    current_dir = os.path.dirname(os.path.realpath(__file__))
+    data_dir = os.path.join(current_dir, "..", "..", "data", "wikipedia")
+    wiki_dataset = load_dataset(
+        "wikipedia", language=lan, date=date, beam_runner="DirectRunner"
+    )
+    for split, dataset in wiki_dataset.items():
+        tgt_fp = data_dir / f"wiki_{lan}_{date}_{split}.jsonl"
+        dataset.to_json(tgt_fp)
+    print("Finished Downloading %s %s. There are total %d pages." % (
+        lan, date, len(dataset["id"])))
+
 
 
 def load_and_format_dataset(
@@ -118,3 +138,8 @@ def load_llama_model(
     print(f"Loaded in {time.time() - start_time:.2f} seconds")
     return model, tokenizer
 
+def main():
+    download_wiki_dataset()
+
+if __name__ == "__main__":
+    fire.Fire(main)
