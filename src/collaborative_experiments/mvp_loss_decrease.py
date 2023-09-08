@@ -288,10 +288,16 @@ def main(
     train_context_length=DEFAULT_MAX_CONTEXT_LENGTH,
     msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH,
     list_of_experiments="all",
+    data_file_path="data/st_patrick_biography.txt",
     verbose=True,
 ):
     if BATCH_SIZE != 1:
         raise NotImplementedError("Only implemented for batch size 1, not {}".format(BATCH_SIZE))
+    if "mock" in model_name:
+        # turn wandb off
+        os.environ["WANDB_MODE"] = "dryrun"
+    else:
+        os.environ["WANDB_MODE"] = "online"
     wandb.init(project="collaborative_training", config={"run_finished_succesfully": False, "model_name": model_name, "save_dir": save_dir, "list_of_experiments": list_of_experiments, "reduced_data": reduced_data, "train_context_length": train_context_length, "msg_context_length": msg_context_length, "batch_size": BATCH_SIZE, "debug": debug})
     device = get_device(model_name)
     if model_name == "llama":
@@ -313,7 +319,7 @@ def main(
     # load dataset
     # https://www.gutenberg.org/ebooks/71431
     current_path = os.path.dirname(os.path.realpath(__file__))
-    textbook_1_path = os.path.join(current_path, "../../data/st_patrick_biography.txt")
+    textbook_1_path = os.path.join(current_path, "../../", data_file_path)
     reshaped_tensor = load_and_format_dataset(
         textbook_1_path,
         causal_lm_tokenizer,
@@ -383,9 +389,10 @@ def main(
     wandb.log({"LOGGING_DICT_WANDB": wandb.Table(dataframe=logging_df)})
     
     
-    if not os.path.exists(f"{save_dir}"):
-        os.makedirs(f"{save_dir}")
-    save_dir = os.path.join(save_dir, f"{model_name}")
+    # if not os.path.exists(f"{save_dir}"):
+    #     os.makedirs(f"{save_dir}")
+    data_file_name = data_file_path.split(os.path.sep)[-1]
+    save_dir = os.path.join(save_dir, f"{model_name}", data_file_name)
     if not os.path.exists(f"{save_dir}"):
         os.makedirs(f"{save_dir}")
     for key in losses_dict:

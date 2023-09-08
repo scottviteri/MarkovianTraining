@@ -51,7 +51,7 @@
                 "--list_of_experiments",
                 "all",
                 "--reduced_data",
-                "5",
+                "2",
                 "--debug",
                 "False",
                 "--BATCH_SIZE",
@@ -59,7 +59,9 @@
                 "--train_context_length",
                 "256",
                 "--msg_context_length",
-                "2"
+                "2",
+                "--data_file_path",
+                "data/gpt-4_20230908_math.txt"
             ]
         },
         {
