@@ -12,6 +12,5 @@ sentencepiece
 datasets
 fire
 wandb
-apache_beam
 # make sure to install this library, pip install -e .
 # make sure to install llama from llama_fork for mac os
