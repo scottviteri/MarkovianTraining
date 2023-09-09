@@ -38,7 +38,7 @@ from tenacity import (
     retry,
     stop_after_attempt,
     wait_random_exponential,
-)  # for exponential backoff
+)
 
 from collaborative_experiments.constants import (
     DEFAULT_MAX_CONTEXT_LENGTH,
@@ -228,7 +228,7 @@ def batched_create_openai_msgs(dataset_1_loader, config):
     all_batches_dataloader = torch.utils.data.DataLoader(
         all_batches, batch_size=1, shuffle=False
     )
-    with ThreadPoolExecutor(max_workers=20) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         messages_batched = list(
             tqdm(
                 executor.map(config.msg_fn, all_batches_dataloader, chunksize=1),
@@ -289,16 +289,16 @@ def main(
     msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH,
     list_of_experiments="all",
     data_file_path="data/st_patrick_biography.txt",
+    batched_openai=True,
     verbose=True,
 ):
     if BATCH_SIZE != 1:
         raise NotImplementedError("Only implemented for batch size 1, not {}".format(BATCH_SIZE))
     if "mock" in model_name:
-        # turn wandb off
         os.environ["WANDB_MODE"] = "dryrun"
     else:
         os.environ["WANDB_MODE"] = "online"
-    wandb.init(project="collaborative_training", config={"run_finished_succesfully": False, "model_name": model_name, "save_dir": save_dir, "list_of_experiments": list_of_experiments, "reduced_data": reduced_data, "train_context_length": train_context_length, "msg_context_length": msg_context_length, "batch_size": BATCH_SIZE, "debug": debug})
+    wandb.init(project="collaborative_training", config={"run_finished_succesfully": False, "model_name": model_name, "save_dir": save_dir, "list_of_experiments": list_of_experiments, "reduced_data": reduced_data, "train_context_length": train_context_length, "msg_context_length": msg_context_length, "batch_size": BATCH_SIZE, "debug": debug, "data_file_path": data_file_path, "batched_openai": batched_openai, "verbose": verbose})
     device = get_device(model_name)
     if model_name == "llama":
         causal_lm, causal_lm_tokenizer = load_llama_model(device=device)
@@ -370,7 +370,7 @@ def main(
     correct_probs_all_dict = {}
     for experiment in tqdm(experiments, desc="Experiment"):
         losses, correct_probs_all = run_experiment(
-            experiment, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=False, verbose=verbose
+            experiment, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=batched_openai, verbose=verbose
         )
         losses_dict[experiment.name] = losses
         correct_probs_all_dict[experiment.name] = correct_probs_all.clone().numpy() / (

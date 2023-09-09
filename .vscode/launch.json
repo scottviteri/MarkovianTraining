@@ -138,8 +138,8 @@
                 "256",
                 "--msg_context_length",
                 "64",
-                // "--data_file_path",
-                // "data/gpt-4_20230908_math.txt"
+                "--data_file_path",
+                "data/gpt-4_20230908_math.txt"
             ]
         },
     ]
