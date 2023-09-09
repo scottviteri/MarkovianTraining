@@ -2,19 +2,11 @@
 
 ## Installation
 First git clone the repository.
-Then, from within the repository and your env, run:
+Then, from within the repository and your env that has python3, run:
 ```
 pip install -e .
 ```
-```
-pip install pip-tools
-```
-```
-pip-compile requirements.in
-```
-```
-pip install -r requirements.txt
-```
+
 
 For llama, you will have to install that separately at the moment.
 
