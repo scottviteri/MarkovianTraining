@@ -54,8 +54,6 @@
                 "2",
                 "--debug",
                 "False",
-                "--BATCH_SIZE",
-                "1",
                 "--train_context_length",
                 "256",
                 "--msg_context_length",
@@ -80,8 +78,6 @@
                 "2",
                 "--debug",
                 "False",
-                "--BATCH_SIZE",
-                "1",
                 "--train_context_length",
                 "256",
                 "--msg_context_length",
@@ -132,14 +128,14 @@
                 // "260",
                 "--debug",
                 "False",
-                "--BATCH_SIZE",
-                "1",
                 "--train_context_length",
                 "256",
                 "--msg_context_length",
                 "64",
                 "--data_file_path",
                 "data/gpt-4_20230908_math.txt"
+                "--batched_openai",
+                "False"
             ]
         },
     ]
