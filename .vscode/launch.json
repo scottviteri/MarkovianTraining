@@ -128,8 +128,8 @@
                 "results",
                 "--model_name",
                 "gpt-neo",
-                "--reduced_data",
-                "260",
+                // "--reduced_data",
+                // "260",
                 "--debug",
                 "False",
                 "--BATCH_SIZE",
@@ -138,6 +138,8 @@
                 "256",
                 "--msg_context_length",
                 "64",
+                // "--data_file_path",
+                // "data/gpt-4_20230908_math.txt"
             ]
         },
     ]
