@@ -38,6 +38,7 @@ from tenacity import (
     retry,
     stop_after_attempt,
     wait_random_exponential,
+    retry_if_exception_type,
 )
 
 from collaborative_experiments.constants import (
@@ -58,6 +59,15 @@ logger = logging.getLogger(__name__)
 
 LOGGING_DICT_WANDB = {}
 
+class OpenAIException(Exception):
+    """
+    Custom exception to make sure we only retry due to errors from OpenAI
+    and not on other errors.
+    """
+    def __init__(self, Exception):
+        self.Exception = Exception
+        self.message = str(Exception)
+    
 
 class ExperimentConfig:
     def __init__(self, msg_fn, expected_length, name):
@@ -106,7 +116,7 @@ def create_helpful_message_1(tokens, tokens_to_grab=DEFAULT_MSG_CONTEXT_LENGTH):
     return msg
 
 
-@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+@retry(wait=wait_random_exponential(max=10), stop=stop_after_attempt(2), retry=retry_if_exception_type(OpenAIException))
 def create_openai_helpful_message(
     tokens,
     causal_lm_tokenizer,
@@ -115,6 +125,7 @@ def create_openai_helpful_message(
     print_msg=False,
     msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH,
 ):
+    print("trying to create openai helpful message")
     # Convert tokens to text
     text = causal_lm_tokenizer.decode(tokens[0])
     # Make a chat completion call to GPT-3.5
@@ -123,19 +134,22 @@ def create_openai_helpful_message(
     if user_prompt is None:
         user_prompt = "Please generate a prepend string for the following text: "
     user_prompt += text
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
-            {
-                "role": "user",
-                "content": user_prompt,
-            },
-        ],
-    )
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                },
+            ],
+        )
+    except Exception as e:
+        raise OpenAIException(e)
     # Get the prepend string from the response
     prepend_string = response.choices[0].message["content"]
     # Convert the summary back to tokens
@@ -152,7 +166,7 @@ def create_openai_helpful_message(
         msg_tokens = msg_tokens[:, :msg_context_length]
     if msg_tokens.shape[1] < msg_context_length:
         padding_length = msg_context_length - msg_tokens.shape[1]
-        padding = torch.full((1, padding_length), causal_lm_tokenizer.pad_token_id, device=msg_tokens.device)
+        padding = torch.full((1, padding_length), causal_lm_tokenizer.encode("-")[0], device=msg_tokens.device)
         msg_tokens = torch.cat([padding, msg_tokens], dim=1)
     return msg_tokens
 
@@ -314,6 +328,9 @@ def main(
     print("Loaded causal LM")
     print(causal_lm)
     causal_lm = causal_lm.to(device)
+    # We are setting this token to be eos, so we must make sure to use attention masks
+    # to not attend to these positions.
+    causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
     print("Loaded causal LM to device")
 
     # load dataset
