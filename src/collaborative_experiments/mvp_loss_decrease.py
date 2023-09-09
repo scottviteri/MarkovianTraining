@@ -329,7 +329,7 @@ def main(
     )
     ## make a pytorch data loader for the dataset
     dataset_1_loader = torch.utils.data.DataLoader(
-        reshaped_tensor, batch_size=BATCH_SIZE, shuffle=True
+        reshaped_tensor, batch_size=BATCH_SIZE, shuffle=False
     )
 
     loss_fn = torch.nn.CrossEntropyLoss()
@@ -389,8 +389,6 @@ def main(
     wandb.log({"LOGGING_DICT_WANDB": wandb.Table(dataframe=logging_df)})
     
     
-    # if not os.path.exists(f"{save_dir}"):
-    #     os.makedirs(f"{save_dir}")
     data_file_name = data_file_path.split(os.path.sep)[-1]
     save_dir = os.path.join(save_dir, f"{model_name}", data_file_name)
     if not os.path.exists(f"{save_dir}"):
