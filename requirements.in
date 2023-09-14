@@ -1,0 +1,16 @@
+torch
+transformers
+plotly
+networkx
+matplotlib
+openai
+pytest
+tabulate
+jaxtyping
+peft
+sentencepiece
+datasets
+fire
+wandb
+# make sure to install this library, pip install -e .
+# make sure to install llama from llama_fork for mac os

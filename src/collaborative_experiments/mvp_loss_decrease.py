@@ -38,7 +38,8 @@ from tenacity import (
     retry,
     stop_after_attempt,
     wait_random_exponential,
-)  # for exponential backoff
+    retry_if_exception_type,
+)
 
 from collaborative_experiments.constants import (
     DEFAULT_MAX_CONTEXT_LENGTH,
@@ -58,6 +59,15 @@ logger = logging.getLogger(__name__)
 
 LOGGING_DICT_WANDB = {}
 
+class OpenAIException(Exception):
+    """
+    Custom exception to make sure we only retry due to errors from OpenAI
+    and not on other errors.
+    """
+    def __init__(self, Exception):
+        self.Exception = Exception
+        self.message = str(Exception)
+    
 
 class ExperimentConfig:
     def __init__(self, msg_fn, expected_length, name):
@@ -106,7 +116,7 @@ def create_helpful_message_1(tokens, tokens_to_grab=DEFAULT_MSG_CONTEXT_LENGTH):
     return msg
 
 
-@retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(6))
+@retry(wait=wait_random_exponential(max=10), stop=stop_after_attempt(2), retry=retry_if_exception_type(OpenAIException))
 def create_openai_helpful_message(
     tokens,
     causal_lm_tokenizer,
@@ -115,6 +125,7 @@ def create_openai_helpful_message(
     print_msg=False,
     msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH,
 ):
+    print("trying to create openai helpful message")
     # Convert tokens to text
     text = causal_lm_tokenizer.decode(tokens[0])
     # Make a chat completion call to GPT-3.5
@@ -123,19 +134,22 @@ def create_openai_helpful_message(
     if user_prompt is None:
         user_prompt = "Please generate a prepend string for the following text: "
     user_prompt += text
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
-            {
-                "role": "user",
-                "content": user_prompt,
-            },
-        ],
-    )
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                },
+            ],
+        )
+    except Exception as e:
+        raise OpenAIException(e)
     # Get the prepend string from the response
     prepend_string = response.choices[0].message["content"]
     # Convert the summary back to tokens
@@ -152,7 +166,7 @@ def create_openai_helpful_message(
         msg_tokens = msg_tokens[:, :msg_context_length]
     if msg_tokens.shape[1] < msg_context_length:
         padding_length = msg_context_length - msg_tokens.shape[1]
-        padding = torch.full((1, padding_length), causal_lm_tokenizer.pad_token_id, device=msg_tokens.device)
+        padding = torch.full((1, padding_length), causal_lm_tokenizer.encode("-")[0], device=msg_tokens.device)
         msg_tokens = torch.cat([padding, msg_tokens], dim=1)
     return msg_tokens
 
@@ -228,7 +242,7 @@ def batched_create_openai_msgs(dataset_1_loader, config):
     all_batches_dataloader = torch.utils.data.DataLoader(
         all_batches, batch_size=1, shuffle=False
     )
-    with ThreadPoolExecutor(max_workers=20) as executor:
+    with ThreadPoolExecutor(max_workers=10) as executor:
         messages_batched = list(
             tqdm(
                 executor.map(config.msg_fn, all_batches_dataloader, chunksize=1),
@@ -288,11 +302,17 @@ def main(
     train_context_length=DEFAULT_MAX_CONTEXT_LENGTH,
     msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH,
     list_of_experiments="all",
+    data_file_path="data/st_patrick_biography.txt",
+    batched_openai=True,
     verbose=True,
 ):
     if BATCH_SIZE != 1:
         raise NotImplementedError("Only implemented for batch size 1, not {}".format(BATCH_SIZE))
-    wandb.init(project="collaborative_training", config={"run_finished_succesfully": False, "model_name": model_name, "save_dir": save_dir, "list_of_experiments": list_of_experiments, "reduced_data": reduced_data, "train_context_length": train_context_length, "msg_context_length": msg_context_length, "batch_size": BATCH_SIZE, "debug": debug})
+    if "mock" in model_name:
+        os.environ["WANDB_MODE"] = "dryrun"
+    else:
+        os.environ["WANDB_MODE"] = "online"
+    wandb.init(project="collaborative_training", config={"run_finished_succesfully": False, "model_name": model_name, "save_dir": save_dir, "list_of_experiments": list_of_experiments, "reduced_data": reduced_data, "train_context_length": train_context_length, "msg_context_length": msg_context_length, "batch_size": BATCH_SIZE, "debug": debug, "data_file_path": data_file_path, "batched_openai": batched_openai, "verbose": verbose})
     device = get_device(model_name)
     if model_name == "llama":
         causal_lm, causal_lm_tokenizer = load_llama_model(device=device)
@@ -308,12 +328,15 @@ def main(
     print("Loaded causal LM")
     print(causal_lm)
     causal_lm = causal_lm.to(device)
+    # We are setting this token to be eos, so we must make sure to use attention masks
+    # to not attend to these positions.
+    causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
     print("Loaded causal LM to device")
 
     # load dataset
     # https://www.gutenberg.org/ebooks/71431
     current_path = os.path.dirname(os.path.realpath(__file__))
-    textbook_1_path = os.path.join(current_path, "../../data/st_patrick_biography.txt")
+    textbook_1_path = os.path.join(current_path, "../../", data_file_path)
     reshaped_tensor = load_and_format_dataset(
         textbook_1_path,
         causal_lm_tokenizer,
@@ -323,7 +346,7 @@ def main(
     )
     ## make a pytorch data loader for the dataset
     dataset_1_loader = torch.utils.data.DataLoader(
-        reshaped_tensor, batch_size=BATCH_SIZE, shuffle=True
+        reshaped_tensor, batch_size=BATCH_SIZE, shuffle=False
     )
 
     loss_fn = torch.nn.CrossEntropyLoss()
@@ -364,7 +387,7 @@ def main(
     correct_probs_all_dict = {}
     for experiment in tqdm(experiments, desc="Experiment"):
         losses, correct_probs_all = run_experiment(
-            experiment, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=False, verbose=verbose
+            experiment, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=batched_openai, verbose=verbose
         )
         losses_dict[experiment.name] = losses
         correct_probs_all_dict[experiment.name] = correct_probs_all.clone().numpy() / (
@@ -383,9 +406,8 @@ def main(
     wandb.log({"LOGGING_DICT_WANDB": wandb.Table(dataframe=logging_df)})
     
     
-    if not os.path.exists(f"{save_dir}"):
-        os.makedirs(f"{save_dir}")
-    save_dir = os.path.join(save_dir, f"{model_name}")
+    data_file_name = data_file_path.split(os.path.sep)[-1]
+    save_dir = os.path.join(save_dir, f"{model_name}", data_file_name)
     if not os.path.exists(f"{save_dir}"):
         os.makedirs(f"{save_dir}")
     for key in losses_dict:

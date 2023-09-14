@@ -51,15 +51,15 @@
                 "--list_of_experiments",
                 "all",
                 "--reduced_data",
-                "5",
+                "2",
                 "--debug",
                 "False",
-                "--BATCH_SIZE",
-                "1",
                 "--train_context_length",
                 "256",
                 "--msg_context_length",
-                "2"
+                "2",
+                "--data_file_path",
+                "data/gpt-4_20230908_math.txt"
             ]
         },
         {
@@ -78,8 +78,6 @@
                 "2",
                 "--debug",
                 "False",
-                "--BATCH_SIZE",
-                "1",
                 "--train_context_length",
                 "256",
                 "--msg_context_length",
@@ -126,16 +124,18 @@
                 "results",
                 "--model_name",
                 "gpt-neo",
-                "--reduced_data",
-                "260",
+                // "--reduced_data",
+                // "260",
                 "--debug",
                 "False",
-                "--BATCH_SIZE",
-                "1",
                 "--train_context_length",
                 "256",
                 "--msg_context_length",
                 "64",
+                "--data_file_path",
+                "data/gpt-4_20230908_math.txt"
+                "--batched_openai",
+                "False"
             ]
         },
     ]
