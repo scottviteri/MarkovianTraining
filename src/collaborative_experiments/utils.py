@@ -4,6 +4,7 @@ import sys
 import time
 from pathlib import Path
 import json
+import fire
 
 from datasets import load_dataset
 import accelerate
@@ -118,3 +119,8 @@ def load_llama_model(
     print(f"Loaded in {time.time() - start_time:.2f} seconds")
     return model, tokenizer
 
+def main():
+    print("hi")
+
+if __name__ == "__main__":
+    fire.Fire(main)
