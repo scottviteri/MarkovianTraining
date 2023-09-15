@@ -50,6 +50,7 @@ from collaborative_experiments.utils import (
     load_and_format_dataset,
     load_llama_model,
 )
+from collaborative_experiments.mocking import mockCausalGPT2
 
 import logging
 
@@ -74,45 +75,7 @@ class ExperimentConfig:
         self.msg_fn = msg_fn
         self.expected_length = expected_length  # measured in number of tokens
         self.name = name
-
-class MockConfig:
-    def __init__(self):
-        self.vocab_size = None
-
-class MockOutput:
-    def __init__(self, logits):
-        self.logits = logits
-
-class mockCausalGPT2(torch.nn.Module):
-    def __init__(self, causal_lm_tokenizer):
-        super().__init__()
-        self.dummy = torch.nn.Parameter(torch.tensor([1.0]))
-        self.config = MockConfig()
-        self.config.vocab_size = causal_lm_tokenizer.vocab_size
-        self.device = get_device("mock")
-
-    def forward(self, input_ids):
-        """
-        Sets the first token to be 1.0 and the rest to be 0.0
-        Args:
-            input_ids (torch.tensor): shape (batch_size, seq_len)
-        Returns:
-            output.logits (torch.tensor): shape (batch_size, seq_len, vocab_size)
-        """
-        batch_size, seq_len = input_ids.shape
-        vocab_size = self.config.vocab_size
-        logits = torch.zeros((batch_size, seq_len, vocab_size), device=input_ids.device).to(torch.float32)
-        # Set the first token of every sequence to have its first value as 1.0
-        logits[:, 0, 0] = 1.0
-
-        return MockOutput(logits)
-    def generate(self, input_ids, max_length=DEFAULT_MSG_CONTEXT_LENGTH, num_return_sequences=1, **kwargs):
-        """
-        Returns a tensor of shape (num_return_sequences, max_length) with random integers.
-        """
-        return torch.randint(low=0, high=self.config.vocab_size, size=(num_return_sequences, max_length), device=input_ids.device)
-
-        
+    
 
 def create_helpful_message_1(tokens, tokens_to_grab=DEFAULT_MSG_CONTEXT_LENGTH):
     """
@@ -122,7 +85,7 @@ def create_helpful_message_1(tokens, tokens_to_grab=DEFAULT_MSG_CONTEXT_LENGTH):
     return msg
 
 
-def create_model_helpful_message(tokens, causal_lm_tokenizer, causal_lm, user_prompt, msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH):
+def create_model_helpful_message(tokens, causal_lm_tokenizer, causal_lm, user_prompt=None, msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH):
     """
     Creates a helpful message using the causal language model
     """
@@ -208,6 +171,33 @@ def create_openai_helpful_message(
         msg_tokens = pad_msg(msg_tokens, padding_length, causal_lm_tokenizer.encode("-")[0])
     return msg_tokens
 
+def msg_loss(content, msg, causal_lm, loss_fn, device, requires_grad=False):
+    msg_length = msg.shape[1]
+    # Get the logits for content
+    model_input = torch.cat((msg, content), dim=1)
+    model_input = model_input.to(device)
+    outputs_original = causal_lm(
+        input_ids=model_input
+    )  
+    logits = outputs_original.logits
+    if not requires_grad:
+        logits = logits.detach()
+    logits_shifted = logits[
+        :, msg_length:-1, :
+    ]  # negative one because prediction shifts things by one
+    # should be shape (b, data_context_length - 1, vocab_size)
+
+    # now create one hot labels to get the loss with.
+    shifted_model_input = model_input[
+        :, msg_length + 1:
+    ]  # we shift 1 more because the logits predict one in the future
+    labels = torch.nn.functional.one_hot(
+        shifted_model_input, num_classes=causal_lm.config.vocab_size
+    ).to(torch.float32)
+    loss = loss_fn(logits_shifted[:, ], labels) # only calculate loss on content
+
+    return loss, logits_shifted, shifted_model_input, model_input
+
 def train_step(
     batch,
     causal_lm,
@@ -228,28 +218,8 @@ def train_step(
     """
     msg = batch["msg"] # shape (batch_size, msg_context_length)
     content = batch["content"] # shape (batch_size, data_context_length)
-    msg_length = msg.shape[1]
-
-    # Get the logits for content
-    model_input = torch.cat((msg, content), dim=1)
-    model_input = model_input.to(device)
-    outputs_original = causal_lm(
-        input_ids=model_input
-    )  
-    logits = outputs_original.logits.detach()  # to("cpu")
-    logits_shifted = logits[
-        :, msg_length:-1, :
-    ]  # negative one because prediction shifts things by one
-    # should be shape (b, data_context_length - 1, vocab_size)
-
-    # now create one hot labels to get the loss with.
-    shifted_model_input = model_input[
-        :, msg_length + 1:
-    ]  # we shift 1 more because the logits predict one in the future
-    labels = torch.nn.functional.one_hot(
-        shifted_model_input, num_classes=causal_lm.config.vocab_size
-    ).to(torch.float32)
-    loss = loss_fn(logits_shifted[:, ], labels) # only calculate loss on content
+    loss, logits_shifted, shifted_model_input, model_input = msg_loss(content, msg, causal_lm, loss_fn, device)
+    
     if verbose:
         tqdm.write(f"{loss}")
 
@@ -375,7 +345,7 @@ def main(
     # https://www.gutenberg.org/ebooks/71431
     current_path = os.path.dirname(os.path.realpath(__file__))
     textbook_1_path = os.path.join(current_path, "../../", data_file_path)
-    reshaped_tensor = load_and_format_dataset(
+    dataset_1_loader, seq_len = load_and_format_dataset(
         textbook_1_path,
         causal_lm_tokenizer,
         debug=debug,
@@ -383,9 +353,6 @@ def main(
         train_context_length=train_context_length,
     )
     ## make a pytorch data loader for the dataset
-    dataset_1_loader = torch.utils.data.DataLoader(
-        reshaped_tensor, batch_size=BATCH_SIZE, shuffle=False
-    )
 
     loss_fn = torch.nn.CrossEntropyLoss()
 
@@ -403,7 +370,7 @@ def main(
                     x, causal_lm_tokenizer, user_prompt=user_prompt, system_prompt=system_prompt,
                     msg_context_length=msg_context_length
                 ),
-                reshaped_tensor.shape[1],
+                seq_len,
                 "openai_helpful_message",
             )
         )
@@ -413,17 +380,17 @@ def main(
             ExperimentConfig(
                 lambda x: create_model_helpful_message(
                     x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt, msg_context_length=msg_context_length
-                ), reshaped_tensor.shape[1], "model_helpful_message"
+                ), seq_len, "model_helpful_message"
             )
         )
     experiments.append(
-        ExperimentConfig(lambda x: torch.zeros((x.shape[0], 0), dtype=x.dtype, device=x.device), reshaped_tensor.shape[1], "original")
+        ExperimentConfig(lambda x: torch.zeros((x.shape[0], 0), dtype=x.dtype, device=x.device), seq_len, "original")
     )
     if list_of_experiments == "all" or "helpful_1" in list_of_experiments:
         experiments.append(
             ExperimentConfig(
                 lambda x: create_helpful_message_1(x, msg_context_length),
-                reshaped_tensor.shape[1],
+                seq_len,
                 "helpful_message_1",
             )
         )

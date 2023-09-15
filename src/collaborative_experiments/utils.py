@@ -46,6 +46,7 @@ def load_and_format_dataset(
 
     Returns:
         (torch.tensor): the data as a tensor of shape (n_batches, train_context_length)
+        seq_len: the length of each sequence, which is train_context_length
     """
     assert train_context_length > 0, f"train_context_length {train_context_length} must be greater than 0"
     dataset = load_dataset("text", data_files=textbook_1_path)
@@ -73,7 +74,10 @@ def load_and_format_dataset(
         reshaped_tensor = tile_a_tensor(reshaped_tensor)
     elif reduced_data > 0:
         reshaped_tensor = reshaped_tensor[0:reduced_data]
-    return reshaped_tensor
+    dataset_1_loader = torch.utils.data.DataLoader(
+        reshaped_tensor, batch_size=1, shuffle=False
+    )
+    return dataset_1_loader, reshaped_tensor.shape[1]
 
 
 def load_llama_model(

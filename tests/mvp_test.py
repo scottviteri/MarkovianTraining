@@ -94,9 +94,13 @@ def test_create_openai_helpful_msg(causal_lm_tokenizer):
 
 def test_load_and_format_dataset(causal_lm_tokenizer):
     current_path = os.path.dirname(os.path.realpath(__file__))
-    textbook_1_path = textbook_1_path = os.path.join(current_path, "../data/st_patrick_biography.txt")
-    dataset = load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, train_context_length=DEFAULT_MAX_CONTEXT_LENGTH, reduced_data=1)
-    assert dataset.shape == (1, DEFAULT_MAX_CONTEXT_LENGTH)
+    textbook_1_path = os.path.join(current_path, "../data/st_patrick_biography.txt")
+    dataset, seq_len = load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, train_context_length=DEFAULT_MAX_CONTEXT_LENGTH, reduced_data=1)
+    assert len(dataset) == 1
+    data_1 = []
+    for datum in dataset:
+        data_1.append(datum)
+    assert seq_len == DEFAULT_MAX_CONTEXT_LENGTH 
 
 def test_ability_to_log():
     print("fhjaldksfkladsj;fkladsjfl;kadjs")
