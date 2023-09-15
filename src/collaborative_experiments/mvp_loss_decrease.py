@@ -89,6 +89,7 @@ class mockCausalGPT2(torch.nn.Module):
         self.dummy = torch.nn.Parameter(torch.tensor([1.0]))
         self.config = MockConfig()
         self.config.vocab_size = causal_lm_tokenizer.vocab_size
+        self.device = get_device("mock")
 
     def forward(self, input_ids):
         """
@@ -105,6 +106,11 @@ class mockCausalGPT2(torch.nn.Module):
         logits[:, 0, 0] = 1.0
 
         return MockOutput(logits)
+    def generate(self, input_ids, max_length=DEFAULT_MSG_CONTEXT_LENGTH, num_return_sequences=1, **kwargs):
+        """
+        Returns a tensor of shape (num_return_sequences, max_length) with random integers.
+        """
+        return torch.randint(low=0, high=self.config.vocab_size, size=(num_return_sequences, max_length), device=input_ids.device)
 
         
 
@@ -114,6 +120,39 @@ def create_helpful_message_1(tokens, tokens_to_grab=DEFAULT_MSG_CONTEXT_LENGTH):
     """
     msg = tokens[:, :tokens_to_grab]
     return msg
+
+
+def create_model_helpful_message(tokens, causal_lm_tokenizer, causal_lm, user_prompt, msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH):
+    """
+    Creates a helpful message using the causal language model
+    """
+    text = causal_lm_tokenizer.decode(tokens[0])
+    if user_prompt is None:
+        user_prompt = "You are a language model's assistant, and your job is to make 'prepend text that makes the following text as predictable as possible. Do not be afraid to copy surprising parts of the text verbatim."
+    user_prompt += text
+
+    converted_tokens = causal_lm_tokenizer.encode(user_prompt, return_tensors="pt").to(causal_lm.device).to(torch.int32)
+    seq_len = converted_tokens.shape[1]
+    # only return new tokens
+    msg = causal_lm.generate(
+        input_ids=converted_tokens,
+        max_new_tokens=msg_context_length,
+        do_sample=True,
+        top_p=0.90,
+        temperature=0.7,
+        num_return_sequences=1,
+    )[:, seq_len:]
+    assert msg.shape[1] <= msg_context_length, "somehow the message is longer than the max length"
+    if msg.shape[1] < msg_context_length:
+        padding_length = msg_context_length - msg.shape[1]
+        msg = pad_msg(msg, padding_length, causal_lm_tokenizer.encode("-")[0])
+    return msg.to("cpu")
+
+
+def pad_msg(msg_tokens, pad_length, pad_token_id=0):
+    padding = torch.full((1, pad_length), pad_token_id, device=msg_tokens.device)
+    msg_tokens = torch.cat([padding, msg_tokens], dim=1)
+    return msg_tokens
 
 
 @retry(wait=wait_random_exponential(max=10), stop=stop_after_attempt(2), retry=retry_if_exception_type(OpenAIException))
@@ -166,8 +205,7 @@ def create_openai_helpful_message(
         msg_tokens = msg_tokens[:, :msg_context_length]
     if msg_tokens.shape[1] < msg_context_length:
         padding_length = msg_context_length - msg_tokens.shape[1]
-        padding = torch.full((1, padding_length), causal_lm_tokenizer.encode("-")[0], device=msg_tokens.device)
-        msg_tokens = torch.cat([padding, msg_tokens], dim=1)
+        msg_tokens = pad_msg(msg_tokens, padding_length, causal_lm_tokenizer.encode("-")[0])
     return msg_tokens
 
 def train_step(
@@ -370,6 +408,14 @@ def main(
             )
         )
         print("Added openai experiment")
+    if list_of_experiments == "all" or "model_helpful_message" in list_of_experiments:
+        experiments.append(
+            ExperimentConfig(
+                lambda x: create_model_helpful_message(
+                    x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt, msg_context_length=msg_context_length
+                ), reshaped_tensor.shape[1], "model_helpful_message"
+            )
+        )
     experiments.append(
         ExperimentConfig(lambda x: torch.zeros((x.shape[0], 0), dtype=x.dtype, device=x.device), reshaped_tensor.shape[1], "original")
     )
