@@ -49,7 +49,7 @@
                 "--model_name",
                 "mock",
                 "--list_of_experiments",
-                "all",
+                "model_helpful_message",
                 "--reduced_data",
                 "2",
                 "--debug",
