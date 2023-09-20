@@ -6,3 +6,7 @@ Then, from within the repository and your env that has python3, run:
 ```
 pip install -e .
 ```
+
+```
+pip install -r requirements.in
+```
