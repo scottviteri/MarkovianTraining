@@ -176,6 +176,7 @@ def msg_loss(content, msg, causal_lm, loss_fn, device, requires_grad=False):
     # Get the logits for content
     model_input = torch.cat((msg, content), dim=1)
     model_input = model_input.to(device)
+    
     outputs_original = causal_lm(
         input_ids=model_input
     )  
