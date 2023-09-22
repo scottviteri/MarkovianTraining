@@ -31,6 +31,12 @@ import numpy as np
 import openai
 import wandb
 
+from torchtyping import TensorType, patch_typeguard
+from typeguard import typechecked
+from transformers import PreTrainedTokenizerFast
+from transformers.models.auto.modeling_auto import AutoModelForCausalLM
+from typing import *
+
 # from jaxtyping import Array, Int, Float
 
 from concurrent.futures import ThreadPoolExecutor
@@ -84,32 +90,50 @@ def create_helpful_message_1(tokens, tokens_to_grab=DEFAULT_MSG_CONTEXT_LENGTH):
     msg = tokens[:, :tokens_to_grab]
     return msg
 
-
-def create_model_helpful_message(tokens, causal_lm_tokenizer, causal_lm, user_prompt=None, msg_context_length=DEFAULT_MSG_CONTEXT_LENGTH):
+def create_model_helpful_message(
+    uncompressed_tokens: TensorType["batch", "seq_len"], 
+    causal_lm_tokenizer: PreTrainedTokenizerFast, 
+    causal_lm: AutoModelForCausalLM, 
+    custom_user_prompt: Optional[str] = None, 
+    max_helpful_message_length: int = DEFAULT_MSG_CONTEXT_LENGTH
+) -> TensorType["batch", "seq_len"]:
     """
     Creates a helpful message using the causal language model
+    
+    Args:
+        uncompressed_tokens (TensorType): The input tokens
+        causal_lm_tokenizer (PreTrainedTokenizerFast): The tokenizer used by the causal language model
+        causal_lm (AutoModelForCausalLM): The causal language model
+        custom_user_prompt (Optional[str]): Custom user prompt. If None, a default prompt is used
+        max_helpful_message_length (int): The maximum length of the helpful message
+    
+    Returns:
+        TensorType: The helpful message
     """
-    text = causal_lm_tokenizer.decode(tokens[0])
-    if user_prompt is None:
-        user_prompt = "You are a language model's assistant, and your job is to make 'prepend text that makes the following text as predictable as possible. Do not be afraid to copy surprising parts of the text verbatim."
-    user_prompt += text
+    text = causal_lm_tokenizer.decode(uncompressed_tokens[0])
+    if custom_user_prompt is None:
+        custom_user_prompt = "You are a language model's assistant, and your job is to prepend text that makes the following text as predictable as possible. Do not be afraid to copy surprising parts of the text verbatim. <Begin Text-to-Summarize> "
+    custom_user_prompt += text + "</End Text-To-Summarize> <Begin Summarization> "
 
-    converted_tokens = causal_lm_tokenizer.encode(user_prompt, return_tensors="pt").to(causal_lm.device).to(torch.int32)
+    # Ensure the number of tokens in the message does not exceed the model's maximum position embeddings
+    assert len(custom_user_prompt) + max_helpful_message_length <= causal_lm.config.n_positions, "The total number of tokens exceeds the model's maximum position embeddings"
+
+    converted_tokens = causal_lm_tokenizer.encode(custom_user_prompt, return_tensors="pt").to(causal_lm.device).to(torch.int32)
     seq_len = converted_tokens.shape[1]
     # only return new tokens
-    msg = causal_lm.generate(
+    helpful_message = causal_lm.generate(
         input_ids=converted_tokens,
-        max_new_tokens=msg_context_length,
+        max_new_tokens=max_helpful_message_length,
         do_sample=True,
         top_p=0.90,
         temperature=0.7,
         num_return_sequences=1,
     )[:, seq_len:]
-    assert msg.shape[1] <= msg_context_length, "somehow the message is longer than the max length"
-    if msg.shape[1] < msg_context_length:
-        padding_length = msg_context_length - msg.shape[1]
-        msg = pad_msg(msg, padding_length, causal_lm_tokenizer.encode("-")[0])
-    return msg.to("cpu")
+    assert helpful_message.shape[1] <= max_helpful_message_length, "somehow the message is longer than the max length"
+    if helpful_message.shape[1] < max_helpful_message_length:
+        padding_length = max_helpful_message_length - helpful_message.shape[1]
+        helpful_message = pad_msg(helpful_message, padding_length, causal_lm_tokenizer.encode("-")[0])
+    return helpful_message.to("cpu")
 
 
 def pad_msg(msg_tokens, pad_length, pad_token_id=0):
