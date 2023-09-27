@@ -51,7 +51,7 @@ def generate_msg_data_pairs(
                     datum,
                     causal_lm_tokenizer,
                     causal_lm,
-                    msg_context_length=msg_context_length
+                    max_helpful_message_length=msg_context_length,
                 )
             print("Generated message")
             print(msg)

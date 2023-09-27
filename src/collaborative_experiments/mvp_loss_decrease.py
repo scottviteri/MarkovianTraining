@@ -118,12 +118,22 @@ def create_model_helpful_message(
         custom_user_prompt = "You are a language model's assistant, and your job is to prepend text that makes the following text as predictable as possible. Do not be afraid to copy surprising parts of the text verbatim. <Begin Text-to-Summarize> "
     custom_user_prompt += text + "</End Text-To-Summarize> <Begin Summarization> "
 
+    converted_tokens = (
+        causal_lm_tokenizer.encode(custom_user_prompt, return_tensors="pt")
+        .to(causal_lm.device)
+        .to(torch.int32)
+    )
     # Ensure the number of tokens in the message does not exceed the model's maximum position embeddings
-    assert len(custom_user_prompt) + max_helpful_message_length <= causal_lm.config.n_positions, "The total number of tokens exceeds the model's maximum position embeddings"
+    assert (
+        converted_tokens.shape[1] + max_helpful_message_length
+        <= causal_lm.config.n_positions
+    ), "The total number of tokens exceeds the model's maximum position embeddings"
 
     seq_len = converted_tokens.shape[1]
     # only return new tokens
+    # causal_lm = causal_lm.to("cpu")
     helpful_message = causal_lm.generate(
+        # input_ids=converted_tokens.to("cpu"),
         input_ids=converted_tokens,
         max_new_tokens=max_helpful_message_length,
         do_sample=True,
