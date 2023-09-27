@@ -145,7 +145,7 @@ def train(cfg):
     if cfg.wandb:
         wandb.init(project="collaborative_training", config=cfg)
 
-    device = get_device(cfg.model_name)
+    device = get_device(cfg.device)
     if cfg.model_name == "gpt-neo":
         causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-2.7B")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
@@ -207,6 +207,8 @@ class TrainConfig:
     msg_context_length: int = 64
     epochs: int = 1
     wandb: bool = True
+    device: str = "cpu" # mps
+
 
 def main(
     sample_size=4,
@@ -232,8 +234,8 @@ def main(
         data_file_path=data_file_path,
         train_context_length=train_context_length,
         msg_context_length=msg_context_length,
-        epochs=epochs
         epochs=epochs,
+        # device="mps",  # mps
     )
     train(cfg)
     return True
