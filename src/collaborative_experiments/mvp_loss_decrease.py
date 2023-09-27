@@ -66,22 +66,24 @@ logger = logging.getLogger(__name__)
 
 LOGGING_DICT_WANDB = {}
 
+
 class OpenAIException(Exception):
     """
     Custom exception to make sure we only retry due to errors from OpenAI
     and not on other errors.
     """
+
     def __init__(self, Exception):
         self.Exception = Exception
         self.message = str(Exception)
-    
+
 
 class ExperimentConfig:
     def __init__(self, msg_fn, expected_length, name):
         self.msg_fn = msg_fn
         self.expected_length = expected_length  # measured in number of tokens
         self.name = name
-    
+
 
 def create_helpful_message_1(tokens, tokens_to_grab=DEFAULT_MSG_CONTEXT_LENGTH):
     """
@@ -90,23 +92,24 @@ def create_helpful_message_1(tokens, tokens_to_grab=DEFAULT_MSG_CONTEXT_LENGTH):
     msg = tokens[:, :tokens_to_grab]
     return msg
 
+
 def create_model_helpful_message(
-    uncompressed_tokens: TensorType["batch", "seq_len"], 
-    causal_lm_tokenizer: PreTrainedTokenizerFast, 
-    causal_lm: AutoModelForCausalLM, 
-    custom_user_prompt: Optional[str] = None, 
-    max_helpful_message_length: int = DEFAULT_MSG_CONTEXT_LENGTH
+    uncompressed_tokens: TensorType["batch", "seq_len"],
+    causal_lm_tokenizer: PreTrainedTokenizerFast,
+    causal_lm: AutoModelForCausalLM,
+    custom_user_prompt: Optional[str] = None,
+    max_helpful_message_length: int = DEFAULT_MSG_CONTEXT_LENGTH,
 ) -> TensorType["batch", "seq_len"]:
     """
     Creates a helpful message using the causal language model
-    
+
     Args:
         uncompressed_tokens (TensorType): The input tokens
         causal_lm_tokenizer (PreTrainedTokenizerFast): The tokenizer used by the causal language model
         causal_lm (AutoModelForCausalLM): The causal language model
         custom_user_prompt (Optional[str]): Custom user prompt. If None, a default prompt is used
         max_helpful_message_length (int): The maximum length of the helpful message
-    
+
     Returns:
         TensorType: The helpful message
     """
@@ -118,7 +121,6 @@ def create_model_helpful_message(
     # Ensure the number of tokens in the message does not exceed the model's maximum position embeddings
     assert len(custom_user_prompt) + max_helpful_message_length <= causal_lm.config.n_positions, "The total number of tokens exceeds the model's maximum position embeddings"
 
-    converted_tokens = causal_lm_tokenizer.encode(custom_user_prompt, return_tensors="pt").to(causal_lm.device).to(torch.int32)
     seq_len = converted_tokens.shape[1]
     # only return new tokens
     helpful_message = causal_lm.generate(
@@ -129,10 +131,14 @@ def create_model_helpful_message(
         temperature=0.7,
         num_return_sequences=1,
     )[:, seq_len:]
-    assert helpful_message.shape[1] <= max_helpful_message_length, "somehow the message is longer than the max length"
+    assert (
+        helpful_message.shape[1] <= max_helpful_message_length
+    ), "somehow the message is longer than the max length"
     if helpful_message.shape[1] < max_helpful_message_length:
         padding_length = max_helpful_message_length - helpful_message.shape[1]
-        helpful_message = pad_msg(helpful_message, padding_length, causal_lm_tokenizer.encode("-")[0])
+        helpful_message = pad_msg(
+            helpful_message, padding_length, causal_lm_tokenizer.encode("-")[0]
+        )
     return helpful_message.to("cpu")
 
 
@@ -142,7 +148,11 @@ def pad_msg(msg_tokens, pad_length, pad_token_id=0):
     return msg_tokens
 
 
-@retry(wait=wait_random_exponential(max=10), stop=stop_after_attempt(2), retry=retry_if_exception_type(OpenAIException))
+@retry(
+    wait=wait_random_exponential(max=10),
+    stop=stop_after_attempt(2),
+    retry=retry_if_exception_type(OpenAIException),
+)
 def create_openai_helpful_message(
     tokens,
     causal_lm_tokenizer,
@@ -192,17 +202,18 @@ def create_openai_helpful_message(
         msg_tokens = msg_tokens[:, :msg_context_length]
     if msg_tokens.shape[1] < msg_context_length:
         padding_length = msg_context_length - msg_tokens.shape[1]
-        msg_tokens = pad_msg(msg_tokens, padding_length, causal_lm_tokenizer.encode("-")[0])
+        msg_tokens = pad_msg(
+            msg_tokens, padding_length, causal_lm_tokenizer.encode("-")[0]
+        )
     return msg_tokens
+
 
 def msg_loss(content, msg, causal_lm, loss_fn, device, requires_grad=False):
     msg_length = msg.shape[1]
     # Get the logits for content
     model_input = torch.cat((msg, content), dim=1)
     model_input = model_input.to(device)
-    outputs_original = causal_lm(
-        input_ids=model_input
-    )  
+    outputs_original = causal_lm(input_ids=model_input)
     logits = outputs_original.logits
     if not requires_grad:
         logits = logits.detach()
@@ -213,14 +224,15 @@ def msg_loss(content, msg, causal_lm, loss_fn, device, requires_grad=False):
 
     # now create one hot labels to get the loss with.
     shifted_model_input = model_input[
-        :, msg_length + 1:
+        :, msg_length + 1 :
     ]  # we shift 1 more because the logits predict one in the future
     labels = torch.nn.functional.one_hot(
         shifted_model_input, num_classes=causal_lm.config.vocab_size
     ).to(torch.float32)
-    loss = loss_fn(logits_shifted[:, ], labels) # only calculate loss on content
+    loss = loss_fn(logits_shifted[:,], labels)  # only calculate loss on content
 
     return loss, logits_shifted, shifted_model_input, model_input
+
 
 def train_step(
     batch,
@@ -240,15 +252,19 @@ def train_step(
         correct_probs (torch.tensor): a tensor of shape (batch_size, data_context_length - 1)
         if pytest, returns logits_shifted (torch.tensor): a tensor of shape (batch_size, data_context_length - 1, vocab_size)
     """
-    msg = batch["msg"] # shape (batch_size, msg_context_length)
-    content = batch["content"] # shape (batch_size, data_context_length)
-    loss, logits_shifted, shifted_model_input, model_input = msg_loss(content, msg, causal_lm, loss_fn, device)
-    
+    msg = batch["msg"]  # shape (batch_size, msg_context_length)
+    content = batch["content"]  # shape (batch_size, data_context_length)
+    loss, logits_shifted, shifted_model_input, model_input = msg_loss(
+        content, msg, causal_lm, loss_fn, device
+    )
+
     if verbose:
         tqdm.write(f"{loss}")
 
     # Compute softmax over the last dimension to get probabilities
-    probs = F.softmax(logits_shifted, dim=-1)  # shape (model_input_size, seq_len, vocab_size)
+    probs = F.softmax(
+        logits_shifted, dim=-1
+    )  # shape (model_input_size, seq_len, vocab_size)
 
     # Use gather to pick the probabilities corresponding to the correct token at each position
     correct_probs = (
@@ -266,6 +282,7 @@ def train_step(
     if pytest:
         return loss, correct_probs, logits_shifted
     return loss.to("cpu"), correct_probs
+
 
 def batched_create_openai_msgs(dataset_1_loader, config):
     all_batches = []
@@ -285,7 +302,15 @@ def batched_create_openai_msgs(dataset_1_loader, config):
     return messages_batched
 
 
-def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=True, verbose=False):
+def run_experiment(
+    config,
+    dataset_1_loader,
+    causal_lm,
+    loss_fn,
+    device,
+    batched_openai=True,
+    verbose=False,
+):
     # we subtract one to the size because causal_lm will predict the next token
     # therefore we can only check predictions for the first expected_length - 1 tokens
     correct_probs_all = torch.zeros(config.expected_length - 1).to(device)
@@ -311,12 +336,16 @@ def run_experiment(config, dataset_1_loader, causal_lm, loss_fn, device, batched
             tqdm.write("content: " + tokenizer.decode(batch[0]))
             tqdm.write(f"---end-content--{config.name}--")
         if config.name == "original":
-            LOGGING_DICT_WANDB[f"{config.name}_content"].append(tokenizer.decode(batch[0]))
+            LOGGING_DICT_WANDB[f"{config.name}_content"].append(
+                tokenizer.decode(batch[0])
+            )
         else:
             LOGGING_DICT_WANDB[f"{config.name}_msg_decoded"].append(helpful_msg_decoded)
-        
+
         batch_dict["content"] = batch
-        loss, correct_probs = train_step(batch=batch_dict, causal_lm=causal_lm, loss_fn=loss_fn, device=device)
+        loss, correct_probs = train_step(
+            batch=batch_dict, causal_lm=causal_lm, loss_fn=loss_fn, device=device
+        )
         correct_probs_all += correct_probs.mean(dim=0)
         wandb.log({f"{config.name}_loss": loss.item()}, commit=False)
         wandb.log({f"{config.name}_correct_probs": correct_probs.mean(dim=0)})
@@ -339,12 +368,30 @@ def main(
     verbose=True,
 ):
     if BATCH_SIZE != 1:
-        raise NotImplementedError("Only implemented for batch size 1, not {}".format(BATCH_SIZE))
+        raise NotImplementedError(
+            "Only implemented for batch size 1, not {}".format(BATCH_SIZE)
+        )
     if "mock" in model_name:
         os.environ["WANDB_MODE"] = "dryrun"
     else:
         os.environ["WANDB_MODE"] = "online"
-    wandb.init(project="collaborative_training", config={"run_finished_succesfully": False, "model_name": model_name, "save_dir": save_dir, "list_of_experiments": list_of_experiments, "reduced_data": reduced_data, "train_context_length": train_context_length, "msg_context_length": msg_context_length, "batch_size": BATCH_SIZE, "debug": debug, "data_file_path": data_file_path, "batched_openai": batched_openai, "verbose": verbose})
+    wandb.init(
+        project="collaborative_training",
+        config={
+            "run_finished_succesfully": False,
+            "model_name": model_name,
+            "save_dir": save_dir,
+            "list_of_experiments": list_of_experiments,
+            "reduced_data": reduced_data,
+            "train_context_length": train_context_length,
+            "msg_context_length": msg_context_length,
+            "batch_size": BATCH_SIZE,
+            "debug": debug,
+            "data_file_path": data_file_path,
+            "batched_openai": batched_openai,
+            "verbose": verbose,
+        },
+    )
     device = get_device(model_name)
     if model_name == "llama":
         causal_lm, causal_lm_tokenizer = load_llama_model(device=device)
@@ -383,16 +430,17 @@ def main(
     experiments = []
     # user_prompt = "Your job is to compress the following text, such that you can reconstruct it later. Do not worry about human legibility and you are allowed to use unicode. Finish with </End compressed text> <example>This is called a covariant transformation law, because the covector components transform by the same matrix as the change of basis matrix. The components of a more general tensor are transformed by some combination of covariant and contravariant transformations, with one transformation law for each index. If the transformation matrix of an index is the inverse matrix of the basis transformation, then the index is called contravariant and is conventionally denoted with an upper index (superscript). If the transformation matrix of an index is the basis transformation itself, then the index is called covariant and is denoted with a lower index (subscript).CovTransLaw:covector=ΔbasisMat. Tensor=comb(cov&contra); 1law/idx. InvMat=basisTrans→contra&↑. BasisTrans=cov&↓</example><Begin text to compress:>"
     user_prompt = f"Create a succinct, compressed version of the following text such that you will be able to reconstruct it verbatim. You can use human legible text, or unicode / non human legible text. Use only {msg_context_length} tokens. Reply in only a few words."
-    system_prompt = (
-        ""
-    )
+    system_prompt = ""
     wandb.config.update({"user_prompt": user_prompt, "system_prompt": system_prompt})
     if list_of_experiments == "all" or "openai" in list_of_experiments:
         experiments.append(
             ExperimentConfig(
                 lambda x: create_openai_helpful_message(
-                    x, causal_lm_tokenizer, user_prompt=user_prompt, system_prompt=system_prompt,
-                    msg_context_length=msg_context_length
+                    x,
+                    causal_lm_tokenizer,
+                    user_prompt=user_prompt,
+                    system_prompt=system_prompt,
+                    msg_context_length=msg_context_length,
                 ),
                 seq_len,
                 "openai_helpful_message",
@@ -403,12 +451,22 @@ def main(
         experiments.append(
             ExperimentConfig(
                 lambda x: create_model_helpful_message(
-                    x, causal_lm_tokenizer, causal_lm, user_prompt=user_prompt, msg_context_length=msg_context_length
-                ), seq_len, "model_helpful_message"
+                    x,
+                    causal_lm_tokenizer,
+                    causal_lm,
+                    user_prompt=user_prompt,
+                    msg_context_length=msg_context_length,
+                ),
+                seq_len,
+                "model_helpful_message",
             )
         )
     experiments.append(
-        ExperimentConfig(lambda x: torch.zeros((x.shape[0], 0), dtype=x.dtype, device=x.device), seq_len, "original")
+        ExperimentConfig(
+            lambda x: torch.zeros((x.shape[0], 0), dtype=x.dtype, device=x.device),
+            seq_len,
+            "original",
+        )
     )
     if list_of_experiments == "all" or "helpful_1" in list_of_experiments:
         experiments.append(
@@ -424,7 +482,13 @@ def main(
     correct_probs_all_dict = {}
     for experiment in tqdm(experiments, desc="Experiment"):
         losses, correct_probs_all = run_experiment(
-            experiment, dataset_1_loader, causal_lm, loss_fn, device, batched_openai=batched_openai, verbose=verbose
+            experiment,
+            dataset_1_loader,
+            causal_lm,
+            loss_fn,
+            device,
+            batched_openai=batched_openai,
+            verbose=verbose,
         )
         losses_dict[experiment.name] = losses
         correct_probs_all_dict[experiment.name] = correct_probs_all.clone().numpy() / (
@@ -439,10 +503,15 @@ def main(
     # Convert LOGGING_DICT_WANDB to a DataFrame reference
     logging_df = pd.DataFrame(LOGGING_DICT_WANDB)
     # Log the DataFrame to wandb as a table
-    wandb.log({"Mean Losses": wandb.Table(columns=list(losses_mean.keys()), data=[list(losses_mean.values())])})
+    wandb.log(
+        {
+            "Mean Losses": wandb.Table(
+                columns=list(losses_mean.keys()), data=[list(losses_mean.values())]
+            )
+        }
+    )
     wandb.log({"LOGGING_DICT_WANDB": wandb.Table(dataframe=logging_df)})
-    
-    
+
     data_file_name = data_file_path.split(os.path.sep)[-1]
     save_dir = os.path.join(save_dir, f"{model_name}", data_file_name)
     if not os.path.exists(f"{save_dir}"):

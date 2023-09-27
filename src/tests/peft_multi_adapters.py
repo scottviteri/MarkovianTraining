@@ -29,7 +29,9 @@ class MultipleLlamas:
         A class for testing out how multi adapters work
         """
         self.verbose = verbose
-        self.tokenizer, self.language_model = self.load_language_model(language_model_name, agent_names)
+        self.tokenizer, self.language_model = self.load_language_model(
+            language_model_name, agent_names
+        )
 
     def load_language_model(self, language_model_name, agent_names: List[str]):
         """
@@ -41,13 +43,15 @@ class MultipleLlamas:
         """
         tokenizer = LlamaTokenizer.from_pretrained(language_model_name)
         model = LlamaForCausalLM.from_pretrained(language_model_name)
-        if self.verbose: print("We loaded the model, and it has the following parameters:")
-        if self.verbose: print(model.num_parameters())
+        if self.verbose:
+            print("We loaded the model, and it has the following parameters:")
+        if self.verbose:
+            print(model.num_parameters())
         # add peft adapter
         for agent_name in agent_names:
             lora_r = 4
             if agent_name == "large_lora_r":
-                lora_r = 32 * (10 ** 6)
+                lora_r = 32 * (10**6)
             lora_config = LoraConfig(
                 r=lora_r,
                 lora_alpha=32,
@@ -68,7 +72,7 @@ class MultipleLlamas:
                 model.print_trainable_parameters()
                 print("---")
         return tokenizer, model
-    
+
     def generate_one_completion(self, prompt, agent_name):
         """
         Generates a completion for a prompt
@@ -97,7 +101,7 @@ class MultipleLlamas:
 
         Args:
             agent_names (List[str]): the names of the agents to simulate. If None, simulates all agents.
-        
+
         Returns:
             agent_completions (Dict[str, List[str]]): a dictionary mapping agent names to their completions
         """
@@ -105,9 +109,11 @@ class MultipleLlamas:
         agent_completions = {}
 
         for agent_name in agent_nmes:
-            if self.verbose: print(f"Generating completion for agent {agent_name}")
+            if self.verbose:
+                print(f"Generating completion for agent {agent_name}")
             completion = self.generate_one_completion(prompt, agent_name)
-            if self.verbose: print(completion)
+            if self.verbose:
+                print(completion)
             agent_completions[agent_name] = completion
         return agent_completions
 
@@ -135,6 +141,7 @@ def run_mock_llama_test(agent_names, agent_exp_list: List[List[str]]):
         times[tuple(agents_to_simulate)] = stop - start
     return times
 
+
 def test_one_adapter_creation(num_tests=1):
     """
     This test ensure that despite multiple adapters being created, only the active one is used.
@@ -145,7 +152,9 @@ def test_one_adapter_creation(num_tests=1):
         time_3 = run_mock_llama_test(["agent1", "large_lora_r"], [["large_lora_r"]])[0]
         time_4 = run_mock_llama_test(["agent1", "agent2"], [["agent1", "agent2"]])[0]
 
-        print(f"expected that {time_3} is longest by far, followed by {time_4}, {time_2} which is closly folowed by {time_1}")
+        print(
+            f"expected that {time_3} is longest by far, followed by {time_4}, {time_2} which is closly folowed by {time_1}"
+        )
         assert time_3 > time_1 + time_2 + time_4
 
 
@@ -156,7 +165,10 @@ def test_set_adapter(num_tests=1):
     e.g. model.generate() should only utilize the active adapter, and not all the adapters that have been set.
     """
     for _ in tqdm(range(num_tests)):
-        times_dict = run_mock_llama_test(["agent1", "large_lora_r", "agent2"], [["agent1"], ["agent2"], ["large_lora_r"], ["agent2", "agent1"]])
+        times_dict = run_mock_llama_test(
+            ["agent1", "large_lora_r", "agent2"],
+            [["agent1"], ["agent2"], ["large_lora_r"], ["agent2", "agent1"]],
+        )
         print(times_dict)
 
 
