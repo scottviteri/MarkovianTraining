@@ -66,6 +66,7 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     device = get_device()
     tokens = tokens.to(device)  # (1, 24) == (1, seq_len)
     causal_lm = causal_lm.to(device)
+    causal_lm.eval()
 
     # batch, causal_lm, loss_fn, device, correct_probs_all
     loss_fn = torch.nn.CrossEntropyLoss()
@@ -86,7 +87,9 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     predicted_tokens = ["N/A"]
     predicted_token_ids = [-1]
     for token in logits[0]:
-        predicted_id = torch.argmax(token)
+        token = token.cpu()
+        # predicted_id = torch.argmax(token)
+        predicted_id = torch.max(token, 0).indices
         predicted_token_ids.append(predicted_id)
         predicted_tokens.append(causal_lm_tokenizer.decode(predicted_id))
     correct_probs_list = ["N/A"]
