@@ -9,7 +9,10 @@ import fire
 from datasets import load_dataset
 import accelerate
 
-from collaborative_experiments.constants import DEFAULT_MAX_CONTEXT_LENGTH, DEFAULT_MSG_CONTEXT_LENGTH
+from collaborative_experiments.constants import (
+    DEFAULT_MAX_CONTEXT_LENGTH,
+    DEFAULT_MSG_CONTEXT_LENGTH,
+)
 
 
 def get_device(model_name=""):
@@ -35,7 +38,11 @@ def tile_a_tensor(reshaped_tensor):
 
 
 def load_and_format_dataset(
-    textbook_1_path, causal_lm_tokenizer, debug=False, reduced_data=0, train_context_length=DEFAULT_MAX_CONTEXT_LENGTH
+    textbook_1_path,
+    causal_lm_tokenizer,
+    debug=False,
+    reduced_data=0,
+    train_context_length=DEFAULT_MAX_CONTEXT_LENGTH,
 ):
     """
     Takes input data as a string and then tokenizes it.
@@ -48,7 +55,9 @@ def load_and_format_dataset(
         (torch.tensor): the data as a tensor of shape (n_batches, train_context_length)
         seq_len: the length of each sequence, which is train_context_length
     """
-    assert train_context_length > 0, f"train_context_length {train_context_length} must be greater than 0"
+    assert (
+        train_context_length > 0
+    ), f"train_context_length {train_context_length} must be greater than 0"
     dataset = load_dataset("text", data_files=textbook_1_path)
     print(dataset)
 
@@ -91,6 +100,7 @@ def load_llama_model(
     device: str = "mps",
 ):
     from llama import Llama, Tokenizer, ModelArgs, Transformer
+
     os.environ["RANK"] = "0"
     # generator = Llama.build(
     #     ckpt_dir=ckpt_dir,
@@ -123,8 +133,10 @@ def load_llama_model(
     print(f"Loaded in {time.time() - start_time:.2f} seconds")
     return model, tokenizer
 
+
 def main():
     print("hi")
+
 
 if __name__ == "__main__":
     fire.Fire(main)

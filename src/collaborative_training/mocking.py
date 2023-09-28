@@ -51,6 +51,7 @@ def make_mock_llama_tokenizer() -> Any:
     """
     return LlamaTokenizer.from_pretrained("hf-internal-testing/llama-tokenizer")
 
+
 def save_normal_mock_llama():
     """
     Saves a small llama model to the hub
@@ -69,6 +70,7 @@ def save_normal_mock_llama():
     # pylint: disable=not-callable
     tokenizer.push_to_hub("mock_llama")
 
+
 def save_multi_adapter_model():
     """
     Todo: save  model wtih multiple adapters on it randomly initalized
@@ -79,5 +81,3 @@ def save_multi_adapter_model():
 if __name__ == "__main__":
     print("Testing mocking.py")
     # save_normal_mock_llama()
-
-
