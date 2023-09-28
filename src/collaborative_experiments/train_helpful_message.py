@@ -50,8 +50,8 @@ def generate_msg_data_pairs(data_loader, msg_context_length, causal_lm, causal_l
                     causal_lm,
                     msg_context_length=msg_context_length
                 )
-            print("Generated message")
-            print(msg)
+            # print("Generated message")
+            # print(msg)
             example = {
                 "content": datum,
                 "msg": msg,
@@ -76,11 +76,13 @@ def train_step(data_loader, msg_context_length, causal_lm, causal_lm_tokenizer, 
     if num_data_to_use != 1:
         raise NotImplementedError("num_data_to_use (a.k.a. super_batch_size) must be 1 for now")
     data_msg_pairs = generate_msg_data_pairs(data_loader, msg_context_length, causal_lm, causal_lm_tokenizer, sample_size=sample_size, num_data_to_use=num_data_to_use)
+    if len(data_msg_pairs) == 0:
+        return True
     for example in data_msg_pairs:
         content = example["content"]
         msg = example["msg"]
         loss, logits_shifted, shifted_model_input, model_input = msg_loss(content, msg, causal_lm, loss_fn, device)
-        print("Loss was", loss)
+        # print("Loss was", loss)
         example["loss"] = loss
         if log_table is not None:
             example["decoded_msg"] = causal_lm_tokenizer.decode(msg[0])
@@ -97,19 +99,21 @@ def train_step(data_loader, msg_context_length, causal_lm, causal_lm_tokenizer, 
     causal_lm.train()
     loss, logits_shifted, shifted_model_input, model_input = msg_loss(content, msg, causal_lm, loss_fn, device, requires_grad=True)
     log_dict = {}
-    log_dict["loss"] = loss.item()
+    log_dict["eval_mode_loss"] = best_example["loss"].item()
+    log_dict["train_mode_loss"] = loss.item()
     log_dict["content"] = content
     log_dict["msg"] = msg
     log_dict["logits_shifted"] = logits_shifted
     log_dict["shifted_model_input"] = shifted_model_input
     log_dict["model_input"] = model_input
-    print(f"Auto regressive loss on msg was {loss.item()}")
+    # print(f"Auto regressive loss on msg was {loss.item()}")
     loss.backward()
     optimizer.step()
     optimizer.zero_grad()
     if scheduler:
         scheduler.step()
     wandb.log(log_dict)
+    return False
 
 
 def train(cfg):
@@ -126,13 +130,13 @@ def train(cfg):
     else:
         causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
-    print("Loaded causal LM")
-    print(causal_lm)
+    if cfg.verbose: print("Loaded causal LM")
+    if cfg.verbose: print(causal_lm)
     causal_lm = causal_lm.to(device)
     # We are setting this token to be eos, so we must make sure to use attention masks
     # to not attend to these positions.
     causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
-    print("Loaded causal LM to device")
+    if cfg.verbose: print("Loaded causal LM to device")
 
     # load dataset
     # https://www.gutenberg.org/ebooks/71431
@@ -146,11 +150,14 @@ def train(cfg):
         train_context_length=cfg.train_context_length,
     )
     loss_fn = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(causal_lm.parameters(), lr=5e-5)
+    optimizer = torch.optim.Adam(causal_lm.parameters(), lr=cfg.lr)
 
     log_table = wandb.Table(columns=LOG_COLUMNS)
     for step in tqdm(range(cfg.epochs), desc="Epochs"):
-        train_step(data_loader, cfg.msg_context_length, causal_lm, causal_lm_tokenizer, device, loss_fn, optimizer, sample_size=cfg.sample_size, num_data_to_use=cfg.super_batch_size, log_table=log_table, step=step)
+        finished = train_step(data_loader, cfg.msg_context_length, causal_lm, causal_lm_tokenizer, device, loss_fn, optimizer, sample_size=cfg.sample_size, num_data_to_use=cfg.super_batch_size, log_table=log_table, step=step)
+        if finished:
+            if cfg.verbose: print(f"There is no more data to use. Stopping at step {step}")
+            break
     wandb.log({"log_table": log_table})
 
 
@@ -166,6 +173,8 @@ class TrainConfig:
     msg_context_length: int = 64
     epochs: int = 1
     wandb: bool = True
+    lr: float = 5e-5
+    verbose: bool = False
 
 def main(
         sample_size=4,
