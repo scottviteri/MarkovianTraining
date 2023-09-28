@@ -53,17 +53,17 @@ class Agent:
                 setattr(lora_config, key, value)
         else:
             raise NotImplementedError("Only lora agents are supported at this time.")
-        
-        self.dataset = get_superhf_prompts(self.agent_dataset) # TODO
+
+        self.dataset = get_superhf_prompts(self.agent_dataset)  # TODO
         self.context_history = []
         self.context_prompt = ""
-    
+
     def set_context_history(history: List[Dict]):
         """
         Sets the history of the agent, including fine tune observations, messages, and prompts
         """
         self.context_history = history
-    
+
     def _flatten_context(self, provided_context=None):
         """
         Uses the current context window and flattens is into a prompt which then updates
@@ -75,7 +75,7 @@ class Agent:
         context = self.context_history
         if provided_context is not None:
             context = provided_context
-        
+
         prompt = ""
         for message in context:
             role = message["role"]
@@ -90,12 +90,8 @@ class Agent:
             self.context_prompt = prompt
         return prompt
 
-
     def generate_one_completion(**generation_kwargs):
         """
         Flattens the context history into one prompt. Generates a copmletion and returns the completion only.
         Stores the completion in it's own context history
         """
-        
-
-

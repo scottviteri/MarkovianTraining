@@ -5,10 +5,7 @@ We will just simply use expert iteration to train the model to say more of the t
 created a more helpful
 """
 import os
-from transformers import (
-    AutoTokenizer,
-    AutoModelForCausalLM
-)
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 import torch
 from dataclasses import dataclass
@@ -19,7 +16,7 @@ from tqdm import tqdm
 
 from collaborative_experiments.mvp_loss_decrease import (
     create_model_helpful_message,
-    msg_loss
+    msg_loss,
 )
 
 from collaborative_experiments.utils import (
@@ -31,24 +28,30 @@ from collaborative_experiments.constants import (
     DEFAULT_MSG_CONTEXT_LENGTH,
     DEFAULT_MAX_CONTEXT_LENGTH,
 )
-from collaborative_experiments.mocking import (
-    mockCausalGPT2
-)
+from collaborative_experiments.mocking import mockCausalGPT2
 
 LOG_COLUMNS = ["step", "loss", "msg", "content", "decoded_msg", "decoded_content"]
 
-def generate_msg_data_pairs(data_loader, msg_context_length, causal_lm, causal_lm_tokenizer, sample_size=1, num_data_to_use=2):
+
+def generate_msg_data_pairs(
+    data_loader,
+    msg_context_length,
+    causal_lm,
+    causal_lm_tokenizer,
+    sample_size=1,
+    num_data_to_use=2,
+):
     data_msg_pairs = []
     for i, datum in enumerate(data_loader):
         if i == num_data_to_use:
             break
         for _ in range(sample_size):
-            with torch.no_grad(): # ensures no gradient info is saved
+            with torch.no_grad():  # ensures no gradient info is saved
                 msg = create_model_helpful_message(
                     datum,
                     causal_lm_tokenizer,
                     causal_lm,
-                    msg_context_length=msg_context_length
+                    max_helpful_message_length=msg_context_length,
                 )
             # print("Generated message")
             # print(msg)
@@ -72,16 +75,40 @@ def log_row_fn(example):
     return new_example
 
 
-def train_step(data_loader, msg_context_length, causal_lm, causal_lm_tokenizer, device, loss_fn, optimizer, sample_size, scheduler=None, num_data_to_use=1, log_table=None, step=-1):
+def train_step(
+    data_loader,
+    msg_context_length,
+    causal_lm,
+    causal_lm_tokenizer,
+    device,
+    loss_fn,
+    optimizer,
+    sample_size,
+    scheduler=None,
+    num_data_to_use=1,
+    log_table=None,
+    step=-1,
+):
     if num_data_to_use != 1:
-        raise NotImplementedError("num_data_to_use (a.k.a. super_batch_size) must be 1 for now")
-    data_msg_pairs = generate_msg_data_pairs(data_loader, msg_context_length, causal_lm, causal_lm_tokenizer, sample_size=sample_size, num_data_to_use=num_data_to_use)
+        raise NotImplementedError(
+            "num_data_to_use (a.k.a. super_batch_size) must be 1 for now"
+        )
+    data_msg_pairs = generate_msg_data_pairs(
+        data_loader,
+        msg_context_length,
+        causal_lm,
+        causal_lm_tokenizer,
+        sample_size=sample_size,
+        num_data_to_use=num_data_to_use,
+    )
     if len(data_msg_pairs) == 0:
         return True
     for example in data_msg_pairs:
         content = example["content"]
         msg = example["msg"]
-        loss, logits_shifted, shifted_model_input, model_input = msg_loss(content, msg, causal_lm, loss_fn, device)
+        loss, logits_shifted, shifted_model_input, model_input = msg_loss(
+            content, msg, causal_lm, loss_fn, device
+        )
         # print("Loss was", loss)
         example["loss"] = loss
         if log_table is not None:
@@ -95,9 +122,11 @@ def train_step(data_loader, msg_context_length, causal_lm, causal_lm_tokenizer, 
     best_example = data_msg_pairs[0]
     content = best_example["content"]
     msg = best_example["msg"]
-    
+
     causal_lm.train()
-    loss, logits_shifted, shifted_model_input, model_input = msg_loss(content, msg, causal_lm, loss_fn, device, requires_grad=True)
+    loss, logits_shifted, shifted_model_input, model_input = msg_loss(
+        content, msg, causal_lm, loss_fn, device, requires_grad=True
+    )
     log_dict = {}
     log_dict["eval_mode_loss"] = best_example["loss"].item()
     log_dict["train_mode_loss"] = loss.item()
@@ -120,7 +149,7 @@ def train(cfg):
     if cfg.wandb:
         wandb.init(project="collaborative_training", config=cfg)
 
-    device = get_device(cfg.model_name)
+    device = get_device(cfg.device)
     if cfg.model_name == "gpt-neo":
         causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-2.7B")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
@@ -154,7 +183,19 @@ def train(cfg):
 
     log_table = wandb.Table(columns=LOG_COLUMNS)
     for step in tqdm(range(cfg.epochs), desc="Epochs"):
-        finished = train_step(data_loader, cfg.msg_context_length, causal_lm, causal_lm_tokenizer, device, loss_fn, optimizer, sample_size=cfg.sample_size, num_data_to_use=cfg.super_batch_size, log_table=log_table, step=step)
+        finished = train_step(
+            data_loader,
+            cfg.msg_context_length,
+            causal_lm,
+            causal_lm_tokenizer,
+            device,
+            loss_fn,
+            optimizer,
+            sample_size=cfg.sample_size,
+            num_data_to_use=cfg.super_batch_size,
+            log_table=log_table,
+            step=step,
+        )
         if finished:
             if cfg.verbose: print(f"There is no more data to use. Stopping at step {step}")
             break
@@ -173,24 +214,26 @@ class TrainConfig:
     msg_context_length: int = 64
     epochs: int = 1
     wandb: bool = True
+    device: str = "cpu" # mps
     lr: float = 5e-5
     verbose: bool = False
 
 def main(
-        sample_size=4,
-        super_batch_size=1,
-        model_name="distilgpt2",
-        reduced_data=10,
-        data_file_path="data/st_patrick_biography.txt",
-        train_context_length=256,
-        msg_context_length=64,
-        epochs=2
-    ):
+    sample_size=4,
+    super_batch_size=1,
+    model_name="distilgpt2",
+    reduced_data=10,
+    data_file_path="data/st_patrick_biography.txt",
+    train_context_length=256,
+    msg_context_length=64,
+    epochs=2,
+):
     """
     Args:
         sample size (int): the number of messages to generate per data point
         super_batch_size (int): the number of data points to use per batch
     """
+
     cfg = TrainConfig(
         sample_size=sample_size,
         super_batch_size=super_batch_size,
@@ -199,12 +242,12 @@ def main(
         data_file_path=data_file_path,
         train_context_length=train_context_length,
         msg_context_length=msg_context_length,
-        epochs=epochs
+        epochs=epochs,
+        # device="mps",  # mps
     )
     train(cfg)
     return True
 
-   
-    
+
 if __name__ == "__main__":
     fire.Fire(main)
