@@ -149,7 +149,7 @@ def create_model_helpful_message(
         helpful_message = pad_msg(
             helpful_message, padding_length, causal_lm_tokenizer.encode("-")[0]
         )
-    return helpful_message.to("cpu")
+    return helpful_message
 
 
 def pad_msg(msg_tokens, pad_length, pad_token_id=0):

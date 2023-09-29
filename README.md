@@ -10,7 +10,3 @@ pip install -e .
 ```
 pip install -r requirements.in
 ```
-Install nightly version if you are on mac. 
-```
-pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cpu
-```
