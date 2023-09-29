@@ -149,6 +149,12 @@ def train(cfg):
     if cfg.model_name == "gpt-neo":
         causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-2.7B")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
+    if cfg.model_name == "gpt2":
+        causal_lm = AutoModelForCausalLM.from_pretrained("gpt2")
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained("gpt2")
+    if cfg.model_name == "gpt2-medium":
+        causal_lm = AutoModelForCausalLM.from_pretrained("gpt2-medium")
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained("gpt2-medium")
     elif cfg.model_name == "mock":
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
         causal_lm = mockCausalGPT2(causal_lm_tokenizer)
@@ -213,7 +219,7 @@ class TrainConfig:
 def main(
     sample_size=4,
     super_batch_size=1,
-    model_name="distilgpt2",
+    model_name= "distilgpt2", #"gpt2-medium", # "gpt-neo", # "distilgpt2",
     reduced_data=10,
     data_file_path="data/st_patrick_biography.txt",
     train_context_length=256,
