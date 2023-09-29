@@ -89,6 +89,8 @@ def train_step(
     log_table=None,
     step=-1,
 ):
+    log_dict = {}
+
     if num_data_to_use != 1:
         raise NotImplementedError(
             "num_data_to_use (a.k.a. super_batch_size) must be 1 for now"
@@ -103,6 +105,7 @@ def train_step(
     )
     if len(data_msg_pairs) == 0:
         return True
+    row_table = wandb.Table(columns=LOG_COLUMNS)
     for example in data_msg_pairs:
         content = example["content"]
         msg = example["msg"]
@@ -115,7 +118,8 @@ def train_step(
             example["decoded_msg"] = causal_lm_tokenizer.decode(msg[0])
             example["decoded_content"] = causal_lm_tokenizer.decode(content[0])
             example["step"] = step
-            log_table.add_data(*log_row_fn(example))
+            row_table.add_data(*log_row_fn(example))
+    log_dict.update({"log_table": row_table}, commit=False)
     # 3. Rank the better ones, (also log all the losses in case we want to do RLHF eventually)
     data_msg_pairs.sort(key=lambda x: x["loss"])
     # fine tune on the best one
@@ -127,7 +131,6 @@ def train_step(
     loss, logits_shifted, shifted_model_input, model_input = msg_loss(
         content, msg, causal_lm, loss_fn, device, requires_grad=True
     )
-    log_dict = {}
     log_dict["eval_mode_loss"] = best_example["loss"].item()
     log_dict["train_mode_loss"] = loss.item()
     log_dict["content"] = content
@@ -205,7 +208,7 @@ def train(cfg):
         if finished:
             if cfg.verbose: print(f"There is no more data to use. Stopping at step {step}")
             break
-    wandb.log({"log_table": log_table})
+    # wandb.log({"log_table": log_table})
 
 
 @dataclass
@@ -230,9 +233,9 @@ def main(
     model_name= "distilgpt2", #"gpt2-medium", # "gpt-neo", # "distilgpt2",
     reduced_data=10,
     data_file_path="data/st_patrick_biography.txt",
-    train_context_length=256,
+    train_context_length=64,
     msg_context_length=64,
-    epochs=2,
+    epochs=10,
 ):
     """
     Args:
