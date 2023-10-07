@@ -6,6 +6,7 @@ created a more helpful
 """
 import os
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from peft import LoraConfig, get_peft_model
 
 import torch
 from dataclasses import dataclass
@@ -177,9 +178,22 @@ def train(cfg):
     # We are setting this token to be eos, so we must make sure to use attention masks
     # to not attend to these positions.
     causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
-    if cfg.verbose: print("Loaded causal LM to device")
     if cfg.verbose:
         print("Loaded causal LM to device")
+
+    if cfg.do_lora:
+        if cfg.lora_rank is None:
+            lrank = 16
+        else:
+            lrank = cfg.lora_rank
+        lora_config = LoraConfig(
+            r=lrank,
+            lora_alpha=32,
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+        causal_lm = get_peft_model(causal_lm, lora_config)
 
     # load dataset
     # https://www.gutenberg.org/ebooks/71431
@@ -232,6 +246,9 @@ class TrainConfig:
     device: str = "cpu" # mps
     lr: float = 5e-5
     verbose: bool = False
+    do_lora: bool = True
+    lora_rank: int = None
+
 
 def main(
     sample_size=4,
