@@ -117,7 +117,6 @@ def create_model_helpful_message(
     if custom_user_prompt is None:
         custom_user_prompt = "You are a language model's assistant, and your job is to prepend text that makes the following text as predictable as possible. Do not be afraid to copy surprising parts of the text verbatim. <Begin Text-to-Summarize> "
     custom_user_prompt += text + "</End Text-To-Summarize> <Begin Summarization> "
-
     converted_tokens = (
         causal_lm_tokenizer.encode(custom_user_prompt, return_tensors="pt")
         .to(causal_lm.device)

@@ -109,6 +109,7 @@ def train_step(
     for example in data_msg_pairs:
         content = example["content"].to(causal_lm.device)
         msg = example["msg"]
+
         loss, logits_shifted, shifted_model_input, model_input = msg_loss(
             content, msg, causal_lm, loss_fn, device
         )
@@ -168,13 +169,17 @@ def train(cfg):
     else:
         causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
-    if cfg.verbose: print("Loaded causal LM")
-    if cfg.verbose: print(causal_lm)
+    if cfg.verbose:
+        print("Loaded causal LM")
+    if cfg.verbose:
+        print(causal_lm)
     causal_lm = causal_lm.to(device)
     # We are setting this token to be eos, so we must make sure to use attention masks
     # to not attend to these positions.
     causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
     if cfg.verbose: print("Loaded causal LM to device")
+    if cfg.verbose:
+        print("Loaded causal LM to device")
 
     # load dataset
     # https://www.gutenberg.org/ebooks/71431
@@ -206,7 +211,8 @@ def train(cfg):
             step=step,
         )
         if finished:
-            if cfg.verbose: print(f"There is no more data to use. Stopping at step {step}")
+            if cfg.verbose:
+                print(f"There is no more data to use. Stopping at step {step}")
             break
     # wandb.log({"log_table": log_table})
 
@@ -230,7 +236,7 @@ class TrainConfig:
 def main(
     sample_size=4,
     super_batch_size=1,
-    model_name= "distilgpt2", #"gpt2-medium", # "gpt-neo", # "distilgpt2",
+    model_name="distilgpt2",  # "gpt2-medium", # "gpt-neo", # "distilgpt2",
     reduced_data=10,
     data_file_path="data/st_patrick_biography.txt",
     train_context_length=64,
