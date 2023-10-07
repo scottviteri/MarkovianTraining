@@ -107,7 +107,7 @@ def train_step(
         return True
     row_table = wandb.Table(columns=LOG_COLUMNS)
     for example in data_msg_pairs:
-        content = example["content"]
+        content = example["content"].to(causal_lm.device)
         msg = example["msg"]
         loss, logits_shifted, shifted_model_input, model_input = msg_loss(
             content, msg, causal_lm, loss_fn, device
@@ -124,7 +124,7 @@ def train_step(
     data_msg_pairs.sort(key=lambda x: x["loss"])
     # fine tune on the best one
     best_example = data_msg_pairs[0]
-    content = best_example["content"]
+    content = best_example["content"].to(causal_lm.device)
     msg = best_example["msg"]
 
     causal_lm.train()
