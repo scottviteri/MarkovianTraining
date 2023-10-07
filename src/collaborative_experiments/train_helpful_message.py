@@ -6,6 +6,7 @@ created a more helpful
 """
 import os
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from peft import LoraConfig, get_peft_model
 
 import torch
 from dataclasses import dataclass
@@ -107,8 +108,9 @@ def train_step(
         return True
     row_table = wandb.Table(columns=LOG_COLUMNS)
     for example in data_msg_pairs:
-        content = example["content"]
+        content = example["content"].to(causal_lm.device)
         msg = example["msg"]
+
         loss, logits_shifted, shifted_model_input, model_input = msg_loss(
             content, msg, causal_lm, loss_fn, device
         )
@@ -124,7 +126,7 @@ def train_step(
     data_msg_pairs.sort(key=lambda x: x["loss"])
     # fine tune on the best one
     best_example = data_msg_pairs[0]
-    content = best_example["content"]
+    content = best_example["content"].to(causal_lm.device)
     msg = best_example["msg"]
 
     causal_lm.train()
@@ -168,13 +170,30 @@ def train(cfg):
     else:
         causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
-    if cfg.verbose: print("Loaded causal LM")
-    if cfg.verbose: print(causal_lm)
+    if cfg.verbose:
+        print("Loaded causal LM")
+    if cfg.verbose:
+        print(causal_lm)
     causal_lm = causal_lm.to(device)
     # We are setting this token to be eos, so we must make sure to use attention masks
     # to not attend to these positions.
     causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
-    if cfg.verbose: print("Loaded causal LM to device")
+    if cfg.verbose:
+        print("Loaded causal LM to device")
+
+    if cfg.do_lora:
+        if cfg.lora_rank is None:
+            lrank = 16
+        else:
+            lrank = cfg.lora_rank
+        lora_config = LoraConfig(
+            r=lrank,
+            lora_alpha=32,
+            lora_dropout=0.05,
+            bias="none",
+            task_type="CAUSAL_LM",
+        )
+        causal_lm = get_peft_model(causal_lm, lora_config)
 
     # load dataset
     # https://www.gutenberg.org/ebooks/71431
@@ -206,7 +225,8 @@ def train(cfg):
             step=step,
         )
         if finished:
-            if cfg.verbose: print(f"There is no more data to use. Stopping at step {step}")
+            if cfg.verbose:
+                print(f"There is no more data to use. Stopping at step {step}")
             break
     # wandb.log({"log_table": log_table})
 
@@ -226,11 +246,14 @@ class TrainConfig:
     device: str = "cpu" # mps
     lr: float = 5e-5
     verbose: bool = False
+    do_lora: bool = True
+    lora_rank: int = None
+
 
 def main(
     sample_size=4,
     super_batch_size=1,
-    model_name= "distilgpt2", #"gpt2-medium", # "gpt-neo", # "distilgpt2",
+    model_name="distilgpt2",  # "gpt2-medium", # "gpt-neo", # "distilgpt2",
     reduced_data=10,
     data_file_path="data/st_patrick_biography.txt",
     train_context_length=64,
