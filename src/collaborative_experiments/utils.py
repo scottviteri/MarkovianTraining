@@ -41,7 +41,7 @@ def load_and_format_dataset(
     textbook_1_path,
     causal_lm_tokenizer,
     debug=False,
-    reduced_data=0,
+    debug_dataset_size=0,
     train_context_length=DEFAULT_MAX_CONTEXT_LENGTH,
 ):
     """
@@ -81,8 +81,8 @@ def load_and_format_dataset(
     # turn all values to be the same 11
     if debug:
         reshaped_tensor = tile_a_tensor(reshaped_tensor)
-    elif reduced_data > 0:
-        reshaped_tensor = reshaped_tensor[0:reduced_data]
+    elif debug_dataset_size > 0:
+        reshaped_tensor = reshaped_tensor[0:debug_dataset_size]
     dataset_1_loader = torch.utils.data.DataLoader(
         reshaped_tensor, batch_size=1, shuffle=False
     )
