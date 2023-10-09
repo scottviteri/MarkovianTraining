@@ -4,6 +4,7 @@ A file for testing the functions used in the mvp_loss_decrease.py file.
 import pytest
 import tabulate
 import torch
+from torchtyping import TensorType, patch_typeguard
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from collections import defaultdict
@@ -27,25 +28,21 @@ from collaborative_experiments.utils import (
 
 
 @pytest.fixture
-def causal_lm_tokenizer():
+def causal_lm_tokenizer() -> AutoTokenizer:
     return AutoTokenizer.from_pretrained("distilgpt2")
 
 
 @pytest.fixture
-def causal_lm():
+def causal_lm() -> AutoModelForCausalLM:
     return AutoModelForCausalLM.from_pretrained("distilgpt2")
 
 
 @pytest.fixture
-def tokens():
+def tokens() -> TensorType["batch", "seq_len"]:
     return torch.tensor([list(range(1024))])
 
 
-@pytest.mark.parametrize(
-    "sample_size, super_batch_size, reduced_data, epochs",
-    [(2, 1, 10, 100), (4, 1, 10, 100)],
-)
-def test_variable_rename(sample_size, super_batch_size, reduced_data, epochs):
+def test_variable_rename():
     from collaborative_experiments.train_helpful_message import main
     import inspect
 
@@ -61,7 +58,9 @@ def test_variable_rename(sample_size, super_batch_size, reduced_data, epochs):
         )
 
 
-def test_train_step(causal_lm, causal_lm_tokenizer):
+def test_train_step(
+    causal_lm: AutoModelForCausalLM, causal_lm_tokenizer: AutoTokenizer
+):
     # visualizes it
     sentence = "Hello, my name is john. I like apples. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     tokens = causal_lm_tokenizer.encode(sentence, return_tensors="pt")
@@ -122,13 +121,12 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     with open("tests/test_train_step.txt", "w") as f:
         f.write(tabulate.tabulate(table, headers="firstrow"))
 
-
-def test_create_helpful_message_1(tokens):
+def test_create_helpful_message_1(tokens : TensorType["batch", "seq_len"]):
     helpful_message = create_helpful_message_1(tokens)
     assert helpful_message.shape == (1, DEFAULT_MSG_CONTEXT_LENGTH)
 
 
-def test_create_openai_helpful_msg(causal_lm_tokenizer):
+def test_create_openai_helpful_msg(causal_lm_tokenizer: AutoTokenizer):
     sentence = "Hi there, I am a textbook on working class americans. The world is full of people who work. And the color of the sky is blue, despite it being cloudy often. Don't let those clouds fool you. Often the clouds are really just a conspiracy from the illuminati. Listen here, you didn't hear this from me though."
     tokens = causal_lm_tokenizer.encode(sentence, return_tensors="pt")
     msg_context_length = 128
@@ -140,7 +138,7 @@ def test_create_openai_helpful_msg(causal_lm_tokenizer):
     assert helpful_message.shape == (1, msg_context_length)
 
 
-def test_load_and_format_dataset(causal_lm_tokenizer):
+def test_load_and_format_dataset(causal_lm_tokenizer: AutoTokenizer):
     current_path = os.path.dirname(os.path.realpath(__file__))
     textbook_1_path = os.path.join(current_path, "../data/st_patrick_biography.txt")
     dataset, seq_len = load_and_format_dataset(

@@ -9,6 +9,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import LoraConfig, get_peft_model
 
 import torch
+from torchtyping import TensorType, patch_typeguard
+from typeguard import typechecked
 from dataclasses import dataclass
 import fire
 import wandb
@@ -33,15 +35,34 @@ from collaborative_experiments.mocking import mockCausalGPT2
 
 LOG_COLUMNS = ["step", "loss", "msg", "content", "decoded_msg", "decoded_content"]
 
+@dataclass
+class TrainConfig:
+    experiment_name: str = "train-helpful-message-via-expert-iteration"
+    messages_per_datapoint: int = 2
+    datapoints_per_batch: int = 1
+    model_name: str = "distilgpt2"
+    debug_dataset_size: int = 10
+    data_file_path: str = "data/st_patrick_biography.txt"
+    train_context_length: int = 256
+    msg_context_length: int = 64
+    epochs: int = 1
+    wandb: bool = True
+    device: str = "cpu"  # mps
+    lr: float = 5e-5
+    verbose: bool = False
+    do_lora: bool = True
+    lora_rank: int = None
+
+
 
 def generate_msg_data_pairs(
-    data_loader,
-    msg_context_length,
-    causal_lm,
-    causal_lm_tokenizer,
-    messages_per_datapoint=1,
-    num_data_to_use=2,
-):
+    data_loader: torch.utils.data.DataLoader,
+    msg_context_length: int,
+    causal_lm: torch.nn.Module,
+    causal_lm_tokenizer: AutoTokenizer,
+    messages_per_datapoint: int = 1,
+    num_data_to_use: int = 2,
+) -> list:
     data_msg_pairs = []
     for i, datum in enumerate(data_loader):
         if i == num_data_to_use:
@@ -64,7 +85,7 @@ def generate_msg_data_pairs(
     return data_msg_pairs
 
 
-def log_row_fn(example):
+def log_row_fn(example: dict) -> list:
     new_example = []
     for key in LOG_COLUMNS:
         value = example[key]
@@ -77,19 +98,19 @@ def log_row_fn(example):
 
 
 def train_step(
-    data_loader,
-    msg_context_length,
-    causal_lm,
-    causal_lm_tokenizer,
-    device,
-    loss_fn,
-    optimizer,
-    messages_per_datapoint,
-    scheduler=None,
-    num_data_to_use=1,
-    log_table=None,
-    step=-1,
-):
+    data_loader: torch.utils.data.DataLoader,
+    msg_context_length: int,
+    causal_lm: torch.nn.Module,
+    causal_lm_tokenizer: AutoTokenizer,
+    device: torch.device,
+    loss_fn: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    messages_per_datapoint: int,
+    scheduler: torch.optim.lr_scheduler._LRScheduler = None,
+    num_data_to_use: int = 1,
+    log_table = None,
+    step: int = -1,
+) -> bool:
     log_dict = {}
 
     if num_data_to_use != 1:
@@ -150,7 +171,7 @@ def train_step(
     return False
 
 
-def train(cfg):
+def train(cfg: TrainConfig):
     if cfg.wandb:
         wandb.init(project="collaborative_training", config=cfg)
 
@@ -231,35 +252,17 @@ def train(cfg):
     # wandb.log({"log_table": log_table})
 
 
-@dataclass
-class TrainConfig:
-    experiment_name: str = "train-helpful-message-via-expert-iteration"
-    messages_per_datapoint: int = 2
-    datapoints_per_batch: int = 1
-    model_name: str = "distilgpt2"
-    debug_dataset_size: int = 10
-    data_file_path: str = "data/st_patrick_biography.txt"
-    train_context_length: int = 256
-    msg_context_length: int = 64
-    epochs: int = 1
-    wandb: bool = True
-    device: str = "cpu"  # mps
-    lr: float = 5e-5
-    verbose: bool = False
-    do_lora: bool = True
-    lora_rank: int = None
-
 
 def main(
-    messages_per_datapoint=4,
-    datapoints_per_batch=1,
-    model_name="distilgpt2",  # "gpt2-medium", # "gpt-neo", # "distilgpt2",
-    debug_dataset_size=10,
-    data_file_path="data/st_patrick_biography.txt",
-    train_context_length=64,
-    msg_context_length=64,
-    epochs=10,
-):
+    messages_per_datapoint: int = 4,
+    datapoints_per_batch: int = 1,
+    model_name: str = "distilgpt2",  # "gpt2-medium", # "gpt-neo", # "distilgpt2",
+    debug_dataset_size: int = 10,
+    data_file_path: str = "data/st_patrick_biography.txt",
+    train_context_length: int = 64,
+    msg_context_length: int = 64,
+    epochs: int = 10,
+) -> bool:
     """
     Args:
         sample size (int): the number of messages to generate per data point
