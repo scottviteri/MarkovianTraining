@@ -39,14 +39,14 @@ def generate_msg_data_pairs(
     msg_context_length,
     causal_lm,
     causal_lm_tokenizer,
-    sample_size=1,
+    messages_per_datapoint=1,
     num_data_to_use=2,
 ):
     data_msg_pairs = []
     for i, datum in enumerate(data_loader):
         if i == num_data_to_use:
             break
-        for _ in range(sample_size):
+        for _ in range(messages_per_datapoint):
             with torch.no_grad():  # ensures no gradient info is saved
                 msg = create_model_helpful_message(
                     datum,
@@ -84,7 +84,7 @@ def train_step(
     device,
     loss_fn,
     optimizer,
-    sample_size,
+    messages_per_datapoint,
     scheduler=None,
     num_data_to_use=1,
     log_table=None,
@@ -94,14 +94,14 @@ def train_step(
 
     if num_data_to_use != 1:
         raise NotImplementedError(
-            "num_data_to_use (a.k.a. super_batch_size) must be 1 for now"
+            "num_data_to_use (a.k.a. datapoints_per_batch) must be 1 for now"
         )
     data_msg_pairs = generate_msg_data_pairs(
         data_loader,
         msg_context_length,
         causal_lm,
         causal_lm_tokenizer,
-        sample_size=sample_size,
+        messages_per_datapoint=messages_per_datapoint,
         num_data_to_use=num_data_to_use,
     )
     if len(data_msg_pairs) == 0:
@@ -203,7 +203,7 @@ def train(cfg):
         textbook_1_path,
         causal_lm_tokenizer,
         # debug=debug,
-        reduced_data=cfg.reduced_data,
+        debug_dataset_size=cfg.debug_dataset_size,
         train_context_length=cfg.train_context_length,
     )
     loss_fn = torch.nn.CrossEntropyLoss()
@@ -219,8 +219,8 @@ def train(cfg):
             device,
             loss_fn,
             optimizer,
-            sample_size=cfg.sample_size,
-            num_data_to_use=cfg.super_batch_size,
+            messages_per_datapoint=cfg.messages_per_datapoint,
+            num_data_to_use=cfg.datapoints_per_batch,
             log_table=log_table,
             step=step,
         )
@@ -234,16 +234,16 @@ def train(cfg):
 @dataclass
 class TrainConfig:
     experiment_name: str = "train-helpful-message-via-expert-iteration"
-    sample_size: int = 2
-    super_batch_size: int = 1
+    messages_per_datapoint: int = 2
+    datapoints_per_batch: int = 1
     model_name: str = "distilgpt2"
-    reduced_data: int = 10
+    debug_dataset_size: int = 10
     data_file_path: str = "data/st_patrick_biography.txt"
     train_context_length: int = 256
     msg_context_length: int = 64
     epochs: int = 1
     wandb: bool = True
-    device: str = "cpu" # mps
+    device: str = "cpu"  # mps
     lr: float = 5e-5
     verbose: bool = False
     do_lora: bool = True
@@ -251,10 +251,10 @@ class TrainConfig:
 
 
 def main(
-    sample_size=4,
-    super_batch_size=1,
+    messages_per_datapoint=4,
+    datapoints_per_batch=1,
     model_name="distilgpt2",  # "gpt2-medium", # "gpt-neo", # "distilgpt2",
-    reduced_data=10,
+    debug_dataset_size=10,
     data_file_path="data/st_patrick_biography.txt",
     train_context_length=64,
     msg_context_length=64,
@@ -263,14 +263,14 @@ def main(
     """
     Args:
         sample size (int): the number of messages to generate per data point
-        super_batch_size (int): the number of data points to use per batch
+        datapoints_per_batch (int): the number of data points to use per batch
     """
 
     cfg = TrainConfig(
-        sample_size=sample_size,
-        super_batch_size=super_batch_size,
+        messages_per_datapoint=messages_per_datapoint,
+        datapoints_per_batch=datapoints_per_batch,
         model_name=model_name,
-        reduced_data=reduced_data,
+        debug_dataset_size=debug_dataset_size,
         data_file_path=data_file_path,
         train_context_length=train_context_length,
         msg_context_length=msg_context_length,

@@ -16,39 +16,49 @@ from collaborative_experiments.mvp_loss_decrease import (
     create_openai_helpful_message,
     train_step,
 )
-from collaborative_experiments.constants import DEFAULT_MAX_CONTEXT_LENGTH, DEFAULT_MSG_CONTEXT_LENGTH
+from collaborative_experiments.constants import (
+    DEFAULT_MAX_CONTEXT_LENGTH,
+    DEFAULT_MSG_CONTEXT_LENGTH,
+)
 from collaborative_experiments.utils import (
     get_device,
     load_and_format_dataset,
 )
 
+
 @pytest.fixture
 def causal_lm_tokenizer():
     return AutoTokenizer.from_pretrained("distilgpt2")
+
 
 @pytest.fixture
 def causal_lm():
     return AutoModelForCausalLM.from_pretrained("distilgpt2")
 
+
 @pytest.fixture
 def tokens():
     return torch.tensor([list(range(1024))])
 
+
 @pytest.mark.parametrize(
     "sample_size, super_batch_size, reduced_data, epochs",
-    [(2, 1, 10, 100), (4, 1, 10, 100)]
+    [(2, 1, 10, 100), (4, 1, 10, 100)],
 )
 def test_variable_rename(sample_size, super_batch_size, reduced_data, epochs):
     from collaborative_experiments.train_helpful_message import main
     import inspect
+
     sig = inspect.signature(main)
     params = sig.parameters
     try:
-        assert 'sample_size' not in params
-        assert 'super_batch_size' not in params
-        assert 'reduced_data' not in params
+        assert "sample_size" not in params
+        assert "super_batch_size" not in params
+        assert "reduced_data" not in params
     except AssertionError:
-        pytest.fail("AssertionError occurred, variable rename might not have been successful.")
+        pytest.fail(
+            "AssertionError occurred, variable rename might not have been successful."
+        )
 
 
 def test_train_step(causal_lm, causal_lm_tokenizer):
@@ -56,7 +66,7 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     sentence = "Hello, my name is john. I like apples. aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     tokens = causal_lm_tokenizer.encode(sentence, return_tensors="pt")
     device = get_device()
-    tokens = tokens.to(device) # (1, 24) == (1, seq_len)
+    tokens = tokens.to(device)  # (1, 24) == (1, seq_len)
     causal_lm = causal_lm.to(device)
 
     # batch, causal_lm, loss_fn, device, correct_probs_all
@@ -64,7 +74,9 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     batch = {}
     batch["msg"] = tokens[:, :3]
     batch["content"] = tokens[:, 3:]
-    loss, correct_probs, logits = train_step(batch, causal_lm, loss_fn, device, pytest=True)
+    loss, correct_probs, logits = train_step(
+        batch, causal_lm, loss_fn, device, pytest=True
+    )
     correct_probs = correct_probs.mean(dim=0)
     # logits have shape (batch_size, seq_len, vocab_size)
     # loss should have shape (batch_size, seq_len)
@@ -88,35 +100,61 @@ def test_train_step(causal_lm, causal_lm_tokenizer):
     table = [
         ["Token", "Predicted Token", "Predicted Token ID", "Correct Probability"],
     ]
-    if len(decoded_sentence) != len(predicted_tokens) or len(decoded_sentence) != len(predicted_token_ids) or len(decoded_sentence) != len(correct_probs_list):
-        raise ValueError(f"The lengths of the lists are not the same. decoded_sentence: {len(decoded_sentence)}, predicted_tokens: {len(predicted_tokens)}, predicted_token_ids: {len(predicted_token_ids)}, correct_probs: {len(correct_probs_list)}")
+    if (
+        len(decoded_sentence) != len(predicted_tokens)
+        or len(decoded_sentence) != len(predicted_token_ids)
+        or len(decoded_sentence) != len(correct_probs_list)
+    ):
+        raise ValueError(
+            f"The lengths of the lists are not the same. decoded_sentence: {len(decoded_sentence)}, predicted_tokens: {len(predicted_tokens)}, predicted_token_ids: {len(predicted_token_ids)}, correct_probs: {len(correct_probs_list)}"
+        )
     for i in range(len(decoded_sentence)):
-        table.append([decoded_sentence[i], predicted_tokens[i], predicted_token_ids[i], correct_probs_list[i]])
+        table.append(
+            [
+                decoded_sentence[i],
+                predicted_tokens[i],
+                predicted_token_ids[i],
+                correct_probs_list[i],
+            ]
+        )
     print(tabulate.tabulate(table, headers="firstrow"))
     # save results to a file
     with open("tests/test_train_step.txt", "w") as f:
         f.write(tabulate.tabulate(table, headers="firstrow"))
 
+
 def test_create_helpful_message_1(tokens):
     helpful_message = create_helpful_message_1(tokens)
     assert helpful_message.shape == (1, DEFAULT_MSG_CONTEXT_LENGTH)
+
 
 def test_create_openai_helpful_msg(causal_lm_tokenizer):
     sentence = "Hi there, I am a textbook on working class americans. The world is full of people who work. And the color of the sky is blue, despite it being cloudy often. Don't let those clouds fool you. Often the clouds are really just a conspiracy from the illuminati. Listen here, you didn't hear this from me though."
     tokens = causal_lm_tokenizer.encode(sentence, return_tensors="pt")
     msg_context_length = 128
-    helpful_message = create_openai_helpful_message(tokens, causal_lm_tokenizer=causal_lm_tokenizer, msg_context_length=msg_context_length)
+    helpful_message = create_openai_helpful_message(
+        tokens,
+        causal_lm_tokenizer=causal_lm_tokenizer,
+        msg_context_length=msg_context_length,
+    )
     assert helpful_message.shape == (1, msg_context_length)
+
 
 def test_load_and_format_dataset(causal_lm_tokenizer):
     current_path = os.path.dirname(os.path.realpath(__file__))
     textbook_1_path = os.path.join(current_path, "../data/st_patrick_biography.txt")
-    dataset, seq_len = load_and_format_dataset(textbook_1_path, causal_lm_tokenizer, train_context_length=DEFAULT_MAX_CONTEXT_LENGTH, reduced_data=1)
+    dataset, seq_len = load_and_format_dataset(
+        textbook_1_path,
+        causal_lm_tokenizer,
+        train_context_length=DEFAULT_MAX_CONTEXT_LENGTH,
+        reduced_data=1,
+    )
     assert len(dataset) == 1
     data_1 = []
     for datum in dataset:
         data_1.append(datum)
-    assert seq_len == DEFAULT_MAX_CONTEXT_LENGTH 
+    assert seq_len == DEFAULT_MAX_CONTEXT_LENGTH
+
 
 def test_ability_to_log():
     print("fhjaldksfkladsj;fkladsjfl;kadjs")
