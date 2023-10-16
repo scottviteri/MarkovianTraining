@@ -35,6 +35,7 @@ from collaborative_experiments.mocking import mockCausalGPT2
 
 LOG_COLUMNS = ["step", "loss", "msg", "content", "decoded_msg", "decoded_content"]
 
+
 @dataclass
 class TrainConfig:
     experiment_name: str = "train-helpful-message-via-expert-iteration"
@@ -52,7 +53,6 @@ class TrainConfig:
     verbose: bool = False
     do_lora: bool = True
     lora_rank: int = None
-
 
 
 def generate_msg_data_pairs(
@@ -108,7 +108,7 @@ def train_step(
     messages_per_datapoint: int,
     scheduler: torch.optim.lr_scheduler._LRScheduler = None,
     num_data_to_use: int = 1,
-    log_table = None,
+    log_table=None,
     step: int = -1,
 ) -> bool:
     log_dict = {}
@@ -250,7 +250,6 @@ def train(cfg: TrainConfig):
                 print(f"There is no more data to use. Stopping at step {step}")
             break
     # wandb.log({"log_table": log_table})
-
 
 
 def main(

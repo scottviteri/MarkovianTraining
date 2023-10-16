@@ -24,6 +24,8 @@ import os
 import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.models.gpt2.modeling_gpt2 import GPT2LMHeadModel
+from peft.peft_model import PeftModelForCausalLM
 from tqdm import tqdm
 import plotly.express as px
 import pandas as pd
@@ -90,7 +92,7 @@ class ExperimentConfig:
 def create_helpful_message_1(
     tokens,
     tokens_to_grab: int = DEFAULT_MSG_CONTEXT_LENGTH,
-): 
+):
     """
     Returns the first tokens_to_grab tokens of the input tokens
     """
@@ -102,10 +104,10 @@ def create_helpful_message_1(
 def create_model_helpful_message(
     uncompressed_tokens: TensorType["batch", "seq_len"],
     causal_lm_tokenizer: PreTrainedTokenizerFast,
-    causal_lm: AutoModelForCausalLM,
+    causal_lm: Union[AutoModelForCausalLM, PeftModelForCausalLM, GPT2LMHeadModel],
     custom_user_prompt: Optional[str] = None,
     max_helpful_message_length: int = DEFAULT_MSG_CONTEXT_LENGTH,
-): #-> TensorType["batch", "seq_len"]:
+):  # -> TensorType["batch", "seq_len"]:
     """
     Creates a helpful message using the causal language model
 
@@ -173,13 +175,13 @@ def pad_msg(
 )
 @typechecked
 def create_openai_helpful_message(
-    tokens : TensorType, #: TensorType["batch", "seq_len"],
+    tokens: TensorType,  #: TensorType["batch", "seq_len"],
     causal_lm_tokenizer: PreTrainedTokenizerFast,
     system_prompt: Optional[str] = None,
     user_prompt: Optional[str] = None,
     print_msg: bool = False,
     msg_context_length: int = DEFAULT_MSG_CONTEXT_LENGTH,
-) -> TensorType: #-> TensorType["batch", "seq_len"]:
+) -> TensorType:  # -> TensorType["batch", "seq_len"]:
     print("trying to create openai helpful message")
     # Convert tokens to text
     text = causal_lm_tokenizer.decode(tokens[0])
@@ -260,9 +262,7 @@ def msg_loss(
     labels: TensorType["batch", "seq_len"] = torch.nn.functional.one_hot(
         shifted_model_input, num_classes=causal_lm.config.vocab_size
     ).to(torch.float32)
-    loss: float = loss_fn(
-        logits_shifted[:,], labels
-    )  # only calculate loss on content
+    loss: float = loss_fn(logits_shifted[:,], labels)  # only calculate loss on content
 
     return loss, logits_shifted, shifted_model_input, model_input
 
