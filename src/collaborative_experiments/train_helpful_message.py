@@ -179,7 +179,6 @@ def train(cfg: TrainConfig):
     if cfg.model_name == "gpt-neo":
         causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-2.7B")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
-    if cfg.model_name == "gpt2":
     elif cfg.model_name == "gpt-j":
         causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-j-6b")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-j-6b")
