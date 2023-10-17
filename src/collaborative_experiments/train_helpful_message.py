@@ -180,11 +180,18 @@ def train(cfg: TrainConfig):
         causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-2.7B")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neo-2.7B")
     if cfg.model_name == "gpt2":
+    elif cfg.model_name == "gpt-j":
+        causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-j-6b")
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-j-6b")
+    elif cfg.model_name == "gpt2":
         causal_lm = AutoModelForCausalLM.from_pretrained("gpt2")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("gpt2")
-    if cfg.model_name == "gpt2-medium":
+    elif cfg.model_name == "gpt2-medium":
         causal_lm = AutoModelForCausalLM.from_pretrained("gpt2-medium")
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("gpt2-medium")
+    elif cfg.model_name == "gpt2-large":
+        causal_lm = AutoModelForCausalLM.from_pretrained("gpt2-large")
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained("gpt2-large")
     elif cfg.model_name == "mock":
         causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
         causal_lm = mockCausalGPT2(causal_lm_tokenizer)
