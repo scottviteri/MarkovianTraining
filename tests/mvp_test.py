@@ -145,7 +145,7 @@ def test_load_and_format_dataset(causal_lm_tokenizer: AutoTokenizer):
         textbook_1_path,
         causal_lm_tokenizer,
         train_context_length=DEFAULT_MAX_CONTEXT_LENGTH,
-        reduced_data=1,
+        debug_dataset_size=1,
     )
     assert len(dataset) == 1
     data_1 = []
