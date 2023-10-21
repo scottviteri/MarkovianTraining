@@ -102,12 +102,12 @@ def create_helpful_message_1(
 
 @typechecked
 def create_model_helpful_message(
-    uncompressed_tokens: TensorType["batch", "seq_len"],
+    uncompressed_tokens: TensorType,
     causal_lm_tokenizer: PreTrainedTokenizerFast,
     causal_lm: Union[AutoModelForCausalLM, PeftModelForCausalLM, GPT2LMHeadModel],
     custom_user_prompt: Optional[str] = None,
     max_helpful_message_length: int = DEFAULT_MSG_CONTEXT_LENGTH,
-):  # -> TensorType["batch", "seq_len"]:
+):  # -> TensorType:
     """
     Creates a helpful message using the causal language model
 
@@ -161,8 +161,8 @@ def create_model_helpful_message(
 
 @typechecked
 def pad_msg(
-    msg_tokens: TensorType["batch", "seq_len"], pad_length: int, pad_token_id: int = 0
-) -> TensorType["batch", "seq_len"]:
+    msg_tokens: TensorType, pad_length: int, pad_token_id: int = 0
+) -> TensorType:
     padding = torch.full((1, pad_length), pad_token_id, device=msg_tokens.device)
     msg_tokens = torch.cat([padding, msg_tokens], dim=1)
     return msg_tokens
@@ -175,13 +175,13 @@ def pad_msg(
 )
 @typechecked
 def create_openai_helpful_message(
-    tokens: TensorType,  #: TensorType["batch", "seq_len"],
+    tokens: TensorType,  #: TensorType,
     causal_lm_tokenizer: PreTrainedTokenizerFast,
     system_prompt: Optional[str] = None,
     user_prompt: Optional[str] = None,
     print_msg: bool = False,
     msg_context_length: int = DEFAULT_MSG_CONTEXT_LENGTH,
-) -> TensorType:  # -> TensorType["batch", "seq_len"]:
+) -> TensorType:  # -> TensorType:
     print("trying to create openai helpful message")
     # Convert tokens to text
     text = causal_lm_tokenizer.decode(tokens[0])
@@ -230,36 +230,36 @@ def create_openai_helpful_message(
 
 
 def msg_loss(
-    content: TensorType["batch", "seq_len"],
-    msg: TensorType["batch", "seq_len"],
+    content: TensorType,
+    msg: TensorType,
     causal_lm: AutoModelForCausalLM,
     loss_fn: Callable,
     device: torch.device,
     requires_grad: bool = False,
 ) -> Tuple[
     float,
-    TensorType["batch", "seq_len"],
-    TensorType["batch", "seq_len"],
-    TensorType["batch", "seq_len"],
+    TensorType,
+    TensorType,
+    TensorType,
 ]:
     msg_length: int = msg.shape[1]
     # Get the logits for content
-    model_input: TensorType["batch", "seq_len"] = torch.cat((msg, content), dim=1)
+    model_input: TensorType = torch.cat((msg, content), dim=1)
     model_input = model_input.to(device)
     outputs_original = causal_lm(input_ids=model_input)
     logits = outputs_original.logits
     if not requires_grad:
         logits = logits.detach()
-    logits_shifted: TensorType["batch", "seq_len"] = logits[
+    logits_shifted: TensorType = logits[
         :, msg_length:-1, :
     ]  # negative one because prediction shifts things by one
     # should be shape (b, data_context_length - 1, vocab_size)
 
     # now create one hot labels to get the loss with.
-    shifted_model_input: TensorType["batch", "seq_len"] = model_input[
+    shifted_model_input: TensorType = model_input[
         :, msg_length + 1 :
     ]  # we shift 1 more because the logits predict one in the future
-    labels: TensorType["batch", "seq_len"] = torch.nn.functional.one_hot(
+    labels: TensorType = torch.nn.functional.one_hot(
         shifted_model_input, num_classes=causal_lm.config.vocab_size
     ).to(torch.float32)
     loss: float = loss_fn(logits_shifted[:,], labels)  # only calculate loss on content
@@ -268,7 +268,7 @@ def msg_loss(
 
 
 def train_step(
-    batch: Dict[str, TensorType["batch", "seq_len"]],
+    batch: Dict[str, TensorType],
     causal_lm: AutoModelForCausalLM,
     loss_fn: Callable,
     device: torch.device,
@@ -276,9 +276,9 @@ def train_step(
     debug: bool = False,
     pytest: bool = False,
 ) -> Tuple[
-    TensorType["batch", "seq_len"],
-    TensorType["batch", "seq_len"],
-    TensorType["batch", "seq_len"],
+    TensorType,
+    TensorType,
+    TensorType,
 ]:
     """
     Args:
@@ -289,10 +289,10 @@ def train_step(
         correct_probs (torch.tensor): a tensor of shape (batch_size, data_context_length - 1)
         if pytest, returns logits_shifted (torch.tensor): a tensor of shape (batch_size, data_context_length - 1, vocab_size)
     """
-    msg: TensorType["batch", "seq_len"] = batch[
+    msg: TensorType = batch[
         "msg"
     ]  # shape (batch_size, msg_context_length)
-    content: TensorType["batch", "seq_len"] = batch[
+    content: TensorType = batch[
         "content"
     ]  # shape (batch_size, data_context_length)
     loss, logits_shifted, shifted_model_input, model_input = msg_loss(
@@ -327,15 +327,15 @@ def train_step(
 
 def batched_create_openai_msgs(
     dataset_1_loader: DataLoader, config: ExperimentConfig
-) -> List[TensorType["batch", "seq_len"]]:
-    all_batches: List[TensorType["batch", "seq_len"]] = []
+) -> List[TensorType]:
+    all_batches: List[TensorType] = []
     for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
         all_batches.extend(batch)
     all_batches_dataloader: DataLoader = torch.utils.data.DataLoader(
         all_batches, batch_size=1, shuffle=False
     )
     with ThreadPoolExecutor(max_workers=10) as executor:
-        messages_batched: List[TensorType["batch", "seq_len"]] = list(
+        messages_batched: List[TensorType] = list(
             tqdm(
                 executor.map(config.msg_fn, all_batches_dataloader, chunksize=1),
                 total=len(all_batches),
@@ -353,16 +353,16 @@ def run_experiment(
     device: torch.device,
     batched_openai: bool = True,
     verbose: bool = False,
-) -> Tuple[List[TensorType["batch", "seq_len"]], TensorType["batch", "seq_len"]]:
+) -> Tuple[List[TensorType], TensorType]:
     # we subtract one to the size because causal_lm will predict the next token
     # therefore we can only check predictions for the first expected_length - 1 tokens
-    correct_probs_all: TensorType["batch", "seq_len"] = torch.zeros(
+    correct_probs_all: TensorType = torch.zeros(
         config.expected_length - 1
     ).to(device)
-    losses: List[TensorType["batch", "seq_len"]] = []
+    losses: List[TensorType] = []
 
     if batched_openai and "openai" in config.name:
-        messages_batched: Iterator[TensorType["batch", "seq_len"]] = iter(
+        messages_batched: Iterator[TensorType] = iter(
             batched_create_openai_msgs(dataset_1_loader, config)
         )
         # function is now an iterator over messages_batched, ignores the batch
@@ -373,7 +373,7 @@ def run_experiment(
     else:
         LOGGING_DICT_WANDB[f"{config.name}_msg_decoded"] = []
     for i, batch in enumerate(tqdm(dataset_1_loader, desc=f"Experiment {config.name}")):
-        batch_dict: Dict[str, TensorType["batch", "seq_len"]] = {}
+        batch_dict: Dict[str, TensorType] = {}
         batch_dict["msg"] = config.msg_fn(batch)
         tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
             "EleutherAI/gpt-neo-2.7B"
@@ -408,7 +408,7 @@ def main(
     debug: bool = False,
     BATCH_SIZE: int = 1,
     model_name: str = "distilgpt2",
-    reduced_data: int = 10,
+    debug_dataset_size: int = 10,
     train_context_length: int = DEFAULT_MAX_CONTEXT_LENGTH,
     msg_context_length: int = DEFAULT_MSG_CONTEXT_LENGTH,
     list_of_experiments: str = "all",
@@ -431,7 +431,7 @@ def main(
             "model_name": model_name,
             "save_dir": save_dir,
             "list_of_experiments": list_of_experiments,
-            "reduced_data": reduced_data,
+            "debug_dataset_size": debug_dataset_size,
             "train_context_length": train_context_length,
             "msg_context_length": msg_context_length,
             "batch_size": BATCH_SIZE,
@@ -479,7 +479,7 @@ def main(
         textbook_1_path,
         causal_lm_tokenizer,
         debug=debug,
-        reduced_data=reduced_data,
+        debug_dataset_size=debug_dataset_size,
         train_context_length=train_context_length,
     )
     ## make a pytorch data loader for the dataset
