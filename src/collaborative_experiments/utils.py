@@ -66,6 +66,8 @@ def load_and_format_dataset(
     text = "\n".join(dataset_1["text"])
 
     # tokenize dataset
+    # FIXME: This causes the error message "Token indices sequence length is longer
+    #  than the specified maximum sequence length for this model"
     dataset_1_tokenized = causal_lm_tokenizer(text, return_tensors="pt")
 
     # convert from shape (1, num_tokens) to (num_tokens/train_context_length, train_context_length)
