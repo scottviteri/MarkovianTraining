@@ -148,6 +148,7 @@ def create_model_helpful_message(
         top_p=0.90,
         temperature=0.7,
         num_return_sequences=1,
+        pad_token_id=causal_lm_tokenizer.pad_token_id,
     )[:, seq_len:]
     assert (
         helpful_message.shape[1] <= max_helpful_message_length
