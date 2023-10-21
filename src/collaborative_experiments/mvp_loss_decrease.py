@@ -131,6 +131,7 @@ def create_model_helpful_message(
         .to(torch.int32)
     )
     # Ensure the number of tokens in the message does not exceed the model's maximum position embeddings
+    # FIXME: GPTNeo config uses max_position_embeddings instead of n_positions
     assert (
         converted_tokens.shape[1] + max_helpful_message_length
         <= causal_lm.config.n_positions
