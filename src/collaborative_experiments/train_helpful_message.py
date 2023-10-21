@@ -219,6 +219,7 @@ def train(cfg: TrainConfig):
             lora_dropout=0.05,
             bias="none",
             task_type="CAUSAL_LM",
+            target_modules=["c_attn", "c_fc"],
         )
         causal_lm = get_peft_model(causal_lm, lora_config)
 
