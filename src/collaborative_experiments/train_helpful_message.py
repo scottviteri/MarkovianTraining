@@ -226,9 +226,9 @@ def train(cfg: TrainConfig):
     # load dataset
     # https://www.gutenberg.org/ebooks/71431
     current_path = os.path.dirname(os.path.realpath(__file__))
-    textbook_1_path = os.path.join(current_path, "../../", cfg.data_file_path)
+    # textbook_1_path = os.path.join(current_path, "../../", cfg.data_file_path)
     data_loader, seq_len = load_and_format_dataset(
-        textbook_1_path,
+        cfg.data_file_path,
         causal_lm_tokenizer,
         # debug=debug,
         debug_dataset_size=cfg.debug_dataset_size,
