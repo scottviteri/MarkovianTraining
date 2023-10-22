@@ -267,7 +267,7 @@ def main(
     data_file_path: str = "data/st_patrick_biography.txt",
     train_context_length: int = 64,
     msg_context_length: int = 64,
-    epochs: int = 10,
+    epochs: int = 2,
 ) -> bool:
     """
     Args:
@@ -284,7 +284,9 @@ def main(
         train_context_length=train_context_length,
         msg_context_length=msg_context_length,
         epochs=epochs,
-        # device="mps",  # mps
+        device="mps",  # mps
+        do_lora=True,
+        lora_rank=16,
     )
     train(cfg)
     return True
