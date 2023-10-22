@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import setup, find_packages, find_namespace_packages
 
 # import subprocess
 # first install pip-tools
@@ -18,7 +18,7 @@ def read_requirements():
 setup(
     name="collaborative_experiments",
     version="0.1",
-    packages=find_packages(where="src"),
+    packages=find_namespace_packages(where="src"),
     package_dir={"": "src"},
     install_requires=read_requirements(),
 )
