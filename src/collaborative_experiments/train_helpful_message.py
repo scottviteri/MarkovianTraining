@@ -223,6 +223,8 @@ def train(cfg: TrainConfig):
         )
         causal_lm = get_peft_model(causal_lm, lora_config)
 
+    print(causal_lm)
+
     # load dataset
     # https://www.gutenberg.org/ebooks/71431
     current_path = os.path.dirname(os.path.realpath(__file__))
