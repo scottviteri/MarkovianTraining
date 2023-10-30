@@ -229,12 +229,14 @@ def train(cfg: TrainConfig):
         )
         causal_lm = get_peft_model(causal_lm, lora_config)
 
+    print(causal_lm)
+
     # load dataset
     # https://www.gutenberg.org/ebooks/71431
     current_path = os.path.dirname(os.path.realpath(__file__))
-    textbook_1_path = os.path.join(current_path, "../../", cfg.data_file_path)
+    # textbook_1_path = os.path.join(current_path, "../../", cfg.data_file_path)
     data_loader, seq_len = load_and_format_dataset(
-        textbook_1_path,
+        cfg.data_file_path,
         causal_lm_tokenizer,
         # debug=debug,
         debug_dataset_size=cfg.debug_dataset_size,
@@ -299,7 +301,9 @@ def main(
         training_context_length=training_context_length,
         helpful_msg_context_length=helpful_msg_context_length,
         epochs=epochs,
-        # device="mps",  # mps
+        device="mps",  # mps
+        do_lora=True,
+        lora_rank=16,
     )
     train(cfg)
     return True
