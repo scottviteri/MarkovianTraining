@@ -30,7 +30,8 @@ from tqdm import tqdm
 import plotly.express as px
 import pandas as pd
 import numpy as np
-import openai
+
+# import openai
 import wandb
 
 from torchtyping import TensorType, patch_typeguard
@@ -70,15 +71,15 @@ logger = logging.getLogger(__name__)
 LOGGING_DICT_WANDB = {}
 
 
-class OpenAIException(Exception):
-    """
-    Custom exception to make sure we only retry due to errors from OpenAI
-    and not on other errors.
-    """
-
-    def __init__(self, Exception):
-        self.Exception = Exception
-        self.message = str(Exception)
+# class OpenAIException(Exception):
+#     """
+#     Custom exception to make sure we only retry due to errors from OpenAI
+#     and not on other errors.
+#     """
+#
+#     def __init__(self, Exception):
+#         self.Exception = Exception
+#         self.message = str(Exception)
 
 
 class ExperimentConfig:
@@ -170,65 +171,66 @@ def pad_msg(
     return msg_tokens
 
 
-@retry(
-    wait=wait_random_exponential(max=10),
-    stop=stop_after_attempt(2),
-    retry=retry_if_exception_type(OpenAIException),
-)
-@typechecked
-def create_openai_helpful_message(
-    tokens: TensorType,  #: TensorType,
-    causal_lm_tokenizer: PreTrainedTokenizerFast,
-    system_prompt: Optional[str] = None,
-    user_prompt: Optional[str] = None,
-    print_msg: bool = False,
-    msg_context_length: int = DEFAULT_MSG_CONTEXT_LENGTH,
-) -> TensorType:  # -> TensorType:
-    print("trying to create openai helpful message")
-    # Convert tokens to text
-    text = causal_lm_tokenizer.decode(tokens[0])
-    # Make a chat completion call to GPT-3.5
-    if system_prompt is None:
-        system_prompt = "You are a language model's assistant, and your job is to make 'prepend text that makes the following text as predictable as possible. Do not be afraid to copy surprising parts of the text verbatim."
-    if user_prompt is None:
-        user_prompt = "Please generate a prepend string for the following text: "
-    user_prompt += text
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt,
-                },
-            ],
-        )
-    except Exception as e:
-        raise OpenAIException(e)
-    # Get the prepend string from the response
-    prepend_string = response.choices[0].message["content"]
-    # Convert the summary back to tokens
-    msg_tokens = causal_lm_tokenizer.encode(prepend_string, return_tensors="pt")
-    # Decode the summary tokens for printing
-    decoded_main_tokens = causal_lm_tokenizer.decode(
-        tokens[:, : -msg_tokens.shape[1]][0]
-    )
-    if print_msg:
-        print(
-            "Prepend string: ", prepend_string, "\nMain string: ", decoded_main_tokens
-        )
-    if msg_tokens.shape[1] > msg_context_length:
-        msg_tokens = msg_tokens[:, :msg_context_length]
-    if msg_tokens.shape[1] < msg_context_length:
-        padding_length = msg_context_length - msg_tokens.shape[1]
-        msg_tokens = pad_msg(
-            msg_tokens, padding_length, causal_lm_tokenizer.encode("-")[0]
-        )
-    return msg_tokens
+# @retry(
+#     wait=wait_random_exponential(max=10),
+#     stop=stop_after_attempt(2),
+#     retry=retry_if_exception_type(OpenAIException),
+# )
+# @typechecked
+# def create_openai_helpful_message(
+#     tokens: TensorType,  #: TensorType,
+#     causal_lm_tokenizer: PreTrainedTokenizerFast,
+#     system_prompt: Optional[str] = None,
+#     user_prompt: Optional[str] = None,
+#     print_msg: bool = False,
+#     msg_context_length: int = DEFAULT_MSG_CONTEXT_LENGTH,
+# ) -> TensorType:  # -> TensorType:
+#     print("trying to create openai helpful message")
+#     # Convert tokens to text
+#     text = causal_lm_tokenizer.decode(tokens[0])
+#     # Make a chat completion call to GPT-3.5
+#     if system_prompt is None:
+#         system_prompt = "You are a language model's assistant, and your job is to make 'prepend text that makes the following text as predictable as possible. Do not be afraid to copy surprising parts of the text verbatim."
+#     if user_prompt is None:
+#         user_prompt = "Please generate a prepend string for the following text: "
+#     user_prompt += text
+#     try:
+#         response = openai.ChatCompletion.create(
+#             model="gpt-3.5-turbo",
+#             messages=[
+#                 {
+#                     "role": "system",
+#                     "content": system_prompt,
+#                 },
+#                 {
+#                     "role": "user",
+#                     "content": user_prompt,
+#                 },
+#             ],
+#         )
+#     except Exception as e:
+#         raise OpenAIException(e)
+#     # Get the prepend string from the response
+#     prepend_string = response.choices[0].message["content"]
+#     # Convert the summary back to tokens
+#     msg_tokens = causal_lm_tokenizer.encode(prepend_string, return_tensors="pt")
+#     # Decode the summary tokens for printing
+#     decoded_main_tokens = causal_lm_tokenizer.decode(
+#         tokens[:, : -msg_tokens.shape[1]][0]
+#     )
+#     if print_msg:
+#         print(
+#             "Prepend string: ", prepend_string, "\nMain string: ", decoded_main_tokens
+#         )
+#     if msg_tokens.shape[1] > msg_context_length:
+#         msg_tokens = msg_tokens[:, :msg_context_length]
+#     if msg_tokens.shape[1] < msg_context_length:
+#         padding_length = msg_context_length - msg_tokens.shape[1]
+#         msg_tokens = pad_msg(
+#             msg_tokens, padding_length, causal_lm_tokenizer.encode("-")[0]
+#         )
+#     return msg_tokens
+#
 
 
 def msg_loss(
@@ -277,11 +279,7 @@ def train_step(
     verbose: bool = False,
     debug: bool = False,
     pytest: bool = False,
-) -> Tuple[
-    TensorType,
-    TensorType,
-    TensorType,
-]:
+) -> Tuple[TensorType, TensorType, TensorType,]:
     """
     Args:
         batch (dict): a dictionary with a 'msg' key and a 'content' key. The 'msg' key is a tensor of shape (batch_size, msg_context_length)
@@ -327,24 +325,25 @@ def train_step(
     return loss.to("cpu"), correct_probs
 
 
-def batched_create_openai_msgs(
-    dataset_1_loader: DataLoader, config: ExperimentConfig
-) -> List[TensorType]:
-    all_batches: List[TensorType] = []
-    for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
-        all_batches.extend(batch)
-    all_batches_dataloader: DataLoader = torch.utils.data.DataLoader(
-        all_batches, batch_size=1, shuffle=False
-    )
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        messages_batched: List[TensorType] = list(
-            tqdm(
-                executor.map(config.msg_fn, all_batches_dataloader, chunksize=1),
-                total=len(all_batches),
-                desc=f"Reformating exp {config.name} for multi-threading",
-            )
-        )
-    return messages_batched
+#
+# def batched_create_openai_msgs(
+#     dataset_1_loader: DataLoader, config: ExperimentConfig
+# ) -> List[TensorType]:
+#     all_batches: List[TensorType] = []
+#     for batch in tqdm(dataset_1_loader, desc=f"Experiment {config.name}"):
+#         all_batches.extend(batch)
+#     all_batches_dataloader: DataLoader = torch.utils.data.DataLoader(
+#         all_batches, batch_size=1, shuffle=False
+#     )
+#     with ThreadPoolExecutor(max_workers=10) as executor:
+#         messages_batched: List[TensorType] = list(
+#             tqdm(
+#                 executor.map(config.msg_fn, all_batches_dataloader, chunksize=1),
+#                 total=len(all_batches),
+#                 desc=f"Reformating exp {config.name} for multi-threading",
+#             )
+#         )
+#     return messages_batched
 
 
 def run_experiment(
@@ -358,17 +357,16 @@ def run_experiment(
 ) -> Tuple[List[TensorType], TensorType]:
     # we subtract one to the size because causal_lm will predict the next token
     # therefore we can only check predictions for the first expected_length - 1 tokens
-    correct_probs_all: TensorType = torch.zeros(
-        config.expected_length - 1
-    ).to(device)
+    correct_probs_all: TensorType = torch.zeros(config.expected_length - 1).to(device)
     losses: List[TensorType] = []
 
     if batched_openai and "openai" in config.name:
-        messages_batched: Iterator[TensorType] = iter(
-            batched_create_openai_msgs(dataset_1_loader, config)
-        )
-        # function is now an iterator over messages_batched, ignores the batch
-        config.msg_fn = lambda x: messages_batched.__next__()
+        pass
+        # messages_batched: Iterator[TensorType] = iter(
+        #     batched_create_openai_msgs(dataset_1_loader, config)
+        # )
+        # # function is now an iterator over messages_batched, ignores the batch
+        # config.msg_fn = lambda x: messages_batched.__next__()
 
     if config.name == "original":
         LOGGING_DICT_WANDB[f"{config.name}_original_text"] = []
@@ -494,20 +492,21 @@ def main(
     system_prompt = ""
     wandb.config.update({"user_prompt": user_prompt, "system_prompt": system_prompt})
     if experiment_list == "all" or "openai" in experiment_list:
-        experiments.append(
-            ExperimentConfig(
-                lambda x: create_openai_helpful_message(
-                    x,
-                    causal_lm_tokenizer,
-                    user_prompt=user_prompt,
-                    system_prompt=system_prompt,
-                    message_context_length=message_context_length,
-                ),
-                seq_len,
-                "openai_helpful_message",
-            )
-        )
-        print("Added openai experiment")
+        pass
+#         experiments.append(
+#             ExperimentConfig(
+#                 lambda x: create_openai_helpful_message(
+#                     x,
+#                     causal_lm_tokenizer,
+#                     user_prompt=user_prompt,
+#                     system_prompt=system_prompt,
+#                     message_context_length=message_context_length,
+#                 ),
+#                 seq_len,
+#                 "openai_helpful_message",
+#             )
+#         )
+#         print("Added openai experiment")
     if experiment_list == "all" or "model_helpful_message" in experiment_list:
         experiments.append(
             ExperimentConfig(
