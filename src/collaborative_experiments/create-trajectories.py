@@ -1,5 +1,3 @@
-# %%
-
 import os
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import LoraConfig, get_peft_model
@@ -33,59 +31,72 @@ from collaborative_experiments.constants import (
 )
 from collaborative_experiments.mocking import mockCausalGPT2
 
-# %%
+DEVICE = "cpu"  # "mps"
 
-causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2")
-causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
+print("Loading Models")
+causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2").to(
+    DEVICE
+)  # EleutherAI/gpt-j-6b     distilgpt2
+causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2", padding_side="left")
 
+print("Loading Data")
 # https://www.gutenberg.org/ebooks/71431
 current_path = os.path.dirname(os.path.realpath(__file__))
-textbook_1_path = "/home/scottviteri/Projects/CollaborativeTraining/CollaborativeTraining/data/st_patrick_biography.txt"
+textbook_1_path = "../../data/st_patrick_biography.txt"  # "/home/scottviteri/Projects/CollaborativeTraining/CollaborativeTraining/data/st_patrick_biography.txt"
 data_loader, seq_len = load_and_format_dataset(
     textbook_1_path,
     causal_lm_tokenizer,
     debug_dataset_size=10,
-    training_context_length=100
+    training_context_length=100,
 )
-
+data_loader
+print("Done Loading")
 loss_fn = torch.nn.CrossEntropyLoss()
 
-#%%
 
-aor = torch.tensor([[causal_lm_tokenizer.bos_token_id]])
-aor_separated = {"a":[], "o":[], "r":[]}
+aor = torch.tensor([[causal_lm_tokenizer.bos_token_id]]).to(DEVICE)
+aor_separated = {"a": [], "o": [], "r": []}
 for data in data_loader:
     # Generate 100 tokens from causal lm and store it in "a"
     # Keep the logits around for later indexing
+
     with torch.no_grad():
-        outputs = causal_lm.generate(aor[:,-causal_lm.config.n_ctx//2:], output_scores=True, return_dict_in_generate=True, max_length=100)
+        outputs = causal_lm.generate(
+            aor[:, -causal_lm.config.n_ctx // 2 :],
+            output_scores=True,
+            return_dict_in_generate=True,
+            max_length=100,
+        )
     # Let "a" be the argmax logit indices across outputs
     a: TensorType["batch", "seq_length"] = outputs.sequences
-    o: TensorType["batch", "seq_length"] = data  # Second part of the tensor
+    o: TensorType["batch", "seq_length"] = data.to(DEVICE)  # Second part of the tensor
     # Selecting the first element from the batch dimension
-    logits_first_element: TensorType["seq_len", "vocab_size"] = torch.cat(outputs.scores) 
+    logits_first_element: TensorType["seq_len", "vocab_size"] = torch.cat(
+        outputs.scores
+    )
     # Shape: ["seq_len", "vocab_size"]
     # Calculating the loss between the logits and the second part of the tensor
     # Using elements of o as indices into logits_first_element to calculate cross entropy loss
     scalar_reward: str = str(logits_first_element[range(o.shape[0]), o].mean().item())
     # Encode scalar reward as "r", a tensor of integers by tokenizing the scalar reward
-    r: TensorType["batch", "seq_length"] = causal_lm_tokenizer(scalar_reward, return_tensors="pt").input_ids
-    aor = torch.concat((aor,a,o,r), dim=-1)
-    aor_separated["a"].append(a)
-    aor_separated["o"].append(o)
-    aor_separated["r"].append(r)
+    r: TensorType["batch", "seq_length"] = causal_lm_tokenizer(
+        scalar_reward, return_tensors="pt"
+    ).input_ids.to(DEVICE)
+    aor = torch.concat((aor, a, o, r), dim=-1)
+    aor_separated["a"].append(a.to("cpu"))
+    aor_separated["o"].append(o.to("cpu"))
+    aor_separated["r"].append(r.to("cpu"))
 
-# %%
+    print(aor)
+
 
 r_list: List[TensorType] = aor_separated["r"]
 a_list: List[TensorType] = aor_separated["a"]
 o_list: List[TensorType] = aor_separated["o"]
 
-#rao: TensorType = torch.tensor([]) 
-#for r, a, o in zip(r_list, a_list, o_list):
+# rao: TensorType = torch.tensor([])
+# for r, a, o in zip(r_list, a_list, o_list):
 #    print(r.shape, a.shape, o.shape)
 #    #torch.Size([1, 9]) torch.Size([1, 100]) torch.Size([1, 100])
 #    new_rao: TensorType = torch.cat((r, a, o), dim=-1)
 #    rao = torch.concat((rao, new_rao))
-
-# %%
