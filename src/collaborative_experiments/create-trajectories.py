@@ -1,4 +1,3 @@
-# %%
 import os
 
 import torchtyping
@@ -84,8 +83,6 @@ class MyRAO:
     r: torchtyping.TensorType
     a: torchtyping.TensorType
     o: torchtyping.TensorType
-
-# %%
 
 all_rao = []
 for data in dataset_resampled:
