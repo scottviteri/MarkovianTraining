@@ -1,3 +1,5 @@
+# %%
+
 import os
 
 import torchtyping
@@ -84,9 +86,10 @@ class MyRAO:
     a: torchtyping.TensorType
     o: torchtyping.TensorType
 
+# %% 
 all_rao = []
 for data in dataset_resampled:
-    rao = torch.tensor([[causal_lm_tokenizer("0.0")]]).to(DEVICE)
+    rao = torch.tensor([causal_lm_tokenizer("0.0").input_ids]).to(DEVICE)
     rao_separated = []
 
     for smp in range(data["input_ids"].shape[-1] // MAX_SEQU):
@@ -124,7 +127,7 @@ for data in dataset_resampled:
 
         rao = torch.concat((rao, a, o, r), dim=-1)
         curr_rao = MyRAO(a=a, r=r, o=o)
-        rao.append(curr_rao)
+        rao_separated.append(curr_rao)
 
     all_rao.append(rao_separated)
 
@@ -139,3 +142,4 @@ for data in dataset_resampled:
 # supervised all_rao
 
 # wandb log loss
+# %%
