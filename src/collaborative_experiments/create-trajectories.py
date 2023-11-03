@@ -15,23 +15,9 @@ import matplotlib.pyplot as plt
 from typing import List
 from torchtyping import TensorType
 
-from collaborative_experiments.mvp_loss_decrease import (
-    create_model_helpful_message,
-    msg_loss,
-)
-
-from collaborative_experiments.utils import (
-    get_device,
-    load_and_format_dataset,
-    tile_a_tensor,
-)
-from collaborative_experiments.constants import (
-    DEFAULT_MSG_CONTEXT_LENGTH,
-    DEFAULT_MAX_CONTEXT_LENGTH,
-)
-from collaborative_experiments.mocking import mockCausalGPT2
-
 DEVICE = "cpu"  # "mps"
+MAX_SEQU = 50
+IND_CUT = MAX_SEQU * 20
 
 print("Loading Models")
 causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2").to(
@@ -39,24 +25,63 @@ causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2").to(
 )  # EleutherAI/gpt-j-6b     distilgpt2
 causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2", padding_side="left")
 
+causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
+
 print("Loading Data")
-# https://www.gutenberg.org/ebooks/71431
-current_path = os.path.dirname(os.path.realpath(__file__))
-textbook_1_path = "../../data/st_patrick_biography.txt"  # "/home/scottviteri/Projects/CollaborativeTraining/CollaborativeTraining/data/st_patrick_biography.txt"
-data_loader, seq_len = load_and_format_dataset(
-    textbook_1_path,
-    causal_lm_tokenizer,
-    debug_dataset_size=10,
-    training_context_length=100,
+
+from datasets import load_dataset, Dataset, Features, Value, Sequence
+
+dataset = load_dataset("wikipedia", "20220301.frr")
+
+
+def tokenization(example):
+    return causal_lm_tokenizer(example["text"])
+
+
+dataset = dataset.map(tokenization, batched=True)
+dataset.set_format(type="torch", columns=["input_ids", "attention_mask", "text"])
+
+
+# Define the features of your dataset
+features = Features(
+    {
+        "text": Value(dtype="string", id=None),
+        "input_ids": Sequence(
+            feature=Value(dtype="int32", id=None), length=-1, id=None
+        ),
+        "attention_mask": Sequence(
+            feature=Value(dtype="int8", id=None), length=-1, id=None
+        ),
+    }
 )
-data_loader
+
+buffer = {
+    "text": [],
+    "input_ids": [],
+    "attention_mask": [],
+}
+for smp in dataset["train"]:
+    # Only accept long enough samples
+    if smp["input_ids"].shape[-1] >= IND_CUT:
+        for key in buffer:
+            buffer[key].append(smp[key])
+
+        pass
+
+# Convert the list of dictionaries into a Dataset in one go
+dataset_resampled = Dataset.from_dict(buffer, features=features)
+dataset_resampled.set_format(
+    type="torch", columns=["input_ids", "attention_mask", "text"]
+)
+
+
 print("Done Loading")
 loss_fn = torch.nn.CrossEntropyLoss()
 
 
 aor = torch.tensor([[causal_lm_tokenizer.bos_token_id]]).to(DEVICE)
 aor_separated = {"a": [], "o": [], "r": []}
-for data in data_loader:
+for data in dataset_resampled:
     # Generate 100 tokens from causal lm and store it in "a"
     # Keep the logits around for later indexing
 
@@ -65,11 +90,14 @@ for data in data_loader:
             aor[:, -causal_lm.config.n_ctx // 2 :],
             output_scores=True,
             return_dict_in_generate=True,
-            max_length=100,
+            max_length=MAX_SEQU,
+            pad_token_id=causal_lm_tokenizer.pad_token_id,
         )
     # Let "a" be the argmax logit indices across outputs
     a: TensorType["batch", "seq_length"] = outputs.sequences
-    o: TensorType["batch", "seq_length"] = data.to(DEVICE)  # Second part of the tensor
+    o: TensorType["batch", "seq_length"] = (
+        data["input_ids"].view(1, -1).to(DEVICE)
+    )  # Second part of the tensor
     # Selecting the first element from the batch dimension
     logits_first_element: TensorType["seq_len", "vocab_size"] = torch.cat(
         outputs.scores
@@ -87,7 +115,7 @@ for data in data_loader:
     aor_separated["o"].append(o.to("cpu"))
     aor_separated["r"].append(r.to("cpu"))
 
-    print(aor)
+    print(aor.shape)
 
 
 r_list: List[TensorType] = aor_separated["r"]
