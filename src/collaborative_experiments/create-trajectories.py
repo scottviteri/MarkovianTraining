@@ -1,5 +1,3 @@
-# %%
-
 import os
 
 import torchtyping
@@ -23,12 +21,12 @@ from torchtyping import TensorType
 DEVICE = "cpu"  # "mps"
 MAX_SEQU = 50
 IND_CUT = MAX_SEQU * 20
+# distilgpt2  ;  EleutherAI/gpt-j-6b   ;
+MODEL = "distilgpt2"
 
 print("Loading Models")
-causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2").to(
-    DEVICE
-)  # EleutherAI/gpt-j-6b     distilgpt2
-causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2", padding_side="left")
+causal_lm = AutoModelForCausalLM.from_pretrained(MODEL).to(DEVICE)
+causal_lm_tokenizer = AutoTokenizer.from_pretrained(MODEL, padding_side="left")
 
 causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
 
@@ -86,7 +84,7 @@ class MyRAO:
     a: torchtyping.TensorType
     o: torchtyping.TensorType
 
-# %% 
+
 all_rao = []
 for data in dataset_resampled:
     rao = torch.tensor([causal_lm_tokenizer("0.0").input_ids]).to(DEVICE)
@@ -131,15 +129,38 @@ for data in dataset_resampled:
 
     all_rao.append(rao_separated)
 
-# rao: TensorType = torch.tensor([])
-# for r, a, o in zip(r_list, a_list, o_list):
-#    print(r.shape, a.shape, o.shape)
-#    #torch.Size([1, 9]) torch.Size([1, 100]) torch.Size([1, 100])
-#    new_rao: TensorType = torch.cat((r, a, o), dim=-1)
-#    rao = torch.concat((rao, new_rao))
+    # if len(all_rao) >= 3:
+    #     break
 
 
-# supervised all_rao
+# Create a new data set for SFT from all_rao
+features = Features(
+    {
+        "input_ids": Sequence(
+            feature=Value(dtype="int32", id=None), length=-1, id=None
+        ),
+        "attention_mask": Sequence(
+            feature=Value(dtype="int8", id=None), length=-1, id=None
+        ),
+    }
+)
 
-# wandb log loss
-# %%
+buffer = {
+    "input_ids": [],
+    "attention_mask": [],
+}
+for smp_rao in all_rao:
+    sequ_ids = None
+    print(len(smp_rao))
+    for myrao in smp_rao:
+        if sequ_ids is None:
+            sequ_ids = torch.concat([myrao.r[0], myrao.a[0], myrao.o[0]])
+        else:
+            sequ_ids = torch.concat([sequ_ids, myrao.r[0], myrao.a[0], myrao.o[0]])
+
+    buffer["input_ids"].append(sequ_ids)
+    buffer["attention_mask"].append(torch.ones(sequ_ids.shape, dtype=torch.int8))
+
+dataset_rao = Dataset.from_dict(buffer, features=features)
+dataset_rao.set_format(type="torch", columns=["input_ids", "attention_mask"])
+# dataset_rao.save_to_disk("training_rao_test")
