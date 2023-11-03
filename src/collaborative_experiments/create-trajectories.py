@@ -1,3 +1,4 @@
+# %%
 import os
 
 import torchtyping
@@ -84,11 +85,12 @@ class MyRAO:
     a: torchtyping.TensorType
     o: torchtyping.TensorType
 
+# %%
 
-all_aor = []
+all_rao = []
 for data in dataset_resampled:
-    aor = torch.tensor([[causal_lm_tokenizer.bos_token_id]]).to(DEVICE)
-    aor_separated = []
+    rao = torch.tensor([[causal_lm_tokenizer("0.0")]]).to(DEVICE)
+    rao_separated = []
 
     for smp in range(data["input_ids"].shape[-1] // MAX_SEQU):
         # Generate 100 tokens from causal lm and store it in "a"
@@ -98,7 +100,7 @@ for data in dataset_resampled:
 
         with torch.no_grad():
             outputs = causal_lm.generate(
-                aor[:, -causal_lm.config.n_ctx // 2 :],
+                rao[:, -causal_lm.config.n_ctx // 2 :],
                 output_scores=True,
                 return_dict_in_generate=True,
                 max_length=MAX_SEQU,
@@ -123,11 +125,11 @@ for data in dataset_resampled:
             scalar_reward, return_tensors="pt"
         ).input_ids.to(DEVICE)
 
-        aor = torch.concat((aor, a, o, r), dim=-1)
+        rao = torch.concat((rao, a, o, r), dim=-1)
         curr_rao = MyRAO(a=a, r=r, o=o)
-        aor_separated.append(curr_rao)
+        rao.append(curr_rao)
 
-    all_aor.append(aor_separated)
+    all_rao.append(rao_separated)
 
 # rao: TensorType = torch.tensor([])
 # for r, a, o in zip(r_list, a_list, o_list):
@@ -135,3 +137,8 @@ for data in dataset_resampled:
 #    #torch.Size([1, 9]) torch.Size([1, 100]) torch.Size([1, 100])
 #    new_rao: TensorType = torch.cat((r, a, o), dim=-1)
 #    rao = torch.concat((rao, new_rao))
+
+
+# supervised all_rao
+
+# wandb log loss
