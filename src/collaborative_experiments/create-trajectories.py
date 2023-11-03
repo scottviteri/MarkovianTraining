@@ -1,5 +1,8 @@
 import os
+
+import torchtyping
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from datasets import load_dataset, Dataset, Features, Value, Sequence
 from peft import LoraConfig, get_peft_model
 
 import torch
@@ -28,8 +31,6 @@ causal_lm_tokenizer = AutoTokenizer.from_pretrained("distilgpt2", padding_side="
 causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
 
 print("Loading Data")
-
-from datasets import load_dataset, Dataset, Features, Value, Sequence
 
 dataset = load_dataset("wikipedia", "20220301.frr")
 
@@ -66,8 +67,6 @@ for smp in dataset["train"]:
         for key in buffer:
             buffer[key].append(smp[key])
 
-        pass
-
 # Convert the list of dictionaries into a Dataset in one go
 dataset_resampled = Dataset.from_dict(buffer, features=features)
 dataset_resampled.set_format(
@@ -79,48 +78,56 @@ print("Done Loading")
 loss_fn = torch.nn.CrossEntropyLoss()
 
 
-aor = torch.tensor([[causal_lm_tokenizer.bos_token_id]]).to(DEVICE)
-aor_separated = {"a": [], "o": [], "r": []}
+@dataclass
+class MyRAO:
+    r: torchtyping.TensorType
+    a: torchtyping.TensorType
+    o: torchtyping.TensorType
+
+
+all_aor = []
 for data in dataset_resampled:
-    # Generate 100 tokens from causal lm and store it in "a"
-    # Keep the logits around for later indexing
+    aor = torch.tensor([[causal_lm_tokenizer.bos_token_id]]).to(DEVICE)
+    aor_separated = []
 
-    with torch.no_grad():
-        outputs = causal_lm.generate(
-            aor[:, -causal_lm.config.n_ctx // 2 :],
-            output_scores=True,
-            return_dict_in_generate=True,
-            max_length=MAX_SEQU,
-            pad_token_id=causal_lm_tokenizer.pad_token_id,
+    for smp in range(data["input_ids"].shape[-1] // MAX_SEQU):
+        # Generate 100 tokens from causal lm and store it in "a"
+        # Keep the logits around for later indexing
+
+        curr_input_ids = data["input_ids"][smp * MAX_SEQU : (smp + 1) * MAX_SEQU]
+
+        with torch.no_grad():
+            outputs = causal_lm.generate(
+                aor[:, -causal_lm.config.n_ctx // 2 :],
+                output_scores=True,
+                return_dict_in_generate=True,
+                max_length=MAX_SEQU,
+                pad_token_id=causal_lm_tokenizer.pad_token_id,
+            )
+
+        a: TensorType["batch", "seq_length"] = outputs.sequences
+        o: TensorType["batch", "seq_length"] = curr_input_ids.view(1, -1).to(DEVICE)
+
+        # Selecting the first element from the batch dimension
+        logits_first_element: TensorType["seq_len", "vocab_size"] = torch.cat(
+            outputs.scores
         )
-    # Let "a" be the argmax logit indices across outputs
-    a: TensorType["batch", "seq_length"] = outputs.sequences
-    o: TensorType["batch", "seq_length"] = (
-        data["input_ids"].view(1, -1).to(DEVICE)
-    )  # Second part of the tensor
-    # Selecting the first element from the batch dimension
-    logits_first_element: TensorType["seq_len", "vocab_size"] = torch.cat(
-        outputs.scores
-    )
-    # Shape: ["seq_len", "vocab_size"]
-    # Calculating the loss between the logits and the second part of the tensor
-    # Using elements of o as indices into logits_first_element to calculate cross entropy loss
-    scalar_reward: str = str(logits_first_element[range(o.shape[0]), o].mean().item())
-    # Encode scalar reward as "r", a tensor of integers by tokenizing the scalar reward
-    r: TensorType["batch", "seq_length"] = causal_lm_tokenizer(
-        scalar_reward, return_tensors="pt"
-    ).input_ids.to(DEVICE)
-    aor = torch.concat((aor, a, o, r), dim=-1)
-    aor_separated["a"].append(a.to("cpu"))
-    aor_separated["o"].append(o.to("cpu"))
-    aor_separated["r"].append(r.to("cpu"))
+        # Shape: ["seq_len", "vocab_size"]
+        # Calculating the loss between the logits and the second part of the tensor
+        # Using elements of o as indices into logits_first_element to calculate cross entropy loss
+        scalar_reward: str = str(
+            logits_first_element[range(o.shape[0]), o].mean().item()
+        )
+        # Encode scalar reward as "r", a tensor of integers by tokenizing the scalar reward
+        r: TensorType["batch", "seq_length"] = causal_lm_tokenizer(
+            scalar_reward, return_tensors="pt"
+        ).input_ids.to(DEVICE)
 
-    print(aor.shape)
+        aor = torch.concat((aor, a, o, r), dim=-1)
+        curr_rao = MyRAO(a=a, r=r, o=o)
+        aor_separated.append(curr_rao)
 
-
-r_list: List[TensorType] = aor_separated["r"]
-a_list: List[TensorType] = aor_separated["a"]
-o_list: List[TensorType] = aor_separated["o"]
+    all_aor.append(aor_separated)
 
 # rao: TensorType = torch.tensor([])
 # for r, a, o in zip(r_list, a_list, o_list):
