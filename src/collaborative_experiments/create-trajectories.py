@@ -87,23 +87,31 @@ class MyRAO:
     o: torchtyping.TensorType
 
 # %% 
+
+def truncate_dataset(dataset, n):
+    return {"text": dataset["text"][:n], "input_ids": dataset["input_ids"][:n], "attention_mask": dataset["attention_mask"][:n]} 
+
+data = truncate_dataset(dataset_resampled,2)
+high_reward = causal_lm_tokenizer("0.0", return_tensors="pt").input_ids.to(DEVICE)
 all_rao = []
-for data in dataset_resampled:
-    rao = torch.tensor([causal_lm_tokenizer("0.0").input_ids]).to(DEVICE)
+for i in range(3):
+    print('i', i)
+    rao = torch.tensor([[]], device=DEVICE)
     rao_separated = []
 
-    for smp in range(data["input_ids"].shape[-1] // MAX_SEQU):
+    for smp in range(data["input_ids"][i].shape[-1] // MAX_SEQU):
         # Generate 100 tokens from causal lm and store it in "a"
         # Keep the logits around for later indexing
 
-        curr_input_ids = data["input_ids"][smp * MAX_SEQU : (smp + 1) * MAX_SEQU]
+        curr_input_ids = data["input_ids"][i][smp * MAX_SEQU : (smp + 1) * MAX_SEQU]
 
         with torch.no_grad():
+            incentive_rao = torch.cat((rao, high_reward), dim=-1)[:, -causal_lm.config.n_ctx // 2 :]
             outputs = causal_lm.generate(
-                rao[:, -causal_lm.config.n_ctx // 2 :],
+                incentive_rao,
                 output_scores=True,
                 return_dict_in_generate=True,
-                max_length=MAX_SEQU,
+                max_length=10,
                 pad_token_id=causal_lm_tokenizer.pad_token_id,
             )
 
@@ -111,22 +119,22 @@ for data in dataset_resampled:
         o: TensorType["batch", "seq_length"] = curr_input_ids.view(1, -1).to(DEVICE)
 
         # Selecting the first element from the batch dimension
-        logits_first_element: TensorType["seq_len", "vocab_size"] = torch.cat(
+        logits: TensorType["seq_len", "vocab_size"] = torch.cat(
             outputs.scores
         )
         # Shape: ["seq_len", "vocab_size"]
         # Calculating the loss between the logits and the second part of the tensor
         # Using elements of o as indices into logits_first_element to calculate cross entropy loss
         scalar_reward: str = str(
-            logits_first_element[range(o.shape[0]), o].mean().item()
+            round(logits[range(o.shape[0]), o].mean().item(), 3)
         )
         # Encode scalar reward as "r", a tensor of integers by tokenizing the scalar reward
         r: TensorType["batch", "seq_length"] = causal_lm_tokenizer(
             scalar_reward, return_tensors="pt"
         ).input_ids.to(DEVICE)
 
-        rao = torch.concat((rao, a, o, r), dim=-1)
-        curr_rao = MyRAO(a=a, r=r, o=o)
+        rao = torch.concat((rao, r, a, o), dim=-1)
+        curr_rao = MyRAO(r=r, a=a, o=o)
         rao_separated.append(curr_rao)
 
     all_rao.append(rao_separated)
