@@ -1,0 +1,17 @@
+transformers
+peft
+tqdm
+datasets
+torch
+numpy
+fire
+accelerate
+plotly
+pandas
+wandb
+torchtyping
+typeguard
+tenacity
+pytest
+tabulate
+setuptools
