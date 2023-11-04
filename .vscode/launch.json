@@ -1,0 +1,142 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: Current File all code",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Llama Evaluation",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/evaluate_llama_model.py",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Run with llama",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/collaborative_experiments/mvp_loss_decrease.py",
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Mock",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/collaborative_experiments/mvp_loss_decrease.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--save_dir",
+                "results_debug",
+                "--model_name",
+                "mock",
+                "--list_of_experiments",
+                "model_helpful_message",
+                "--reduced_data",
+                "2",
+                "--debug",
+                "False",
+                "--train_context_length",
+                "256",
+                "--msg_context_length",
+                "2",
+                "--data_file_path",
+                "data/gpt-4_20230908_math.txt"
+            ]
+        },
+        {
+            "name": "Debug MVP experiment with distilgpt2",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/collaborative_experiments/mvp_loss_decrease.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--save_dir",
+                "results_debug",
+                "--model_name",
+                "distilgpt2",
+                "--reduced_data",
+                "2",
+                "--debug",
+                "False",
+                "--train_context_length",
+                "256",
+                "--msg_context_length",
+                "64",
+                "--verbose",
+                "False"
+            ]
+        },
+        {
+            "name": "Debug MVP experiment with gpt-neo",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/collaborative_experiments/mvp_loss_decrease.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--save_dir",
+                "results",
+                "--model_name",
+                "gpt-neo",
+                "--reduced_data",
+                "250",
+                "--debug",
+                "False",
+                "--BATCH_SIZE",
+                "1",
+                "--train_context_length",
+                "256",
+                "--msg_context_length",
+                "64",
+                // "--verbose",
+                // "False"
+            ]
+        },
+        {
+            "name": "Run MVP experiment",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/collaborative_experiments/mvp_loss_decrease.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--save_dir",
+                "results",
+                "--model_name",
+                "gpt-neo",
+                // "--reduced_data",
+                // "260",
+                "--debug",
+                "False",
+                "--train_context_length",
+                "256",
+                "--msg_context_length",
+                "64",
+                "--data_file_path",
+                "data/gpt-4_20230908_math.txt"
+                "--batched_openai",
+                "False"
+            ]
+        },
+    ]
+}
