@@ -109,7 +109,9 @@ for data in dataset_resampled:
                 pad_token_id=causal_lm_tokenizer.pad_token_id,
             )
 
-        a: TensorType["batch", "seq_length"] = outputs.sequences
+        a: TensorType["batch", "seq_length"] = outputs.sequences[
+            :, incentive_rao.shape[-1] :
+        ]
         o: TensorType["batch", "seq_length"] = curr_input_ids.view(1, -1).to(DEVICE)
 
         # Selecting the first element from the batch dimension
