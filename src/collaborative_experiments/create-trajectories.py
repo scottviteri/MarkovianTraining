@@ -94,6 +94,46 @@ class MyRAO:
     o: torchtyping.TensorType
 
 
+def save_traj_to_drive(rao_list, bdebug: bool = False):
+    # Create a new data set for SFT from all_rao
+    features = Features(
+        {
+            "input_ids": Sequence(
+                feature=Value(dtype="int32", id=None), length=-1, id=None
+            ),
+            "attention_mask": Sequence(
+                feature=Value(dtype="int8", id=None), length=-1, id=None
+            ),
+        }
+    )
+
+    buffer = {
+        "input_ids": [],
+        "attention_mask": [],
+    }
+    for smp_rao in rao_list:
+        sequ_ids = None
+
+        for myrao in smp_rao:
+            if bdebug:
+                print("r: ", causal_lm_tokenizer.decode(myrao.r[0]))
+                print("a: ", causal_lm_tokenizer.decode(myrao.a[0]))
+                print("o: ", causal_lm_tokenizer.decode(myrao.o[0]))
+                print()
+            if sequ_ids is None:
+                sequ_ids = torch.concat([myrao.r[0], myrao.a[0], myrao.o[0]])
+            else:
+                sequ_ids = torch.concat([sequ_ids, myrao.r[0], myrao.a[0], myrao.o[0]])
+
+        buffer["input_ids"].append(sequ_ids)
+        buffer["attention_mask"].append(torch.ones(sequ_ids.shape, dtype=torch.int8))
+
+    dataset_rao = Dataset.from_dict(buffer, features=features)
+    dataset_rao.set_format(type="torch", columns=["input_ids", "attention_mask"])
+    if not bdebug:
+        dataset_rao.save_to_disk(f"training_rao_test_{MODEL}_wiki_en")
+
+
 high_reward = causal_lm_tokenizer("0.0", return_tensors="pt").input_ids.to(DEVICE)
 all_rao = []
 for data in tqdm(dataset_resampled, desc="Samples"):
@@ -143,38 +183,5 @@ for data in tqdm(dataset_resampled, desc="Samples"):
 
     all_rao.append(rao_separated)
 
-    # if len(all_rao) >= 3:
-    #    break
-
-
-# Create a new data set for SFT from all_rao
-features = Features(
-    {
-        "input_ids": Sequence(
-            feature=Value(dtype="int32", id=None), length=-1, id=None
-        ),
-        "attention_mask": Sequence(
-            feature=Value(dtype="int8", id=None), length=-1, id=None
-        ),
-    }
-)
-
-buffer = {
-    "input_ids": [],
-    "attention_mask": [],
-}
-for smp_rao in all_rao:
-    sequ_ids = None
-    print(len(smp_rao))
-    for myrao in smp_rao:
-        if sequ_ids is None:
-            sequ_ids = torch.concat([myrao.r[0], myrao.a[0], myrao.o[0]])
-        else:
-            sequ_ids = torch.concat([sequ_ids, myrao.r[0], myrao.a[0], myrao.o[0]])
-
-    buffer["input_ids"].append(sequ_ids)
-    buffer["attention_mask"].append(torch.ones(sequ_ids.shape, dtype=torch.int8))
-
-dataset_rao = Dataset.from_dict(buffer, features=features)
-dataset_rao.set_format(type="torch", columns=["input_ids", "attention_mask"])
-# dataset_rao.save_to_disk("training_rao_test")
+    # if len(all_rao) % 5 == 0 and len(all_rao) > 2:
+    save_traj_to_drive(all_rao, bdebug=True)
