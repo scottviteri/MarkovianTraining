@@ -13,17 +13,35 @@ DEVICE = "cuda"  # "mps"
 MAX_SEQU = 50
 IND_CUT = MAX_SEQU * 20
 # distilgpt2  ;  EleutherAI/gpt-j-6b   ;
-MODEL = "distilgpt2"
+MODEL = "gpt2-xl"
+DATA_CUT = 100
+MAX_RAO_LEN = 10
 
 print("Loading Models")
-causal_lm = AutoModelForCausalLM.from_pretrained(MODEL).to(DEVICE)
-causal_lm_tokenizer = AutoTokenizer.from_pretrained(MODEL, padding_side="left")
+if MODEL == "distilgpt2":
+    causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2").to(DEVICE)
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+        "distilgpt2", padding_side="left"
+    )
+elif MODEL == "gptj":
+    causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-j-6b").to(DEVICE)
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+        "EleutherAI/gpt-j-6b", padding_side="left"
+    )
+elif MODEL == "gpt2-large":
+    causal_lm = AutoModelForCausalLM.from_pretrained("gpt2-large").to(DEVICE)
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+        "gpt2-large", padding_side="left"
+    )
+elif MODEL == "gpt2-xl":
+    causal_lm = AutoModelForCausalLM.from_pretrained("gpt2-xl").to(DEVICE)
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained("gpt2-xl", padding_side="left")
 
 causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
 
 print("Loading Data")
 
-dataset = load_dataset("wikipedia", "20220301.frr")
+dataset = load_dataset("wikipedia", "20220301.en", split=f"train[:{DATA_CUT}]")
 
 
 def tokenization(example):
@@ -52,7 +70,7 @@ buffer = {
     "input_ids": [],
     "attention_mask": [],
 }
-for smp in dataset["train"]:
+for smp in dataset:
     # Only accept long enough samples
     if smp["input_ids"].shape[-1] >= IND_CUT:
         for key in buffer:
@@ -65,7 +83,7 @@ dataset_resampled.set_format(
 )
 
 
-print("Done Loading")
+print(f"Done Loading - number of articles: {dataset_resampled.shape}")
 loss_fn = torch.nn.CrossEntropyLoss()
 
 
@@ -78,13 +96,13 @@ class MyRAO:
 
 high_reward = causal_lm_tokenizer("0.0", return_tensors="pt").input_ids.to(DEVICE)
 all_rao = []
-for data in dataset_resampled:
+for data in tqdm(dataset_resampled, desc="Samples"):
     rao = torch.tensor([[]], device=DEVICE, dtype=torch.int32)
     rao_separated = []
 
-    for smp in range(data["input_ids"].shape[-1] // MAX_SEQU):
-        # Generate 100 tokens from causal lm and store it in "a"
-        # Keep the logits around for later indexing
+    for smp in tqdm(range(data["input_ids"].shape[-1] // MAX_SEQU), desc="Sequence"):
+        if smp >= MAX_RAO_LEN:
+            break
 
         curr_input_ids = data["input_ids"][smp * MAX_SEQU : (smp + 1) * MAX_SEQU]
 
@@ -103,6 +121,9 @@ for data in dataset_resampled:
         a: TensorType["batch", "seq_length"] = outputs.sequences[
             :, incentive_rao.shape[-1] :
         ]
+        assert (
+            a.shape[-1] <= MAX_SEQU
+        ), f"a sequence is too long. Should be {MAX_SEQU}, but is {a.shape[-1]}"
         o: TensorType["batch", "seq_length"] = curr_input_ids.view(1, -1).to(DEVICE)
 
         # Selecting the first element from the batch dimension
