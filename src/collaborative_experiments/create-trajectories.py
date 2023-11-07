@@ -11,11 +11,11 @@ from torchtyping import TensorType
 
 DEVICE = "cuda"  # "mps"
 MAX_SEQU = 50
-IND_CUT = MAX_SEQU * 20
+IND_CUT_MIN = MAX_SEQU * 20
+IND_CUT_MAX = 50
 # distilgpt2  ;  EleutherAI/gpt-j-6b   ;
 MODEL = "gpt2-xl"
 DATA_CUT = 100
-MAX_RAO_LEN = 10
 
 print("Loading Models")
 if MODEL == "distilgpt2":
@@ -72,7 +72,7 @@ buffer = {
 }
 for smp in dataset:
     # Only accept long enough samples
-    if smp["input_ids"].shape[-1] >= IND_CUT:
+    if smp["input_ids"].shape[-1] >= IND_CUT_MIN:
         for key in buffer:
             buffer[key].append(smp[key])
 
@@ -140,10 +140,9 @@ for data in tqdm(dataset_resampled, desc="Samples"):
     rao = torch.tensor([[]], device=DEVICE, dtype=torch.int32)
     rao_separated = []
 
-    for smp in tqdm(range(data["input_ids"].shape[-1] // MAX_SEQU), desc="Sequence"):
-        if smp >= MAX_RAO_LEN:
-            break
-
+    smp_iter = min(IND_CUT_MAX, data["input_ids"].shape[-1] // MAX_SEQU)
+    print(smp_iter, IND_CUT_MAX, data["input_ids"].shape[-1] // MAX_SEQU)
+    for smp in tqdm(range(smp_iter), desc="Sequence"):
         curr_input_ids = data["input_ids"][smp * MAX_SEQU : (smp + 1) * MAX_SEQU]
 
         with torch.no_grad():
@@ -183,5 +182,8 @@ for data in tqdm(dataset_resampled, desc="Samples"):
 
     all_rao.append(rao_separated)
 
-    # if len(all_rao) % 5 == 0 and len(all_rao) > 2:
-    save_traj_to_drive(all_rao, bdebug=True)
+    if len(all_rao) % 5 == 0 and len(all_rao) > 2:
+        save_traj_to_drive(all_rao, bdebug=False)
+
+    if len(all_rao) % 10 == 0 and len(all_rao) > 2:
+        save_traj_to_drive(all_rao, bdebug=True)
