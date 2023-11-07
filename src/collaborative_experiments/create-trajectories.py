@@ -134,7 +134,7 @@ def save_traj_to_drive(rao_list, bdebug: bool = False):
         dataset_rao.save_to_disk(f"training_rao_test_{MODEL}_wiki_en")
 
 
-high_reward = causal_lm_tokenizer("0.0", return_tensors="pt").input_ids.to(DEVICE)
+high_reward = causal_lm_tokenizer("0.0 ", return_tensors="pt").input_ids.to(DEVICE)
 all_rao = []
 for data in tqdm(dataset_resampled, desc="Samples"):
     rao = torch.tensor([[]], device=DEVICE, dtype=torch.int32)
