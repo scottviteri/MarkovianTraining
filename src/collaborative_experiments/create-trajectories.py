@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-from einops import rearrange
+from einops import rearrange, reduce
 
 from typing import List
 from torch.nn.utils.rnn import pad_sequence
@@ -24,11 +24,12 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "mps")
 TOKENS_PER_ACTION = 10
 TOKENS_PER_OBSERVATION = 50
 # make each have 20 substrings 
-OBSERVATIONS_PER_DOCUMENT = 2 
+OBSERVATIONS_PER_DOCUMENT = 10
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT 
 MODEL = "distilgpt2" #"gpt2-xl" # distilgpt2  ;  EleutherAI/gpt-j-6b   ;
-BATCH_SIZE = 2
-NUM_BATCHES=10
+BATCH_SIZE = 4 
+NUM_BATCHES=100
+NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES
 
 """
 We will pull in passages from wikipedia articles. 
@@ -61,7 +62,7 @@ causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
 
 print("Loading Data")
 
-dataset = load_dataset("wikipedia", "20220301.frr")
+dataset = load_dataset("wikipedia", "20220301.frr", split=f"train[:{NUM_DATAPOINTS}]")
 dataset = dataset.map(lambda example: causal_lm_tokenizer(example["text"]), batched=True) 
 # removing attention mask from features because the segments are all valid tokens
 # dataset.set_format(type="torch", columns=["input_ids", "attention_mask", "text"])
@@ -78,7 +79,7 @@ truncated_documents = {
     "input_ids": []
 }
 
-for document in dataset["train"]:
+for document in dataset:
     # Only accept long enough samples
     if document["input_ids"].shape[-1] >= TOKENS_PER_DOCUMENT:
         # truncate documents
@@ -94,7 +95,7 @@ truncated_dataset.set_format(
     type="torch", columns=["input_ids", "text"] 
 )
 
-loss_fn = torch.nn.CrossEntropyLoss()
+loss_fn = torch.nn.CrossEntropyLoss(reduction='none')
 
 def save_traj_to_drive(rao_list, bdebug: bool = False):
     # Create a new data set for SFT from all_rao
@@ -111,7 +112,7 @@ def save_traj_to_drive(rao_list, bdebug: bool = False):
     }
     for smp_rao in rao_sequences:
         sequ_ids = None
-        print(len(smp_rao))
+        #print(len(smp_rao))
         for myrao in smp_rao:
             if sequ_ids is None:
                 sequ_ids = torch.concat([myrao.r, myrao.a, myrao.o])
@@ -130,12 +131,12 @@ class MyRAO:
     a: torchtyping.TensorType
     o: torchtyping.TensorType
 
-dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE)
+dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE, drop_last=True)
 high_reward = causal_lm_tokenizer(["0.1 " for _ in range(BATCH_SIZE)], return_tensors="pt").input_ids.to(DEVICE)
 rao_sequences = []
 i = 0
 optimizer = torch.optim.Adam(causal_lm.parameters())
-for data in dataloader:
+for data in tqdm(dataloader, total=NUM_BATCHES):
     if i > NUM_BATCHES: break
     i += 1
     rao_tensor = torch.tensor([[] for _ in range(BATCH_SIZE)], device=DEVICE, dtype=torch.int32)
@@ -155,18 +156,21 @@ for data in dataloader:
         action : TensorType["batch", "seq_length"] = full_action.sequences[
             :, -TOKENS_PER_ACTION:
         ]
-        true_obs: TensorType["batch", "seq_length"] = data["input_ids"][:,:,observation_index] 
+        true_obs: TensorType["batch", "seq_length"] = data["input_ids"][:,1:,observation_index]
+        #true_obs = torch.randint(50257, size=true_obs.shape)
         true_obs = true_obs.to(DEVICE)
-        prediction = causal_lm(true_obs, labels=true_obs)
-        predicted_logits = prediction.logits
-        predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
-        selected_logits = predicted_logits.gather(dim=2, index=true_obs.unsqueeze(-1)).squeeze(-1)
-        batch_loss = selected_logits.mean(dim=-1)
+        prediction = causal_lm(torch.cat((incentive_rao, action, true_obs), dim=-1)[:, -causal_lm.config.n_ctx//3:])
+        predicted_logits = prediction.logits[:,-TOKENS_PER_OBSERVATION:-1,:]
+        flat_logits = rearrange(predicted_logits, 'batch seq_length vocab_size-> (batch seq_length) vocab_size')
+        flat_obs = rearrange(true_obs, 'batch seq_length -> (batch seq_length)')
+        batch_loss = rearrange(loss_fn(flat_logits, flat_obs), "(batch seq_length) -> batch seq_length", batch=BATCH_SIZE).mean(dim=-1)
         aggregate_loss = batch_loss.mean()
-        print("aggregate loss: ", aggregate_loss)
-        print("action: ", causal_lm_tokenizer.batch_decode(action))
-        print("predicted obs: ", causal_lm_tokenizer.batch_decode(predicted_obs))
-        print("true obs:", causal_lm_tokenizer.batch_decode(true_obs))
+        predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
+        if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%(NUM_BATCHES//10)==0:
+            print("aggregate loss: ", aggregate_loss)
+            print("action: ", causal_lm_tokenizer.batch_decode(action))
+            print("predicted obs: ", causal_lm_tokenizer.batch_decode(predicted_obs))
+            print("true obs:", causal_lm_tokenizer.batch_decode(true_obs))
         aggregate_loss.backward()
         optimizer.step()
         string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
@@ -179,9 +183,9 @@ for data in dataloader:
     for b in range(BATCH_SIZE):
         rao_sequences.append([rao_batch[b] for rao_batch in rao_sequence])
         
-    if len(rao_sequences) % 5 == 0 and len(rao_sequences) > 2:
-        save_traj_to_drive(rao_sequences, bdebug=False)
+    #if len(rao_sequences) % 5 == 0 and len(rao_sequences) > 2:
+    #    save_traj_to_drive(rao_sequences, bdebug=False)
 
-    if len(rao_sequences) % 10 == 0 and len(rao_sequences) > 2:
-        save_traj_to_drive(rao_sequences, bdebug=True)
+    #if len(rao_sequences) % 10 == 0 and len(rao_sequences) > 2:
+    #    save_traj_to_drive(rao_sequences, bdebug=True)
 
