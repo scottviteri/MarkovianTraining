@@ -4,7 +4,7 @@ import torchtyping
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from datasets import load_dataset, Dataset, Features, Value, Sequence, Array2D
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, PeftConfig, LoraConfig
 
 import torch
 from torch.utils.data import DataLoader
@@ -40,10 +40,19 @@ We reassemble the article subsequences to include (reward, prediction, article s
 
 print("Loading Models")
 if MODEL == "distilgpt2":
-    causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2").to(DEVICE)
+    base_model = AutoModelForCausalLM.from_pretrained("distilgpt2").to(DEVICE)
     causal_lm_tokenizer = AutoTokenizer.from_pretrained(
         "distilgpt2", padding_side="left"
     )
+    # Define the PEFT configuration
+    peft_config = LoraConfig(
+        base_model_name_or_path="distilgpt2",
+        r = 32,
+        lora_alpha=32,
+        lora_dropout=0.1
+        #target_modules=["query","values"] 
+    )
+    causal_lm = get_peft_model(base_model, peft_config)
 elif MODEL == "gptj":
     causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-j-6b").to(DEVICE)
     causal_lm_tokenizer = AutoTokenizer.from_pretrained(
