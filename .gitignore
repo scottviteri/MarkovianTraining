@@ -1,10 +1,10 @@
 *.pyc
 *__pycache__/
 *.egg*
-<<<<<<< HEAD
 *.html
 *.png
 *.txt
 *.json
+training_rao_test/*
 
 wandb
