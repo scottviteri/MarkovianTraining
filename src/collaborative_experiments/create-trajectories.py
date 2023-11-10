@@ -20,14 +20,15 @@ from einops import rearrange
 from typing import List
 from torch.nn.utils.rnn import pad_sequence
 
-DEVICE = "cpu"  # "mps"
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "mps")
+TOKENS_PER_ACTION = 10
 TOKENS_PER_OBSERVATION = 50
 # make each have 20 substrings 
 OBSERVATIONS_PER_DOCUMENT = 2 
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT 
-
-# distilgpt2  ;  EleutherAI/gpt-j-6b   ;
-MODEL = "distilgpt2" #"gpt2-xl"
+MODEL = "distilgpt2" #"gpt2-xl" # distilgpt2  ;  EleutherAI/gpt-j-6b   ;
+BATCH_SIZE = 2
+NUM_BATCHES=10
 
 """
 We will pull in passages from wikipedia articles. 
@@ -35,7 +36,6 @@ For each article that is long enough, we will break it into chunks of fixed toke
 The dataloader will feed the ith segment of BATCH_SIZE different articles to the transformer simultaneously to generate rewards.
 We reassemble the article subsequences to include (reward, prediction, article snippet) triples.
 """
-
 
 print("Loading Models")
 if MODEL == "distilgpt2":
@@ -70,11 +70,10 @@ dataset.set_format(type="torch", columns=["input_ids", "text"])
 # Define your features
 truncated_document_features = Features({
     'text': Value(dtype='string', id=None),
-    'input_ids': Array2D(shape=(TOKENS_PER_OBSERVATION, OBSERVATIONS_PER_DOCUMENT ), dtype='int32')
+    'input_ids': Array2D(shape=(TOKENS_PER_OBSERVATION, OBSERVATIONS_PER_DOCUMENT), dtype='int32')
 })
 
 truncated_documents = {
-
     "text": [],
     "input_ids": []
 }
@@ -125,68 +124,57 @@ def save_traj_to_drive(rao_list, bdebug: bool = False):
     dataset_rao.set_format(type="torch", columns=["input_ids"])
     dataset_rao.save_to_disk("training_rao_test")
 
-
-
 @dataclass
 class MyRAO:
     r: torchtyping.TensorType
     a: torchtyping.TensorType
     o: torchtyping.TensorType
 
-BATCH_SIZE = 2
-
 dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE)
-high_reward = causal_lm_tokenizer(["0.0 " for _ in range(BATCH_SIZE)], return_tensors="pt").input_ids.to(DEVICE)
+high_reward = causal_lm_tokenizer(["0.1 " for _ in range(BATCH_SIZE)], return_tensors="pt").input_ids.to(DEVICE)
 rao_sequences = []
-# data["input_ids"] is a pytorch tensor of dim:
-#   (BATCH_SIZE, OBSERVATIONS_PER_DOCUMENT, TOKENS_PER_OBSERVATION)
 i = 0
+optimizer = torch.optim.Adam(causal_lm.parameters())
 for data in dataloader:
-    if i > 2: break
+    if i > NUM_BATCHES: break
     i += 1
     rao_tensor = torch.tensor([[] for _ in range(BATCH_SIZE)], device=DEVICE, dtype=torch.int32)
     rao_sequence = []
-    # max number of generations
+    aggregate_reward = 0
     for observation_index in range(OBSERVATIONS_PER_DOCUMENT): 
-        with torch.no_grad():
-            incentive_rao = torch.cat((rao_tensor, high_reward), dim=-1)
-            outputs = causal_lm.generate(
-                inputs=incentive_rao,
-                output_scores=True,
-                return_dict_in_generate=True,
-                max_new_tokens=TOKENS_PER_OBSERVATION,
-                pad_token_id=causal_lm_tokenizer.pad_token_id,
-                eos_token_id=None # disable the EOS token
-            ) 
-
-        a: TensorType["batch", "seq_length"] = outputs.sequences[
-            :, -TOKENS_PER_OBSERVATION:
+        optimizer.zero_grad()
+        incentive_rao = torch.cat((rao_tensor, high_reward), dim=-1)
+        full_action = causal_lm.generate(
+            inputs=incentive_rao,
+            output_scores=True,
+            return_dict_in_generate=True,
+            max_new_tokens=TOKENS_PER_ACTION,
+            pad_token_id=causal_lm_tokenizer.pad_token_id,
+            eos_token_id=None # disable the EOS token
+        ) 
+        action : TensorType["batch", "seq_length"] = full_action.sequences[
+            :, -TOKENS_PER_ACTION:
         ]
-        o: TensorType["batch", "seq_length"] = data["input_ids"][:,:,observation_index] 
-        logits: TensorType["seq_len", "vocab_size"] = torch.stack(outputs.scores, dim=1)
-        # Shape: ["seq_len", "vocab_size"]
-        # Calculating the loss between the logits and the second part of the tensor
-        # Using elements of o as indices into logits_first_element to calculate cross entropy loss
-        # We want to select one element from the vocab_size dimension for each position in the seq_length dimension
-        # So we expand the dimensions of o to match the dimensions of logits
-        o_expanded = o.unsqueeze(-1)
-
-        # Now we can use gather to select the elements from logits
-        selected_logits = logits.gather(dim=2, index=o_expanded)
-
-        # selected_logits is now of shape [batch_size, seq_length, 1]
-        # If you want to remove the last dimension, you can use squeeze
-        selected_logits = selected_logits.squeeze(-1)
-        batch_rewards = selected_logits.mean(dim=-1)
-        scalar_reward: str = [str(round(r.item(), 3)) for r in batch_rewards]
-        #scalar_reward: str = str(round(logits[range(o.shape[0]), o].mean().item(), 3))
-        # Encode scalar reward as "r", a tensor of integers by tokenizing the scalar reward
-        r: TensorType["batch", "seq_length"] = causal_lm_tokenizer(
-            scalar_reward, return_tensors="pt", padding=True
+        true_obs: TensorType["batch", "seq_length"] = data["input_ids"][:,:,observation_index] 
+        true_obs = true_obs.to(DEVICE)
+        prediction = causal_lm(true_obs, labels=true_obs)
+        predicted_logits = prediction.logits
+        predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
+        selected_logits = predicted_logits.gather(dim=2, index=true_obs.unsqueeze(-1)).squeeze(-1)
+        batch_loss = selected_logits.mean(dim=-1)
+        aggregate_loss = batch_loss.mean()
+        print("aggregate loss: ", aggregate_loss)
+        print("action: ", causal_lm_tokenizer.batch_decode(action))
+        print("predicted obs: ", causal_lm_tokenizer.batch_decode(predicted_obs))
+        print("true obs:", causal_lm_tokenizer.batch_decode(true_obs))
+        aggregate_loss.backward()
+        optimizer.step()
+        string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
+        losses : TensorType["batch", "seq_length"] = causal_lm_tokenizer(
+            string_losses, return_tensors="pt", padding=True
         ).input_ids.to(DEVICE)
-        rao_tensor = torch.cat((rao_tensor, r, a, o), dim=-1)[:, -causal_lm.config.n_ctx//3:]
-        print(len(rao_sequence))
-        rao_sequence.append([MyRAO(r=r[i], a=a[i], o=o[i]) for i in range(BATCH_SIZE)])
+        rao_tensor = torch.cat((rao_tensor, losses, action, true_obs), dim=-1)[:, -causal_lm.config.n_ctx//3:]
+        rao_sequence.append([MyRAO(r=losses[i], a=action[i], o=true_obs[i]) for i in range(BATCH_SIZE)])
 
     for b in range(BATCH_SIZE):
         rao_sequences.append([rao_batch[b] for rao_batch in rao_sequence])
