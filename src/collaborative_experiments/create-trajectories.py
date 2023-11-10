@@ -27,8 +27,7 @@ OBSERVATIONS_PER_DOCUMENT = 2
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT 
 
 # distilgpt2  ;  EleutherAI/gpt-j-6b   ;
-MODEL = "gpt2-xl"
-DATA_CUT = 100
+MODEL = "distilgpt2" #"gpt2-xl"
 
 """
 We will pull in passages from wikipedia articles. 
@@ -96,9 +95,37 @@ truncated_dataset.set_format(
     type="torch", columns=["input_ids", "text"] 
 )
 
-print(f"Done Loading - number of articles: {dataset_resampled.shape}")
-
 loss_fn = torch.nn.CrossEntropyLoss()
+
+def save_traj_to_drive(rao_list, bdebug: bool = False):
+    # Create a new data set for SFT from all_rao
+    features = Features(
+        {
+            "input_ids": Sequence(
+                feature=Value(dtype="int32", id=None), length=-1, id=None
+            ),
+        }
+    )
+
+    buffer = {
+        "input_ids": [],
+    }
+    for smp_rao in rao_sequences:
+        sequ_ids = None
+        print(len(smp_rao))
+        for myrao in smp_rao:
+            if sequ_ids is None:
+                sequ_ids = torch.concat([myrao.r, myrao.a, myrao.o])
+            else:
+                sequ_ids = torch.concat([sequ_ids, myrao.r, myrao.a, myrao.o])
+
+        buffer["input_ids"].append(sequ_ids)
+
+    dataset_rao = Dataset.from_dict(buffer, features=features)
+    dataset_rao.set_format(type="torch", columns=["input_ids"])
+    dataset_rao.save_to_disk("training_rao_test")
+
+
 
 @dataclass
 class MyRAO:
@@ -108,16 +135,15 @@ class MyRAO:
 
 BATCH_SIZE = 2
 
-#dataset = dataset_resampled.map(lambda x:x, batched=True, batch_size=4)
 dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE)
 high_reward = causal_lm_tokenizer(["0.0 " for _ in range(BATCH_SIZE)], return_tensors="pt").input_ids.to(DEVICE)
 rao_sequences = []
 # data["input_ids"] is a pytorch tensor of dim:
 #   (BATCH_SIZE, OBSERVATIONS_PER_DOCUMENT, TOKENS_PER_OBSERVATION)
-#i = 0
+i = 0
 for data in dataloader:
-    #if i > 2: break
-    #i += 1
+    if i > 2: break
+    i += 1
     rao_tensor = torch.tensor([[] for _ in range(BATCH_SIZE)], device=DEVICE, dtype=torch.int32)
     rao_sequence = []
     # max number of generations
@@ -170,32 +196,4 @@ for data in dataloader:
 
     if len(rao_sequences) % 10 == 0 and len(rao_sequences) > 2:
         save_traj_to_drive(rao_sequences, bdebug=True)
-
-def save_traj_to_drive(rao_list, bdebug: bool = False):
-  # Create a new data set for SFT from all_rao
-  features = Features(
-      {
-          "input_ids": Sequence(
-              feature=Value(dtype="int32", id=None), length=-1, id=None
-          ),
-      }
-  )
-
-  buffer = {
-      "input_ids": [],
-  }
-  for smp_rao in rao_sequences:
-      sequ_ids = None
-      print(len(smp_rao))
-      for myrao in smp_rao:
-          if sequ_ids is None:
-              sequ_ids = torch.concat([myrao.r, myrao.a, myrao.o])
-          else:
-              sequ_ids = torch.concat([sequ_ids, myrao.r, myrao.a, myrao.o])
-
-      buffer["input_ids"].append(sequ_ids)
-
-  dataset_rao = Dataset.from_dict(buffer, features=features)
-  dataset_rao.set_format(type="torch", columns=["input_ids"])
-  dataset_rao.save_to_disk("training_rao_test")
 
