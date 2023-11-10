@@ -167,6 +167,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
         aggregate_loss = batch_loss.mean()
         predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
         if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%(NUM_BATCHES//10)==0:
+            print()
             print("aggregate loss: ", aggregate_loss)
             print("action: ", causal_lm_tokenizer.batch_decode(action))
             print("predicted obs: ", causal_lm_tokenizer.batch_decode(predicted_obs))
