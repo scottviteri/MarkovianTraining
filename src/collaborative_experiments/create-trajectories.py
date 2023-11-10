@@ -2,6 +2,7 @@ import os
 
 import torchtyping
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
 from datasets import load_dataset, Dataset, Features, Value, Sequence, Array2D
 from peft import LoraConfig, get_peft_model
 
@@ -9,12 +10,11 @@ import torch
 from torch.utils.data import DataLoader
 from torchtyping import TensorType, patch_typeguard
 from typeguard import typechecked
+
 from dataclasses import dataclass
-import fire
-import wandb
-import pandas as pd
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+
 from einops import rearrange
 
 from typing import List
@@ -25,8 +25,10 @@ TOKENS_PER_OBSERVATION = 50
 # make each have 20 substrings 
 OBSERVATIONS_PER_DOCUMENT = 2 
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT 
+
 # distilgpt2  ;  EleutherAI/gpt-j-6b   ;
-MODEL = "distilgpt2"
+MODEL = "gpt2-xl"
+DATA_CUT = 100
 
 """
 We will pull in passages from wikipedia articles. 
@@ -37,8 +39,25 @@ We reassemble the article subsequences to include (reward, prediction, article s
 
 
 print("Loading Models")
-causal_lm = AutoModelForCausalLM.from_pretrained(MODEL).to(DEVICE)
-causal_lm_tokenizer = AutoTokenizer.from_pretrained(MODEL)
+if MODEL == "distilgpt2":
+    causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2").to(DEVICE)
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+        "distilgpt2", padding_side="left"
+    )
+elif MODEL == "gptj":
+    causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-j-6b").to(DEVICE)
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+        "EleutherAI/gpt-j-6b", padding_side="left"
+    )
+elif MODEL == "gpt2-large":
+    causal_lm = AutoModelForCausalLM.from_pretrained("gpt2-large").to(DEVICE)
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+        "gpt2-large", padding_side="left"
+    )
+elif MODEL == "gpt2-xl":
+    causal_lm = AutoModelForCausalLM.from_pretrained("gpt2-xl").to(DEVICE)
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained("gpt2-xl", padding_side="left")
+
 causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
 
 print("Loading Data")
@@ -56,9 +75,11 @@ truncated_document_features = Features({
 })
 
 truncated_documents = {
+
     "text": [],
     "input_ids": []
 }
+
 for document in dataset["train"]:
     # Only accept long enough samples
     if document["input_ids"].shape[-1] >= TOKENS_PER_DOCUMENT:
@@ -75,7 +96,8 @@ truncated_dataset.set_format(
     type="torch", columns=["input_ids", "text"] 
 )
 
-print("Done Loading")
+print(f"Done Loading - number of articles: {dataset_resampled.shape}")
+
 loss_fn = torch.nn.CrossEntropyLoss()
 
 @dataclass
@@ -83,13 +105,6 @@ class MyRAO:
     r: torchtyping.TensorType
     a: torchtyping.TensorType
     o: torchtyping.TensorType
-
-#def collate_fn(batch):
-#    # Your input sequences are assumed to be under 'input_ids' key
-#    sequences = [item['input_ids'] for item in batch]
-#    for i, item in enumerate(batch):
-#        item["input_ids"] = sequences[i]
-#    return batch
 
 BATCH_SIZE = 2
 
@@ -99,10 +114,10 @@ high_reward = causal_lm_tokenizer(["0.0 " for _ in range(BATCH_SIZE)], return_te
 rao_sequences = []
 # data["input_ids"] is a pytorch tensor of dim:
 #   (BATCH_SIZE, OBSERVATIONS_PER_DOCUMENT, TOKENS_PER_OBSERVATION)
-i = 0
+#i = 0
 for data in dataloader:
-    if i > 2: break
-    i += 1
+    #if i > 2: break
+    #i += 1
     rao_tensor = torch.tensor([[] for _ in range(BATCH_SIZE)], device=DEVICE, dtype=torch.int32)
     rao_sequence = []
     # max number of generations
@@ -149,33 +164,38 @@ for data in dataloader:
 
     for b in range(BATCH_SIZE):
         rao_sequences.append([rao_batch[b] for rao_batch in rao_sequence])
+        
+    if len(rao_sequences) % 5 == 0 and len(rao_sequences) > 2:
+        save_traj_to_drive(rao_sequences, bdebug=False)
 
-    # if len(all_rao) >= 3:
-    #    break
+    if len(rao_sequences) % 10 == 0 and len(rao_sequences) > 2:
+        save_traj_to_drive(rao_sequences, bdebug=True)
 
-# Create a new data set for SFT from all_rao
-features = Features(
-    {
-        "input_ids": Sequence(
-            feature=Value(dtype="int32", id=None), length=-1, id=None
-        ),
-    }
-)
+def save_traj_to_drive(rao_list, bdebug: bool = False):
+  # Create a new data set for SFT from all_rao
+  features = Features(
+      {
+          "input_ids": Sequence(
+              feature=Value(dtype="int32", id=None), length=-1, id=None
+          ),
+      }
+  )
 
-buffer = {
-    "input_ids": [],
-}
-for smp_rao in rao_sequences:
-    sequ_ids = None
-    print(len(smp_rao))
-    for myrao in smp_rao:
-        if sequ_ids is None:
-            sequ_ids = torch.concat([myrao.r, myrao.a, myrao.o])
-        else:
-            sequ_ids = torch.concat([sequ_ids, myrao.r, myrao.a, myrao.o])
+  buffer = {
+      "input_ids": [],
+  }
+  for smp_rao in rao_sequences:
+      sequ_ids = None
+      print(len(smp_rao))
+      for myrao in smp_rao:
+          if sequ_ids is None:
+              sequ_ids = torch.concat([myrao.r, myrao.a, myrao.o])
+          else:
+              sequ_ids = torch.concat([sequ_ids, myrao.r, myrao.a, myrao.o])
 
-    buffer["input_ids"].append(sequ_ids)
+      buffer["input_ids"].append(sequ_ids)
 
-dataset_rao = Dataset.from_dict(buffer, features=features)
-dataset_rao.set_format(type="torch", columns=["input_ids"])
-dataset_rao.save_to_disk("training_rao_test")
+  dataset_rao = Dataset.from_dict(buffer, features=features)
+  dataset_rao.set_format(type="torch", columns=["input_ids"])
+  dataset_rao.save_to_disk("training_rao_test")
+
