@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 
 from einops import rearrange, reduce
 
+import numpy as np
+
 from typing import List
 from torch.nn.utils.rnn import pad_sequence
 import math
@@ -30,7 +32,7 @@ OBSERVATIONS_PER_DOCUMENT = 20
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT 
 MODEL = "distilgpt2" #"gpt2-xl" # distilgpt2  ;  EleutherAI/gpt-j-6b   ;
 BATCH_SIZE = 4 
-NUM_BATCHES = 100 
+NUM_BATCHES = 10 
 NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES
 
 """
@@ -153,15 +155,18 @@ dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE, drop_last=True
 high_reward = causal_lm_tokenizer(["0.1 " for _ in range(BATCH_SIZE)], return_tensors="pt").input_ids.to(DEVICE)
 rao_sequences = []
 i = 0
+aggregate_losses = []
 optimizer = torch.optim.Adam(causal_lm.parameters())
 for data in tqdm(dataloader, total=NUM_BATCHES):
     if i > NUM_BATCHES: break
     i += 1
     rao_tensor = torch.tensor([[] for _ in range(BATCH_SIZE)], device=DEVICE, dtype=torch.int32)
     rao_sequence = []
-    aggregate_reward = 0
     for observation_index in range(OBSERVATIONS_PER_DOCUMENT): 
         optimizer.zero_grad()
+        # Update high_reward every iteration with a string of a number one standard deviation smaller than the mean of previous aggregate_losses
+        high_reward_value = round(np.mean(aggregate_losses) - np.std(aggregate_losses),3) if aggregate_losses else 6.0
+        high_reward = causal_lm_tokenizer([str(high_reward_value) for _ in range(BATCH_SIZE)], return_tensors="pt").input_ids.to(DEVICE)
         incentive_rao = torch.cat((rao_tensor, high_reward), dim=-1)
         full_action = causal_lm.generate(
             inputs=incentive_rao,
@@ -190,12 +195,14 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
         predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
         if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%(math.ceil(NUM_BATCHES/10.0))==0:
             print()
-            print("aggregate loss: ", aggregate_loss)
+            print("average loss: ", high_reward_value )
+            print("loss: ", aggregate_loss)
             print("action: ", causal_lm_tokenizer.batch_decode(action))
             print("predicted obs: ", causal_lm_tokenizer.batch_decode(predicted_obs))
             print("true obs:", causal_lm_tokenizer.batch_decode(true_obs))
         aggregate_loss.backward()
         optimizer.step()
+        aggregate_losses.append(aggregate_loss.item())
         string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
         losses : TensorType["batch", "seq_length"] = causal_lm_tokenizer(
             string_losses, return_tensors="pt", padding=True
