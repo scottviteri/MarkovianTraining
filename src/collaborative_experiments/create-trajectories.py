@@ -157,6 +157,9 @@ rao_sequences = []
 i = 0
 aggregate_losses = []
 optimizer = torch.optim.Adam(causal_lm.parameters())
+total_steps = NUM_BATCHES * OBSERVATIONS_PER_DOCUMENT
+warmup_steps = int(0.1 * total_steps)
+scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, total_steps=total_steps, pct_start=warmup_steps/total_steps)
 for data in tqdm(dataloader, total=NUM_BATCHES):
     if i > NUM_BATCHES: break
     i += 1
@@ -194,7 +197,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
         aggregate_loss = batch_loss.mean()
         predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
         if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%(math.ceil(NUM_BATCHES/10.0))==0:
-            print()
+            print(); print()
             print("average loss: ", high_reward_value )
             print("loss: ", aggregate_loss)
             print("action: ", causal_lm_tokenizer.batch_decode(action))
@@ -202,6 +205,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
             print("true obs:", causal_lm_tokenizer.batch_decode(true_obs))
         aggregate_loss.backward()
         optimizer.step()
+        scheduler.step()
         aggregate_losses.append(aggregate_loss.item())
         string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
         losses : TensorType["batch", "seq_length"] = causal_lm_tokenizer(
