@@ -185,12 +185,6 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
             input = rearrange(predicted_logits, 'batch seq_length vocab_size-> batch vocab_size seq_length'),
             target = true_obs 
         )
-        #predicted_logits = torch.zeros_like(predicted_logits)  # Create a tensor of zeros with the same shape as predicted_logits
-        #predicted_logits.scatter_(dim=-1, index=true_obs.unsqueeze(-1), value=10)  # Scatter ones at the true_obs indices0
-        #flat_logits = rearrange(predicted_logits, 'batch seq_length vocab_size-> (batch seq_length) vocab_size')
-        #flat_obs = rearrange(true_obs, 'batch seq_length -> (batch seq_length)')
-        #all_losses = loss_fn(flat_logits, flat_obs)
-        #out = rearrange(all_losses, "(batch seq_length) -> batch seq_length", batch=BATCH_SIZE)
         batch_loss = out.mean(dim=-1)
         aggregate_loss = batch_loss.mean()
         predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
@@ -200,8 +194,8 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
             print("action: ", causal_lm_tokenizer.batch_decode(action))
             print("predicted obs: ", causal_lm_tokenizer.batch_decode(predicted_obs))
             print("true obs:", causal_lm_tokenizer.batch_decode(true_obs))
-        #aggregate_loss.backward()
-        #optimizer.step()
+        aggregate_loss.backward()
+        optimizer.step()
         string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
         losses : TensorType["batch", "seq_length"] = causal_lm_tokenizer(
             string_losses, return_tensors="pt", padding=True
