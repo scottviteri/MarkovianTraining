@@ -19,16 +19,18 @@ from einops import rearrange, reduce
 
 from typing import List
 from torch.nn.utils.rnn import pad_sequence
+import math
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "mps")
+#DEVICE = "cpu"
 TOKENS_PER_ACTION = 10
-TOKENS_PER_OBSERVATION = 50
+TOKENS_PER_OBSERVATION = 10
 # make each have 20 substrings 
-OBSERVATIONS_PER_DOCUMENT = 10
+OBSERVATIONS_PER_DOCUMENT = 20 
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT 
 MODEL = "distilgpt2" #"gpt2-xl" # distilgpt2  ;  EleutherAI/gpt-j-6b   ;
 BATCH_SIZE = 4 
-NUM_BATCHES=100
+NUM_BATCHES = 100 
 NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES
 
 """
@@ -39,20 +41,20 @@ We reassemble the article subsequences to include (reward, prediction, article s
 """
 
 print("Loading Models")
-if MODEL == "distilgpt2":
-    base_model = AutoModelForCausalLM.from_pretrained("distilgpt2").to(DEVICE)
-    causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-        "distilgpt2", padding_side="left"
-    )
-    # Define the PEFT configuration
-    peft_config = LoraConfig(
+
+peft_config = LoraConfig(
         base_model_name_or_path="distilgpt2",
         r = 32,
         lora_alpha=32,
         lora_dropout=0.1
         #target_modules=["query","values"] 
     )
-    causal_lm = get_peft_model(base_model, peft_config)
+
+if MODEL == "distilgpt2":
+    causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2").to(DEVICE)
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+        "distilgpt2", padding_side="left"
+    )
 elif MODEL == "gptj":
     causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-j-6b").to(DEVICE)
     causal_lm_tokenizer = AutoTokenizer.from_pretrained(
@@ -67,36 +69,43 @@ elif MODEL == "gpt2-xl":
     causal_lm = AutoModelForCausalLM.from_pretrained("gpt2-xl").to(DEVICE)
     causal_lm_tokenizer = AutoTokenizer.from_pretrained("gpt2-xl", padding_side="left")
 
+causal_lm = get_peft_model(causal_lm, peft_config)
 causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
 
 print("Loading Data")
 
-dataset = load_dataset("wikipedia", "20220301.frr", split=f"train[:{NUM_DATAPOINTS}]")
-dataset = dataset.map(lambda example: causal_lm_tokenizer(example["text"]), batched=True) 
-# removing attention mask from features because the segments are all valid tokens
-# dataset.set_format(type="torch", columns=["input_ids", "attention_mask", "text"])
-dataset.set_format(type="torch", columns=["input_ids", "text"])
+POINTS_FROM_DATASET = NUM_DATAPOINTS
+while 1:
+    dataset = load_dataset("wikipedia", "20220301.frr", split=f"train[:{POINTS_FROM_DATASET}]")
+    dataset = dataset.map(lambda example: causal_lm_tokenizer(example["text"]), batched=True) 
+    dataset.set_format(type="torch", columns=["input_ids", "text"])
 
-# Define your features
-truncated_document_features = Features({
-    'text': Value(dtype='string', id=None),
-    'input_ids': Array2D(shape=(TOKENS_PER_OBSERVATION, OBSERVATIONS_PER_DOCUMENT), dtype='int32')
-})
+    # Define your features
+    truncated_document_features = Features({
+        'text': Value(dtype='string', id=None),
+        'input_ids': Array2D(shape=(TOKENS_PER_OBSERVATION, OBSERVATIONS_PER_DOCUMENT), dtype='int32')
+    })
 
-truncated_documents = {
-    "text": [],
-    "input_ids": []
-}
+    truncated_documents = {
+        "text": [],
+        "input_ids": []
+    }
 
-for document in dataset:
-    # Only accept long enough samples
-    if document["input_ids"].shape[-1] >= TOKENS_PER_DOCUMENT:
-        # truncate documents
-        truncated_tokens = document["input_ids"][:TOKENS_PER_DOCUMENT]
-        # view() places elements in reverse dimension order, aka into the TOKENS_PER_OBSERVATION dim
-        truncated_documents["input_ids"].append(truncated_tokens.view((TOKENS_PER_OBSERVATION, OBSERVATIONS_PER_DOCUMENT)))
-        # leave the text alone (not truncated)
-        truncated_documents["text"].append(document["text"])
+    i = 0
+    for document in dataset:
+        if i == NUM_DATAPOINTS: break
+        # Only accept long enough samples
+        if document["input_ids"].shape[-1] >= TOKENS_PER_DOCUMENT:
+            i += 1
+            # truncate documents
+            truncated_tokens = document["input_ids"][:TOKENS_PER_DOCUMENT]
+            # view() places elements in reverse dimension order, aka into the TOKENS_PER_OBSERVATION dim
+            truncated_documents["input_ids"].append(truncated_tokens.view((TOKENS_PER_OBSERVATION, OBSERVATIONS_PER_DOCUMENT)))
+            # leave the text alone (not truncated)
+            truncated_documents["text"].append(document["text"])
+
+    if i == NUM_DATAPOINTS: break
+    POINTS_FROM_DATASET *= 2
 
 # Convert the list of dictionaries into a Dataset in one go
 truncated_dataset = Dataset.from_dict(truncated_documents, features=truncated_document_features)
@@ -168,21 +177,31 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
         true_obs: TensorType["batch", "seq_length"] = data["input_ids"][:,1:,observation_index]
         #true_obs = torch.randint(50257, size=true_obs.shape)
         true_obs = true_obs.to(DEVICE)
+        # Commenting out the current predicted_logits and testing loss from a probability distribution that assigns 1 to the correct labels, and 0 otherwise
         prediction = causal_lm(torch.cat((incentive_rao, action, true_obs), dim=-1)[:, -causal_lm.config.n_ctx//3:])
         predicted_logits = prediction.logits[:,-TOKENS_PER_OBSERVATION:-1,:]
-        flat_logits = rearrange(predicted_logits, 'batch seq_length vocab_size-> (batch seq_length) vocab_size')
-        flat_obs = rearrange(true_obs, 'batch seq_length -> (batch seq_length)')
-        batch_loss = rearrange(loss_fn(flat_logits, flat_obs), "(batch seq_length) -> batch seq_length", batch=BATCH_SIZE).mean(dim=-1)
+        # out shape = (batch seq_length)
+        out = loss_fn(
+            input = rearrange(predicted_logits, 'batch seq_length vocab_size-> batch vocab_size seq_length'),
+            target = true_obs 
+        )
+        #predicted_logits = torch.zeros_like(predicted_logits)  # Create a tensor of zeros with the same shape as predicted_logits
+        #predicted_logits.scatter_(dim=-1, index=true_obs.unsqueeze(-1), value=10)  # Scatter ones at the true_obs indices0
+        #flat_logits = rearrange(predicted_logits, 'batch seq_length vocab_size-> (batch seq_length) vocab_size')
+        #flat_obs = rearrange(true_obs, 'batch seq_length -> (batch seq_length)')
+        #all_losses = loss_fn(flat_logits, flat_obs)
+        #out = rearrange(all_losses, "(batch seq_length) -> batch seq_length", batch=BATCH_SIZE)
+        batch_loss = out.mean(dim=-1)
         aggregate_loss = batch_loss.mean()
         predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
-        if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%(NUM_BATCHES//10)==0:
+        if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%(math.ceil(NUM_BATCHES/10.0))==0:
             print()
             print("aggregate loss: ", aggregate_loss)
             print("action: ", causal_lm_tokenizer.batch_decode(action))
             print("predicted obs: ", causal_lm_tokenizer.batch_decode(predicted_obs))
             print("true obs:", causal_lm_tokenizer.batch_decode(true_obs))
-        aggregate_loss.backward()
-        optimizer.step()
+        #aggregate_loss.backward()
+        #optimizer.step()
         string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
         losses : TensorType["batch", "seq_length"] = causal_lm_tokenizer(
             string_losses, return_tensors="pt", padding=True
