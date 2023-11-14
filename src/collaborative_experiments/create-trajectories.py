@@ -204,7 +204,8 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
         )
         batch_loss = out.mean(dim=-1)
         aggregate_loss = batch_loss.mean()
-        if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%(math.ceil(NUM_BATCHES/10.0))==0:
+        #if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%(math.ceil(NUM_BATCHES/10.0))==0:
+        if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%5==0:
             print(); print()
             print("average loss: ", high_reward_value )
             print("loss: ", aggregate_loss)
