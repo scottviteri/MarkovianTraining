@@ -158,8 +158,12 @@ i = 0
 aggregate_losses = []
 optimizer = torch.optim.Adam(causal_lm.parameters())
 total_steps = NUM_BATCHES * OBSERVATIONS_PER_DOCUMENT
-warmup_steps = int(0.1 * total_steps)
-scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.01, total_steps=total_steps, pct_start=warmup_steps/total_steps)
+scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, 
+                     base_lr = 1e-4, # Initial learning rate which is the lower boundary in the cycle for each parameter group
+                     max_lr = 1e-3, # Upper learning rate boundaries in the cycle for each parameter group
+                     step_size_up = 4, # Number of training iterations in the increasing half of a cycle
+                     cycle_momentum = False,
+                     mode = "triangular")
 for data in tqdm(dataloader, total=NUM_BATCHES):
     if i > NUM_BATCHES: break
     i += 1
@@ -179,15 +183,20 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
             pad_token_id=causal_lm_tokenizer.pad_token_id,
             eos_token_id=None # disable the EOS token
         ) 
-        action : TensorType["batch", "seq_length"] = full_action.sequences[
-            :, -TOKENS_PER_ACTION:
-        ]
+        #action : TensorType["batch", "seq_length"] = full_action.sequences[
+        #    :, -TOKENS_PER_ACTION:
+        #]
+        action: TensorType["batch", "seq_length"] = data["input_ids"][:,:,observation_index]
         true_obs: TensorType["batch", "seq_length"] = data["input_ids"][:,1:,observation_index]
         #true_obs = torch.randint(50257, size=true_obs.shape)
+        action = action.to(DEVICE)
         true_obs = true_obs.to(DEVICE)
         # Commenting out the current predicted_logits and testing loss from a probability distribution that assigns 1 to the correct labels, and 0 otherwise
         prediction = causal_lm(torch.cat((incentive_rao, action, true_obs), dim=-1)[:, -causal_lm.config.n_ctx//3:])
         predicted_logits = prediction.logits[:,-TOKENS_PER_OBSERVATION:-1,:]
+        predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
+        #predicted_logits = torch.ones_like(predicted_logits) * -10.0
+        #predicted_logits.scatter_(2, true_obs.unsqueeze(-1), 10.0)
         # out shape = (batch seq_length)
         out = loss_fn(
             input = rearrange(predicted_logits, 'batch seq_length vocab_size-> batch vocab_size seq_length'),
@@ -195,7 +204,6 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
         )
         batch_loss = out.mean(dim=-1)
         aggregate_loss = batch_loss.mean()
-        predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
         if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%(math.ceil(NUM_BATCHES/10.0))==0:
             print(); print()
             print("average loss: ", high_reward_value )
