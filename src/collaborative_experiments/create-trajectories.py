@@ -156,14 +156,14 @@ high_reward = causal_lm_tokenizer(["0.1 " for _ in range(BATCH_SIZE)], return_te
 rao_sequences = []
 i = 0
 aggregate_losses = []
-optimizer = torch.optim.Adam(causal_lm.parameters())
+optimizer = torch.optim.Adam(causal_lm.parameters(), lr=1e-4)
 total_steps = NUM_BATCHES * OBSERVATIONS_PER_DOCUMENT
-scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, 
-                     base_lr = 1e-4, # Initial learning rate which is the lower boundary in the cycle for each parameter group
-                     max_lr = 1e-3, # Upper learning rate boundaries in the cycle for each parameter group
-                     step_size_up = 4, # Number of training iterations in the increasing half of a cycle
-                     cycle_momentum = False,
-                     mode = "triangular")
+#scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, 
+#                     base_lr = 1e-4, # Initial learning rate which is the lower boundary in the cycle for each parameter group
+#                     max_lr = 1e-3, # Upper learning rate boundaries in the cycle for each parameter group
+#                     step_size_up = 4, # Number of training iterations in the increasing half of a cycle
+#                     cycle_momentum = False,
+#                     mode = "triangular")
 for data in tqdm(dataloader, total=NUM_BATCHES):
     if i > NUM_BATCHES: break
     i += 1
@@ -213,7 +213,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
             print("true obs:", causal_lm_tokenizer.batch_decode(true_obs))
         aggregate_loss.backward()
         optimizer.step()
-        scheduler.step()
+        #scheduler.step()
         aggregate_losses.append(aggregate_loss.item())
         string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
         losses : TensorType["batch", "seq_length"] = causal_lm_tokenizer(
