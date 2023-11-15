@@ -195,7 +195,7 @@ dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE, drop_last=True
 rao_sequences = []
 i = 0
 aggregate_losses = []
-optimizer = torch.optim.Adam(causal_lm.parameters(), lr=1e-4)
+optimizer = torch.optim.Adam(causal_lm.parameters(), lr=1e-3)
 total_steps = NUM_BATCHES * OBSERVATIONS_PER_DOCUMENT
 warmup_steps = int(0.1 * total_steps)
 
@@ -223,7 +223,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
             :, -TOKENS_PER_ACTION:
         ]
         action_probs = torch.softmax(torch.stack(full_action.scores,dim=1)[:,-TOKENS_PER_ACTION:], dim=-1)
-        batch_entropy = 0.2 * ( action_probs * torch.log2(action_probs)).sum(dim=-1).mean(dim=-1)
+        batch_entropy = 2 * ( action_probs * torch.log2(action_probs)).sum(dim=-1).mean(dim=-1)
         #start_observation = causal_lm_tokenizer([" Observation: " for _ in range(BATCH_SIZE)], return_tensors="pt").input_ids.to(DEVICE)
         #action: TensorType["batch", "seq_length"] = data["input_ids"][:,observation_index, :TOKENS_PER_ACTION]
         #action = action.to(DEVICE)
