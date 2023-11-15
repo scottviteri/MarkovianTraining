@@ -19,6 +19,7 @@ from einops import rearrange
 import numpy as np
 import math
 
+from transformers import GPTJPreTrainedModel
 from typing import List
 from torch.nn.utils.rnn import pad_sequence
 
@@ -87,7 +88,20 @@ elif MODEL == "gpt2":
 causal_lm = get_peft_model(causal_lm, peft_config)
 causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
 
-print("Loading Data")
+#class MyModel(torch.nn.Module):
+#    def __init__(self, ...):
+#        super(MyModel, self).__init__()
+#        self.part1 = causal_lm.transformer.h[:15].to("cuda:0")
+#        self.part2 = causal_lm.transformer.h[15:].to("cuda:1")
+#
+#    def forward(self, x):
+#        x = x.to('cuda:0')
+#        x = self.part1(x)  # First part of the model on GPU 0
+#        x = x.to('cuda:1')
+#        x = self.part2(x)  # Second part of the model on GPU 1
+#        return x
+#
+#print("Loading Data")
 
 
 POINTS_FROM_DATASET = NUM_DATAPOINTS
@@ -208,6 +222,8 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
         action : TensorType["batch", "seq_length"] = full_action.sequences[
             :, -TOKENS_PER_ACTION:
         ]
+        action_probs = torch.softmax(torch.stack(full_action.scores,dim=1)[:,-TOKENS_PER_ACTION:], dim=-1)
+        batch_entropy = 0.2 * ( action_probs * torch.log2(action_probs)).sum(dim=-1).mean(dim=-1)
         #start_observation = causal_lm_tokenizer([" Observation: " for _ in range(BATCH_SIZE)], return_tensors="pt").input_ids.to(DEVICE)
         #action: TensorType["batch", "seq_length"] = data["input_ids"][:,observation_index, :TOKENS_PER_ACTION]
         #action = action.to(DEVICE)
@@ -223,7 +239,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
             target = true_obs
         )
         batch_loss = out.mean(dim=-1)
-        aggregate_loss = batch_loss.mean()
+        aggregate_loss = (batch_loss.mean() + batch_entropy.mean())
         aggregate_losses.append(aggregate_loss.item())
         predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
         if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%5==0:
@@ -232,7 +248,8 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
         #if True:
             print()
             print()
-            print("loss: ", aggregate_loss)
+            print("loss: ", batch_loss[0])
+            print("scaled entropy:", batch_entropy[0])
             print("average loss: ", np.mean(aggregate_losses))
             print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]))
             print("predicted obs: ", repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]))
