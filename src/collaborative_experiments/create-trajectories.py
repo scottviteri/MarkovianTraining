@@ -187,6 +187,7 @@ rao_sequences = []
 i = 0
 aggregate_losses = []
 optimizer = torch.optim.Adam(causal_lm.parameters(), lr=1e-4)
+with open(f'../../saved_weights_and_losses/{MODEL}_training_info.txt', 'w+') as f: print("\n", file=f)
 
 for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloader):
     if NUM_BATCHES and i > NUM_BATCHES: break
@@ -248,12 +249,12 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
                 print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]), file=f)
                 print("predicted obs: ", repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]), file=f)
                 print("true obs:", repr(causal_lm_tokenizer.batch_decode(true_obs)[0]), file=f)
-            print("\n\nloss: ", batch_loss[0], file=f)
-            if ENTROPY_PENALTY: print("e ^ negentropy:", batch_entropy[0], file=f)
-            print("average loss: ", np.mean(aggregate_losses), file=f)
-            print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]), file=f)
-            print("predicted obs: ", repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]), file=f)
-            print("true obs:", repr(causal_lm_tokenizer.batch_decode(true_obs)[0]), file=f)
+            print("\n\nloss: ", batch_loss[0])
+            if ENTROPY_PENALTY: print("e ^ negentropy:", batch_entropy[0])
+            print("average loss: ", np.mean(aggregate_losses))
+            print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]))
+            print("predicted obs: ", repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]))
+            print("true obs:", repr(causal_lm_tokenizer.batch_decode(true_obs)[0]))
 
         aggregate_loss.backward()
         optimizer.step()
