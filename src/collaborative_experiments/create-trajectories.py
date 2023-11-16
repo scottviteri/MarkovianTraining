@@ -36,7 +36,7 @@ NUM_BATCHES = 1000
 NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES
 ENTROPY_PENALTY = False
 SAVE_WEIGHTS_INTERVAL = 30 
-PRINT_INTERVAL = 5 if MODEL == "gptj" else 20
+PRINT_INTERVAL = 5 if MODEL == "gptj" or MODEL == "mistral" else 20
 LOAD_MODEL = False
 
 """
@@ -60,6 +60,16 @@ peft_config = LoraConfig(
 if  LOAD_MODEL:
     causal_lm_tokenizer = AutoTokenizer.from_pretrained(f"/content/drive/MyDrive/CollaborativeTrainingModelWeights/tokenizer_{MODEL}")
     causal_lm = AutoModelForCausalLM.from_pretrained(f"/content/drive/MyDrive/CollaborativeTrainingModelWeights/trained_{MODEL}")
+    causal_lm.to(DEVICE)
+    if MODEL == "gptj": CTXT_WINDOW_SIZE = causal_lm.config.n_positions 
+    elif MODEL == "gptj": CTXT_WINDOW_SIZE = causal_lm.config.sliding_window
+    else: CTXT_WINDOW_SIZE = causal_lm.config.n_ctx
+
+elif MODEL == "mistral":
+    causal_lm = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1").to(DEVICE)
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1", padding_side="left")
+    CTXT_WINDOW_SIZE = causal_lm.config.sliding_window
+
 elif MODEL == "distilgpt2":
     causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2").to(DEVICE)
     causal_lm_tokenizer = AutoTokenizer.from_pretrained(
