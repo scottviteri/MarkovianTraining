@@ -6,5 +6,5 @@
 *.txt
 *.json
 training_rao_test/*
-
+saved_weights/*
 wandb

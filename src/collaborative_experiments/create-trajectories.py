@@ -1,7 +1,9 @@
+#pip install transformers datasets==2.14.6 torchtyping==0.1.4 peft einops apache_beam==2.51.0 matplotlib
+
 import os
 
 import torchtyping
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModel
 
 from datasets import load_dataset, Dataset, Features, Value, Sequence, Array2D
 from peft import LoraConfig, get_peft_model
@@ -19,8 +21,6 @@ from einops import rearrange
 import numpy as np
 import math
 
-from transformers import GPTJPreTrainedModel
-from transformers import GPT2LMHeadModel
 from typing import List
 from torch.nn.utils.rnn import pad_sequence
 
@@ -35,6 +35,9 @@ BATCH_SIZE = 4
 NUM_BATCHES = 1000
 NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES
 ENTROPY_PENALTY = False
+SAVE_WEIGHTS_INTERVAL = 30 
+PRINT_INTERVAL = 5 if MODEL == "gptj" else 20
+LOAD_MODEL = False
 
 """
 We will pull in passages from wikipedia articles.
@@ -54,7 +57,10 @@ peft_config = LoraConfig(
     )
 
 
-if MODEL == "distilgpt2":
+if  LOAD_MODEL:
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained(f"/content/drive/MyDrive/CollaborativeTrainingModelWeights/tokenizer_{MODEL}")
+    causal_lm = AutoModelForCausalLM.from_pretrained(f"/content/drive/MyDrive/CollaborativeTrainingModelWeights/trained_{MODEL}")
+elif MODEL == "distilgpt2":
     causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2").to(DEVICE)
     causal_lm_tokenizer = AutoTokenizer.from_pretrained(
         "distilgpt2", padding_side="left"
@@ -84,7 +90,6 @@ elif MODEL == "gpt2":
     causal_lm = AutoModelForCausalLM.from_pretrained("gpt2").to(DEVICE)
     causal_lm_tokenizer = AutoTokenizer.from_pretrained("gpt2", padding_side="left")
     CTXT_WINDOW_SIZE = causal_lm.config.n_ctx
-
 
 causal_lm = get_peft_model(causal_lm, peft_config)
 causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
@@ -187,6 +192,11 @@ warmup_steps = int(0.1 * total_steps)
 for data in tqdm(dataloader, total=NUM_BATCHES):
     if i > NUM_BATCHES: break
     i += 1
+    if i > 1 and i%SAVE_WEIGHTS_INTERVAL == 0: 
+        print(f"Saving trained_{MODEL}")
+        causal_lm_tokenizer.save_pretrained(f"../../saved_weights//tokenizer_{MODEL}")
+        causal_lm.save_pretrained(f"../../saved_weights/trained_{MODEL}")
+        #torch.save(causal_lm.state_dict(), f"../../saved_weights/trained_{MODEL}_weights.pth")
     rao_tensor = torch.tensor([[] for _ in range(BATCH_SIZE)], device=DEVICE, dtype=torch.int32)
     rao_sequence = []
     for observation_index in range(OBSERVATIONS_PER_DOCUMENT):
@@ -228,7 +238,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
             aggregate_loss = batch_loss.mean()
         aggregate_losses.append(aggregate_loss.item())
         predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
-        if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%20==0:
+        if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%PRINT_INTERVAL==0:
         #if i%(math.ceil(NUM_BATCHES/20.0))==0:
         #if aggregate_loss.item() < (np.mean(aggregate_losses) - np.std(aggregate_losses)):
         #if True:
