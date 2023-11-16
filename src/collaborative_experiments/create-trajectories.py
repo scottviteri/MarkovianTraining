@@ -20,6 +20,7 @@ import numpy as np
 import math
 
 from transformers import GPTJPreTrainedModel
+from transformers import GPT2LMHeadModel
 from typing import List
 from torch.nn.utils.rnn import pad_sequence
 
@@ -29,7 +30,7 @@ TOKENS_PER_OBSERVATION = 20
 # make each have 20 substrings
 OBSERVATIONS_PER_DOCUMENT = 10
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT
-MODEL = "gptj" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   ;
+MODEL = "gpt2" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
 BATCH_SIZE = 2
 
 NUM_BATCHES = 1000
@@ -87,22 +88,6 @@ elif MODEL == "gpt2":
 
 causal_lm = get_peft_model(causal_lm, peft_config)
 causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
-
-#class MyModel(torch.nn.Module):
-#    def __init__(self, ...):
-#        super(MyModel, self).__init__()
-#        self.part1 = causal_lm.transformer.h[:15].to("cuda:0")
-#        self.part2 = causal_lm.transformer.h[15:].to("cuda:1")
-#
-#    def forward(self, x):
-#        x = x.to('cuda:0')
-#        x = self.part1(x)  # First part of the model on GPU 0
-#        x = x.to('cuda:1')
-#        x = self.part2(x)  # Second part of the model on GPU 1
-#        return x
-#
-#print("Loading Data")
-
 
 POINTS_FROM_DATASET = NUM_DATAPOINTS
 while 1:
@@ -195,7 +180,7 @@ dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE, drop_last=True
 rao_sequences = []
 i = 0
 aggregate_losses = []
-optimizer = torch.optim.Adam(causal_lm.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(causal_lm.parameters(), lr=1e-4)
 total_steps = NUM_BATCHES * OBSERVATIONS_PER_DOCUMENT
 warmup_steps = int(0.1 * total_steps)
 
@@ -214,6 +199,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
         full_action = causal_lm.generate(
             inputs=incentive_rao,
             output_scores=True,
+            do_sample=True,
             return_dict_in_generate=True,
             max_new_tokens=TOKENS_PER_ACTION,
             pad_token_id=causal_lm_tokenizer.pad_token_id,
@@ -222,8 +208,10 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
         action : TensorType["batch", "seq_length"] = full_action.sequences[
             :, -TOKENS_PER_ACTION:
         ]
-        action_probs = torch.softmax(torch.stack(full_action.scores,dim=1)[:,-TOKENS_PER_ACTION:], dim=-1)
-        batch_entropy = 2 * ( action_probs * torch.log2(action_probs)).sum(dim=-1).mean(dim=-1)
+        scores=torch.stack(full_action.scores,dim=1)
+        scores.requires_grad = True
+        action_probs = torch.softmax(scores[:,-TOKENS_PER_ACTION:], dim=-1) + 1e-10
+        batch_entropy = torch.e ** ( torch.log2(action_probs) * action_probs).sum(dim=-1).mean(dim=-1)
         #start_observation = causal_lm_tokenizer([" Observation: " for _ in range(BATCH_SIZE)], return_tensors="pt").input_ids.to(DEVICE)
         #action: TensorType["batch", "seq_length"] = data["input_ids"][:,observation_index, :TOKENS_PER_ACTION]
         #action = action.to(DEVICE)
@@ -242,7 +230,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
         aggregate_loss = (batch_loss.mean() + batch_entropy.mean())
         aggregate_losses.append(aggregate_loss.item())
         predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
-        if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%5==0:
+        if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%20==0:
         #if i%(math.ceil(NUM_BATCHES/20.0))==0:
         #if aggregate_loss.item() < (np.mean(aggregate_losses) - np.std(aggregate_losses)):
         #if True:
