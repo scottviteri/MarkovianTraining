@@ -30,11 +30,11 @@ TOKENS_PER_OBSERVATION = 20
 # make each have 20 substrings
 OBSERVATIONS_PER_DOCUMENT = 10
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT
-MODEL = "gpt2" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
-BATCH_SIZE = 2
-
+MODEL = "gptj" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
+BATCH_SIZE = 4 
 NUM_BATCHES = 1000
 NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES
+ENTROPY_PENALTY = False
 
 """
 We will pull in passages from wikipedia articles.
@@ -208,17 +208,8 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
         action : TensorType["batch", "seq_length"] = full_action.sequences[
             :, -TOKENS_PER_ACTION:
         ]
-        scores=torch.stack(full_action.scores,dim=1)
-        scores.requires_grad = True
-        action_probs = torch.softmax(scores[:,-TOKENS_PER_ACTION:], dim=-1) + 1e-10
-        batch_entropy = torch.e ** ( torch.log2(action_probs) * action_probs).sum(dim=-1).mean(dim=-1)
-        #start_observation = causal_lm_tokenizer([" Observation: " for _ in range(BATCH_SIZE)], return_tensors="pt").input_ids.to(DEVICE)
-        #action: TensorType["batch", "seq_length"] = data["input_ids"][:,observation_index, :TOKENS_PER_ACTION]
-        #action = action.to(DEVICE)
-        #action = torch.cat([action, start_observation], dim=1)
         true_obs: TensorType["batch", "seq_length"] = data["input_ids"][:,observation_index, :]
         true_obs = true_obs.to(DEVICE)
-        # Commenting out the current predicted_logits and testing loss from a probability distribution that assigns 1 to the correct labels, and 0 otherwise
         prediction = causal_lm(torch.cat((incentive_rao, action, true_obs), dim=-1)[:, -CTXT_WINDOW_SIZE//3:])
         predicted_logits = prediction.logits[:,-TOKENS_PER_OBSERVATION-1:-1,:]
         # out shape = (batch seq_length)
@@ -227,7 +218,14 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
             target = true_obs
         )
         batch_loss = out.mean(dim=-1)
-        aggregate_loss = (batch_loss.mean() + batch_entropy.mean())
+        if ENTROPY_PENALTY:
+            scores=torch.stack(full_action.scores,dim=1)
+            scores.requires_grad = True
+            action_probs = torch.softmax(scores[:,-TOKENS_PER_ACTION:], dim=-1) + 1e-10
+            batch_entropy = ENTROPY_PENALTY * torch.e ** ( torch.log2(action_probs) * action_probs).sum(dim=-1).mean(dim=-1)
+            aggregate_loss = batch_loss.mean() + batch_entropy.mean()
+        else:
+            aggregate_loss = batch_loss.mean()
         aggregate_losses.append(aggregate_loss.item())
         predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
         if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%20==0:
@@ -237,7 +235,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
             print()
             print()
             print("loss: ", batch_loss[0])
-            print("scaled entropy:", batch_entropy[0])
+            if ENTROPY_PENALTY: print("e ^ negentropy:", batch_entropy[0])
             print("average loss: ", np.mean(aggregate_losses))
             print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]))
             print("predicted obs: ", repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]))
