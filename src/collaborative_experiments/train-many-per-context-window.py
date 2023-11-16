@@ -186,7 +186,7 @@ dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE, drop_last=True
 rao_sequences = []
 i = 0
 aggregate_losses = []
-optimizer = torch.optim.Adam(causal_lm.parameters(3e-4))
+optimizer = torch.optim.Adam(causal_lm.parameters, lr=1e-4)
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
 with open(f'../../saved_weights_and_losses/{MODEL}_training_info.txt', 'w+') as f: print("\n", file=f)
 
@@ -244,8 +244,8 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
         #if True:
         if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%PRINT_INTERVAL==0:
             with open(f'../../saved_weights_and_losses/{MODEL}_training_info.txt', 'a') as f:
-                print(f"Batch number {i}", file=f)
-                print("\n\nloss: ", batch_loss[0], file=f)
+                print(f"\nBatch number {i}", file=f)
+                print("loss: ", batch_loss[0], file=f)
                 if ENTROPY_PENALTY: print("e ^ negentropy:", batch_entropy[0], file=f)
                 print("average loss: ", np.mean(aggregate_losses), file=f)
                 print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]), file=f)
@@ -253,8 +253,8 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
                 print("true obs:", repr(causal_lm_tokenizer.batch_decode(true_obs)[0]), file=f)
                 for param_group in optimizer.param_groups:
                     print("Current learning rate: ", param_group["lr"], file=f)
-            print(f"Batch number {i}")
-            print("\n\nloss: ", batch_loss[0])
+            print(f"\nBatch number {i}")
+            print("loss: ", batch_loss[0])
             if ENTROPY_PENALTY: print("e ^ negentropy:", batch_entropy[0])
             print("average loss: ", np.mean(aggregate_losses))
             print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]))
