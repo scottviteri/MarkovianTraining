@@ -32,7 +32,7 @@ OBSERVATIONS_PER_DOCUMENT = 10
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT
 MODEL = "mistral" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
 BATCH_SIZE = 16 
-NUM_BATCHES = None #1000
+NUM_BATCHES = None #10
 NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES if NUM_BATCHES else None
 ENTROPY_PENALTY = False
 SAVE_WEIGHTS_INTERVAL = 30 
@@ -193,9 +193,9 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
     i += 1
     if i > 1 and i%SAVE_WEIGHTS_INTERVAL == 0: 
         print(f"Saving trained_{MODEL}")
-        causal_lm_tokenizer.save_pretrained(f"../../saved_weights/tokenizer_{MODEL}")
-        causal_lm.save_pretrained(f"../../saved_weights/trained_{MODEL}")
-        #torch.save(causal_lm.state_dict(), f"../../saved_weights/trained_{MODEL}_weights.pth")
+        causal_lm_tokenizer.save_pretrained(f"../../saved_weights_and_losses/tokenizer_{MODEL}")
+        causal_lm.save_pretrained(f"../../saved_weights_and_losses/trained_{MODEL}")
+        #torch.save(causal_lm.state_dict(), f"../../saved_weights_and_losses/trained_{MODEL}_weights.pth")
     rao_tensor = torch.tensor([[] for _ in range(BATCH_SIZE)], device=DEVICE, dtype=torch.int32)
     rao_sequence = []
     for observation_index in range(OBSERVATIONS_PER_DOCUMENT):
@@ -241,14 +241,20 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
         #if aggregate_loss.item() < (np.mean(aggregate_losses) - np.std(aggregate_losses)):
         #if True:
         if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%PRINT_INTERVAL==0:
-            print()
-            print()
-            print("loss: ", batch_loss[0])
-            if ENTROPY_PENALTY: print("e ^ negentropy:", batch_entropy[0])
-            print("average loss: ", np.mean(aggregate_losses))
-            print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]))
-            print("predicted obs: ", repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]))
-            print("true obs:", repr(causal_lm_tokenizer.batch_decode(true_obs)[0]))
+            with open(f'../../saved_weights_and_losses/{MODEL}_training_info.txt', 'a') as f:
+                print("\n\nloss: ", batch_loss[0], file=f)
+                if ENTROPY_PENALTY: print("e ^ negentropy:", batch_entropy[0], file=f)
+                print("average loss: ", np.mean(aggregate_losses), file=f)
+                print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]), file=f)
+                print("predicted obs: ", repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]), file=f)
+                print("true obs:", repr(causal_lm_tokenizer.batch_decode(true_obs)[0]), file=f)
+            print("\n\nloss: ", batch_loss[0], file=f)
+            if ENTROPY_PENALTY: print("e ^ negentropy:", batch_entropy[0], file=f)
+            print("average loss: ", np.mean(aggregate_losses), file=f)
+            print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]), file=f)
+            print("predicted obs: ", repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]), file=f)
+            print("true obs:", repr(causal_lm_tokenizer.batch_decode(true_obs)[0]), file=f)
+
         aggregate_loss.backward()
         optimizer.step()
         #scheduler.step()
