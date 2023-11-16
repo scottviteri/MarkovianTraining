@@ -174,20 +174,10 @@ class MyRAO:
     o: torchtyping.TensorType
 
 dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE, drop_last=True)
-#scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=0.001, total_steps=total_steps, pct_start=warmup_steps/total_steps)
-#scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, 
-#                     base_lr = 1e-4, # Initial learning rate which is the lower boundary in the cycle for each parameter group
-#                     max_lr = 1e-3, # Upper learning rate boundaries in the cycle for each parameter group
-#                     step_size_up = 4, # Number of training iterations in the increasing half of a cycle
-#                     cycle_momentum = False,
-#                     mode = "triangular")
-#scheduler = torch.optim.lr_scheduler.ConstantLR(optimizer, )
 rao_sequences = []
 i = 0
 aggregate_losses = []
 optimizer = torch.optim.Adam(causal_lm.parameters(), lr=1e-4)
-total_steps = NUM_BATCHES * OBSERVATIONS_PER_DOCUMENT
-warmup_steps = int(0.1 * total_steps)
 
 for data in tqdm(dataloader, total=NUM_BATCHES):
     if i > NUM_BATCHES: break
