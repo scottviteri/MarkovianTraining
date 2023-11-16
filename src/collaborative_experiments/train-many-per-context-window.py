@@ -136,7 +136,10 @@ while 1:
             # leave the text alone (not truncated)
             truncated_documents["text"].append(document["text"])
 
-    if not NUM_DATAPOINTS: break
+    if not NUM_DATAPOINTS: 
+        NUM_DATAPOINTS = len(truncated_documents["text"])
+        NUM_BATCHES = NUM_DATAPOINTS // BATCH_SIZE
+        break
     if i == NUM_DATAPOINTS: break
     POINTS_FROM_DATASET *= 2
 
@@ -186,8 +189,8 @@ dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE, drop_last=True
 rao_sequences = []
 i = 0
 aggregate_losses = []
-optimizer = torch.optim.Adam(causal_lm.parameters, lr=1e-4)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+optimizer = torch.optim.Adam(causal_lm.parameters(), lr=1e-4)
+scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.1, total_iters=NUM_BATCHES)
 with open(f'../../saved_weights_and_losses/{MODEL}_training_info.txt', 'w+') as f: print("\n", file=f)
 
 for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloader):
@@ -272,7 +275,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
         rao_tensor = torch.cat((rao_tensor, losses, action, true_obs), dim=-1)[:, -CTXT_WINDOW_SIZE//3:]
         rao_sequence.append([MyRAO(r=losses[i], a=action[i], o=true_obs[i]) for i in range(BATCH_SIZE)])
     
-    scheduler.step(np.mean(aggregate_losses[-OBSERVATIONS_PER_DOCUMENT:]))
+    scheduler.step()
 
     for b in range(BATCH_SIZE):
         rao_sequences.append([rao_batch[b] for rao_batch in rao_sequence])
