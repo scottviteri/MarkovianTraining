@@ -30,10 +30,10 @@ TOKENS_PER_OBSERVATION = 20
 # make each have 20 substrings
 OBSERVATIONS_PER_DOCUMENT = 10
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT
-MODEL = "gptj" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
-BATCH_SIZE = 4 
-NUM_BATCHES = 1000
-NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES
+MODEL = "mistral" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
+BATCH_SIZE = 16 
+NUM_BATCHES = None #1000
+NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES if NUM_BATCHES else None
 ENTROPY_PENALTY = False
 SAVE_WEIGHTS_INTERVAL = 30 
 PRINT_INTERVAL = 5 if MODEL == "gptj" or MODEL == "mistral" else 20
@@ -46,8 +46,6 @@ The dataloader will feed the ith segment of BATCH_SIZE different articles to the
 We reassemble the article subsequences to include (reward, prediction, article snippet) triples.
 """
 
-print("Loading Models")
-
 peft_config = LoraConfig(
         #base_model_name_or_path=MODEL,
         r = 64,
@@ -56,9 +54,10 @@ peft_config = LoraConfig(
         #target_modules=["query","values"]
     )
 
+print("Loading Models")
 
 if  LOAD_MODEL:
-    causal_lm_tokenizer = AutoTokenizer.from_pretrained(f"/content/drive/MyDrive/CollaborativeTrainingModelWeights/tokenizer_{MODEL}")
+    causal_lm_tokenizer = AutoTokenizer.from_pretrained(f"/content/drive/MyDrive/CollaborativeTrainingModelWeights/tokenizer_{MODEL}", padding_size="left")
     causal_lm = AutoModelForCausalLM.from_pretrained(f"/content/drive/MyDrive/CollaborativeTrainingModelWeights/trained_{MODEL}")
     causal_lm.to(DEVICE)
     if MODEL == "gptj": CTXT_WINDOW_SIZE = causal_lm.config.n_positions 
@@ -66,7 +65,7 @@ if  LOAD_MODEL:
     else: CTXT_WINDOW_SIZE = causal_lm.config.n_ctx
 
 elif MODEL == "mistral":
-    causal_lm = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1").to(DEVICE)
+    causal_lm = AutoModelForCausalLM.from_pretrained("mistralai/Mistral-7B-v0.1", torch_dtype=torch.float16, use_flash_attention_2=True).to(DEVICE)
     causal_lm_tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1", padding_side="left")
     CTXT_WINDOW_SIZE = causal_lm.config.sliding_window
 
@@ -107,7 +106,7 @@ causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
 POINTS_FROM_DATASET = NUM_DATAPOINTS
 while 1:
     #dataset = load_dataset("bookcorpus", split=f"train[:{POINTS_FROM_DATASET}]")
-    dataset = load_dataset("wikipedia", "20220301.simple", split=f"train[:{POINTS_FROM_DATASET}]")
+    dataset = load_dataset("wikipedia", "20220301.simple", split=f"train[:{POINTS_FROM_DATASET}]" if POINTS_FROM_DATASET else "train")
     dataset = dataset.map(lambda example: causal_lm_tokenizer(example["text"]), batched=True)
     dataset.set_format(type="torch", columns=["input_ids", "text"])
 
@@ -125,7 +124,7 @@ while 1:
 
     i = 0
     for document in dataset:
-        if i == NUM_DATAPOINTS: break
+        if NUM_DATAPOINTS and i == NUM_DATAPOINTS: break
         # Only accept long enough samples
         if document["input_ids"].shape[-1] >= TOKENS_PER_DOCUMENT:
             i += 1
@@ -137,9 +136,9 @@ while 1:
             # leave the text alone (not truncated)
             truncated_documents["text"].append(document["text"])
 
+    if not NUM_DATAPOINTS: break
     if i == NUM_DATAPOINTS: break
     POINTS_FROM_DATASET *= 2
-
 
 # Convert the list of dictionaries into a Dataset in one go
 truncated_dataset = Dataset.from_dict(truncated_documents, features=truncated_document_features)
@@ -183,18 +182,18 @@ class MyRAO:
     a: torchtyping.TensorType
     o: torchtyping.TensorType
 
-dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE, drop_last=True)
+dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE, drop_last=True, shuffle=True)
 rao_sequences = []
 i = 0
 aggregate_losses = []
 optimizer = torch.optim.Adam(causal_lm.parameters(), lr=1e-4)
 
-for data in tqdm(dataloader, total=NUM_BATCHES):
-    if i > NUM_BATCHES: break
+for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloader):
+    if NUM_BATCHES and i > NUM_BATCHES: break
     i += 1
     if i > 1 and i%SAVE_WEIGHTS_INTERVAL == 0: 
         print(f"Saving trained_{MODEL}")
-        causal_lm_tokenizer.save_pretrained(f"../../saved_weights//tokenizer_{MODEL}")
+        causal_lm_tokenizer.save_pretrained(f"../../saved_weights/tokenizer_{MODEL}")
         causal_lm.save_pretrained(f"../../saved_weights/trained_{MODEL}")
         #torch.save(causal_lm.state_dict(), f"../../saved_weights/trained_{MODEL}_weights.pth")
     rao_tensor = torch.tensor([[] for _ in range(BATCH_SIZE)], device=DEVICE, dtype=torch.int32)
@@ -238,10 +237,10 @@ for data in tqdm(dataloader, total=NUM_BATCHES):
             aggregate_loss = batch_loss.mean()
         aggregate_losses.append(aggregate_loss.item())
         predicted_obs : TensorType["batch", "seq_length"] = predicted_logits.argmax(dim=-1)
-        if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%PRINT_INTERVAL==0:
-        #if i%(math.ceil(NUM_BATCHES/20.0))==0:
+        #if  NUM_BATCHES and i%(math.ceil(NUM_BATCHES/20.0))==0:
         #if aggregate_loss.item() < (np.mean(aggregate_losses) - np.std(aggregate_losses)):
         #if True:
+        if observation_index == OBSERVATIONS_PER_DOCUMENT - 1 and i%PRINT_INTERVAL==0:
             print()
             print()
             print("loss: ", batch_loss[0])
