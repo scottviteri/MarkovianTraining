@@ -1,5 +1,4 @@
-#pip install transformers datasets==2.14.6 torchtyping==0.1.4 peft einops apache_beam==2.51.0 matplotlib
-
+#pip install transformers datasets==2.14.6 torchtyping==0.1.4  peft einops apache_beam==2.51.0 matplotlib wandb
 import os
 
 import torchtyping
@@ -20,6 +19,7 @@ import matplotlib.pyplot as plt
 from einops import rearrange
 import numpy as np
 import math
+import wandb
 
 from typing import List
 from torch.nn.utils.rnn import pad_sequence
@@ -27,17 +27,19 @@ from torch.nn.utils.rnn import pad_sequence
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "mps")
 TOKENS_PER_ACTION = 10
 TOKENS_PER_OBSERVATION = 20
-# make each have 20 substrings
 OBSERVATIONS_PER_DOCUMENT = 10
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT
 MODEL = "mistral" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
-BATCH_SIZE = 16 
+BATCH_SIZE = 100 
 NUM_BATCHES = None #10
 NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES if NUM_BATCHES else None
 ENTROPY_PENALTY = False
 SAVE_WEIGHTS_INTERVAL = 30 
 PRINT_INTERVAL = 5 if MODEL == "gptj" or MODEL == "mistral" else 20
 LOAD_MODEL = False
+
+run = wandb.init(project="collaborative-training-many-per-context-window", entity="scottviteri")
+wandb_table = wandb.Table(data = [], columns=["Action", "Predicted Observation", "Actual Observation"])
 
 """
 We will pull in passages from wikipedia articles.
@@ -265,7 +267,16 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
             print("true obs:", repr(causal_lm_tokenizer.batch_decode(true_obs)[0]))
             for param_group in optimizer.param_groups:
                 print("Current learning rate: ", param_group["lr"])
-
+            wandb.log({
+                "Batch number": i,
+                "Loss": batch_loss[0].item(),
+                "Average loss": np.mean(aggregate_losses),
+                "Current learning rate": [g["lr"] for g in optimizer.param_groups if "lr" in g][0]
+            })
+            wandb_table.add_data(
+                repr(causal_lm_tokenizer.batch_decode(action)[0]), 
+                repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]),
+                repr(causal_lm_tokenizer.batch_decode(true_obs)[0]))
         aggregate_loss.backward()
         optimizer.step()
         string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
@@ -285,3 +296,6 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
 
     #if len(rao_sequences) % 10 == 0 and len(rao_sequences) > 2:
     #    save_traj_to_drive(rao_sequences, bdebug=True)
+
+run.log({"Prediction Accuracy Table": wandb_table})
+wandb.finish()
