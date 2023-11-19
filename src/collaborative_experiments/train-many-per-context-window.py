@@ -26,21 +26,15 @@ from typing import List
 from torch.nn.utils.rnn import pad_sequence
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "mps")
-TOKENS_PER_ACTION = 10
-TOKENS_PER_OBSERVATION = 20
-OBSERVATIONS_PER_DOCUMENT = 10
-TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT
-MODEL = "gpt2" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
-BATCH_SIZE = 2 
-NUM_BATCHES = 5 # None
-NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES if NUM_BATCHES else None
-SAVE_WEIGHTS_INTERVAL = 30 
-PRINT_INTERVAL = 5 if MODEL == "gptj" or MODEL == "mistral" else 1
 LOAD_MODEL = False
-SAVE_DIRECTORY = "/home/scottviteri/Projects/CollaborativeTraining/CollaborativeTraining/saved_weights_and_losses"
+MODEL = "gpt2" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
+WANDB = False
 
-run = wandb.init(project="collaborative-training-many-per-context-window", entity="scottviteri")
-wandb_table = wandb.Table(data = [], columns=["Previous Observation", "Action", "Predicted Observation", "Actual Observation"])
+if WANDB:
+    run = wandb.init(project="collaborative-training-many-per-context-window", entity="scottviteri")
+    wandb_table = wandb.Table(data = [], columns=["Previous Observation", "Action", "Predicted Observation", "Actual Observation"])
+else:
+    wandb_table = None
 
 """
 We will pull in passages from wikipedia articles.
@@ -105,6 +99,19 @@ elif MODEL == "gpt2":
 
 causal_lm = get_peft_model(causal_lm, peft_config)
 causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
+
+TOKENS_PER_ACTION = 10
+TOKENS_PER_OBSERVATION = 20
+OBSERVATIONS_PER_DOCUMENT = 10
+TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT
+BATCH_SIZE = 2 
+NUM_BATCHES = 5 # None
+NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES if NUM_BATCHES else None
+SAVE_WEIGHTS_INTERVAL = 30 
+PRINT_INTERVAL = 5 if MODEL == "gptj" or MODEL == "mistral" else 1
+SAVE_DIRECTORY = "/home/scottviteri/Projects/CollaborativeTraining/CollaborativeTraining/saved_weights_and_losses"
+
+
 
 POINTS_FROM_DATASET = NUM_DATAPOINTS
 while 1:
@@ -181,17 +188,18 @@ def log_and_print_info(i, batch_loss, aggregate_losses, prev_obs, action, predic
         print("true obs:", repr(causal_lm_tokenizer.batch_decode(true_obs)[0]))
         for param_group in optimizer.param_groups:
             print("Current learning rate: ", param_group["lr"])
-        wandb.log({
-            "Batch number": i,
-            "Loss": batch_loss[0].item(),
-            "Average loss": np.mean(aggregate_losses),
-            "Current learning rate": [g["lr"] for g in optimizer.param_groups if "lr" in g][0]
-        })
-        wandb_table.add_data(
-            repr(causal_lm_tokenizer.batch_decode(prev_obs)[0]), 
-            repr(causal_lm_tokenizer.batch_decode(action)[0]), 
-            repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]),
-            repr(causal_lm_tokenizer.batch_decode(true_obs)[0]))
+        if WANDB:
+            wandb.log({
+                "Batch number": i,
+                "Loss": batch_loss[0].item(),
+                "Average loss": np.mean(aggregate_losses),
+                "Current learning rate": [g["lr"] for g in optimizer.param_groups if "lr" in g][0]
+            })
+            wandb_table.add_data(
+                repr(causal_lm_tokenizer.batch_decode(prev_obs)[0]), 
+                repr(causal_lm_tokenizer.batch_decode(action)[0]), 
+                repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]),
+                repr(causal_lm_tokenizer.batch_decode(true_obs)[0]))
 
 dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE, drop_last=True, shuffle=True)
 i = 0
@@ -259,5 +267,6 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
         optimizer.step()
     scheduler.step()
 
-run.log({"Prediction Accuracy Table": wandb_table})
-wandb.finish()
+if WANDB:
+    run.log({"Prediction Accuracy Table": wandb_table})
+    wandb.finish()
