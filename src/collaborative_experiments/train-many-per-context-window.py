@@ -100,22 +100,30 @@ elif MODEL == "gpt2":
 causal_lm = get_peft_model(causal_lm, peft_config)
 causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
 
+
+TOKENS_PER_REWARD = 10
 TOKENS_PER_ACTION = 10
-TOKENS_PER_OBSERVATION = 20
-OBSERVATIONS_PER_DOCUMENT = 10
+TOKENS_PER_OBSERVATION = 20 # CTXT_WINDOW_SIZE - TOKENS_PER_ACTION - TOKENS_PER_REWARD
+OBSERVATIONS_PER_DOCUMENT = 10 
+#TOKENS_PER_RAO = TOKENS_PER_REWARD + TOKENS_PER_ACTION + TOKENS_PER_OBSERVATION
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT
-BATCH_SIZE = 2 
-NUM_BATCHES = 5 # None
+BATCH_SIZE = 4
+NUM_BATCHES = 10 # None
 NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES if NUM_BATCHES else None
 SAVE_WEIGHTS_INTERVAL = 30 
-PRINT_INTERVAL = 5 if MODEL == "gptj" or MODEL == "mistral" else 1
+PRINT_INTERVAL = 5 if MODEL == "gptj" or MODEL == "mistral" else 10
 SAVE_DIRECTORY = "/home/scottviteri/Projects/CollaborativeTraining/CollaborativeTraining/saved_weights_and_losses"
 
-
-
 POINTS_FROM_DATASET = NUM_DATAPOINTS
-while 1:
-    #dataset = load_dataset("bookcorpus", split=f"train[:{POINTS_FROM_DATASET}]")
+truncated_documents = {
+    "text": [],
+    "input_ids": []
+}
+
+while len(truncated_documents["input_ids"]) < NUM_DATAPOINTS:
+    # This while loop is used to load the dataset. It will keep running until a valid dataset is loaded.
+    # The termination condition is when a valid dataset is loaded without any exceptions.
+    # not creating enough datapoints
     dataset = load_dataset("wikipedia", "20220301.simple", split=f"train[:{POINTS_FROM_DATASET}]" if POINTS_FROM_DATASET else "train")
     dataset = dataset.map(lambda example: causal_lm_tokenizer(example["text"]), batched=True)
     dataset.set_format(type="torch", columns=["input_ids", "text"])
@@ -132,26 +140,39 @@ while 1:
         "input_ids": []
     }
 
-    i = 0
+    observation_prefix = "Observation: "
+    observation_prefix_tokens = causal_lm_tokenizer.encode(observation_prefix, add_special_tokens=False)
+    tokens_per_pure_observation = TOKENS_PER_OBSERVATION - len(observation_prefix_tokens)
+
+    # currently need to use tensors in input_ids as per the truncated_document_features
     for document in dataset:
-        if NUM_DATAPOINTS and i == NUM_DATAPOINTS: break
+        if NUM_DATAPOINTS and len(truncated_documents["input_ids"]) == NUM_DATAPOINTS: break
         # Only accept long enough samples
-        if document["input_ids"].shape[-1] >= TOKENS_PER_DOCUMENT:
-            i += 1
-            # truncate documents
-            truncated_tokens = document["input_ids"][:TOKENS_PER_DOCUMENT]
-            # view() places elements in reverse dimension order, aka into the TOKENS_PER_OBSERVATION dim
-            #truncated_documents["input_ids"].append(truncated_tokens.view((TOKENS_PER_OBSERVATION, OBSERVATIONS_PER_DOCUMENT)))
-            truncated_documents["input_ids"].append(truncated_tokens.view((OBSERVATIONS_PER_DOCUMENT, TOKENS_PER_OBSERVATION)))
+        if document["input_ids"].shape[-1] <= TOKENS_PER_DOCUMENT: continue 
+        # truncate documents
+        tokens = document["input_ids"].tolist()
+        # Inject "Observation: " prefix every TOKENS_PER_OBSERVATION - observation_prefix_tokens
+        new_tokens = []
+        for j in range(0, len(tokens), tokens_per_pure_observation):
+            new_tokens.extend(observation_prefix_tokens)
+            new_tokens.extend(tokens[j:j+tokens_per_pure_observation])
+            #if len(new_tokens) >= TOKENS_PER_DOCUMENT: break
+        if len(new_tokens) >= TOKENS_PER_DOCUMENT:
+            new_document = torch.tensor(new_tokens[:TOKENS_PER_DOCUMENT])
+            reshaped_document = new_document.reshape((OBSERVATIONS_PER_DOCUMENT, TOKENS_PER_OBSERVATION))
+            truncated_documents["input_ids"].append(reshaped_document)
+            assert len(new_tokens[:TOKENS_PER_DOCUMENT]) == TOKENS_PER_DOCUMENT
             # leave the text alone (not truncated)
             truncated_documents["text"].append(document["text"])
+            if len(truncated_documents["input_ids"]) == NUM_DATAPOINTS: break
+        if len(truncated_documents["input_ids"]) == NUM_DATAPOINTS: break
+        if not NUM_DATAPOINTS: 
+            NUM_DATAPOINTS = len(truncated_documents["text"])
+            NUM_BATCHES = NUM_DATAPOINTS // BATCH_SIZE
+            break
+        POINTS_FROM_DATASET *= 2
 
-    if not NUM_DATAPOINTS: 
-        NUM_DATAPOINTS = len(truncated_documents["text"])
-        NUM_BATCHES = NUM_DATAPOINTS // BATCH_SIZE
-        break
-    if i == NUM_DATAPOINTS: break
-    POINTS_FROM_DATASET *= 2
+assert len(truncated_documents["input_ids"]) == NUM_DATAPOINTS
 
 # Convert the list of dictionaries into a Dataset in one go
 truncated_dataset = Dataset.from_dict(truncated_documents, features=truncated_document_features)
@@ -168,38 +189,38 @@ class MyRAO:
     o: torchtyping.TensorType
 
 def log_and_print_info(i, batch_loss, aggregate_losses, prev_obs, action, predicted_obs, true_obs, optimizer, wandb_table, causal_lm_tokenizer, MODEL):
-    if i%PRINT_INTERVAL==0:
-        with open(f'{SAVE_DIRECTORY}/{MODEL}_training_info.txt', 'a') as f:
-            print(f"\nBatch number {i}", file=f)
-            print("loss: ", batch_loss[0], file=f)
-            print("average loss: ", np.mean(aggregate_losses), file=f)
-            print("previous obs:", repr(causal_lm_tokenizer.batch_decode(prev_obs)[0]), file=f)
-            print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]), file=f)
-            print("predicted obs: ", repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]), file=f)
-            print("true obs:", repr(causal_lm_tokenizer.batch_decode(true_obs)[0]), file=f)
-            for param_group in optimizer.param_groups:
-                print("Current learning rate: ", param_group["lr"], file=f)
+    if i % PRINT_INTERVAL == 0:
         print(f"\nBatch number {i}")
-        print("loss: ", batch_loss[0])
-        print("average loss: ", np.mean(aggregate_losses))
+        print("batch loss: ", batch_loss[0])
+        if aggregate_losses: print("aggregate loss: ", aggregate_losses[-1])
         print("previous obs:", repr(causal_lm_tokenizer.batch_decode(prev_obs)[0]))
         print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]))
         print("predicted obs: ", repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]))
         print("true obs:", repr(causal_lm_tokenizer.batch_decode(true_obs)[0]))
         for param_group in optimizer.param_groups:
             print("Current learning rate: ", param_group["lr"])
-        if WANDB:
-            wandb.log({
-                "Batch number": i,
-                "Loss": batch_loss[0].item(),
-                "Average loss": np.mean(aggregate_losses),
-                "Current learning rate": [g["lr"] for g in optimizer.param_groups if "lr" in g][0]
-            })
-            wandb_table.add_data(
-                repr(causal_lm_tokenizer.batch_decode(prev_obs)[0]), 
-                repr(causal_lm_tokenizer.batch_decode(action)[0]), 
-                repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]),
-                repr(causal_lm_tokenizer.batch_decode(true_obs)[0]))
+    with open(f'{SAVE_DIRECTORY}/{MODEL}_training_info.txt', 'a') as f:
+        print(f"\nBatch number {i}", file=f)
+        print("batch loss: ", batch_loss[0], file=f)
+        if aggregate_losses: print("aggregate loss: ", aggregate_losses[-1], file=f)
+        print("previous obs:", repr(causal_lm_tokenizer.batch_decode(prev_obs)[0]), file=f)
+        print("action: ", repr(causal_lm_tokenizer.batch_decode(action)[0]), file=f)
+        print("predicted obs: ", repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]), file=f)
+        print("true obs:", repr(causal_lm_tokenizer.batch_decode(true_obs)[0]), file=f)
+        for param_group in optimizer.param_groups:
+            print("Current learning rate: ", param_group["lr"], file=f)
+    if WANDB:
+        wandb.log({
+            "Batch number": i,
+            "Batch Loss": batch_loss[0].item(),
+            #"Aggregate loss": aggregate_losses[-1] if aggregate_losses else -1,
+            "Current learning rate": [g["lr"] for g in optimizer.param_groups if "lr" in g][0]
+        })
+        wandb_table.add_data(
+            repr(causal_lm_tokenizer.batch_decode(prev_obs)[0]), 
+            repr(causal_lm_tokenizer.batch_decode(action)[0]), 
+            repr(causal_lm_tokenizer.batch_decode(predicted_obs)[0]),
+            repr(causal_lm_tokenizer.batch_decode(true_obs)[0]))
 
 dataloader = DataLoader(truncated_dataset, batch_size=BATCH_SIZE, drop_last=True, shuffle=True)
 i = 0
@@ -241,6 +262,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
         with torch.no_grad():
             prediction = causal_lm(torch.cat((incentive_rao, action, true_obs), dim=-1)[:, -CTXT_WINDOW_SIZE//3:])
             predicted_logits = prediction.logits[:,-TOKENS_PER_OBSERVATION-1:-1,:]
+            predicted_obs = predicted_logits.argmax(dim=-1)
             out = loss_fn(
                 input = rearrange(predicted_logits, 'batch seq_length vocab_size -> batch vocab_size seq_length'),
                 target = true_obs
@@ -252,19 +274,19 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
         ).input_ids.to(DEVICE)
         rao_tensor = torch.cat((rao_tensor, losses, action, true_obs), dim=-1)[:, -CTXT_WINDOW_SIZE//3:]
         rao_sequence.append([MyRAO(r=losses[i], a=action[i], o=true_obs[i]) for i in range(BATCH_SIZE)])
-    
-        # Compute the loss on the whole rao_tensor sequence and perform backpropagation
-        rao_tensor_logits = causal_lm(rao_tensor).logits[:, -CTXT_WINDOW_SIZE//3:, :]
-        rao_tensor_loss = loss_fn(
-            input = rearrange(rao_tensor_logits, 'batch seq_length vocab_size -> batch vocab_size seq_length'),
-            target = rao_tensor
-        )
-        aggregate_loss = rao_tensor_loss.mean()
-        aggregate_losses.append(aggregate_loss.item())
-        predicted_obs = predicted_logits.argmax(dim=-1)
         log_and_print_info(i, batch_loss, aggregate_losses, prev_obs, action, predicted_obs, true_obs, optimizer, wandb_table, causal_lm_tokenizer, MODEL)
-        aggregate_loss.backward()
-        optimizer.step()
+    
+    # Compute the loss on the whole rao_tensor sequence and perform backpropagation
+    rao_tensor_logits = causal_lm(rao_tensor).logits
+    rao_tensor_loss = loss_fn(
+        input = rearrange(rao_tensor_logits, 'batch seq_length vocab_size -> batch vocab_size seq_length'),
+        target = rao_tensor
+    )
+    aggregate_loss = rao_tensor_loss.mean()
+    aggregate_losses.append(aggregate_loss.item())
+    aggregate_loss.backward()
+    if WANDB: wandb.log({"Aggregate loss": aggregate_losses[-1]})
+    optimizer.step()
     scheduler.step()
 
 if WANDB:
