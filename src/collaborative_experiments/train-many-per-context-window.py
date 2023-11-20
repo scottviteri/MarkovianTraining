@@ -109,13 +109,13 @@ causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
 
 TOKENS_PER_REWARD = 10 
 TOKENS_PER_ACTION = 10
-TOKENS_PER_OBSERVATION = 20 # CTXT_WINDOW_SIZE - TOKENS_PER_ACTION - TOKENS_PER_REWARD
-OBSERVATIONS_PER_DOCUMENT =  30 
+TOKENS_PER_OBSERVATION = 50 # CTXT_WINDOW_SIZE - TOKENS_PER_ACTION - TOKENS_PER_REWARD
+OBSERVATIONS_PER_DOCUMENT =  20 
 TOKENS_PER_RAO = TOKENS_PER_REWARD + TOKENS_PER_ACTION + TOKENS_PER_OBSERVATION
 assert TOKENS_PER_RAO * OBSERVATIONS_PER_DOCUMENT <= CTXT_WINDOW_SIZE
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT
-BATCH_SIZE = 4
-NUM_BATCHES = 100 # None
+BATCH_SIZE = 8
+NUM_BATCHES = 1000 # None
 NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES if NUM_BATCHES else None
 SAVE_WEIGHTS_INTERVAL = 30 
 PRINT_INTERVAL = 5 if MODEL == "gptj" or MODEL == "mistral" else 10
@@ -147,7 +147,7 @@ while len(truncated_documents["input_ids"]) < NUM_DATAPOINTS:
         "input_ids": []
     }
 
-    observation_prefix = "Observation: "
+    observation_prefix = "\nObservation: "
     observation_prefix_tokens = causal_lm_tokenizer.encode(observation_prefix, add_special_tokens=False)
     tokens_per_pure_observation = TOKENS_PER_OBSERVATION - len(observation_prefix_tokens)
 
@@ -162,11 +162,13 @@ while len(truncated_documents["input_ids"]) < NUM_DATAPOINTS:
         new_tokens = []
         for j in range(0, len(tokens), tokens_per_pure_observation):
             new_tokens.extend(observation_prefix_tokens)
+            #new_tokens.extend(torch.randint(0, causal_lm_tokenizer.vocab_size, (tokens_per_pure_observation,)).tolist())
             new_tokens.extend(tokens[j:j+tokens_per_pure_observation])
-            #if len(new_tokens) >= TOKENS_PER_DOCUMENT: break
         new_document = torch.tensor(new_tokens[:TOKENS_PER_DOCUMENT])
         reshaped_document = new_document.reshape((OBSERVATIONS_PER_DOCUMENT, TOKENS_PER_OBSERVATION))
         truncated_documents["input_ids"].append(reshaped_document)
+        #random_tokens = torch.randint(0, causal_lm_tokenizer.vocab_size, reshaped_document.shape)
+        #truncated_documents["input_ids"].append(random_tokens)
         assert len(new_tokens[:TOKENS_PER_DOCUMENT]) == TOKENS_PER_DOCUMENT
         # leave the text alone (not truncated)
         truncated_documents["text"].append(document["text"])
@@ -233,10 +235,15 @@ optimizer = torch.optim.Adam(causal_lm.parameters(), lr=1e-4)
 scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.1, total_iters=NUM_BATCHES)
 with open(f'{SAVE_DIRECTORY}/{MODEL}_training_info.txt', 'w') as f: pass
 
-action_prefix = "Action: "
+action_prefix = "\nAction: "
 action_prefix_tokens = causal_lm_tokenizer.encode(action_prefix, add_special_tokens=False)
 action_prefix_tensor = repeat(torch.tensor(action_prefix_tokens), 'tokens -> batch tokens', batch=BATCH_SIZE).to(DEVICE)
 tokens_per_pure_action = TOKENS_PER_ACTION - len(action_prefix_tokens)
+
+reward_prefix = "\nReward: "
+reward_prefix_tokens = causal_lm_tokenizer.encode(reward_prefix, add_special_tokens=False)
+reward_prefix_tensor = repeat(torch.tensor(reward_prefix_tokens), 'tokens -> batch tokens', batch=BATCH_SIZE).to(DEVICE)
+tokens_per_pure_reward = TOKENS_PER_REWARD - len(reward_prefix_tokens)
 
 for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloader):
     if NUM_BATCHES and i > NUM_BATCHES: break
@@ -247,12 +254,13 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
         causal_lm.save_pretrained(f"./saved_weights_and_losses/trained_{MODEL}")
     rao_tensor = torch.tensor([[] for _ in range(BATCH_SIZE)], device=DEVICE, dtype=torch.int32)
     rao_sequence = []
+    
     for observation_index in range(OBSERVATIONS_PER_DOCUMENT):
         optimizer.zero_grad()
         high_reward_value = round(np.mean(aggregate_losses) - np.std(aggregate_losses),3) if aggregate_losses else 6.0
-        high_reward = causal_lm_tokenizer(["Reward: " + str(high_reward_value) for _ in range(BATCH_SIZE)], 
-                                          return_tensors="pt", padding="max_length", max_length=TOKENS_PER_REWARD).input_ids
-        high_reward = high_reward.to(DEVICE)
+        high_reward = causal_lm_tokenizer([str(high_reward_value) for _ in range(BATCH_SIZE)], 
+                                          return_tensors="pt", padding="max_length", max_length=tokens_per_pure_reward).input_ids
+        high_reward = torch.cat((reward_prefix_tensor, high_reward.to(DEVICE)), dim=-1)
         incentive_rao = torch.cat((rao_tensor, high_reward, action_prefix_tensor), dim=-1)
         full_action = causal_lm.generate(
             inputs=incentive_rao,
@@ -271,7 +279,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
         true_obs: TensorType["batch", "seq_length"] = data["input_ids"][:,observation_index, :]
         true_obs = true_obs.to(DEVICE)
         with torch.no_grad():
-            prediction = causal_lm(torch.cat((incentive_rao, action, true_obs), dim=-1)[:, -CTXT_WINDOW_SIZE//3:])
+            prediction = causal_lm(torch.cat((rao_tensor, high_reward, action, true_obs), dim=-1))
             predicted_logits = prediction.logits[:,-TOKENS_PER_OBSERVATION-1:-1,:]
             predicted_obs = predicted_logits.argmax(dim=-1)
             out = loss_fn(
@@ -280,18 +288,21 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
             )
             batch_loss = out.mean(dim=-1)
         string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
-        losses : TensorType["batch", "seq_length"] = causal_lm_tokenizer(
+        losses_tensor : TensorType["batch", "seq_length"] = causal_lm_tokenizer(
             string_losses, return_tensors="pt", padding=True
         ).input_ids.to(DEVICE)
-        rao_tensor = torch.cat((rao_tensor, losses, action, true_obs), dim=-1)[:, -CTXT_WINDOW_SIZE//3:]
-        rao_sequence.append([MyRAO(r=losses[i], a=action[i], o=true_obs[i]) for i in range(BATCH_SIZE)])
+        actual_reward = torch.cat((reward_prefix_tensor, losses_tensor), dim=-1)
+        rao_tensor = torch.cat((rao_tensor, actual_reward, action, true_obs), dim=-1)[:, -(CTXT_WINDOW_SIZE - TOKENS_PER_RAO):]
+        rao_sequence.append([MyRAO(r=actual_reward[i], a=action[i], o=true_obs[i]) for i in range(BATCH_SIZE)])
+        #print("rao tensor: ", repr(causal_lm_tokenizer.decode(rao_tensor[0])))
+        #print()
         log_and_print_info(i, observation_index, batch_loss, aggregate_losses, prev_obs, action, predicted_obs, true_obs, optimizer, wandb_table, causal_lm_tokenizer, MODEL)
     
     # Compute the loss on the whole rao_tensor sequence and perform backpropagation
-    rao_tensor_logits = causal_lm(rao_tensor).logits
+    rao_tensor_logits = causal_lm(rao_tensor).logits[:,:-1,:]
     rao_tensor_loss = loss_fn(
         input = rearrange(rao_tensor_logits, 'batch seq_length vocab_size -> batch vocab_size seq_length'),
-        target = rao_tensor
+        target = rao_tensor[:, 1:]
     )
     aggregate_loss = rao_tensor_loss.mean()
     aggregate_losses.append(aggregate_loss.item())
