@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
-from einops import rearrange
+from einops import rearrange, repeat
 import numpy as np
 import math
 import wandb
@@ -28,7 +28,7 @@ from torch.nn.utils.rnn import pad_sequence
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "mps")
 LOAD_MODEL = False
 MODEL = "gpt2" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
-WANDB = False
+WANDB = True 
 
 if WANDB:
     run = wandb.init(project="collaborative-training-many-per-context-window", entity="scottviteri")
@@ -101,10 +101,10 @@ causal_lm = get_peft_model(causal_lm, peft_config)
 causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
 
 
-TOKENS_PER_REWARD = 10
+TOKENS_PER_REWARD = 10 
 TOKENS_PER_ACTION = 10
-TOKENS_PER_OBSERVATION = 20 # CTXT_WINDOW_SIZE - TOKENS_PER_ACTION - TOKENS_PER_REWARD
-OBSERVATIONS_PER_DOCUMENT = 10 
+TOKENS_PER_OBSERVATION = 10 # CTXT_WINDOW_SIZE - TOKENS_PER_ACTION - TOKENS_PER_REWARD
+OBSERVATIONS_PER_DOCUMENT =  5 
 #TOKENS_PER_RAO = TOKENS_PER_REWARD + TOKENS_PER_ACTION + TOKENS_PER_OBSERVATION
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT
 BATCH_SIZE = 4
@@ -229,6 +229,11 @@ optimizer = torch.optim.Adam(causal_lm.parameters(), lr=1e-4)
 scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.1, total_iters=NUM_BATCHES)
 with open(f'{SAVE_DIRECTORY}/{MODEL}_training_info.txt', 'w') as f: pass
 
+action_prefix = "Action: "
+action_prefix_tokens = causal_lm_tokenizer.encode(action_prefix, add_special_tokens=False)
+action_prefix_tensor = repeat(torch.tensor(action_prefix_tokens), 'tokens -> batch tokens', batch=BATCH_SIZE).to(DEVICE)
+tokens_per_pure_action = TOKENS_PER_ACTION - len(action_prefix_tokens)
+
 for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloader):
     if NUM_BATCHES and i > NUM_BATCHES: break
     i += 1
@@ -241,14 +246,16 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
     for observation_index in range(OBSERVATIONS_PER_DOCUMENT):
         optimizer.zero_grad()
         high_reward_value = round(np.mean(aggregate_losses) - np.std(aggregate_losses),3) if aggregate_losses else 6.0
-        high_reward = causal_lm_tokenizer([str(high_reward_value) for _ in range(BATCH_SIZE)], return_tensors="pt").input_ids.to(DEVICE)
-        incentive_rao = torch.cat((rao_tensor, high_reward), dim=-1)
+        high_reward = causal_lm_tokenizer(["Reward: " + str(high_reward_value) for _ in range(BATCH_SIZE)], 
+                                          return_tensors="pt", padding=True, max_length=TOKENS_PER_REWARD).input_ids
+        high_reward = high_reward.to(DEVICE)
+        incentive_rao = torch.cat((rao_tensor, high_reward, action_prefix_tensor), dim=-1)
         full_action = causal_lm.generate(
             inputs=incentive_rao,
             output_scores=True,
             do_sample=True,
             return_dict_in_generate=True,
-            max_new_tokens=TOKENS_PER_ACTION,
+            max_new_tokens=tokens_per_pure_action,
             pad_token_id=causal_lm_tokenizer.pad_token_id,
             eos_token_id=None
         )
