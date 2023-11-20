@@ -28,7 +28,7 @@ from torch.nn.utils.rnn import pad_sequence
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "mps")
 LOAD_MODEL = False
 MODEL = "gpt2" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
-WANDB = True 
+WANDB = False 
 
 if WANDB:
     run = wandb.init(project="collaborative-training-many-per-context-window", entity="scottviteri")
@@ -103,16 +103,16 @@ causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
 
 TOKENS_PER_REWARD = 10 
 TOKENS_PER_ACTION = 10
-TOKENS_PER_OBSERVATION = 10 # CTXT_WINDOW_SIZE - TOKENS_PER_ACTION - TOKENS_PER_REWARD
-OBSERVATIONS_PER_DOCUMENT =  5 
+TOKENS_PER_OBSERVATION = 20 # CTXT_WINDOW_SIZE - TOKENS_PER_ACTION - TOKENS_PER_REWARD
+OBSERVATIONS_PER_DOCUMENT =  30 
 #TOKENS_PER_RAO = TOKENS_PER_REWARD + TOKENS_PER_ACTION + TOKENS_PER_OBSERVATION
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT
 BATCH_SIZE = 4
-NUM_BATCHES = 10 # None
+NUM_BATCHES = 100 # None
 NUM_DATAPOINTS = BATCH_SIZE * NUM_BATCHES if NUM_BATCHES else None
 SAVE_WEIGHTS_INTERVAL = 30 
 PRINT_INTERVAL = 5 if MODEL == "gptj" or MODEL == "mistral" else 10
-SAVE_DIRECTORY = "/home/scottviteri/Projects/CollaborativeTraining/CollaborativeTraining/saved_weights_and_losses"
+SAVE_DIRECTORY = "/root/CollaborativeTraining/saved_weights_and_losses"
 
 POINTS_FROM_DATASET = NUM_DATAPOINTS
 truncated_documents = {
@@ -124,7 +124,7 @@ while len(truncated_documents["input_ids"]) < NUM_DATAPOINTS:
     # This while loop is used to load the dataset. It will keep running until a valid dataset is loaded.
     # The termination condition is when a valid dataset is loaded without any exceptions.
     # not creating enough datapoints
-    dataset = load_dataset("wikipedia", "20220301.simple", split=f"train[:{POINTS_FROM_DATASET}]" if POINTS_FROM_DATASET else "train")
+    dataset = load_dataset("wikipedia", "20220301.en", split=f"train[:{POINTS_FROM_DATASET}]" if POINTS_FROM_DATASET else "train")
     dataset = dataset.map(lambda example: causal_lm_tokenizer(example["text"]), batched=True)
     dataset.set_format(type="torch", columns=["input_ids", "text"])
 
@@ -147,6 +147,7 @@ while len(truncated_documents["input_ids"]) < NUM_DATAPOINTS:
     # currently need to use tensors in input_ids as per the truncated_document_features
     for document in dataset:
         if NUM_DATAPOINTS and len(truncated_documents["input_ids"]) == NUM_DATAPOINTS: break
+        i+=1
         # Only accept long enough samples
         if document["input_ids"].shape[-1] <= TOKENS_PER_DOCUMENT: continue 
         # truncate documents
@@ -157,20 +158,17 @@ while len(truncated_documents["input_ids"]) < NUM_DATAPOINTS:
             new_tokens.extend(observation_prefix_tokens)
             new_tokens.extend(tokens[j:j+tokens_per_pure_observation])
             #if len(new_tokens) >= TOKENS_PER_DOCUMENT: break
-        if len(new_tokens) >= TOKENS_PER_DOCUMENT:
-            new_document = torch.tensor(new_tokens[:TOKENS_PER_DOCUMENT])
-            reshaped_document = new_document.reshape((OBSERVATIONS_PER_DOCUMENT, TOKENS_PER_OBSERVATION))
-            truncated_documents["input_ids"].append(reshaped_document)
-            assert len(new_tokens[:TOKENS_PER_DOCUMENT]) == TOKENS_PER_DOCUMENT
-            # leave the text alone (not truncated)
-            truncated_documents["text"].append(document["text"])
-            if len(truncated_documents["input_ids"]) == NUM_DATAPOINTS: break
-        if len(truncated_documents["input_ids"]) == NUM_DATAPOINTS: break
-        if not NUM_DATAPOINTS: 
-            NUM_DATAPOINTS = len(truncated_documents["text"])
-            NUM_BATCHES = NUM_DATAPOINTS // BATCH_SIZE
-            break
-        POINTS_FROM_DATASET *= 2
+        new_document = torch.tensor(new_tokens[:TOKENS_PER_DOCUMENT])
+        reshaped_document = new_document.reshape((OBSERVATIONS_PER_DOCUMENT, TOKENS_PER_OBSERVATION))
+        truncated_documents["input_ids"].append(reshaped_document)
+        assert len(new_tokens[:TOKENS_PER_DOCUMENT]) == TOKENS_PER_DOCUMENT
+        # leave the text alone (not truncated)
+        truncated_documents["text"].append(document["text"])
+    if not NUM_DATAPOINTS: 
+        NUM_DATAPOINTS = len(truncated_documents["text"])
+        NUM_BATCHES = NUM_DATAPOINTS // BATCH_SIZE
+        break
+    POINTS_FROM_DATASET *= 2
 
 assert len(truncated_documents["input_ids"]) == NUM_DATAPOINTS
 
