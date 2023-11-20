@@ -147,7 +147,6 @@ while len(truncated_documents["input_ids"]) < NUM_DATAPOINTS:
     # currently need to use tensors in input_ids as per the truncated_document_features
     for document in dataset:
         if NUM_DATAPOINTS and len(truncated_documents["input_ids"]) == NUM_DATAPOINTS: break
-        i+=1
         # Only accept long enough samples
         if document["input_ids"].shape[-1] <= TOKENS_PER_DOCUMENT: continue 
         # truncate documents
