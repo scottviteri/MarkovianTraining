@@ -27,7 +27,7 @@ from torch.nn.utils.rnn import pad_sequence
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "mps")
 LOAD_MODEL = False
-MODEL = "gpt2" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
+MODEL = "mistral" # "gpt2" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
 WANDB = True 
 
 if WANDB:
@@ -93,8 +93,8 @@ def get_linear_layers(model):
 
 peft_config = LoraConfig(
         #base_model_name_or_path=MODEL,
-        r = 32,
-        lora_alpha=64,
+        r = 64,
+        lora_alpha=128,
         lora_dropout=0.1,
         target_modules=get_linear_layers(causal_lm)
     )
@@ -109,7 +109,8 @@ TOKENS_PER_REWARD = 10
 TOKENS_PER_ACTION = 10
 TOKENS_PER_OBSERVATION = 20 # CTXT_WINDOW_SIZE - TOKENS_PER_ACTION - TOKENS_PER_REWARD
 OBSERVATIONS_PER_DOCUMENT =  30 
-#TOKENS_PER_RAO = TOKENS_PER_REWARD + TOKENS_PER_ACTION + TOKENS_PER_OBSERVATION
+TOKENS_PER_RAO = TOKENS_PER_REWARD + TOKENS_PER_ACTION + TOKENS_PER_OBSERVATION
+assert TOKENS_PER_RAO * OBSERVATIONS_PER_DOCUMENT <= CTXT_WINDOW_SIZE
 TOKENS_PER_DOCUMENT = TOKENS_PER_OBSERVATION * OBSERVATIONS_PER_DOCUMENT
 BATCH_SIZE = 4
 NUM_BATCHES = 100 # None
@@ -189,9 +190,9 @@ class MyRAO:
     a: torchtyping.TensorType
     o: torchtyping.TensorType
 
-def log_and_print_info(i, batch_loss, aggregate_losses, prev_obs, action, predicted_obs, true_obs, optimizer, wandb_table, causal_lm_tokenizer, MODEL):
-    if i % PRINT_INTERVAL == 0:
-        print(f"\nBatch number {i}")
+def log_and_print_info(batch_index, observation_index, batch_loss, aggregate_losses, prev_obs, action, predicted_obs, true_obs, optimizer, wandb_table, causal_lm_tokenizer, MODEL):
+    if batch_index % PRINT_INTERVAL == 0 and observation_index % PRINT_INTERVAL == 0:
+        print(f"\nBatch number {batch_index}")
         print("batch loss: ", batch_loss[0])
         if aggregate_losses: print("aggregate loss: ", aggregate_losses[-1])
         print("previous obs:", repr(causal_lm_tokenizer.batch_decode(prev_obs)[0]))
@@ -201,7 +202,7 @@ def log_and_print_info(i, batch_loss, aggregate_losses, prev_obs, action, predic
         for param_group in optimizer.param_groups:
             print("Current learning rate: ", param_group["lr"])
     with open(f'{SAVE_DIRECTORY}/{MODEL}_training_info.txt', 'a') as f:
-        print(f"\nBatch number {i}", file=f)
+        print(f"\nBatch number {batch_index}", file=f)
         print("batch loss: ", batch_loss[0], file=f)
         if aggregate_losses: print("aggregate loss: ", aggregate_losses[-1], file=f)
         print("previous obs:", repr(causal_lm_tokenizer.batch_decode(prev_obs)[0]), file=f)
@@ -212,7 +213,7 @@ def log_and_print_info(i, batch_loss, aggregate_losses, prev_obs, action, predic
             print("Current learning rate: ", param_group["lr"], file=f)
     if WANDB:
         wandb.log({
-            "Batch number": i,
+            "Batch number": batch_index,
             "Batch Loss": batch_loss[0].item(),
             #"Aggregate loss": aggregate_losses[-1] if aggregate_losses else -1,
             "Current learning rate": [g["lr"] for g in optimizer.param_groups if "lr" in g][0]
@@ -248,7 +249,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
         optimizer.zero_grad()
         high_reward_value = round(np.mean(aggregate_losses) - np.std(aggregate_losses),3) if aggregate_losses else 6.0
         high_reward = causal_lm_tokenizer(["Reward: " + str(high_reward_value) for _ in range(BATCH_SIZE)], 
-                                          return_tensors="pt", padding=True, max_length=TOKENS_PER_REWARD).input_ids
+                                          return_tensors="pt", padding="max_length", max_length=TOKENS_PER_REWARD).input_ids
         high_reward = high_reward.to(DEVICE)
         incentive_rao = torch.cat((rao_tensor, high_reward, action_prefix_tensor), dim=-1)
         full_action = causal_lm.generate(
@@ -282,7 +283,7 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
         ).input_ids.to(DEVICE)
         rao_tensor = torch.cat((rao_tensor, losses, action, true_obs), dim=-1)[:, -CTXT_WINDOW_SIZE//3:]
         rao_sequence.append([MyRAO(r=losses[i], a=action[i], o=true_obs[i]) for i in range(BATCH_SIZE)])
-        log_and_print_info(i, batch_loss, aggregate_losses, prev_obs, action, predicted_obs, true_obs, optimizer, wandb_table, causal_lm_tokenizer, MODEL)
+        log_and_print_info(i, observation_index, batch_loss, aggregate_losses, prev_obs, action, predicted_obs, true_obs, optimizer, wandb_table, causal_lm_tokenizer, MODEL)
     
     # Compute the loss on the whole rao_tensor sequence and perform backpropagation
     rao_tensor_logits = causal_lm(rao_tensor).logits
@@ -293,7 +294,8 @@ for data in tqdm(dataloader, total=NUM_BATCHES) if NUM_BATCHES else tqdm(dataloa
     aggregate_loss = rao_tensor_loss.mean()
     aggregate_losses.append(aggregate_loss.item())
     aggregate_loss.backward()
-    if WANDB: wandb.log({"Aggregate loss": aggregate_losses[-1]})
+    print("Aggregate loss: ", aggregate_loss)
+    if WANDB: wandb.log({"Aggregate loss": aggregate_loss})
     optimizer.step()
     scheduler.step()
 
