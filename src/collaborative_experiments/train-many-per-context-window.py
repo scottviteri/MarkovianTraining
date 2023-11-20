@@ -28,7 +28,7 @@ from torch.nn.utils.rnn import pad_sequence
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "mps")
 LOAD_MODEL = False
 MODEL = "gpt2" #"gpt2-xl" #"distilgpt2" #gpt2-large" # distilgpt2  ;  EleutherAI/gpt-j-6b   
-WANDB = False 
+WANDB = True 
 
 if WANDB:
     run = wandb.init(project="collaborative-training-many-per-context-window", entity="scottviteri")
@@ -42,16 +42,6 @@ For each article that is long enough, we will break it into chunks of fixed toke
 The dataloader will feed the ith segment of BATCH_SIZE different articles to the transformer simultaneously to generate rewards.
 We reassemble the article subsequences to include (reward, prediction, article snippet) triples.
 """
-
-peft_config = LoraConfig(
-        #base_model_name_or_path=MODEL,
-        r = 64,
-        lora_alpha=32,
-        lora_dropout=0.1
-        #target_modules=["query","values"]
-    )
-
-print("Loading Models")
 
 if  LOAD_MODEL:
     causal_lm_tokenizer = AutoTokenizer.from_pretrained(f"/content/drive/MyDrive/CollaborativeTrainingModelWeights/tokenizer_{MODEL}", padding_size="left")
@@ -96,6 +86,20 @@ elif MODEL == "gpt2":
     causal_lm = AutoModelForCausalLM.from_pretrained("gpt2").to(DEVICE)
     causal_lm_tokenizer = AutoTokenizer.from_pretrained("gpt2", padding_side="left")
     CTXT_WINDOW_SIZE = causal_lm.config.n_ctx
+
+def get_linear_layers(model):
+    return set(map(lambda x:x[0].split('.')[-1], 
+                   filter(lambda x:isinstance(x[1],torch.nn.Linear), causal_lm.named_modules())))
+
+peft_config = LoraConfig(
+        #base_model_name_or_path=MODEL,
+        r = 32,
+        lora_alpha=64,
+        lora_dropout=0.1,
+        target_modules=get_linear_layers(causal_lm)
+    )
+
+print("Loading Models")
 
 causal_lm = get_peft_model(causal_lm, peft_config)
 causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
