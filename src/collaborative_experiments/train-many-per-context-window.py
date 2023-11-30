@@ -5,12 +5,10 @@
 
 
 import torch
-from torchtyping import TensorType
 from tqdm import tqdm
-from einops import rearrange, repeat
-import numpy as np
+from einops import rearrange
 import wandb
-from collaborative_experiments.rao_tools import MyRAO, RaoConfig, log_and_print_info
+from collaborative_experiments.rao_tools import RaoConfig
 from collaborative_experiments.rao_generator import RaoGenerator
 
 cfg = RaoConfig(
@@ -55,10 +53,6 @@ raogen = RaoGenerator(
     num_data_points=NUM_DATAPOINTS,
 )
 dataloader = raogen.dataloader
-tokens_per_pure_reward = raogen.tokens_per_pure_reward
-reward_prefix_tensor = raogen.reward_prefix_tensor
-action_prefix_tensor = raogen.action_prefix_tensor
-tokens_per_pure_action = raogen.tokens_per_pure_action
 
 i = 0
 aggregate_losses = []
@@ -82,97 +76,15 @@ for data in (
         causal_lm.save_pretrained(
             f"./saved_weights_and_losses/trained_{cfg.model_name}"
         )
-    rao_tensor = torch.tensor(
-        [[] for _ in range(cfg.batch_size)], device=cfg.device, dtype=torch.int32
-    )
-    rao_sequence = []
 
-    for observation_index in range(cfg.obs_p_doc):
-        optimizer.zero_grad()
-        high_reward_value = (
-            round(np.mean(aggregate_losses) - np.std(aggregate_losses), 3)
-            if aggregate_losses
-            else 6.0
-        )
-        high_reward = causal_lm_tokenizer(
-            [str(high_reward_value) for _ in range(cfg.batch_size)],
-            return_tensors="pt",
-            padding="max_length",
-            max_length=tokens_per_pure_reward,
-        ).input_ids
-        high_reward = torch.cat(
-            (reward_prefix_tensor, high_reward.to(cfg.device)), dim=-1
-        )
-        incentive_rao = torch.cat(
-            (rao_tensor, high_reward, action_prefix_tensor), dim=-1
-        )
-        full_action = causal_lm.generate(
-            inputs=incentive_rao,
-            output_scores=True,
-            do_sample=True,
-            return_dict_in_generate=True,
-            max_new_tokens=tokens_per_pure_action,
-            pad_token_id=causal_lm_tokenizer.pad_token_id,
-            eos_token_id=None,
-        )
-        action: TensorType["batch", "seq_length"] = full_action.sequences[
-            :, -cfg.tok_p_action :
-        ]
-        if observation_index > 1:
-            prev_obs: TensorType["batch", "seq_length"] = data["input_ids"][
-                :, observation_index - 1, :
-            ]
-        else:
-            prev_obs: TensorType["batch", "seq_length"] = torch.full_like(
-                data["input_ids"][:, 0, :], causal_lm_tokenizer.pad_token_id
-            )
-        true_obs: TensorType["batch", "seq_length"] = data["input_ids"][
-            :, observation_index, :
-        ]
-        true_obs = true_obs.to(cfg.device)
-        with torch.no_grad():
-            prediction = causal_lm(
-                torch.cat((rao_tensor, high_reward, action, true_obs), dim=-1)
-            )
-            predicted_logits = prediction.logits[:, -cfg.tok_p_obs - 1 : -1, :]
-            predicted_obs = predicted_logits.argmax(dim=-1)
-            out = loss_fn(
-                input=rearrange(
-                    predicted_logits,
-                    "batch seq_length vocab_size -> batch vocab_size seq_length",
-                ),
-                target=true_obs,
-            )
-            batch_loss = out.mean(dim=-1)
-        string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
-        losses_tensor: TensorType["batch", "seq_length"] = causal_lm_tokenizer(
-            string_losses, return_tensors="pt", padding=True
-        ).input_ids.to(cfg.device)
-        actual_reward = torch.cat((reward_prefix_tensor, losses_tensor), dim=-1)
-        rao_tensor = torch.cat((rao_tensor, actual_reward, action, true_obs), dim=-1)[
-            :, -(cfg.ctxt_size - cfg.tok_p_rao) :
-        ]
-        rao_sequence.append(
-            [
-                MyRAO(r=actual_reward[i], a=action[i], o=true_obs[i])
-                for i in range(cfg.batch_size)
-            ]
-        )
-        # print("rao tensor: ", repr(causal_lm_tokenizer.decode(rao_tensor[0])))
-        # print()
-        log_and_print_info(
-            cfg,
-            i,
-            observation_index,
-            batch_loss,
-            aggregate_losses,
-            prev_obs,
-            action,
-            predicted_obs,
-            true_obs,
-            optimizer,
-            wandb_table,
-        )
+    rao_tensor = raogen.gen_rao_tensor(
+        data=data,
+        optimizer=optimizer,
+        loss_fn=loss_fn,
+        aggregate_losses=aggregate_losses,
+        i=i,
+        wandb_table=wandb_table,
+    )
 
     # Compute the loss on the whole rao_tensor sequence and perform backpropagation
     rao_tensor_logits = causal_lm(rao_tensor).logits[:, :-1, :]
