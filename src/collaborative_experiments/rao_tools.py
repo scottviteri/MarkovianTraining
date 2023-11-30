@@ -10,6 +10,7 @@ import torch
 import torchtyping
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import LoraConfig, get_peft_model
+import wandb
 
 # from collections import namedtuple
 # Config = namedtuple("Config", ["setting1", "setting2"])
@@ -68,10 +69,6 @@ class RaoConfig:
             self._tok_p_obs = tok_p_obs
         self._tok_p_rao = self._tok_p_reward + self._tok_p_action + self._tok_p_obs
         self._tok_p_doc = self._tok_p_obs * self._obs_p_doc
-        assert (
-            self._tok_p_rao * self._obs_p_doc <= self._ctxt_size
-        ), "self._tok_p_rao * self._obs_p_doc <= self._ctxt_size"
-
         self._batch_size = batch_size
         self._num_batches = num_batches
         self._interval_save_weights = interval_save_weights
@@ -84,6 +81,10 @@ class RaoConfig:
 
         # sets model, tokenizer and ctxt_size
         self._set_model()
+
+        assert (
+            self._tok_p_rao * self._obs_p_doc <= self._ctxt_size
+        ), "self._tok_p_rao * self._obs_p_doc <= self._ctxt_size"
 
     def __repr__(self):
         return (
@@ -268,6 +269,68 @@ class RaoConfig:
                     model.named_modules(),
                 ),
             )
+        )
+
+
+def log_and_print_info(
+    cfg,
+    batch_index,
+    observation_index,
+    batch_loss,
+    aggregate_losses,
+    prev_obs,
+    action,
+    predicted_obs,
+    true_obs,
+    optimizer,
+    wandb_table,
+):
+    tokenizer = cfg.tokenizer
+    if (
+        batch_index % cfg.interval_print == 0
+        and observation_index % cfg.interval_print == 0
+    ):
+        print(f"\nBatch number {batch_index}")
+        print("batch loss: ", batch_loss[0])
+        if aggregate_losses:
+            print("aggregate loss: ", aggregate_losses[-1])
+        print("previous obs:", repr(tokenizer.batch_decode(prev_obs)[0]))
+        print("action: ", repr(tokenizer.batch_decode(action)[0]))
+        print("predicted obs: ", repr(tokenizer.batch_decode(predicted_obs)[0]))
+        print("true obs:", repr(tokenizer.batch_decode(true_obs)[0]))
+        for param_group in optimizer.param_groups:
+            print("Current learning rate: ", param_group["lr"])
+    with open(f"{cfg.save_dir}/{cfg.model_name}_training_info.txt", "a") as f:
+        print(f"\nBatch number {batch_index}", file=f)
+        print("batch loss: ", batch_loss[0], file=f)
+        if aggregate_losses:
+            print("aggregate loss: ", aggregate_losses[-1], file=f)
+        print("previous obs:", repr(tokenizer.batch_decode(prev_obs)[0]), file=f)
+        print("action: ", repr(tokenizer.batch_decode(action)[0]), file=f)
+        print(
+            "predicted obs: ",
+            repr(tokenizer.batch_decode(predicted_obs)[0]),
+            file=f,
+        )
+        print("true obs:", repr(tokenizer.batch_decode(true_obs)[0]), file=f)
+        for param_group in optimizer.param_groups:
+            print("Current learning rate: ", param_group["lr"], file=f)
+    if cfg.wandb:
+        wandb.log(
+            {
+                "Batch number": batch_index,
+                "Batch Loss": batch_loss[0].item(),
+                # "Aggregate loss": aggregate_losses[-1] if aggregate_losses else -1,
+                "Current learning rate": [
+                    g["lr"] for g in optimizer.param_groups if "lr" in g
+                ][0],
+            }
+        )
+        wandb_table.add_data(
+            repr(tokenizer.batch_decode(prev_obs)[0]),
+            repr(tokenizer.batch_decode(action)[0]),
+            repr(tokenizer.batch_decode(predicted_obs)[0]),
+            repr(tokenizer.batch_decode(true_obs)[0]),
         )
 
 
