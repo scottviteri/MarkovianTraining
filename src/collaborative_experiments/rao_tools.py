@@ -203,11 +203,11 @@ class RaoConfig:
         return self._model_name
 
     # I do not know if immutability is an issue for a trainable model
-    # @property
+    @property
     def model(self):
         return self._model
 
-    # @property
+    @property
     def tokenizer(self):
         return self._tokenizer
 

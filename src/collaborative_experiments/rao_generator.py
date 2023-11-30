@@ -6,10 +6,12 @@ We reassemble the article subsequences to include (reward, prediction, article s
 """
 
 import torch
+from torchtyping import TensorType
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Dataset, Features, Value, Array2D
-from einops import repeat
-from collaborative_experiments.rao_tools import RaoConfig
+from einops import repeat, rearrange
+import numpy as np
+from collaborative_experiments.rao_tools import RaoConfig, log_and_print_info
 
 # POINTS_FROM_DATASET = NUM_DATAPOINTS
 
@@ -31,6 +33,113 @@ class RaoGenerator:
         # self._reward_prefix_tensor, self._tokens_per_pure_action,
         # and self._action_prefix_tensor
         self.trunc_documents()
+
+    def gen_rao_tensor(
+        self,
+        data,
+        optimizer,
+        loss_fn,
+        aggregate_losses,
+        i=None,
+        wandb_table=None,
+    ):
+        rao_tensor = torch.tensor(
+            [[] for _ in range(self._cfg.batch_size)],
+            device=self._cfg.device,
+            dtype=torch.int32,
+        )
+        causal_lm = self._cfg.model
+        causal_lm_tokenizer = self._cfg.tokenizer
+
+        for observation_index in range(self._cfg.obs_p_doc):
+            optimizer.zero_grad()
+            high_reward_value = (
+                round(np.mean(aggregate_losses) - np.std(aggregate_losses), 3)
+                if aggregate_losses
+                else 6.0
+            )
+            high_reward = causal_lm_tokenizer(
+                [str(high_reward_value) for _ in range(self._cfg.batch_size)],
+                return_tensors="pt",
+                padding="max_length",
+                # Fixme: one context uses cfg.tok_p_reward here
+                max_length=self._tokens_per_pure_reward,
+            ).input_ids
+            # Fixme: high_reward.to(cfg.device) without cat
+            high_reward = torch.cat(
+                (self._reward_prefix_tensor, high_reward.to(self._cfg.device)), dim=-1
+            )
+            incentive_rao = torch.cat(
+                (rao_tensor, high_reward, self._action_prefix_tensor), dim=-1
+            )
+            full_action = causal_lm.generate(
+                inputs=incentive_rao,
+                output_scores=True,
+                do_sample=True,
+                return_dict_in_generate=True,
+                max_new_tokens=self._tokens_per_pure_action,
+                pad_token_id=causal_lm_tokenizer.pad_token_id,
+                eos_token_id=None,
+            )
+            action: TensorType["batch", "seq_length"] = full_action.sequences[
+                :, -self._cfg.tok_p_action :
+            ]
+            if observation_index > 1:
+                prev_obs: TensorType["batch", "seq_length"] = data["input_ids"][
+                    :, observation_index - 1, :
+                ]
+            else:
+                prev_obs: TensorType["batch", "seq_length"] = torch.full_like(
+                    data["input_ids"][:, 0, :], causal_lm_tokenizer.pad_token_id
+                )
+            true_obs: TensorType["batch", "seq_length"] = data["input_ids"][
+                :, observation_index, :
+            ]
+            true_obs = true_obs.to(self._cfg.device)
+            with torch.no_grad():
+                prediction = causal_lm(
+                    torch.cat((rao_tensor, high_reward, action, true_obs), dim=-1)
+                )
+                predicted_logits = prediction.logits[
+                    :, -self._cfg.tok_p_obs - 1 : -1, :
+                ]
+                predicted_obs = predicted_logits.argmax(dim=-1)
+                out = loss_fn(
+                    input=rearrange(
+                        predicted_logits,
+                        "batch seq_length vocab_size -> batch vocab_size seq_length",
+                    ),
+                    target=true_obs,
+                )
+                batch_loss = out.mean(dim=-1)
+            string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
+            losses_tensor: TensorType["batch", "seq_length"] = causal_lm_tokenizer(
+                string_losses, return_tensors="pt", padding=True
+            ).input_ids.to(self._cfg.device)
+            actual_reward = torch.cat(
+                (self._reward_prefix_tensor, losses_tensor), dim=-1
+            )
+            rao_tensor = torch.cat(
+                (rao_tensor, actual_reward, action, true_obs), dim=-1
+            )[:, -(self._cfg.ctxt_size - self._cfg.tok_p_rao) :]
+
+            # print("rao tensor: ", repr(causal_lm_tokenizer.decode(rao_tensor[0])))
+            # print()
+            log_and_print_info(
+                self._cfg,
+                i,
+                observation_index,
+                batch_loss,
+                aggregate_losses,
+                prev_obs,
+                action,
+                predicted_obs,
+                true_obs,
+                optimizer,
+                wandb_table,
+            )
+
+            return rao_tensor
 
     def trunc_documents(self):
         truncated_documents = {"text": [], "input_ids": []}
