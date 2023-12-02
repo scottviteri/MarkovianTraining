@@ -22,11 +22,10 @@ class RaoGenerator:
     def __init__(
         self,
         cfg: RaoConfig,
-        points_from_data: int,
         num_data_points: int,
     ):
         self._cfg = cfg
-        self._points_from_data = points_from_data
+        self._points_from_data = num_data_points 
         self._num_data_points = num_data_points
 
         # sets self._dataloader, self._tokens_per_pure_reward
@@ -40,7 +39,7 @@ class RaoGenerator:
         optimizer,
         loss_fn,
         aggregate_losses,
-        i=None,
+        batch_index=None,
         wandb_table=None,
     ):
         rao_tensor = torch.tensor(
@@ -64,10 +63,10 @@ class RaoGenerator:
                 padding="max_length",
                 # Fixme: one context uses cfg.tok_p_reward here
                 max_length=self._tokens_per_pure_reward,
-            ).input_ids
-            # Fixme: high_reward.to(cfg.device) without cat
+            ).input_ids.to(self._cfg.device)
+            # _reward_prefix_tensor already on device
             high_reward = torch.cat(
-                (self._reward_prefix_tensor, high_reward.to(self._cfg.device)), dim=-1
+                (self._reward_prefix_tensor, high_reward), dim=-1
             )
             incentive_rao = torch.cat(
                 (rao_tensor, high_reward, self._action_prefix_tensor), dim=-1
@@ -127,7 +126,7 @@ class RaoGenerator:
             # print()
             log_and_print_info(
                 self._cfg,
-                i,
+                batch_index,
                 observation_index,
                 batch_loss,
                 aggregate_losses,
@@ -150,7 +149,7 @@ class RaoGenerator:
             # not creating enough datapoints
             dataset = load_dataset(
                 "wikipedia",
-                "20220301.en",
+                "20220301.simple",
                 split=f"train[:{self._points_from_data}]"
                 if self._points_from_data
                 else "train",

@@ -82,10 +82,6 @@ class RaoConfig:
         # sets model, tokenizer and ctxt_size
         self._set_model()
 
-        assert (
-            self._tok_p_rao * self._obs_p_doc <= self._ctxt_size
-        ), "self._tok_p_rao * self._obs_p_doc <= self._ctxt_size"
-
     def __repr__(self):
         return (
             f"RaoConfig({self._model_name}, do_lora {self._do_lora}, "
@@ -261,14 +257,14 @@ class RaoConfig:
 
     @staticmethod
     def get_linear_layers(model):
-        return set(
+        return list(set(
             map(
                 lambda x: x[0].split(".")[-1],
                 filter(
                     lambda x: isinstance(x[1], torch.nn.Linear),
                     model.named_modules(),
                 ),
-            )
+            ))
         )
 
 
