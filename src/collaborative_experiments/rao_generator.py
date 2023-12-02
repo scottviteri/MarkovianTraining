@@ -138,7 +138,7 @@ class RaoGenerator:
                 wandb_table,
             )
 
-            return rao_tensor
+        return rao_tensor
 
     def trunc_documents(self):
         truncated_documents = {"text": [], "input_ids": []}
