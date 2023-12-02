@@ -48,12 +48,11 @@ causal_lm_tokenizer = cfg.tokenizer
 
 raogen = RaoGenerator(
     cfg=cfg,
-    points_from_data=NUM_DATAPOINTS,
     num_data_points=NUM_DATAPOINTS,
 )
 dataloader = raogen.dataloader
 
-i = 0
+batch_index = 0
 aggregate_losses = []
 loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
 optimizer = torch.optim.Adam(causal_lm.parameters(), lr=1e-4)
@@ -61,13 +60,13 @@ scheduler = torch.optim.lr_scheduler.LinearLR(
     optimizer, start_factor=1.0, end_factor=0.1, total_iters=cfg.num_batches
 )
 
-for data in (
-    tqdm(dataloader, total=cfg.num_batches) if cfg.num_batches else tqdm(dataloader)
+for batch_index, data in (
+    tqdm(enumerate(dataloader), total=cfg.num_batches) if cfg.num_batches else tqdm(dataloader)
 ):
-    if cfg.num_batches and i > cfg.num_batches:
+    if cfg.num_batches and batch_index > cfg.num_batches:
         break
-    i += 1
-    if i > 1 and i % cfg.interval_save_weights == 0:
+    batch_index += 1
+    if batch_index > 1 and batch_index % cfg.interval_save_weights == 0:
         print(f"Saving trained_{cfg.model_name}")
         causal_lm_tokenizer.save_pretrained(
             f"./saved_weights_and_losses/tokenizer_{cfg.model_name}"
@@ -81,7 +80,7 @@ for data in (
         optimizer=optimizer,
         loss_fn=loss_fn,
         aggregate_losses=aggregate_losses,
-        i=i,
+        batch_index=batch_index,
         wandb_table=wandb_table,
     )
 
