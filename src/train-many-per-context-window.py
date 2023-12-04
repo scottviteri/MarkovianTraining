@@ -1,4 +1,3 @@
-# mamba activate menv
 # pip install transformers datasets==2.14.6 torchtyping==0.1.4
 # pip install peft einops apache_beam==2.51.0 matplotlib wandb
 # pip install -U flash-attn --no-build-isolation
@@ -8,8 +7,8 @@ import torch
 from tqdm import tqdm
 from einops import rearrange
 import wandb
-from collaborative_experiments.rao_tools import RaoConfig
-from collaborative_experiments.rao_generator import RaoGenerator
+from rao_tools import RaoConfig
+from rao_generator import RaoGenerator
 
 cfg = RaoConfig(
     load_model=False,

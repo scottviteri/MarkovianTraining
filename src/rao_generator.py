@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from datasets import load_dataset, Dataset, Features, Value, Array2D
 from einops import repeat, rearrange
 import numpy as np
-from collaborative_experiments.rao_tools import RaoConfig, log_and_print_info
+from rao_tools import RaoConfig, log_and_print_info
 
 # POINTS_FROM_DATASET = NUM_DATAPOINTS
 
