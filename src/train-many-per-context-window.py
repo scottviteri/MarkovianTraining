@@ -18,9 +18,9 @@ cfg = RaoConfig(
     tok_p_reward=10,
     tok_p_action=10,
     tok_p_obs=50,
-    obs_p_doc=2,  # 20,
-    batch_size=8,
-    num_batches=1000,
+    obs_p_doc=10,
+    batch_size=16,
+    num_batches=100,
     interval_save_weights=30,
 )
 
