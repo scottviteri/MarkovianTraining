@@ -284,7 +284,7 @@ def log_and_print_info(
     tokenizer = cfg.tokenizer
     if (
         batch_index % cfg.interval_print == 0
-        and observation_index % cfg.interval_print == 0
+        and observation_index % (cfg.obs_p_doc//2) == 0
     ):
         print(f"\nBatch number {batch_index}")
         print("batch loss: ", batch_loss[0])
