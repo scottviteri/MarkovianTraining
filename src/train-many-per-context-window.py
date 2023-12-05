@@ -23,12 +23,13 @@ sweep_config = {
         'model_name': {'values': ["distilgpt2"]},
         #'save_dir': {'values': ["."]},
         'lr': {'values': [1e-3, 5e-4, 1e-4]},
+        'do_lora': {'values': [False]},
         'tok_p_reward': {'values': [10,30,50]},
         'tok_p_action': {'values': [10,30,50]},
         'tok_p_obs': {'values': [10,30,50]},
         #'obs_p_doc': {'values': [10]},
         'batch_size': {'values': [12]},
-        'num_batches': {'values': [100]},
+        'num_batches': {'values': [10]},
         #'interval_save_weights': {'values': [30]},
     }
 }
@@ -44,6 +45,7 @@ def train():
         wandb=True,
         model_name=wb_cfg.model_name,
         lr = wb_cfg.lr,
+        do_lora = wb_cfg.do_lora, 
         save_dir=".",
         tok_p_reward=wb_cfg.tok_p_reward,
         tok_p_action=wb_cfg.tok_p_action,
@@ -51,9 +53,11 @@ def train():
         obs_p_doc=obs_p_doc,
         batch_size=wb_cfg.batch_size,
         num_batches=wb_cfg.num_batches,
-        interval_save_weights=30
+        interval_save_weights=30,
+        interval_print = 5
     )
-    run.name = f"{wb_cfg.model_name}_lr{wb_cfg.lr}_rao{wb_cfg.tok_p_reward}/{wb_cfg.tok_p_action}/{wb_cfg.tok_p_obs}_bs{wb_cfg.batch_size}"
+    lora_string = "L" if wb_cfg.do_lora else "nL"
+    run.name = f"{lora_string}{wb_cfg.model_name[:4]}_lr{wb_cfg.lr}_rao{wb_cfg.tok_p_reward}/{wb_cfg.tok_p_action}/{wb_cfg.tok_p_obs}_bs{wb_cfg.batch_size}_nb{wb_cfg.num_batches}"
 
     wandb_table = wandb.Table(
         data=[],
