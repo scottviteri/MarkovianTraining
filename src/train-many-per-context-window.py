@@ -27,16 +27,16 @@ sweep_config = {
         'tok_p_action': {'values': [10,30,50]},
         'tok_p_obs': {'values': [10,30,50]},
         #'obs_p_doc': {'values': [10]},
-        'batch_size': {'values': [8]},
-        'num_batches': {'values': [10]},
+        'batch_size': {'values': [12]},
+        'num_batches': {'values': [100]},
         #'interval_save_weights': {'values': [30]},
     }
 }
 
-sweep_id = wandb.sweep(sweep_config)
+sweep_id = wandb.sweep(sweep_config, project="collaborative-training-many-per-context-window")
 
 def train():
-    run = wandb.init(project="collaborative-training-many-per-context-window")
+    run = wandb.init()
     wb_cfg = run.config
     obs_p_doc = 1024 // (wb_cfg.tok_p_reward + wb_cfg.tok_p_action + wb_cfg.tok_p_obs) 
     cfg = RaoConfig(
@@ -53,8 +53,7 @@ def train():
         num_batches=wb_cfg.num_batches,
         interval_save_weights=30
     )
-    run.name = f"{wb_cfg.model_name}_lr{wb_cfg.lr:e}_rao{wb_cfg.tok_p_reward}/{wb_cfg.tok_p_action}/{wb_cfg.tok_p_obs}_bs{wb_cfg.batch_size}"
-    run.save()
+    run.name = f"{wb_cfg.model_name}_lr{wb_cfg.lr}_rao{wb_cfg.tok_p_reward}/{wb_cfg.tok_p_action}/{wb_cfg.tok_p_obs}_bs{wb_cfg.batch_size}"
 
     wandb_table = wandb.Table(
         data=[],
@@ -78,7 +77,7 @@ def train():
 
     aggregate_losses = []
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    optimizer = torch.optim.Adam(causal_lm.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(causal_lm.parameters(), lr=cfg.lr)
     #scheduler = torch.optim.lr_scheduler.LinearLR(
     #    optimizer, start_factor=1.0, end_factor=0.1, total_iters=cfg.num_batches
     #)
