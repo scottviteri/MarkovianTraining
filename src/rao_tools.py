@@ -36,7 +36,7 @@ class RaoConfig:
         lr: float = 1e-4,
         save_dir: str = "./",
         path_2_model: str = None,
-        tok_p_reward: int = 10,
+        tok_p_loss: int = 10,
         tok_p_action: int = 100,
         tok_p_obs: int = 50,
         obs_p_doc: int = 5,
@@ -61,14 +61,14 @@ class RaoConfig:
         self._path_2_model = path_2_model
 
         # ints
-        self._tok_p_reward = tok_p_reward
+        self._tok_p_loss = tok_p_loss
         self._tok_p_action = tok_p_action
         self._obs_p_doc = obs_p_doc
         if tok_p_obs is None:
-            self._tok_p_obs = self._ctxt_size - self._tok_p_action - self._tok_p_reward
+            self._tok_p_obs = self._ctxt_size - self._tok_p_action - self._tok_p_loss
         else:
             self._tok_p_obs = tok_p_obs
-        self._tok_p_rao = self._tok_p_reward + self._tok_p_action + self._tok_p_obs
+        self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
         self._tok_p_doc = self._tok_p_obs * self._obs_p_doc
         self._batch_size = batch_size
         self._num_batches = num_batches
@@ -102,7 +102,7 @@ class RaoConfig:
             ), f"Path to model not set {self._path_2_model}"
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                 f"/content/drive/MyDrive/CollaborativeTrainingModelWeights/tokenizer_{self._model_name}",
-                padding_size="left",
+                padding_side="left",
             )
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 f"/content/drive/MyDrive/CollaborativeTrainingModelWeights/trained_{self._model_name}"
@@ -178,7 +178,9 @@ class RaoConfig:
 
             causal_lm = get_peft_model(causal_lm, peft_config)
 
-        causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
+        #causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
+        causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.encode(" ")[0]
+
         self._model = causal_lm
         self._tokenizer = causal_lm_tokenizer
 
@@ -220,8 +222,8 @@ class RaoConfig:
         return self._save_dir
 
     @property
-    def tok_p_reward(self):
-        return self._tok_p_reward
+    def tok_p_loss(self):
+        return self._tok_p_loss
 
     @property
     def tok_p_action(self):
@@ -283,6 +285,7 @@ def log_and_print_info(
     batch_loss,
     aggregate_losses,
     prev_obs,
+    actual_loss, 
     action,
     predicted_obs,
     true_obs,
@@ -299,6 +302,7 @@ def log_and_print_info(
         if aggregate_losses:
             print("aggregate loss: ", aggregate_losses[-1])
         print("previous obs:", repr(tokenizer.batch_decode(prev_obs)[0]))
+        print("actual loss:", repr(tokenizer.batch_decode(actual_loss)[0]))
         print("action: ", repr(tokenizer.batch_decode(action)[0]))
         print("predicted obs: ", repr(tokenizer.batch_decode(predicted_obs)[0]))
         print("true obs:", repr(tokenizer.batch_decode(true_obs)[0]))
@@ -310,6 +314,7 @@ def log_and_print_info(
         if aggregate_losses:
             print("aggregate loss: ", aggregate_losses[-1], file=f)
         print("previous obs:", repr(tokenizer.batch_decode(prev_obs)[0]), file=f)
+        print("actual loss:", repr(tokenizer.batch_decode(actual_loss)[0]), file=f)
         print("action: ", repr(tokenizer.batch_decode(action)[0]), file=f)
         print(
             "predicted obs: ",
@@ -332,6 +337,7 @@ def log_and_print_info(
         )
         wandb_table.add_data(
             repr(tokenizer.batch_decode(prev_obs)[0]),
+            repr(tokenizer.batch_decode(actual_loss)[0]),
             repr(tokenizer.batch_decode(action)[0]),
             repr(tokenizer.batch_decode(predicted_obs)[0]),
             repr(tokenizer.batch_decode(true_obs)[0]),

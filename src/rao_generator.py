@@ -52,33 +52,35 @@ class RaoGenerator:
 
         for observation_index in range(self._cfg.obs_p_doc):
             optimizer.zero_grad()
-            high_reward_value = (
+            low_loss_value = (
                 round(np.mean(aggregate_losses) - np.std(aggregate_losses), 3)
                 if aggregate_losses
                 else 6.0
             )
-            high_reward = causal_lm_tokenizer(
-                [str(high_reward_value) for _ in range(self._cfg.batch_size)],
+            low_loss = causal_lm_tokenizer.batch_encode_plus(
+                [str(low_loss_value) for _ in range(self._cfg.batch_size)],
                 return_tensors="pt",
+                truncation="longest_first",
                 padding="max_length",
-                # Fixme: one context uses cfg.tok_p_reward here
+                # Fixme: one context uses cfg.tok_p_loss here
                 max_length=self._tokens_per_pure_reward,
             ).input_ids.to(self._cfg.device)
             # _reward_prefix_tensor already on device
-            high_reward = torch.cat(
-                (self._reward_prefix_tensor, high_reward), dim=-1
+            low_loss = torch.cat(
+                (self._reward_prefix_tensor, low_loss), dim=-1
             )
             incentive_rao = torch.cat(
-                (rao_tensor, high_reward, self._action_prefix_tensor), dim=-1
+                (rao_tensor, low_loss, self._action_prefix_tensor), dim=-1
             )
             full_action = causal_lm.generate(
                 inputs=incentive_rao,
                 output_scores=True,
                 do_sample=True,
                 return_dict_in_generate=True,
+                min_new_tokens=self._tokens_per_pure_action,
                 max_new_tokens=self._tokens_per_pure_action,
-                pad_token_id=causal_lm_tokenizer.pad_token_id,
-                eos_token_id=None,
+                #causal_lm_tokenizer.eos_token_id
+                pad_token_id = causal_lm_tokenizer.encode(" ")[0]
             )
             action: TensorType["batch", "seq_length"] = full_action.sequences[
                 :, -self._cfg.tok_p_action :
@@ -97,7 +99,7 @@ class RaoGenerator:
             true_obs = true_obs.to(self._cfg.device)
             with torch.no_grad():
                 prediction = causal_lm(
-                    torch.cat((rao_tensor, high_reward, action, true_obs), dim=-1)
+                    torch.cat((rao_tensor, low_loss, action, true_obs), dim=-1)
                 )
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :
@@ -112,14 +114,18 @@ class RaoGenerator:
                 )
                 batch_loss = out.mean(dim=-1)
             string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
-            losses_tensor: TensorType["batch", "seq_length"] = causal_lm_tokenizer(
-                string_losses, return_tensors="pt", padding=True
+            losses_tensor: TensorType["batch", "seq_length"] = causal_lm_tokenizer.batch_encode_plus(
+                string_losses, return_tensors="pt", 
+                padding="max_length",
+                truncation = "longest_first",
+                max_length=self._tokens_per_pure_reward
             ).input_ids.to(self._cfg.device)
-            actual_reward = torch.cat(
+            assert causal_lm_tokenizer.eos_token_id not in losses_tensor
+            actual_loss = torch.cat(
                 (self._reward_prefix_tensor, losses_tensor), dim=-1
             )
             rao_tensor = torch.cat(
-                (rao_tensor, actual_reward, action, true_obs), dim=-1
+                (rao_tensor, actual_loss, action, true_obs), dim=-1
             )[:, -(self._cfg.ctxt_size - self._cfg.tok_p_rao) :]
 
             # print("rao tensor: ", repr(causal_lm_tokenizer.decode(rao_tensor[0])))
@@ -131,6 +137,7 @@ class RaoGenerator:
                 batch_loss,
                 aggregate_losses,
                 prev_obs,
+                actual_loss,
                 action,
                 predicted_obs,
                 true_obs,
@@ -191,7 +198,7 @@ class RaoGenerator:
             ).to(self._cfg.device)
             tokens_per_pure_action = self._cfg.tok_p_action - len(action_prefix_tokens)
 
-            reward_prefix = "\nReward: "
+            reward_prefix = "\nLoss: "
             reward_prefix_tokens = self._cfg.tokenizer.encode(
                 reward_prefix, add_special_tokens=False
             )
@@ -200,7 +207,7 @@ class RaoGenerator:
                 "tokens -> batch tokens",
                 batch=self._cfg.batch_size,
             ).to(self._cfg.device)
-            tokens_per_pure_reward = self._cfg.tok_p_reward - len(reward_prefix_tokens)
+            tokens_per_pure_reward = self._cfg.tok_p_loss - len(reward_prefix_tokens)
 
             # currently need to use tensors in input_ids as per the truncated_document_features
             for document in dataset:
