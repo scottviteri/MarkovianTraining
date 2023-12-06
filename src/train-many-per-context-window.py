@@ -56,7 +56,7 @@ def train():
         interval_save_weights=30,
         interval_print = 5
     )
-    lora_string = "L" if wb_cfg.do_lora else "nL"
+    lora_string = "gL" if wb_cfg.do_lora else "gnL"
     run.name = f"{lora_string}{wb_cfg.model_name[:4]}_lr{wb_cfg.lr}_rao{wb_cfg.tok_p_reward}/{wb_cfg.tok_p_action}/{wb_cfg.tok_p_obs}_bs{wb_cfg.batch_size}_nb{wb_cfg.num_batches}"
 
     wandb_table = wandb.Table(

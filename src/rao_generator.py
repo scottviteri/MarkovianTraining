@@ -76,9 +76,8 @@ class RaoGenerator:
                 output_scores=True,
                 do_sample=True,
                 return_dict_in_generate=True,
-                max_new_tokens=self._tokens_per_pure_action,
-                pad_token_id=causal_lm_tokenizer.pad_token_id,
-                eos_token_id=None,
+                min_new_tokens=self._tokens_per_pure_action,
+                max_new_tokens=self._tokens_per_pure_action
             )
             action: TensorType["batch", "seq_length"] = full_action.sequences[
                 :, -self._cfg.tok_p_action :
