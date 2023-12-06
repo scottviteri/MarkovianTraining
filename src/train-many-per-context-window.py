@@ -26,7 +26,7 @@ sweep_config = {
         'tok_p_obs': {'values': [10,30,50]},
         #'obs_p_doc': {'values': [10]},
         'batch_size': {'values': [12]},
-        'num_batches': {'values': [100]},
+        'num_batches': {'values': [10]},
         #'interval_save_weights': {'values': [30]},
     }
 }
