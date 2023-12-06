@@ -179,6 +179,7 @@ class RaoConfig:
             causal_lm = get_peft_model(causal_lm, peft_config)
 
         #causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
+        causal_lm_tokenizer.padding_side = "left"
         causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.encode(" ")[0]
 
         self._model = causal_lm

@@ -65,6 +65,7 @@ class RaoGenerator:
                 # Fixme: one context uses cfg.tok_p_loss here
                 max_length=self._tokens_per_pure_reward,
             ).input_ids.to(self._cfg.device)
+            assert low_loss.shape[-1] == self._tokens_per_pure_reward
             # _reward_prefix_tensor already on device
             low_loss = torch.cat(
                 (self._reward_prefix_tensor, low_loss), dim=-1
@@ -72,17 +73,21 @@ class RaoGenerator:
             incentive_rao = torch.cat(
                 (rao_tensor, low_loss, self._action_prefix_tensor), dim=-1
             )
+
             full_action = causal_lm.generate(
                 inputs=incentive_rao,
                 output_scores=True,
                 do_sample=True,
-                return_dict_in_generate=True,
+                num_beams=1,
+                #return_dict_in_generate=True,
                 min_new_tokens=self._tokens_per_pure_action,
                 max_new_tokens=self._tokens_per_pure_action,
-                #causal_lm_tokenizer.eos_token_id
-                pad_token_id = causal_lm_tokenizer.encode(" ")[0]
+                pad_token_id = causal_lm_tokenizer.eos_token_id
+                #pad_token_id = causal_lm_tokenizer.encode(" ")[0]
             )
-            action: TensorType["batch", "seq_length"] = full_action.sequences[
+            assert causal_lm_tokenizer.eos_token_id not in full_action
+            #.sequences
+            action: TensorType["batch", "seq_length"] = full_action[
                 :, -self._cfg.tok_p_action :
             ]
             if observation_index > 1:
@@ -121,6 +126,7 @@ class RaoGenerator:
                 max_length=self._tokens_per_pure_reward
             ).input_ids.to(self._cfg.device)
             assert causal_lm_tokenizer.eos_token_id not in losses_tensor
+            assert losses_tensor.shape[-1] == self._tokens_per_pure_reward
             actual_loss = torch.cat(
                 (self._reward_prefix_tensor, losses_tensor), dim=-1
             )
