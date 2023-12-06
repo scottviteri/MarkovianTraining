@@ -2,7 +2,6 @@
 # pip install peft einops apache_beam==2.51.0 matplotlib wandb
 # pip install -U flash-attn --no-build-isolation
 
-
 import torch
 from tqdm import tqdm
 from einops import rearrange
@@ -18,13 +17,11 @@ sweep_config = {
       'goal': 'minimize'   
     },
     'parameters': {
-        #'load_model': {'values': [False]},
-        #'wandb': {'values': [True]},
+        'use_wandb': {'values': [False]},  # Add this line
         'model_name': {'values': ["distilgpt2"]},
-        #'save_dir': {'values': ["."]},
         'lr': {'values': [1e-3, 5e-4, 1e-4]},
         'do_lora': {'values': [False, True]},
-        'tok_p_reward': {'values': [3]},
+        'tok_p_loss': {'values': [9]},
         'tok_p_action': {'values': [10,30,50]},
         'tok_p_obs': {'values': [10,30,50]},
         #'obs_p_doc': {'values': [10]},
@@ -37,37 +34,46 @@ sweep_config = {
 sweep_id = wandb.sweep(sweep_config, project="collaborative-training-many-per-context-window")
 
 def train():
-    run = wandb.init()
-    wb_cfg = run.config
-    obs_p_doc = 1024 // (wb_cfg.tok_p_reward + wb_cfg.tok_p_action + wb_cfg.tok_p_obs) 
+    run = None
+    if sweep_config['parameters']['use_wandb']['values'][0]:
+        run = wandb.init()
+        wb_cfg = run.config
+        config_params = {param: getattr(wb_cfg, param) for param in sweep_config['parameters']}
+    else:
+        wb_cfg = None
+        config_params = {param: sweep_config['parameters'][param]['values'][0] for param in sweep_config['parameters']}
+
+    obs_p_doc = 1024 // (config_params['tok_p_loss'] + config_params['tok_p_action'] + config_params['tok_p_obs']) 
     cfg = RaoConfig(
         load_model=False,
-        wandb=True,
-        model_name=wb_cfg.model_name,
-        lr = wb_cfg.lr,
-        do_lora = wb_cfg.do_lora, 
+        wandb=sweep_config['parameters']['use_wandb']['values'][0],
+        model_name=config_params['model_name'],
+        lr = config_params['lr'],
+        do_lora = config_params['do_lora'], 
         save_dir=".",
-        tok_p_reward=wb_cfg.tok_p_reward,
-        tok_p_action=wb_cfg.tok_p_action,
-        tok_p_obs=wb_cfg.tok_p_obs,
+        tok_p_loss=config_params['tok_p_loss'],
+        tok_p_action=config_params['tok_p_action'],
+        tok_p_obs=config_params['tok_p_obs'],
         obs_p_doc=obs_p_doc,
-        batch_size=wb_cfg.batch_size,
-        num_batches=wb_cfg.num_batches,
+        batch_size=config_params['batch_size'],
+        num_batches=config_params['num_batches'],
         interval_save_weights=30,
         interval_print = 5
     )
-    lora_string = "gL" if wb_cfg.do_lora else "gnL"
-    run.name = f"{lora_string}{wb_cfg.model_name[:4]}_lr{wb_cfg.lr}_rao{wb_cfg.tok_p_reward}/{wb_cfg.tok_p_action}/{wb_cfg.tok_p_obs}_bs{wb_cfg.batch_size}_nb{wb_cfg.num_batches}"
+    lora_string = "gL" if cfg.do_lora else "gnL"
+    if run is not None:
+        run.name = f"{lora_string}{cfg.model_name[:4]}_lr{cfg.lr}_rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_bs{cfg.batch_size}_nb{cfg.num_batches}"
 
     wandb_table = wandb.Table(
         data=[],
         columns=[
             "Previous Observation",
+            "Loss",
             "Action",
             "Predicted Observation",
             "Actual Observation",
         ],
-    )
+    ) if sweep_config['parameters']['use_wandb']['values'][0] else None
 
     NUM_DATAPOINTS = cfg.batch_size * cfg.num_batches if cfg.num_batches else None
     causal_lm = cfg.model
@@ -82,9 +88,6 @@ def train():
     aggregate_losses = []
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     optimizer = torch.optim.Adam(causal_lm.parameters(), lr=cfg.lr)
-    #scheduler = torch.optim.lr_scheduler.LinearLR(
-    #    optimizer, start_factor=1.0, end_factor=0.1, total_iters=cfg.num_batches
-    #)
 
     for batch_index, data in (
         tqdm(enumerate(dataloader), total=cfg.num_batches) if cfg.num_batches else tqdm(dataloader)
@@ -109,7 +112,6 @@ def train():
             wandb_table=wandb_table,
         )
 
-        # Compute the loss on the whole rao_tensor sequence and perform backpropagation
         rao_tensor_logits = causal_lm(rao_tensor).logits[:, :-1, :]
         rao_tensor_loss = loss_fn(
             input=rearrange(
@@ -122,13 +124,16 @@ def train():
         aggregate_losses.append(aggregate_loss.item())
         aggregate_loss.backward()
         print("Aggregate loss: ", aggregate_loss)
-        if cfg.wandb:
+        if wb_cfg:
             wandb.log({"Aggregate loss": aggregate_loss})
         optimizer.step()
-        #scheduler.step()
 
-    run.log({"Prediction Accuracy Table": wandb_table})
-    run.finish()
+    if wb_cfg:
+        run.log({"Prediction Accuracy Table": wandb_table})
+        run.finish()
 
 
-wandb.agent(sweep_id, function=train)
+if sweep_config['parameters']['use_wandb']['values'][0]:
+    wandb.agent(sweep_id, function=train)
+else:
+    train()
