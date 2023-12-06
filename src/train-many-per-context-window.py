@@ -23,13 +23,13 @@ sweep_config = {
         'model_name': {'values': ["distilgpt2"]},
         #'save_dir': {'values': ["."]},
         'lr': {'values': [1e-3, 5e-4, 1e-4]},
-        'do_lora': {'values': [False]},
-        'tok_p_reward': {'values': [10,30,50]},
+        'do_lora': {'values': [False, True]},
+        'tok_p_reward': {'values': [3]},
         'tok_p_action': {'values': [10,30,50]},
         'tok_p_obs': {'values': [10,30,50]},
         #'obs_p_doc': {'values': [10]},
         'batch_size': {'values': [12]},
-        'num_batches': {'values': [10]},
+        'num_batches': {'values': [100]},
         #'interval_save_weights': {'values': [30]},
     }
 }
