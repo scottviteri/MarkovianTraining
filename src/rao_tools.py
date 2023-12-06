@@ -33,6 +33,7 @@ class RaoConfig:
         load_model: bool = False,
         do_lora: bool = True,
         model_name: str = "distilgpt2",
+        lr: float = 1e-4,
         save_dir: str = "./",
         path_2_model: str = None,
         tok_p_reward: int = 10,
@@ -78,6 +79,9 @@ class RaoConfig:
             )
         else:
             self._interval_print = interval_print
+
+        #float
+        self._lr = lr
 
         # sets model, tokenizer and ctxt_size
         self._set_model()
@@ -254,6 +258,10 @@ class RaoConfig:
     @property
     def interval_print(self):
         return self._interval_print
+
+    @property
+    def lr(self):
+        return self._lr
 
     @staticmethod
     def get_linear_layers(model):
