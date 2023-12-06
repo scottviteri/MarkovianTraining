@@ -78,7 +78,7 @@ class RaoGenerator:
                 inputs=incentive_rao,
                 output_scores=True,
                 do_sample=True,
-                num_beams=1,
+                num_beams=4,
                 #return_dict_in_generate=True,
                 min_new_tokens=self._tokens_per_pure_action,
                 max_new_tokens=self._tokens_per_pure_action,
@@ -90,7 +90,7 @@ class RaoGenerator:
             action: TensorType["batch", "seq_length"] = full_action[
                 :, -self._cfg.tok_p_action :
             ]
-            if observation_index > 1:
+            if observation_index > 0:
                 prev_obs: TensorType["batch", "seq_length"] = data["input_ids"][
                     :, observation_index - 1, :
                 ]
