@@ -298,6 +298,7 @@ def log_and_print_info(
         print("batch loss: ", batch_loss[0])
         if aggregate_losses:
             print("aggregate loss: ", aggregate_losses[-1])
+        print("loss:", repr(tokenizer.batch_decode()))
         print("previous obs:", repr(tokenizer.batch_decode(prev_obs)[0]))
         print("action: ", repr(tokenizer.batch_decode(action)[0]))
         print("predicted obs: ", repr(tokenizer.batch_decode(predicted_obs)[0]))
