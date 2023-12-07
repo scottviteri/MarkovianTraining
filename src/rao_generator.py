@@ -38,6 +38,7 @@ class RaoGenerator:
         data,
         optimizer,
         loss_fn,
+        average_loss_differences,
         aggregate_losses,
         batch_index=None
     ):
@@ -49,11 +50,12 @@ class RaoGenerator:
         causal_lm = self._cfg.model
         causal_lm_tokenizer = self._cfg.tokenizer
 
+        new_loss_differences = []
         for observation_index in range(self._cfg.obs_p_doc):
             optimizer.zero_grad()
             low_loss_value = (
-                round(np.mean(aggregate_losses) - np.std(aggregate_losses), 3)
-                if aggregate_losses
+                round(np.mean(average_loss_differences) - np.std(average_loss_differences), 3)
+                if average_loss_differences 
                 else 6.0
             )
             low_loss = causal_lm_tokenizer.batch_encode_plus(
@@ -141,7 +143,8 @@ class RaoGenerator:
                 batch_loss_filler = out.mean(dim=-1)
 
             # Calculate the difference in loss
-            loss_difference = batch_loss_filler - batch_loss_action
+            loss_difference = batch_loss_action - batch_loss_filler
+            new_loss_differences.append(loss_difference.mean().item())
 
             string_losses: str = [str(round(r.item(), 3)) for r in loss_difference]
             losses_tensor: TensorType["batch", "seq_length"] = causal_lm_tokenizer.batch_encode_plus(
@@ -175,7 +178,7 @@ class RaoGenerator:
                 optimizer
             )
 
-        return rao_tensor
+        return rao_tensor, new_loss_differences
 
     def trunc_documents(self):
         truncated_documents = {"text": [], "input_ids": []}
