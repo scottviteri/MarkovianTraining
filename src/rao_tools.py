@@ -299,29 +299,29 @@ def log_and_print_info(
         batch_index % cfg.interval_print == 0
         and observation_index % (cfg.obs_p_doc//2) == 0
     ):
-        print(f"\nBatch number {batch_index}")
-        print("Loss (Action/Filler/Difference): ", f"{batch_loss_action[0]:.3f}/{batch_loss_filler[0]:.3f}/{loss_difference[0]:.3f}")
+        print(f"\nBatch Number {batch_index}")
+        print("Loss (Action - Filler = Difference): ", f"{batch_loss_filler[0]:.3f}/{batch_loss_action[0]:.3f}/{loss_difference[0]:.3f}")
         if aggregate_losses:
-            print("aggregate loss: ", aggregate_losses[-1])
-        print("previous obs:", repr(tokenizer.batch_decode(prev_obs)[0]))
-        print("actual loss:", repr(tokenizer.batch_decode(actual_loss)[0]))
-        print("action: ", repr(tokenizer.batch_decode(action)[0]))
-        print("predicted obs: ", repr(tokenizer.batch_decode(predicted_obs)[0]))
-        print("true obs:", repr(tokenizer.batch_decode(true_obs)[0]))
+            print("Aggregate Loss: ", aggregate_losses[-1])
+        print("Previous Obs:", repr(tokenizer.batch_decode(prev_obs)[0]))
+        print("Actual Loss:", repr(tokenizer.batch_decode(actual_loss)[0]))
+        print("Action: ", repr(tokenizer.batch_decode(action)[0]))
+        print("Predicted Obs: ", repr(tokenizer.batch_decode(predicted_obs)[0]))
+        print("True Obs:", repr(tokenizer.batch_decode(true_obs)[0]))
         for param_group in optimizer.param_groups:
-            print("Current learning rate: ", param_group["lr"])
+            print("Current Learning Rate: ", param_group["lr"])
     with open(f"{cfg.save_dir}/{cfg.model_name}_training_info.txt", "a") as f:
-        print(f"\nBatch number {batch_index}", file=f)
-        print("Loss (Action/Filler/Difference): ", f"{batch_loss_action[0]}/{batch_loss_filler[0]}/{loss_difference[0]}", file=f)
+        print(f"\nBatch Number {batch_index}", file=f)
+        print("Loss (Action - Filler = Difference): ", f"{batch_loss_filler[0]:.3f}/{batch_loss_action[0]:.3f}/{loss_difference[0]:.3f}", file=f)
         if aggregate_losses:
-            print("aggregate loss: ", aggregate_losses[-1], file=f)
-        print("previous obs:", repr(tokenizer.batch_decode(prev_obs)[0]), file=f)
-        print("actual loss:", repr(tokenizer.batch_decode(actual_loss)[0]), file=f)
-        print("action: ", repr(tokenizer.batch_decode(action)[0]), file=f)
-        print("predicted obs: ", repr(tokenizer.batch_decode(predicted_obs)[0]), file=f)
-        print("true obs:", repr(tokenizer.batch_decode(true_obs)[0]), file=f)
+            print("Aggregate Loss: ", aggregate_losses[-1], file=f)
+        print("Previous Obs:", repr(tokenizer.batch_decode(prev_obs)[0]), file=f)
+        print("Actual Loss:", repr(tokenizer.batch_decode(actual_loss)[0]), file=f)
+        print("Action: ", repr(tokenizer.batch_decode(action)[0]), file=f)
+        print("Predicted Obs: ", repr(tokenizer.batch_decode(predicted_obs)[0]), file=f)
+        print("True Obs:", repr(tokenizer.batch_decode(true_obs)[0]), file=f)
         for param_group in optimizer.param_groups:
-            print("Current learning rate: ", param_group["lr"], file=f)
+            print("Current Learning Rate: ", param_group["lr"], file=f)
 
 
 def main():

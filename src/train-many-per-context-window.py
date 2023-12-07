@@ -26,7 +26,7 @@ sweep_config = {
         'tok_p_obs': {'values': [30]},
         #'obs_p_doc': {'values': [10]},
         'batch_size': {'values': [10]},
-        'num_batches': {'values': [1000]},
+        'num_batches': {'values': [10000]},
         #'interval_save_weights': {'values': [30]},
     }
 }
@@ -85,6 +85,7 @@ def train():
     )
     dataloader = raogen.dataloader
 
+    average_loss_differences = []
     aggregate_losses = []
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     optimizer = torch.optim.Adam(causal_lm.parameters(), lr=cfg.lr)
@@ -103,13 +104,16 @@ def train():
                 f"./saved_weights_and_losses/trained_{cfg.model_name}"
             )
 
-        rao_tensor = raogen.gen_rao_tensor(
+        rao_tensor, new_loss_differences = raogen.gen_rao_tensor(
             data=data,
             optimizer=optimizer,
             loss_fn=loss_fn,
+            average_loss_differences = average_loss_differences,
             aggregate_losses=aggregate_losses,
             batch_index=batch_index,
         )
+
+        average_loss_differences.extend(new_loss_differences)
 
         rao_tensor_logits = causal_lm(rao_tensor).logits[:, :-1, :]
         rao_tensor_loss = loss_fn(
