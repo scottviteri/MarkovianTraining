@@ -17,16 +17,16 @@ sweep_config = {
       'goal': 'minimize'   
     },
     'parameters': {
-        'use_wandb': {'values': [False]},  # Add this line
+        'use_wandb': {'values': [True]},  # Add this line
         'model_name': {'values': ["distilgpt2"]},
-        'lr': {'values': [1e-3, 5e-4, 1e-4]},
-        'do_lora': {'values': [False, True]},
+        'lr': {'values': [1e-4]},
+        'do_lora': {'values': [False]},
         'tok_p_loss': {'values': [9]},
-        'tok_p_action': {'values': [10,30,50]},
-        'tok_p_obs': {'values': [10,30,50]},
+        'tok_p_action': {'values': [30]},
+        'tok_p_obs': {'values': [30]},
         #'obs_p_doc': {'values': [10]},
-        'batch_size': {'values': [12]},
-        'num_batches': {'values': [10]},
+        'batch_size': {'values': [10]},
+        'num_batches': {'values': [1000]},
         #'interval_save_weights': {'values': [30]},
     }
 }
@@ -60,20 +60,20 @@ def train():
         interval_save_weights=30,
         interval_print = 5
     )
-    lora_string = "gL" if cfg.do_lora else "gnL"
+    lora_string = "ld_b4_L" if cfg.do_lora else "ld_b4_nL"
     if run is not None:
         run.name = f"{lora_string}{cfg.model_name[:4]}_lr{cfg.lr}_rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_bs{cfg.batch_size}_nb{cfg.num_batches}"
 
-    wandb_table = wandb.Table(
-        data=[],
-        columns=[
-            "Previous Observation",
-            "Loss",
-            "Action",
-            "Predicted Observation",
-            "Actual Observation",
-        ],
-    ) if sweep_config['parameters']['use_wandb']['values'][0] else None
+    #wandb_table = wandb.Table(
+    #    data=[],
+    #    columns=[
+    #        "Previous Observation",
+    #        "Loss",
+    #        "Action",
+    #        "Predicted Observation",
+    #        "Actual Observation",
+    #    ],
+    #) if sweep_config['parameters']['use_wandb']['values'][0] else None
 
     NUM_DATAPOINTS = cfg.batch_size * cfg.num_batches if cfg.num_batches else None
     causal_lm = cfg.model
@@ -109,7 +109,6 @@ def train():
             loss_fn=loss_fn,
             aggregate_losses=aggregate_losses,
             batch_index=batch_index,
-            wandb_table=wandb_table,
         )
 
         rao_tensor_logits = causal_lm(rao_tensor).logits[:, :-1, :]
@@ -129,7 +128,7 @@ def train():
         optimizer.step()
 
     if wb_cfg:
-        run.log({"Prediction Accuracy Table": wandb_table})
+        #run.log({"Prediction Accuracy Table": wandb_table})
         run.finish()
 
 
