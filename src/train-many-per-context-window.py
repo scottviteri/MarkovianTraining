@@ -64,6 +64,9 @@ def train():
     if run is not None:
         run.name = f"{lora_string}{cfg.model_name[:4]}_lr{cfg.lr}_rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_bs{cfg.batch_size}_nb{cfg.num_batches}"
 
+    with open(f"{cfg.save_dir}/{cfg.model_name}_training_info.txt", "w") as f:
+        print(f)
+
     #wandb_table = wandb.Table(
     #    data=[],
     #    columns=[
