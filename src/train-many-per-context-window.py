@@ -56,7 +56,7 @@ def train():
         obs_p_doc=obs_p_doc,
         batch_size=config_params['batch_size'],
         num_batches=config_params['num_batches'],
-        interval_save_weights=30,
+        interval_save_weights=30 if config_params['do_lora'] else 100,
         interval_print = 5
     )
     # todo add flag for ld
