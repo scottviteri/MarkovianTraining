@@ -135,6 +135,7 @@ class RaoConfig:
                     torch_dtype=torch.float16,
                     use_flash_attention_2=True,
                 )#.to(self._device)
+                causal_lm.bfloat16()
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(model, padding_side="left")
                 self._ctxt_size  = causal_lm.config.max_position_embeddings
 
