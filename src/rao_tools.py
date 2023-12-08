@@ -116,15 +116,27 @@ class RaoConfig:
                 self._ctxt_size = causal_lm.config.n_ctx
 
         elif self._model_name == "mistral":
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                "mistralai/Mistral-7B-v0.1",
-                torch_dtype=torch.float16,
-                use_flash_attention_2=True,
-            ).to(self._device)
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                "mistralai/Mistral-7B-v0.1", padding_side="left"
-            )
-            self._ctxt_size = causal_lm.config.sliding_window
+            with self._device:
+                causal_lm = AutoModelForCausalLM.from_pretrained(
+                    "mistralai/Mistral-7B-v0.1",
+                    torch_dtype=torch.float16,
+                    use_flash_attention_2=True,
+                )
+                causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+                    "mistralai/Mistral-7B-v0.1", padding_side="left"
+                )
+                self._ctxt_size = causal_lm.config.sliding_window
+            
+        elif self._model_name == "llama":
+            with self._device: #torch.device("cuda"):
+                model = "meta-llama/Llama-2-7b-hf"
+                causal_lm = AutoModelForCausalLM.from_pretrained(
+                    model,
+                    torch_dtype=torch.float16,
+                    use_flash_attention_2=True,
+                )#.to(self._device)
+                causal_lm_tokenizer = AutoTokenizer.from_pretrained(model, padding_side="left")
+                self._ctxt_size  = causal_lm.config.max_position_embeddings
 
         elif self._model_name == "distilgpt2":
             causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2").to(
