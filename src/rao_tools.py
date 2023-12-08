@@ -297,7 +297,6 @@ def log_and_print_info(
     tokenizer = cfg.tokenizer
     if (
         batch_index % cfg.interval_print == 0
-        and observation_index % (cfg.obs_p_doc//2) == 0
     ):
         print(f"\nBatch Number {batch_index}")
         print("Loss (Action - Filler = Difference): ", f"{batch_loss_action[0]:.3f}/{batch_loss_filler[0]:.3f}/{loss_difference[0]:.3f}")
