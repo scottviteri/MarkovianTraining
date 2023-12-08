@@ -320,6 +320,13 @@ def log_and_print_info(
         print("True Obs:", repr(tokenizer.batch_decode(true_obs)[0]), file=f)
         for param_group in optimizer.param_groups:
             print("Current Learning Rate: ", param_group["lr"], file=f)
+        if cfg.wandb:
+            wandb.log({
+                "Batch Index": batch_index,
+                "Batch Loss": batch_loss_action[0],
+                "Filler Loss": batch_loss_filler[0],
+                "Loss Difference": loss_difference[0]
+            })
 
 
 def main():
