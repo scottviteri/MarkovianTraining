@@ -18,7 +18,7 @@ sweep_config = {
     },
     'parameters': {
         'use_wandb': {'values': [True]},  # Add this line
-        'model_name': {'values': ["distilgpt2"]},
+        'model_name': {'values': ["llama"]},
         'lr': {'values': [1e-4]},
         'do_lora': {'values': [False]},
         'tok_p_loss': {'values': [9]},
@@ -26,7 +26,7 @@ sweep_config = {
         'tok_p_obs': {'values': [30]},
         #'obs_p_doc': {'values': [10]},
         'batch_size': {'values': [10]},
-        'num_batches': {'values': [10000]},
+        'num_batches': {'values': [5000]},
         #'interval_save_weights': {'values': [30]},
     }
 }
@@ -132,7 +132,6 @@ def train():
         optimizer.step()
 
     if wb_cfg:
-        #run.log({"Prediction Accuracy Table": wandb_table})
         run.finish()
 
 
