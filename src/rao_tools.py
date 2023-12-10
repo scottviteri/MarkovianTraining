@@ -32,8 +32,6 @@ class RaoConfig:
         do_lora: bool = True,
         model_name: str = "distilgpt2",
         lr: float = 1e-4,
-        save_dir: str = "./",
-        path_2_model: str = None,
         tok_p_loss: int = 10,
         tok_p_action: int = 100,
         tok_p_obs: int = 50,
@@ -56,8 +54,6 @@ class RaoConfig:
 
         # strs
         self._model_name = model_name
-        self._save_dir = save_dir
-        self._path_2_model = path_2_model
 
         # ints
         self._tok_p_loss = tok_p_loss
@@ -73,6 +69,9 @@ class RaoConfig:
         self._batch_size = batch_size
         self._num_batches = num_batches
         self._interval_save_weights = interval_save_weights
+        self._path_2_model = f"saved_weights_and_losses/{self._model_name}_weights"
+        self._path_2_tokenizer = f"saved_weights_and_losses/{self._model_name}_tokenizer"
+
         if interval_print is None:
             self._interval_print = 10 
         else:
@@ -93,95 +92,106 @@ class RaoConfig:
 
     def _set_model(self):
         """Load model"""
+        model_dict = {
+            "tinystories": "roneneldan/TinyStories-1M",
+            "llama": "meta-llama/Llama-2-7b-hf",
+            "distilgpt2": "distilgpt2",
+            "gptj": "EleutherAI/gpt-j-6b",
+            "mistral": "mistralai/Mistral-7B-v0.1",
+            "gpt2-large": "gpt2-large",
+            "gpt2-xl": "gpt2-xl",
+            "gpt2": "gpt2",
+            # Add other models here
+        }
 
-        if self._load_model:
-            assert (
-                self._path_2_model is not None
-            ), f"Path to model not set {self._path_2_model}"
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                f"/content/drive/MyDrive/CollaborativeTrainingModelWeights/tokenizer_{self._model_name}",
-                padding_side="left",
-            )
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                f"/content/drive/MyDrive/CollaborativeTrainingModelWeights/trained_{self._model_name}"
-            )
-            causal_lm.to(self._device)
-            if self._model_name == "gptj":
-                self._ctxt_size = causal_lm.config.n_positions
-            elif self._model_name == "gptj":
-                self._ctxt_size = causal_lm.config.sliding_window
-            else:
-                self._ctxt_size = causal_lm.config.n_ctx
-
-        elif self._model_name == "mistral":
-            with self._device:
+        with self._device:
+            if self._load_model:
                 causal_lm = AutoModelForCausalLM.from_pretrained(
-                    "mistralai/Mistral-7B-v0.1",
+                    model_dict[self._model_name],
                     torch_dtype=torch.float16,
-                    use_flash_attention_2=True,
+                    use_flash_attention_2=self._model_name == "mistral" or self._model_name == "llama",
                 )
+                causal_lm.bfloat16()
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                    "mistralai/Mistral-7B-v0.1", padding_side="left"
+                    model_dict[self._model_name], padding_side="left"
                 )
-                self._ctxt_size = causal_lm.config.sliding_window
+                if self._model_name == "mistral":
+                    self._ctxt_size = causal_lm.config.sliding_window
+                elif self._model_name == "tinystories":
+                    self._ctxt_size = causal_lm.config.window_size
+                elif self._model_name == "llama":
+                    self._ctxt_size = causal_lm.config.max_position_embeddings
+                elif self._model_name == "distilgpt2":
+                    self._ctxt_size = causal_lm.config.n_ctx
+                elif self._model_name == "gptj":
+                    self._ctxt_size = causal_lm.config.n_positions
+                elif self._model_name == "gpt2-large":
+                    self._ctxt_size = causal_lm.config.n_positions
+                else:
+                    self._ctxt_size = causal_lm.config.n_positions
 
-        elif self._model_name ==  "tinystories":
-            with self._device:
-                causal_lm_tokenizer = AutoTokenizer.from_pretrained("roneneldan/TinyStories-1M", padding_size="left")
-                causal_lm = AutoModelForCausalLM.from_pretrained("roneneldan/TinyStories-1M") 
+            elif self._model_name ==  "tinystories":
+                causal_lm_tokenizer = AutoTokenizer.from_pretrained(model_dict[self._model_name], padding_size="left")
+                causal_lm = AutoModelForCausalLM.from_pretrained(model_dict[self._model_name]) 
                 self._ctxt_size = causal_lm.config.window_size
-        elif self._model_name == "llama":
-            with self._device: #torch.device("cuda"):
-                model = "meta-llama/Llama-2-7b-hf"
+            elif self._model_name == "llama":
                 causal_lm = AutoModelForCausalLM.from_pretrained(
-                    model,
+                    model_dict[self._model_name],
                     torch_dtype=torch.float16,
                     use_flash_attention_2=True,
                 )#.to(self._device)
                 causal_lm.bfloat16()
-                causal_lm_tokenizer = AutoTokenizer.from_pretrained(model, padding_side="left")
+                causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+                    model_dict[self._model_name], padding_side="left"
+                )
+                self._ctxt_size  = causal_lm.config.max_position_embeddings
+            elif self._model_name == "mistral":
+                causal_lm = AutoModelForCausalLM.from_pretrained(
+                    model_dict[self._model_name],
+                    torch_dtype=torch.float16,
+                    use_flash_attention_2=True,
+                )#.to(self._device)
+                causal_lm.bfloat16()
+                causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+                    model_dict[self._model_name], padding_side="left"
+                )
                 self._ctxt_size  = causal_lm.config.max_position_embeddings
 
-        elif self._model_name == "distilgpt2":
-            causal_lm = AutoModelForCausalLM.from_pretrained("distilgpt2").to(
-                self._device
-            )
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                "distilgpt2", padding_side="left"
-            )
-            self._ctxt_size = causal_lm.config.n_ctx
 
-        elif self._model_name == "gptj":
-            causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-j-6b").to(
-                self._device
-            )
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                "EleutherAI/gpt-j-6b", padding_side="left"
-            )
-            self._ctxt_size = causal_lm.config.n_positions
+            elif self._model_name == "distilgpt2":
+                causal_lm = AutoModelForCausalLM.from_pretrained(model_dict[self._model_name])
+                causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+                    model_dict[self._model_name], padding_side="left"
+                )
+                self._ctxt_size = causal_lm.config.n_ctx
 
-        elif self._model_name == "gpt2-large":
-            causal_lm = AutoModelForCausalLM.from_pretrained("gpt2-large").to(
-                self._device
-            )
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                "gpt2-large", padding_side="left"
-            )
-            self._ctxt_size = causal_lm.config.n_ctx
+            elif self._model_name == "gptj":
+                causal_lm = AutoModelForCausalLM.from_pretrained(model_dict[self._model_name])
+                causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+                    model_dict[self._model_name], padding_side="left"
+                )
+                self._ctxt_size = causal_lm.config.n_positions
 
-        elif self._model_name == "gpt2-xl":
-            causal_lm = AutoModelForCausalLM.from_pretrained("gpt2-xl").to(self._device)
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                "gpt2-xl", padding_side="left"
-            )
-            self._ctxt_size = causal_lm.config.n_ctx
+            elif self._model_name == "gpt2-large":
+                causal_lm = AutoModelForCausalLM.from_pretrained(model_dict[self._model_name])
+                causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+                    model_dict[self._model_name], padding_side="left"
+                )
+                self._ctxt_size = causal_lm.config.n_ctx
 
-        elif self._model_name == "gpt2":
-            causal_lm = AutoModelForCausalLM.from_pretrained("gpt2").to(self._device)
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                "gpt2", padding_side="left"
-            )
-            self._ctxt_size = causal_lm.config.n_ctx
+            elif self._model_name == "gpt2-xl":
+                causal_lm = AutoModelForCausalLM.from_pretrained(model_dict[self._model_name])
+                causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+                    model_dict[self._model_name], padding_side="left"
+                )
+                self._ctxt_size = causal_lm.config.n_ctx
+
+            elif self._model_name == "gpt2":
+                causal_lm = AutoModelForCausalLM.from_pretrained(model_dict[self._model_name])
+                causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+                    model_dict[self._model_name], padding_side="left"
+                )
+                self._ctxt_size = causal_lm.config.n_ctx
 
         if self._do_lora:
             peft_config = LoraConfig(
@@ -235,10 +245,6 @@ class RaoConfig:
         return self._ctxt_size
 
     @property
-    def save_dir(self):
-        return self._save_dir
-
-    @property
     def tok_p_loss(self):
         return self._tok_p_loss
 
@@ -273,6 +279,14 @@ class RaoConfig:
     @property
     def num_batches(self):
         return self._num_batches
+
+    @property
+    def path_2_model(self):
+        return self._path_2_model
+
+    @property
+    def path_2_tokenizer(self):
+        return self._path_2_tokenizer
 
     @property
     def interval_save_weights(self):
@@ -325,18 +339,18 @@ def log_and_print_info(
         print("Previous Obs:", repr(tokenizer.batch_decode(prev_obs)[0]))
         print("Actual Loss:", repr(tokenizer.batch_decode(actual_loss)[0]))
         print("Action: ", repr(tokenizer.batch_decode(action)[0]))
-        print("Predicted Obs: ", repr(tokenizer.batch_decode(predicted_obs)[0]))
+        print("Predicted Obs: ", repr(tokenizer.batch_decode(predicted_obs)[0].encode('utf-8')))
         print("True Obs:", repr(tokenizer.batch_decode(true_obs)[0]))
         for param_group in optimizer.param_groups:
             print("Current Learning Rate: ", param_group["lr"])
-    with open(f"{cfg.save_dir}/{cfg.model_name}_training_info.txt", "a") as f:
+    with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
         print(f"\nBatch Number {batch_index}", file=f)
         print("Loss (Action - Filler = Difference): ", f"{batch_loss_action[0]:.3f}/{batch_loss_filler[0]:.3f}/{loss_difference[0]:.3f}", file=f)
         if aggregate_losses: print("Aggregate Loss: ", aggregate_losses[-1], file=f)
         print("Previous Obs:", repr(tokenizer.batch_decode(prev_obs)[0]), file=f)
         print("Actual Loss:", repr(tokenizer.batch_decode(actual_loss)[0]), file=f)
         print("Action: ", repr(tokenizer.batch_decode(action)[0]), file=f)
-        print("Predicted Obs: ", repr(tokenizer.batch_decode(predicted_obs)[0]), file=f)
+        print("Predicted Obs: ", repr(tokenizer.batch_decode(predicted_obs)[0].encode('utf-8')), file=f)
         print("True Obs:", repr(tokenizer.batch_decode(true_obs)[0]), file=f)
         for param_group in optimizer.param_groups:
             print("Current Learning Rate: ", param_group["lr"], file=f)

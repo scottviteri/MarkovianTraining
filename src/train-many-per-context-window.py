@@ -16,7 +16,8 @@ sweep_config = {
       'goal': 'minimize'   
     },
     'parameters': {
-        'use_wandb': {'values': [False]},  # Add this line
+        'load_model': {'values': [True]},
+        'use_wandb': {'values': [False]},  
         'model_name': {'values': ["tinystories"]},
         'lr': {'values': [1e-4]},
         'do_lora': {'values': [False]},
@@ -25,9 +26,9 @@ sweep_config = {
         'tok_p_obs': {'values': [30]},
         #'obs_p_doc': {'values': [10]},
         'num_beams': {'values': [1]},
-        'batch_size': {'values': [1]},
-        'num_batches': {'values': [5]},
-        #'interval_save_weights': {'values': [30]},
+        'batch_size': {'values': [200]},
+        'num_batches': {'values': [30]},
+        'interval_save_weights': {'values': [10]},
     }
 }
 
@@ -36,7 +37,7 @@ sweep_id = wandb.sweep(sweep_config, project="collaborative-training-many-per-co
 def train():
     run = None
     if sweep_config['parameters']['use_wandb']['values'][0]:
-        run = wandb.init()
+        run = wandb.init(resume=True)
         wb_cfg = run.config
         config_params = {param: getattr(wb_cfg, param) for param in sweep_config['parameters']}
     else:
@@ -45,12 +46,11 @@ def train():
 
     obs_p_doc = 1024 // (config_params['tok_p_loss'] + config_params['tok_p_action'] + config_params['tok_p_obs']) 
     cfg = RaoConfig(
-        load_model=False,
+        load_model=config_params['load_model'],
         wandb=sweep_config['parameters']['use_wandb']['values'][0],
         model_name=config_params['model_name'],
         lr = config_params['lr'],
         do_lora = config_params['do_lora'], 
-        save_dir=".",
         tok_p_loss=config_params['tok_p_loss'],
         tok_p_action=config_params['tok_p_action'],
         tok_p_obs=config_params['tok_p_obs'],
@@ -58,7 +58,7 @@ def train():
         num_beams =config_params['num_beams'],
         batch_size=config_params['batch_size'],
         num_batches=config_params['num_batches'],
-        interval_save_weights=30 if config_params['do_lora'] else 100,
+        interval_save_weights=config_params['interval_save_weights'],
         interval_print = 5
     )
     # todo add flag for ld
@@ -66,19 +66,9 @@ def train():
     if run is not None:
         run.name = f"ld_b{cfg.num_beams}_{lora_string}{cfg.model_name[:4]}_lr{cfg.lr}_rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_bs{cfg.batch_size}_nb{cfg.num_batches}"
 
-    with open(f"{cfg.save_dir}/{cfg.model_name}_training_info.txt", "w") as f:
-        print(f)
-
-    #wandb_table = wandb.Table(
-    #    data=[],
-    #    columns=[
-    #        "Previous Observation",
-    #        "Loss",
-    #        "Action",
-    #        "Predicted Observation",
-    #        "Actual Observation",
-    #    ],
-    #) if sweep_config['parameters']['use_wandb']['values'][0] else None
+    if not cfg.load_model:
+        with open(f"saved_weights_and_losses/{cfg.model_name}", "w") as f:
+            print("")
 
     NUM_DATAPOINTS = cfg.batch_size * cfg.num_batches if cfg.num_batches else None
     causal_lm = cfg.model
@@ -100,14 +90,10 @@ def train():
     ):
         if cfg.num_batches and batch_index > cfg.num_batches:
             break
-        if batch_index > 1 and batch_index % cfg.interval_save_weights == 0:
+        if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:
             print(f"Saving trained_{cfg.model_name}")
-            causal_lm_tokenizer.save_pretrained(
-                f"./saved_weights_and_losses/tokenizer_{cfg.model_name}"
-            )
-            causal_lm.save_pretrained(
-                f"./saved_weights_and_losses/trained_{cfg.model_name}"
-            )
+            causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
+            causal_lm.save_pretrained(cfg.path_2_model)
 
         rao_tensor, new_loss_differences = raogen.gen_rao_tensor(
             data=data,
