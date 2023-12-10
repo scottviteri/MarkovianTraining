@@ -15,13 +15,11 @@ import wandb
 # from collections import namedtuple
 # Config = namedtuple("Config", ["setting1", "setting2"])
 
-
 @dataclass
 class MyRAO:
     r: torchtyping.TensorType
     a: torchtyping.TensorType
     o: torchtyping.TensorType
-
 
 class RaoConfig:
     """Immutable config class to set up rao-like training and data generation."""
@@ -40,6 +38,7 @@ class RaoConfig:
         tok_p_action: int = 100,
         tok_p_obs: int = 50,
         obs_p_doc: int = 5,
+        num_beams: int = 1,
         batch_size: int = 2,
         num_batches: int = 4,
         interval_save_weights: int = 30,
@@ -69,14 +68,13 @@ class RaoConfig:
         else:
             self._tok_p_obs = tok_p_obs
         self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
+        self._num_beams = num_beams
         self._tok_p_doc = self._tok_p_obs * self._obs_p_doc
         self._batch_size = batch_size
         self._num_batches = num_batches
         self._interval_save_weights = interval_save_weights
         if interval_print is None:
-            self._interval_print = (
-                5 if self._model_name == "gptj" or self._model_name == "mistral" else 10
-            )
+            self._interval_print = 10 
         else:
             self._interval_print = interval_print
 
@@ -126,7 +124,12 @@ class RaoConfig:
                     "mistralai/Mistral-7B-v0.1", padding_side="left"
                 )
                 self._ctxt_size = causal_lm.config.sliding_window
-            
+
+        elif self._model_name ==  "tinystories":
+            with self._device:
+                causal_lm_tokenizer = AutoTokenizer.from_pretrained("roneneldan/TinyStories-1M", padding_size="left")
+                causal_lm = AutoModelForCausalLM.from_pretrained("roneneldan/TinyStories-1M") 
+                self._ctxt_size = causal_lm.config.window_size
         elif self._model_name == "llama":
             with self._device: #torch.device("cuda"):
                 model = "meta-llama/Llama-2-7b-hf"
@@ -258,6 +261,10 @@ class RaoConfig:
     @property
     def obs_p_doc(self):
         return self._obs_p_doc
+
+    @property
+    def num_beams(self):
+        return self._num_beams
 
     @property
     def batch_size(self):

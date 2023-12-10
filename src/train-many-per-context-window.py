@@ -16,16 +16,17 @@ sweep_config = {
       'goal': 'minimize'   
     },
     'parameters': {
-        'use_wandb': {'values': [True]},  # Add this line
-        'model_name': {'values': ["llama"]},
+        'use_wandb': {'values': [False]},  # Add this line
+        'model_name': {'values': ["tinystories"]},
         'lr': {'values': [1e-4]},
         'do_lora': {'values': [False]},
         'tok_p_loss': {'values': [9]},
         'tok_p_action': {'values': [30]},
         'tok_p_obs': {'values': [30]},
         #'obs_p_doc': {'values': [10]},
+        'num_beams': {'values': [1]},
         'batch_size': {'values': [1]},
-        'num_batches': {'values': [5000]},
+        'num_batches': {'values': [5]},
         #'interval_save_weights': {'values': [30]},
     }
 }
@@ -54,6 +55,7 @@ def train():
         tok_p_action=config_params['tok_p_action'],
         tok_p_obs=config_params['tok_p_obs'],
         obs_p_doc=obs_p_doc,
+        num_beams =config_params['num_beams'],
         batch_size=config_params['batch_size'],
         num_batches=config_params['num_batches'],
         interval_save_weights=30 if config_params['do_lora'] else 100,
@@ -62,7 +64,7 @@ def train():
     # todo add flag for ld
     lora_string = "L" if cfg.do_lora else "nL"
     if run is not None:
-        run.name = f"ld_b4_{lora_string}{cfg.model_name[:4]}_lr{cfg.lr}_rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_bs{cfg.batch_size}_nb{cfg.num_batches}"
+        run.name = f"ld_b{cfg.num_beams}_{lora_string}{cfg.model_name[:4]}_lr{cfg.lr}_rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_bs{cfg.batch_size}_nb{cfg.num_batches}"
 
     with open(f"{cfg.save_dir}/{cfg.model_name}_training_info.txt", "w") as f:
         print(f)
