@@ -107,13 +107,16 @@ class RaoConfig:
         with self._device:
             if self._load_model:
                 causal_lm = AutoModelForCausalLM.from_pretrained(
-                    model_dict[self._model_name],
+                    self._path_2_model,
+                    #model_dict[self._model_name],
                     torch_dtype=torch.float16,
                     use_flash_attention_2=self._model_name == "mistral" or self._model_name == "llama",
                 )
                 causal_lm.bfloat16()
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                    model_dict[self._model_name], padding_side="left"
+                    self._path_2_tokenizer,
+                    #model_dict[self._model_name], 
+                    padding_side="left"
                 )
                 if self._model_name == "mistral":
                     self._ctxt_size = causal_lm.config.sliding_window
