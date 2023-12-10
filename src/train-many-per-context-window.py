@@ -17,7 +17,7 @@ sweep_config = {
     },
     'parameters': {
         'load_model': {'values': [True]},
-        'use_wandb': {'values': [False]},  
+        'use_wandb': {'values': [True]},  
         'model_name': {'values': ["tinystories"]},
         'lr': {'values': [1e-4]},
         'do_lora': {'values': [False]},
@@ -27,8 +27,9 @@ sweep_config = {
         #'obs_p_doc': {'values': [10]},
         'num_beams': {'values': [1]},
         'batch_size': {'values': [200]},
-        'num_batches': {'values': [30]},
+        'num_batches': {'values': [15]},
         'interval_save_weights': {'values': [10]},
+        'interval_print': {'values': [10]}
     }
 }
 
@@ -37,7 +38,7 @@ sweep_id = wandb.sweep(sweep_config, project="collaborative-training-many-per-co
 def train():
     run = None
     if sweep_config['parameters']['use_wandb']['values'][0]:
-        run = wandb.init(resume=True)
+        run = wandb.init(resume=sweep_config['parameters']['load_model']['values'][0])
         wb_cfg = run.config
         config_params = {param: getattr(wb_cfg, param) for param in sweep_config['parameters']}
     else:
@@ -59,7 +60,7 @@ def train():
         batch_size=config_params['batch_size'],
         num_batches=config_params['num_batches'],
         interval_save_weights=config_params['interval_save_weights'],
-        interval_print = 5
+        interval_print = config_params['interval_print'] 
     )
     # todo add flag for ld
     lora_string = "L" if cfg.do_lora else "nL"
@@ -91,7 +92,7 @@ def train():
         if cfg.num_batches and batch_index > cfg.num_batches:
             break
         if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:
-            print(f"Saving trained_{cfg.model_name}")
+            print(f"Saving trained_{cfg.model_name} \n\n")
             causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
             causal_lm.save_pretrained(cfg.path_2_model)
 
