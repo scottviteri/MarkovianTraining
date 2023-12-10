@@ -10,11 +10,11 @@ from rao_generator import RaoGenerator
 
 
 sweep_config = {
-    'method': 'bayes', 
-    'metric': {
-      'name': 'loss',
-      'goal': 'minimize'   
-    },
+    'method': 'grid', 
+    #'metric': {
+    #  'name': 'loss',
+    #  'goal': 'minimize'   
+    #},
     'parameters': {
         'load_model': {'values': [True]},
         'use_wandb': {'values': [True]},  
