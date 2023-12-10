@@ -77,7 +77,7 @@ class RaoGenerator:
                 inputs=incentive_rao,
                 output_scores=True,
                 do_sample=True,
-                num_beams=4,
+                num_beams=self._cfg.num_beams,
                 min_new_tokens=self._tokens_per_pure_action,
                 max_new_tokens=self._tokens_per_pure_action,
                 pad_token_id = causal_lm_tokenizer.eos_token_id
