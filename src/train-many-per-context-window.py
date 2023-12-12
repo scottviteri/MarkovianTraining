@@ -59,9 +59,10 @@ def train():
         interval_print = config_params['interval_print'] 
     )
     # todo add flag for ld
+    attention_mask_string = "A" if cfg.use_attention_mask else ""
     lora_string = "L" if cfg.do_lora else "nL"
     if run is not None:
-        run.name = f"ld_b{cfg.num_beams}_{lora_string}{cfg.model_name[:4]}_lr{cfg.lr}_rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_bs{cfg.batch_size}_nb{cfg.num_batches}"
+        run.name = f"{attention_mask_string}ld_b{cfg.num_beams}_{lora_string}{cfg.model_name[:4]}_lr{cfg.lr}_rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_bs{cfg.batch_size}_nb{cfg.num_batches}"
 
     if not cfg.load_model:
         with open(f"saved_weights_and_losses/{cfg.model_name}", "w") as f:
