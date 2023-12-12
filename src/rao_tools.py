@@ -12,6 +12,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import LoraConfig, get_peft_model
 import wandb
 
+
 # from collections import namedtuple
 # Config = namedtuple("Config", ["setting1", "setting2"])
 
@@ -71,8 +72,6 @@ class RaoConfig:
         self._num_batches = num_batches
         self._use_attention_mask = use_attention_mask
         self._attention_mask = None
-        if self._use_attention_mask:
-            self._attention_mask = self._create_attention_mask()
         self._interval_save_weights = interval_save_weights
         self._path_2_model = f"saved_weights_and_losses/{self._model_name}_weights"
         self._path_2_tokenizer = f"saved_weights_and_losses/{self._model_name}_tokenizer"
@@ -87,6 +86,9 @@ class RaoConfig:
 
         # sets model, tokenizer and ctxt_size
         self._set_model()
+        if self._use_attention_mask:
+            self._attention_mask = self._create_attention_mask()
+
 
     def __repr__(self):
         return (
@@ -219,13 +221,12 @@ class RaoConfig:
         self._model = causal_lm
         self._tokenizer = causal_lm_tokenizer
 
-
-    def _create_attention_mask(seq_length: int, tok_p_rao: int, tok_p_obs: int, device: str):
+    def _create_attention_mask(self):
         # Create a standard causal attention mask
-        mask = torch.triu(torch.ones((seq_length, seq_length), device=device), diagonal=1)
+        mask = torch.tril(torch.ones((self._ctxt_size, self._ctxt_size), device=self.device))
         # For each observation section, overwrite the leftmost (i-1)*tok_p_rao entries to 0
-        for i in range(tok_p_rao, seq_length, tok_p_rao):
-            mask[i:i+tok_p_obs, :i] = 0
+        for i in range(self._tok_p_rao, self._ctxt_size, self._tok_p_rao):
+            mask[i:i+self._tok_p_obs, :i] = 0
         return mask
 
     @property

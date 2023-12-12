@@ -8,13 +8,8 @@ import wandb
 from rao_tools import RaoConfig
 from rao_generator import RaoGenerator
 
-
 sweep_config = {
     'method': 'grid', 
-    #'metric': {
-    #  'name': 'loss',
-    #  'goal': 'minimize'   
-    #},
     'parameters': {
         'load_model': {'values': [False]},
         'use_wandb': {'values': [True]},  
@@ -24,13 +19,12 @@ sweep_config = {
         'tok_p_loss': {'values': [9]},
         'tok_p_action': {'values': [30]},
         'tok_p_obs': {'values': [30]},
-        #'obs_p_doc': {'values': [10]},
         'num_beams': {'values': [1]},
         'batch_size': {'values': [15]},
         'num_batches': {'values': [1000]},
-        'use_attention_mask': {'values': [False]},
-        'interval_save_weights': {'values': [25]},
-        'interval_print': {'values': [5]}
+        'use_attention_mask': {'values': [True]},
+        'interval_save_weights': {'values': [50]},
+        'interval_print': {'values': [10]}
     }
 }
 
@@ -108,11 +102,7 @@ def train():
         )
 
         average_loss_differences.extend(new_loss_differences)
-        if cfg.use_attention_mask:
-            attention_mask = cfg.attention_mask
-            rao_tensor_logits = causal_lm(rao_tensor, attention_mask=attention_mask).logits[:, :-1, :]
-        else:
-            rao_tensor_logits = causal_lm(rao_tensor).logits[:, :-1, :]
+        rao_tensor_logits = causal_lm(rao_tensor).logits[:, :-1, :]
         rao_tensor_loss = loss_fn(
             input=rearrange(
                 rao_tensor_logits,
