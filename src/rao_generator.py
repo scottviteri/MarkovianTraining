@@ -106,11 +106,20 @@ class RaoGenerator:
             ]
             true_obs = true_obs.to(self._cfg.device)
 
-            # Calculate loss for the actual action
+           # Calculate loss for the actual action
             with torch.no_grad():
-                prediction = causal_lm(
-                    torch.cat((rao_tensor, low_loss, action, true_obs), dim=-1)
-                )
+                if self._cfg.use_attention_mask:
+                    new_rao_tensor = torch.cat((rao_tensor, low_loss, action, true_obs), dim=-1)
+                    attention_mask = torch.zeros_like(new_rao_tensor)
+                    attention_mask[:,-self._cfg.tok_p_action:]=1.0
+                    prediction = causal_lm(
+                        new_rao_tensor,
+                        attention_mask = attention_mask
+                    )
+                else:
+                    prediction = causal_lm(
+                        torch.cat((rao_tensor, low_loss, action, true_obs), dim=-1)
+                    )
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :
                 ]
@@ -126,9 +135,18 @@ class RaoGenerator:
 
             # Calculate loss for the filler action
             with torch.no_grad():
-                prediction = causal_lm(
-                    torch.cat((rao_tensor, low_loss, filler_action, true_obs), dim=-1)
-                )
+                if self._cfg.use_attention_mask:
+                    new_rao_tensor = torch.cat((rao_tensor, low_loss, filler_action, true_obs), dim=-1)
+                    attention_mask = torch.zeros_like(new_rao_tensor)
+                    attention_mask[:,-self._cfg.tok_p_action:]=1.0
+                    prediction = causal_lm(
+                        new_rao_tensor,
+                        attention_mask = attention_mask
+                    )
+                else:
+                    prediction = causal_lm(
+                        torch.cat((rao_tensor, low_loss, filler_action, true_obs), dim=-1)
+                    )
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :
                 ]
