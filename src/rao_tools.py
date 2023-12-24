@@ -12,6 +12,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import LoraConfig, get_peft_model
 import wandb
 
+
 # from collections import namedtuple
 # Config = namedtuple("Config", ["setting1", "setting2"])
 
@@ -39,6 +40,7 @@ class RaoConfig:
         num_beams: int = 1,
         batch_size: int = 2,
         num_batches: int = 4,
+        use_attention_mask: bool = False,
         interval_save_weights: int = 30,
         interval_print: int = None,
     ):
@@ -68,6 +70,8 @@ class RaoConfig:
         self._tok_p_doc = self._tok_p_obs * self._obs_p_doc
         self._batch_size = batch_size
         self._num_batches = num_batches
+        self._use_attention_mask = use_attention_mask
+        self._attention_mask = None
         self._interval_save_weights = interval_save_weights
         self._path_2_model = f"saved_weights_and_losses/{self._model_name}_weights"
         self._path_2_tokenizer = f"saved_weights_and_losses/{self._model_name}_tokenizer"
@@ -82,6 +86,9 @@ class RaoConfig:
 
         # sets model, tokenizer and ctxt_size
         self._set_model()
+        if self._use_attention_mask:
+            self._attention_mask = self._create_attention_mask()
+
 
     def __repr__(self):
         return (
@@ -214,6 +221,14 @@ class RaoConfig:
         self._model = causal_lm
         self._tokenizer = causal_lm_tokenizer
 
+    def _create_attention_mask(self):
+        # Create a standard causal attention mask
+        mask = torch.tril(torch.ones((self._ctxt_size, self._ctxt_size), device=self.device))
+        # For each observation section, overwrite the leftmost (i-1)*tok_p_rao entries to 0
+        for i in range(self._tok_p_rao, self._ctxt_size, self._tok_p_rao):
+            mask[i:i+self._tok_p_obs, :i] = 0
+        return mask
+
     @property
     def device(self):
         return self._device
@@ -290,6 +305,14 @@ class RaoConfig:
     @property
     def path_2_tokenizer(self):
         return self._path_2_tokenizer
+
+    @property
+    def use_attention_mask(self):
+        return self._use_attention_mask
+    
+    @property
+    def attention_mask(self):
+        return self._attention_mask
 
     @property
     def interval_save_weights(self):
