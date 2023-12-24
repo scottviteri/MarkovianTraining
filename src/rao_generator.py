@@ -189,7 +189,7 @@ class RaoGenerator:
             # not creating enough datapoints
             dataset = load_dataset(
                 "wikipedia",
-                "20220301.en",
+                "20220301.simple",
                 split=f"train[:{self._points_from_data}]"
                 if self._points_from_data
                 else "train",
