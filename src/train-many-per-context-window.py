@@ -16,9 +16,9 @@ sweep_config = {
     #  'goal': 'minimize'   
     #},
     'parameters': {
-        'load_model': {'values': [True]},
-        'use_wandb': {'values': [True]},  
-        'model_name': {'values': ["tinystories"]},
+        'load_model': {'values': [False]},
+        'use_wandb': {'values': [False]},  
+        'model_name': {'values': ["distilgpt2"]},
         'lr': {'values': [1e-4]},
         'do_lora': {'values': [False]},
         'tok_p_loss': {'values': [9]},
@@ -26,7 +26,7 @@ sweep_config = {
         'tok_p_obs': {'values': [30]},
         #'obs_p_doc': {'values': [10]},
         'num_beams': {'values': [1]},
-        'batch_size': {'values': [200]},
+        'batch_size': {'values': [10]},
         'num_batches': {'values': [15]},
         'interval_save_weights': {'values': [10]},
         'interval_print': {'values': [10]}
@@ -115,6 +115,17 @@ def train():
             ),
             target=rao_tensor[:, 1:],
         )
+        # Split rao_tensor_loss into loss_loss, action_loss, and observation_loss
+        section_size = cfg.tok_p_loss + cfg.tok_p_action + cfg.tok_p_obs
+        sections = rao_tensor_loss.split(section_size)
+        rao_triples = [(section[:cfg.tok_p_loss], section[cfg.tok_p_loss:cfg.tok_p_loss+cfg.tok_p_action], section[cfg.tok_p_loss+cfg.tok_p_action:]) for section in sections]
+        loss_loss, action_loss, observation_loss = zip(*rao_triples)
+        loss_loss = torch.stack(loss_loss).mean()
+        action_loss = torch.stack(action_loss).mean()
+        observation_loss = torch.stack(observation_loss).mean()
+        if batch_index % cfg.print_interval == 0:
+            print(f"Loss/Action/Observation loss: {loss_loss}/{action_loss}/{observation_loss}")
+        # Compute the mean of rao_tensor_loss and backward pass as usual
         aggregate_loss = rao_tensor_loss.mean()
         aggregate_losses.append(aggregate_loss.item())
         aggregate_loss.backward()
