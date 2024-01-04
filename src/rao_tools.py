@@ -1,8 +1,22 @@
-"""Script to provide rao training and sequence generation tools.
+"""
+Main Definitions:
 
-Defines MyRAO struct-like class
-Defines RaoConfig for initialization and immutable conf parameters
+1. RaoConfig class
+2. log_and_print_info
 
+High level structure:
+
+The rao_tools.py script provides tools for reward-action-observation (RAO) training and sequence generation. Here's the high-level structure with an emphasis on the RaoConfig class and the log_and_print_info function:
+
+1. Import necessary libraries and modules: This includes libraries like torch, torchtyping, transformers, peft, and wandb.
+
+2. Define RaoConfig class: This class is used to set up RAO-like training and data generation. It includes several attributes that represent various configuration parameters, such as device, wandb, load_model, do_lora, model_name, lr, tok_p_loss, tok_p_action, tok_p_obs, normalize_to_ctxt_size, num_beams, batch_size, num_batches,  interval_save_weights, and interval_print. The class also includes methods to set the model and create an attention mask. The RaoConfig class is particularly important as it encapsulates the configuration parameters for RAO training and data generation. It also includes methods to set the model and create an attention mask, which are crucial steps in the setup process.
+
+3. Define log_and_print_info function: This function is used to log and print information during the training process. It takes in various parameters such as the configuration, batch index, loss values, optimizer, and the RAO tensor. It then logs and prints information such as the batch number, loss values, previous observation, actual loss, action, predicted observation, true observation, size of RAO triple, size of the context window, and the current learning rate. This function is crucial for monitoring the training process and debugging.
+
+4. Define main function: This function is used to test the RaoConfig class. It creates an instance of this class and prints it.
+
+5. Run the main function: If the script is run as a standalone program (i.e., not imported as a module), the main function is called.
 """
 
 from dataclasses import dataclass
@@ -15,12 +29,6 @@ import wandb
 
 # from collections import namedtuple
 # Config = namedtuple("Config", ["setting1", "setting2"])
-
-@dataclass
-class MyRAO:
-    r: torchtyping.TensorType
-    a: torchtyping.TensorType
-    o: torchtyping.TensorType
 
 class RaoConfig:
     """Immutable config class to set up rao-like training and data generation."""
@@ -36,11 +44,11 @@ class RaoConfig:
         tok_p_loss: int = 10,
         tok_p_action: int = 100,
         tok_p_obs: int = 50,
-        obs_p_doc: int = 5,
+        obs_p_doc: int = 10, 
+        normalize_to_ctxt_size : int = False,
         num_beams: int = 1,
         batch_size: int = 2,
         num_batches: int = 4,
-        use_attention_mask: bool = False,
         interval_save_weights: int = 30,
         interval_print: int = None,
     ):
@@ -60,18 +68,15 @@ class RaoConfig:
         # ints
         self._tok_p_loss = tok_p_loss
         self._tok_p_action = tok_p_action
-        self._obs_p_doc = obs_p_doc
-        if tok_p_obs is None:
+        self._normalize_to_ctxt_size = normalize_to_ctxt_size
+        if tok_p_obs is None: #what is the point of this?
             self._tok_p_obs = self._ctxt_size - self._tok_p_action - self._tok_p_loss
         else:
             self._tok_p_obs = tok_p_obs
-        self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
+        self._obs_p_doc = obs_p_doc
         self._num_beams = num_beams
-        self._tok_p_doc = self._tok_p_obs * self._obs_p_doc
         self._batch_size = batch_size
         self._num_batches = num_batches
-        self._use_attention_mask = use_attention_mask
-        self._attention_mask = None
         self._interval_save_weights = interval_save_weights
         self._path_2_model = f"saved_weights_and_losses/{self._model_name}_weights"
         self._path_2_tokenizer = f"saved_weights_and_losses/{self._model_name}_tokenizer"
@@ -86,9 +91,14 @@ class RaoConfig:
 
         # sets model, tokenizer and ctxt_size
         self._set_model()
-        if self._use_attention_mask:
-            self._attention_mask = self._create_attention_mask()
+        if self._normalize_to_ctxt_size:
+            ctxt_left = self._ctxt_size - self._tok_p_loss
+            combined_len = self._tok_p_action + self._tok_p_obs
+            self._tok_p_action = int(ctxt_left * (self._tok_p_action / combined_len))
+            self._tok_p_obs = int(ctxt_left * (self._tok_p_obs / combined_len))
+        self._tok_p_doc = self._tok_p_obs * self._obs_p_doc
 
+        self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
 
     def __repr__(self):
         return (
@@ -221,14 +231,6 @@ class RaoConfig:
         self._model = causal_lm
         self._tokenizer = causal_lm_tokenizer
 
-    def _create_attention_mask(self):
-        # Create a standard causal attention mask
-        mask = torch.tril(torch.ones((self._ctxt_size, self._ctxt_size), device=self.device))
-        # For each observation section, overwrite the leftmost (i-1)*tok_p_rao entries to 0
-        for i in range(self._tok_p_rao, self._ctxt_size, self._tok_p_rao):
-            mask[i:i+self._tok_p_obs, :i] = 0
-        return mask
-
     @property
     def device(self):
         return self._device
@@ -271,6 +273,10 @@ class RaoConfig:
         return self._tok_p_action
 
     @property
+    def normalize_to_ctxt_size(self):
+        return self._normalize_to_ctxt_size
+
+    @property
     def tok_p_obs(self):
         return self._tok_p_obs
 
@@ -305,14 +311,6 @@ class RaoConfig:
     @property
     def path_2_tokenizer(self):
         return self._path_2_tokenizer
-
-    @property
-    def use_attention_mask(self):
-        return self._use_attention_mask
-    
-    @property
-    def attention_mask(self):
-        return self._attention_mask
 
     @property
     def interval_save_weights(self):
@@ -352,7 +350,8 @@ def log_and_print_info(
     action,
     predicted_obs,
     true_obs,
-    optimizer
+    optimizer,
+    rao_tensor
 ):
     tokenizer = cfg.tokenizer
     if (
@@ -367,6 +366,9 @@ def log_and_print_info(
         print("Action: ", repr(tokenizer.batch_decode(action)[0]))
         print("Predicted Obs: ", repr(tokenizer.batch_decode(predicted_obs)[0].encode('utf-8')))
         print("True Obs:", repr(tokenizer.batch_decode(true_obs)[0]))
+        if cfg.normalize_to_ctxt_size:
+            print("Size of RAO tensor: ", rao_tensor.size())
+            print("Size of the context window: ", cfg.ctxt_size)
         for param_group in optimizer.param_groups:
             print("Current Learning Rate: ", param_group["lr"])
     with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
@@ -378,6 +380,9 @@ def log_and_print_info(
         print("Action: ", repr(tokenizer.batch_decode(action)[0]), file=f)
         print("Predicted Obs: ", repr(tokenizer.batch_decode(predicted_obs)[0].encode('utf-8')), file=f)
         print("True Obs:", repr(tokenizer.batch_decode(true_obs)[0]), file=f)
+        if cfg.normalize_to_ctxt_size:
+            print("Size of RAO tensor: ", rao_tensor.size(), file=f)
+            print("Size of the context window: ", cfg.ctxt_size, file=f)
         for param_group in optimizer.param_groups:
             print("Current Learning Rate: ", param_group["lr"], file=f)
         if cfg.wandb:
@@ -391,10 +396,8 @@ def log_and_print_info(
 
 def main():
     # define each class in default to check if they work
-    test0 = MyRAO(r=torch.ones(1), a=torch.ones(10), o=torch.ones(10))
+    test0 = RaoConfig()
     print(test0)
-    test1 = RaoConfig()
-    print(test1)
 
 
 if __name__ == "__main__":
