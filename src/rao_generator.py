@@ -1,8 +1,37 @@
 """
+Main Definitions:
+
+1. RaoGenerator class
+2. __init__ method
+3. gen_rao_tensor method
+4. trunc_documents method
+
+Short Description:
+
 We will pull in passages from wikipedia articles.
 For each article that is long enough, we will break it into chunks of fixed token count, and discard the rest.
 The dataloader will feed the ith segment of BATCH_SIZE different articles to the transformer simultaneously to generate rewards.
 We reassemble the article subsequences to include (reward, prediction, article snippet) triples.
+
+Longer Desciption:
+
+The rao_generator.py script is responsible for generating reward-action-observation (RAO) sequences from Wikipedia articles for training a transformer model. Here's a high-level overview:
+
+1. Import necessary libraries and modules: This includes libraries like torch, torchtyping, datasets, einops, and numpy, as well as the RaoConfig and log_and_print_info from rao_tools.py.
+
+2. Define RaoGenerator class: This class is responsible for generating RAO sequences. It includes several methods:
+
+- __init__: Initializes the RaoGenerator with a RaoConfig and the number of data points. It also sets up the dataloader and various tensor attributes.
+
+- gen_rao_tensor: Generates an RAO tensor for a given batch of data. It iterates over each observation in the batch, generates an action using the transformer model, calculates the loss for the actual and filler actions, and updates the RAO tensor. It also logs and prints information for each observation.
+
+- trunc_documents: Truncates the documents in the dataset to a fixed token count and discards the rest. The truncated documents are then used to generate the RAO sequences.
+
+3. Use of RaoConfig: The RaoConfig class from rao_tools.py is used to configure the RAO generation process. It encapsulates various configuration parameters, such as the model, tokenizer, batch size, and token counts for the reward, action, and observation.
+
+4. Use of log_and_print_info: The log_and_print_info function from rao_tools.py is used to log and print information during the RAO generation process. It logs and prints information such as the batch number, loss values, previous observation, actual loss, action, predicted observation, true observation, size of RAO triple, size of the context window, and the current learning rate.
+
+In summary, rao_generator.py is responsible for generating RAO sequences from Wikipedia articles using a transformer model, which are then used for training. It uses the RaoConfig class to configure the RAO generation process and the log_and_print_info function to log and print information during the process.
 """
 
 import torch
@@ -74,7 +103,7 @@ class RaoGenerator:
             )
 
             full_action = causal_lm.generate(
-                inputs=incentive_rao,
+                inputs=incentive_rao[:,-(self._cfg._ctxt_size - self._tokens_per_pure_action):],
                 output_scores=True,
                 do_sample=True,
                 num_beams=self._cfg.num_beams,
@@ -87,11 +116,11 @@ class RaoGenerator:
             ]
 
             # Generate a filler action of the same length as the actual action
-            filler_action: TensorType["batch", "seq_length"] = torch.full(
-                (self._cfg.batch_size, self._cfg.tok_p_action),
+            filler_action: TensorType["batch", "seq_length"] = torch.cat((self._action_prefix_tensor, torch.full(
+                (self._cfg.batch_size, self._tokens_per_pure_action),
                 causal_lm_tokenizer.pad_token_id,
                 device=self._cfg.device,
-            )
+            )), dim=-1)
 
             if observation_index > 0:
                 prev_obs: TensorType["batch", "seq_length"] = data["input_ids"][
@@ -108,18 +137,10 @@ class RaoGenerator:
 
            # Calculate loss for the actual action
             with torch.no_grad():
-                if self._cfg.use_attention_mask:
-                    new_rao_tensor = torch.cat((rao_tensor, low_loss, action, true_obs), dim=-1)
-                    attention_mask = torch.zeros_like(new_rao_tensor)
-                    attention_mask[:,-self._cfg.tok_p_action:]=1.0
-                    prediction = causal_lm(
-                        new_rao_tensor,
-                        attention_mask = attention_mask
-                    )
-                else:
-                    prediction = causal_lm(
-                        torch.cat((rao_tensor, low_loss, action, true_obs), dim=-1)
-                    )
+                # check this
+                prediction = causal_lm(
+                    torch.cat((rao_tensor, low_loss, action, true_obs), dim=-1)[:, -self._cfg.ctxt_size:]
+                )
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :
                 ]
@@ -135,18 +156,9 @@ class RaoGenerator:
 
             # Calculate loss for the filler action
             with torch.no_grad():
-                if self._cfg.use_attention_mask:
-                    new_rao_tensor = torch.cat((rao_tensor, low_loss, filler_action, true_obs), dim=-1)
-                    attention_mask = torch.zeros_like(new_rao_tensor)
-                    attention_mask[:,-self._cfg.tok_p_action:]=1.0
-                    prediction = causal_lm(
-                        new_rao_tensor,
-                        attention_mask = attention_mask
-                    )
-                else:
-                    prediction = causal_lm(
-                        torch.cat((rao_tensor, low_loss, filler_action, true_obs), dim=-1)
-                    )
+                prediction = causal_lm(
+                    torch.cat((rao_tensor, low_loss, filler_action, true_obs), dim=-1)[:,-self._cfg.ctxt_size:]
+                 )
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :
                 ]
@@ -178,7 +190,7 @@ class RaoGenerator:
             )
             rao_tensor = torch.cat(
                 (rao_tensor, actual_loss, action, true_obs), dim=-1
-            )[:, -(self._cfg.ctxt_size - self._cfg.tok_p_rao) :]
+            )
 
             log_and_print_info(
                 self._cfg,
@@ -193,7 +205,8 @@ class RaoGenerator:
                 action,
                 predicted_obs,
                 true_obs,
-                optimizer
+                optimizer,
+                rao_tensor
             )
 
         return rao_tensor, new_loss_differences
