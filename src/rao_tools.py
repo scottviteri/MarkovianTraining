@@ -46,6 +46,7 @@ class RaoConfig:
         tok_p_obs: int = 50,
         obs_p_doc: int = 10, 
         normalize_to_ctxt_size : int = False,
+        impose_ctxt_size  = None,
         num_beams: int = 1,
         batch_size: int = 2,
         num_batches: int = 4,
@@ -69,6 +70,7 @@ class RaoConfig:
         self._tok_p_loss = tok_p_loss
         self._tok_p_action = tok_p_action
         self._normalize_to_ctxt_size = normalize_to_ctxt_size
+        self._impose_ctxt_size = impose_ctxt_size
         if tok_p_obs is None: #what is the point of this?
             self._tok_p_obs = self._ctxt_size - self._tok_p_action - self._tok_p_loss
         else:
@@ -91,6 +93,9 @@ class RaoConfig:
 
         # sets model, tokenizer and ctxt_size
         self._set_model()
+        if self._impose_ctxt_size:
+            self._ctxt_size = self._impose_ctxt_size
+        assert self._ctxt_size > self._tok_p_loss
         if self._normalize_to_ctxt_size:
             ctxt_left = self._ctxt_size - self._tok_p_loss
             combined_len = self._tok_p_action + self._tok_p_obs
@@ -358,7 +363,10 @@ def log_and_print_info(
         batch_index % cfg.interval_print == 0
     ):
         print(f"\nBatch Number {batch_index}")
-        print("Loss (Action - Filler = Difference): ", f"{batch_loss_action[0]:.3f}/{batch_loss_filler[0]:.3f}/{loss_difference[0]:.3f}")
+        if cfg.normalize_to_ctxt_size:
+            print("Loss: ", f"{batch_loss_action[0]:.3f}")
+        else:
+            print("Loss (Action - Filler = Difference): ", f"{batch_loss_action[0]:.3f}/{batch_loss_filler[0]:.3f}/{loss_difference[0]:.3f}")
         if aggregate_losses:
             print("Aggregate Loss: ", aggregate_losses[-1])
         print("Previous Obs:", repr(tokenizer.batch_decode(prev_obs)[0]))
@@ -371,6 +379,7 @@ def log_and_print_info(
             print("Size of the context window: ", cfg.ctxt_size)
         for param_group in optimizer.param_groups:
             print("Current Learning Rate: ", param_group["lr"])
+        print("____________________________________________")
     with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
         print(f"\nBatch Number {batch_index}", file=f)
         print("Loss (Action - Filler = Difference): ", f"{batch_loss_action[0]:.3f}/{batch_loss_filler[0]:.3f}/{loss_difference[0]:.3f}", file=f)
@@ -385,6 +394,7 @@ def log_and_print_info(
             print("Size of the context window: ", cfg.ctxt_size, file=f)
         for param_group in optimizer.param_groups:
             print("Current Learning Rate: ", param_group["lr"], file=f)
+        print("", file=f)
         if cfg.wandb:
             wandb.log({
                 "Batch Index": batch_index,

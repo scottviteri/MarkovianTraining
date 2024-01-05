@@ -42,7 +42,7 @@ sweep_config = {
     'method': 'grid', 
     'parameters': {
         'load_model': {'values': [False]},
-        'use_wandb': {'values': [False]},  
+        'use_wandb': {'values': [True]},  
         'model_name': {'values': ["distilgpt2"]},
         'lr': {'values': [1e-4]},
         'do_lora': {'values': [False]},
@@ -51,9 +51,10 @@ sweep_config = {
         'tok_p_obs': {'values': [30]},
         'obs_p_doc': {"values": [5]},
         'normalize_to_ctxt_size': {'values': [True]},
+        'impose_ctxt_size': {'values': [100]},
         'num_beams': {'values': [1]},
-        'batch_size': {'values': [2]},
-        'num_batches': {'values': [100]},
+        'batch_size': {'values': [1]},
+        'num_batches': {'values': [1000]},
         'interval_save_weights': {'values': [10]},
         'interval_print': {'values': [10]}
     }
@@ -83,6 +84,7 @@ def train():
         tok_p_obs=config_params['tok_p_obs'],
         obs_p_doc=config_params['obs_p_doc'],
         normalize_to_ctxt_size=config_params['normalize_to_ctxt_size'],
+        impose_ctxt_size=config_params['impose_ctxt_size'],
         num_beams =config_params['num_beams'],
         batch_size=config_params['batch_size'],
         num_batches=config_params['num_batches'],
@@ -91,8 +93,9 @@ def train():
     )
     # todo add flag for ld
     lora_string = "L" if cfg.do_lora else "nL"
+    markov_string = "mkv_" if cfg.normalize_to_ctxt_size else ""
     if run is not None:
-        run.name = f"ld_b{cfg.num_beams}_{lora_string}{cfg.model_name[:4]}_lr{cfg.lr}_rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_bs{cfg.batch_size}_nb{cfg.num_batches}"
+        run.name = f"{markov_string}ld_b{cfg.num_beams}_{lora_string}{cfg.model_name[:4]}_lr{cfg.lr}_rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_bs{cfg.batch_size}_nb{cfg.num_batches}"
 
     if not cfg.load_model:
         with open(f"saved_weights_and_losses/{cfg.model_name}", "w") as f:
