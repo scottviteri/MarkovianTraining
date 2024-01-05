@@ -135,12 +135,12 @@ class RaoGenerator:
             ]
             true_obs = true_obs.to(self._cfg.device)
 
-           # Calculate loss for the actual action
+           # Calculate loss for the actual observation, using only the loss and action as context 
             with torch.no_grad():
-                # check this
-                prediction = causal_lm(
-                    torch.cat((rao_tensor, low_loss, action, true_obs), dim=-1)[:, -self._cfg.ctxt_size:]
-                )
+                #prediction = causal_lm(
+                #    torch.cat((action, true_obs), dim=-1)[:, -(self._cfg.tok_p_loss + self._cfg.tok_p_action):]
+                #)
+                prediction = causal_lm(torch.cat((action, true_obs), dim=-1))
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :
                 ]
@@ -155,9 +155,10 @@ class RaoGenerator:
                 batch_loss_action = out.mean(dim=-1)
 
             # Calculate loss for the filler action
-            with torch.no_grad():
-                prediction = causal_lm(
-                    torch.cat((rao_tensor, low_loss, filler_action, true_obs), dim=-1)[:,-self._cfg.ctxt_size:]
+            if self._cfg.normalize_to_ctxt_size:
+                with torch.no_grad():
+                    prediction = causal_lm(
+                    torch.cat((filler_action, true_obs), dim=-1)
                  )
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :
@@ -171,9 +172,10 @@ class RaoGenerator:
                     target=true_obs,
                 )
                 batch_loss_filler = out.mean(dim=-1)
-
-            # Calculate the difference in loss
-            loss_difference = batch_loss_action - batch_loss_filler
+                # Calculate the difference in loss
+                loss_difference = batch_loss_action - batch_loss_filler
+            else:
+                loss_difference = batch_loss_action
             new_loss_differences.append(loss_difference.mean().item())
 
             string_losses: str = [str(round(r.item(), 3)) for r in loss_difference]
