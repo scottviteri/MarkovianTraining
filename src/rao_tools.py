@@ -30,6 +30,7 @@ import wandb
 # from collections import namedtuple
 # Config = namedtuple("Config", ["setting1", "setting2"])
 
+
 class RaoConfig:
     """Immutable config class to set up rao-like training and data generation."""
 
@@ -44,9 +45,9 @@ class RaoConfig:
         tok_p_loss: int = 10,
         tok_p_action: int = 100,
         tok_p_obs: int = 50,
-        obs_p_doc: int = 10, 
-        normalize_to_ctxt_size : int = False,
-        impose_ctxt_size  = None,
+        obs_p_doc: int = 10,
+        normalize_to_ctxt_size: int = False,
+        impose_ctxt_size=None,
         num_beams: int = 1,
         batch_size: int = 2,
         num_batches: int = 4,
@@ -71,7 +72,7 @@ class RaoConfig:
         self._tok_p_action = tok_p_action
         self._normalize_to_ctxt_size = normalize_to_ctxt_size
         self._impose_ctxt_size = impose_ctxt_size
-        if tok_p_obs is None: #what is the point of this?
+        if tok_p_obs is None:  # what is the point of this?
             self._tok_p_obs = self._ctxt_size - self._tok_p_action - self._tok_p_loss
         else:
             self._tok_p_obs = tok_p_obs
@@ -81,14 +82,16 @@ class RaoConfig:
         self._num_batches = num_batches
         self._interval_save_weights = interval_save_weights
         self._path_2_model = f"saved_weights_and_losses/{self._model_name}_weights"
-        self._path_2_tokenizer = f"saved_weights_and_losses/{self._model_name}_tokenizer"
+        self._path_2_tokenizer = (
+            f"saved_weights_and_losses/{self._model_name}_tokenizer"
+        )
 
         if interval_print is None:
-            self._interval_print = 10 
+            self._interval_print = 10
         else:
             self._interval_print = interval_print
 
-        #float
+        # float
         self._lr = lr
 
         # sets model, tokenizer and ctxt_size
@@ -130,15 +133,16 @@ class RaoConfig:
             if self._load_model:
                 causal_lm = AutoModelForCausalLM.from_pretrained(
                     self._path_2_model,
-                    #model_dict[self._model_name],
+                    # model_dict[self._model_name],
                     torch_dtype=torch.float16,
-                    use_flash_attention_2=self._model_name == "mistral" or self._model_name == "llama",
+                    use_flash_attention_2=self._model_name == "mistral"
+                    or self._model_name == "llama",
                 )
                 causal_lm.bfloat16()
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                     self._path_2_tokenizer,
-                    #model_dict[self._model_name], 
-                    padding_side="left"
+                    # model_dict[self._model_name],
+                    padding_side="left",
                 )
                 if self._model_name == "mistral":
                     self._ctxt_size = causal_lm.config.sliding_window
@@ -155,64 +159,77 @@ class RaoConfig:
                 else:
                     self._ctxt_size = causal_lm.config.n_positions
 
-            elif self._model_name ==  "tinystories":
-                causal_lm_tokenizer = AutoTokenizer.from_pretrained(model_dict[self._model_name], padding_size="left")
-                causal_lm = AutoModelForCausalLM.from_pretrained(model_dict[self._model_name]) 
+            elif self._model_name == "tinystories":
+                causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+                    model_dict[self._model_name], padding_size="left"
+                )
+                causal_lm = AutoModelForCausalLM.from_pretrained(
+                    model_dict[self._model_name]
+                )
                 self._ctxt_size = causal_lm.config.window_size
             elif self._model_name == "llama":
                 causal_lm = AutoModelForCausalLM.from_pretrained(
                     model_dict[self._model_name],
                     torch_dtype=torch.float16,
                     use_flash_attention_2=True,
-                )#.to(self._device)
+                )  # .to(self._device)
                 causal_lm.bfloat16()
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                     model_dict[self._model_name], padding_side="left"
                 )
-                self._ctxt_size  = causal_lm.config.max_position_embeddings
+                self._ctxt_size = causal_lm.config.max_position_embeddings
             elif self._model_name == "mistral":
                 causal_lm = AutoModelForCausalLM.from_pretrained(
                     model_dict[self._model_name],
                     torch_dtype=torch.float16,
                     use_flash_attention_2=True,
-                )#.to(self._device)
+                )  # .to(self._device)
                 causal_lm.bfloat16()
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                     model_dict[self._model_name], padding_side="left"
                 )
-                self._ctxt_size  = causal_lm.config.max_position_embeddings
-
+                self._ctxt_size = causal_lm.config.max_position_embeddings
 
             elif self._model_name == "distilgpt2":
-                causal_lm = AutoModelForCausalLM.from_pretrained(model_dict[self._model_name])
+                causal_lm = AutoModelForCausalLM.from_pretrained(
+                    model_dict[self._model_name]
+                )
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                     model_dict[self._model_name], padding_side="left"
                 )
                 self._ctxt_size = causal_lm.config.n_ctx
 
             elif self._model_name == "gptj":
-                causal_lm = AutoModelForCausalLM.from_pretrained(model_dict[self._model_name])
+                causal_lm = AutoModelForCausalLM.from_pretrained(
+                    model_dict[self._model_name]
+                )
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                     model_dict[self._model_name], padding_side="left"
                 )
                 self._ctxt_size = causal_lm.config.n_positions
 
             elif self._model_name == "gpt2-large":
-                causal_lm = AutoModelForCausalLM.from_pretrained(model_dict[self._model_name])
+                causal_lm = AutoModelForCausalLM.from_pretrained(
+                    model_dict[self._model_name]
+                )
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                     model_dict[self._model_name], padding_side="left"
                 )
                 self._ctxt_size = causal_lm.config.n_ctx
 
             elif self._model_name == "gpt2-xl":
-                causal_lm = AutoModelForCausalLM.from_pretrained(model_dict[self._model_name])
+                causal_lm = AutoModelForCausalLM.from_pretrained(
+                    model_dict[self._model_name]
+                )
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                     model_dict[self._model_name], padding_side="left"
                 )
                 self._ctxt_size = causal_lm.config.n_ctx
 
             elif self._model_name == "gpt2":
-                causal_lm = AutoModelForCausalLM.from_pretrained(model_dict[self._model_name])
+                causal_lm = AutoModelForCausalLM.from_pretrained(
+                    model_dict[self._model_name]
+                )
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                     model_dict[self._model_name], padding_side="left"
                 )
@@ -229,7 +246,7 @@ class RaoConfig:
 
             causal_lm = get_peft_model(causal_lm, peft_config)
 
-        #causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
+        # causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
         causal_lm_tokenizer.padding_side = "left"
         causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.encode(" ")[0]
 
@@ -331,14 +348,16 @@ class RaoConfig:
 
     @staticmethod
     def get_linear_layers(model):
-        return list(set(
-            map(
-                lambda x: x[0].split(".")[-1],
-                filter(
-                    lambda x: isinstance(x[1], torch.nn.Linear),
-                    model.named_modules(),
-                ),
-            ))
+        return list(
+            set(
+                map(
+                    lambda x: x[0].split(".")[-1],
+                    filter(
+                        lambda x: isinstance(x[1], torch.nn.Linear),
+                        model.named_modules(),
+                    ),
+                )
+            )
         )
 
 
@@ -351,28 +370,32 @@ def log_and_print_info(
     loss_difference,
     aggregate_losses,
     prev_obs,
-    actual_loss, 
+    actual_loss,
     action,
     predicted_obs,
     true_obs,
     optimizer,
-    rao_tensor
+    rao_tensor,
 ):
     tokenizer = cfg.tokenizer
-    if (
-        batch_index % cfg.interval_print == 0
-    ):
+    if batch_index % cfg.interval_print == 0:
         print(f"\nBatch Number {batch_index}")
         if cfg.normalize_to_ctxt_size:
             print("Loss: ", f"{batch_loss_action[0]:.3f}")
         else:
-            print("Loss (Action - Filler = Difference): ", f"{batch_loss_action[0]:.3f}/{batch_loss_filler[0]:.3f}/{loss_difference[0]:.3f}")
+            print(
+                "Loss (Action - Filler = Difference): ",
+                f"{batch_loss_action[0]:.3f}/{batch_loss_filler[0]:.3f}/{loss_difference[0]:.3f}",
+            )
         if aggregate_losses:
             print("Aggregate Loss: ", aggregate_losses[-1])
         print("Previous Obs:", repr(tokenizer.batch_decode(prev_obs)[0]))
         print("Actual Loss:", repr(tokenizer.batch_decode(actual_loss)[0]))
         print("Action: ", repr(tokenizer.batch_decode(action)[0]))
-        print("Predicted Obs: ", repr(tokenizer.batch_decode(predicted_obs)[0].encode('utf-8')))
+        print(
+            "Predicted Obs: ",
+            repr(tokenizer.batch_decode(predicted_obs)[0].encode("utf-8")),
+        )
         print("True Obs:", repr(tokenizer.batch_decode(true_obs)[0]))
         if cfg.normalize_to_ctxt_size:
             print("Size of RAO tensor: ", rao_tensor.size())
@@ -382,12 +405,21 @@ def log_and_print_info(
         print("____________________________________________")
     with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
         print(f"\nBatch Number {batch_index}", file=f)
-        print("Loss (Action - Filler = Difference): ", f"{batch_loss_action[0]:.3f}/{batch_loss_filler[0]:.3f}/{loss_difference[0]:.3f}", file=f)
-        if aggregate_losses: print("Aggregate Loss: ", aggregate_losses[-1], file=f)
+        print(
+            "Loss (Action - Filler = Difference): ",
+            f"{batch_loss_action[0]:.3f}/{batch_loss_filler[0]:.3f}/{loss_difference[0]:.3f}",
+            file=f,
+        )
+        if aggregate_losses:
+            print("Aggregate Loss: ", aggregate_losses[-1], file=f)
         print("Previous Obs:", repr(tokenizer.batch_decode(prev_obs)[0]), file=f)
         print("Actual Loss:", repr(tokenizer.batch_decode(actual_loss)[0]), file=f)
         print("Action: ", repr(tokenizer.batch_decode(action)[0]), file=f)
-        print("Predicted Obs: ", repr(tokenizer.batch_decode(predicted_obs)[0].encode('utf-8')), file=f)
+        print(
+            "Predicted Obs: ",
+            repr(tokenizer.batch_decode(predicted_obs)[0].encode("utf-8")),
+            file=f,
+        )
         print("True Obs:", repr(tokenizer.batch_decode(true_obs)[0]), file=f)
         if cfg.normalize_to_ctxt_size:
             print("Size of RAO tensor: ", rao_tensor.size(), file=f)
@@ -396,12 +428,14 @@ def log_and_print_info(
             print("Current Learning Rate: ", param_group["lr"], file=f)
         print("", file=f)
         if cfg.wandb:
-            wandb.log({
-                "Batch Index": batch_index,
-                "Batch Loss": batch_loss_action[0],
-                "Filler Loss": batch_loss_filler[0],
-                "Loss Difference": loss_difference[0]
-            })
+            wandb.log(
+                {
+                    "Batch Index": batch_index,
+                    "Batch Loss": batch_loss_action[0],
+                    "Filler Loss": batch_loss_filler[0],
+                    "Loss Difference": loss_difference[0],
+                }
+            )
 
 
 def main():
