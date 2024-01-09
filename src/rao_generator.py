@@ -166,7 +166,7 @@ class RaoGenerator:
                 batch_loss_action = out.mean(dim=-1)
 
             # Calculate loss for the filler action
-            if self._cfg.normalize_to_ctxt_size:
+            if not self._cfg.normalize_to_ctxt_size:
                 with torch.no_grad():
                     prediction = causal_lm(torch.cat((filler_action, true_obs), dim=-1))
                 predicted_logits = prediction.logits[
@@ -184,6 +184,7 @@ class RaoGenerator:
                 # Calculate the difference in loss
                 loss_difference = batch_loss_action - batch_loss_filler
             else:
+                batch_loss_filler = None
                 loss_difference = batch_loss_action
             new_loss_differences.append(loss_difference.mean().item())
 

@@ -50,7 +50,7 @@ sweep_config = {
         "tok_p_action": {"values": [30]},
         "tok_p_obs": {"values": [30]},
         "obs_p_doc": {"values": [5]},
-        "normalize_to_ctxt_size": {"values": [True]},
+        "normalize_to_ctxt_size": {"values": [False]},
         "impose_ctxt_size": {"values": [100]},
         "num_beams": {"values": [1]},
         "batch_size": {"values": [1]},
