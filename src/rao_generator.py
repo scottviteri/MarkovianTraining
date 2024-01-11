@@ -89,7 +89,7 @@ class RaoGenerator:
                     3,
                 )
                 if average_loss_differences
-                else 6.0
+                else 0.5 
             )
             low_loss = causal_lm_tokenizer.batch_encode_plus(
                 [str(low_loss_value) for _ in range(self._cfg.batch_size)],
