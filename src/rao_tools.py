@@ -39,6 +39,7 @@ class RaoConfig:
         wandb: bool = False,
         load_model: bool = False,
         do_lora: bool = True,
+        use_loss_difference: bool = True,
         model_name: str = "distilgpt2",
         lr: float = 1e-4,
         tok_p_loss: int = 10,
@@ -62,6 +63,7 @@ class RaoConfig:
         self._load_model = load_model
         self._wandb = wandb
         self._do_lora = do_lora
+        self._use_loss_difference = use_loss_difference
 
         # strs
         self._model_name = model_name
@@ -251,6 +253,10 @@ class RaoConfig:
     @property
     def do_lora(self):
         return self._do_lora
+
+    @property
+    def _use_loss_difference(self):
+        return self._use_loss_difference
 
     @property
     def model_name(self):
