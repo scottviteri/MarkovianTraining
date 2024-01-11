@@ -150,7 +150,6 @@ class RaoGenerator:
                 # prediction = causal_lm(
                 #    torch.cat((action, true_obs), dim=-1)[:, -(self._cfg.tok_p_loss + self._cfg.tok_p_action):]
                 # )
-                # FIXME: Why is there no loss?
                 prediction = causal_lm(torch.cat((low_loss, action, true_obs), dim=-1))
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :

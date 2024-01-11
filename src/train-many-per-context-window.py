@@ -39,26 +39,26 @@ from rao_tools import RaoConfig
 from rao_generator import RaoGenerator
 
 sweep_config = {
-    'method': 'grid', 
-    'parameters': {
-        'load_model': {'values': [False]},
-        'use_wandb': {'values': [True]},  
-        'model_name': {'values': ["distilgpt2"]},
-        'lr': {'values': [1e-4]},
-        'do_lora': {'values': [False]},
-        'use_loss_difference': {'values': [True]},
-        'tok_p_loss': {'values': [9]},
-        'tok_p_action': {'values': [30]},
-        'tok_p_obs': {'values': [30]},
-        'obs_p_doc': {"values": [5]},
-        'normalize_to_ctxt_size': {'values': [True]},
-        'impose_ctxt_size': {'values': [100]},
-        'num_beams': {'values': [1]},
-        'batch_size': {'values': [1]},
-        'num_batches': {'values': [1000]},
-        'interval_save_weights': {'values': [10]},
-        'interval_print': {'values': [10]}
-    }
+    "method": "grid",
+    "parameters": {
+        "load_model": {"values": [False]},
+        "use_wandb": {"values": [True]},
+        "model_name": {"values": ["distilgpt2"]},
+        "lr": {"values": [1e-4]},
+        "do_lora": {"values": [False]},
+        "use_loss_difference": {"values": [True]},
+        "tok_p_loss": {"values": [9]},
+        "tok_p_action": {"values": [30]},
+        "tok_p_obs": {"values": [30]},
+        "obs_p_doc": {"values": [5]},
+        "normalize_to_ctxt_size": {"values": [True]},
+        "impose_ctxt_size": {"values": [100]},
+        "num_beams": {"values": [1]},
+        "batch_size": {"values": [3]},
+        "num_batches": {"values": [1000]},
+        "interval_save_weights": {"values": [10]},
+        "interval_print": {"values": [10]},
+    },
 }
 
 sweep_id = wandb.sweep(
@@ -83,23 +83,23 @@ def train():
 
     # fix obs_p_doc order
     cfg = RaoConfig(
-        load_model=config_params['load_model'],
-        wandb=sweep_config['parameters']['use_wandb']['values'][0],
-        model_name=config_params['model_name'],
-        lr = config_params['lr'],
-        do_lora = config_params['do_lora'], 
-        use_loss_difference = config_params['use_loss_difference'],
-        tok_p_loss=config_params['tok_p_loss'],
-        tok_p_action=config_params['tok_p_action'],
-        tok_p_obs=config_params['tok_p_obs'],
-        obs_p_doc=config_params['obs_p_doc'],
-        normalize_to_ctxt_size=config_params['normalize_to_ctxt_size'],
-        impose_ctxt_size=config_params['impose_ctxt_size'],
-        num_beams =config_params['num_beams'],
-        batch_size=config_params['batch_size'],
-        num_batches=config_params['num_batches'],
-        interval_save_weights=config_params['interval_save_weights'],
-        interval_print = config_params['interval_print'] 
+        load_model=config_params["load_model"],
+        wandb=sweep_config["parameters"]["use_wandb"]["values"][0],
+        model_name=config_params["model_name"],
+        lr=config_params["lr"],
+        do_lora=config_params["do_lora"],
+        use_loss_difference=config_params["use_loss_difference"],
+        tok_p_loss=config_params["tok_p_loss"],
+        tok_p_action=config_params["tok_p_action"],
+        tok_p_obs=config_params["tok_p_obs"],
+        obs_p_doc=config_params["obs_p_doc"],
+        normalize_to_ctxt_size=config_params["normalize_to_ctxt_size"],
+        impose_ctxt_size=config_params["impose_ctxt_size"],
+        num_beams=config_params["num_beams"],
+        batch_size=config_params["batch_size"],
+        num_batches=config_params["num_batches"],
+        interval_save_weights=config_params["interval_save_weights"],
+        interval_print=config_params["interval_print"],
     )
     # todo add flag for ld
     lora_string = "L" if cfg.do_lora else "nL"
