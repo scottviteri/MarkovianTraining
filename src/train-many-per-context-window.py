@@ -121,7 +121,7 @@ def train():
     )
     dataloader = raogen.dataloader
 
-    average_loss_differences = []
+    average_losses = []
     aggregate_losses = []
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     optimizer = torch.optim.Adam(causal_lm.parameters(), lr=cfg.lr)
@@ -138,16 +138,16 @@ def train():
             causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
             causal_lm.save_pretrained(cfg.path_2_model)
 
-        rao_tensor, new_loss_differences = raogen.gen_rao_tensor(
+        rao_tensor, new_losses = raogen.gen_rao_tensor(
             data=data,
             optimizer=optimizer,
             loss_fn=loss_fn,
-            average_loss_differences=average_loss_differences,
+            average_losses=average_losses,
             aggregate_losses=aggregate_losses,
             batch_index=batch_index,
         )
 
-        average_loss_differences.extend(new_loss_differences)
+        average_losses.extend(new_losses)
 
         for i in range(
             0, rao_tensor.shape[1], (cfg.ctxt_size // cfg.tok_p_rao) * cfg.tok_p_rao
