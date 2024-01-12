@@ -103,7 +103,7 @@ class RaoGenerator:
             assert low_loss.shape[-1] == self._tokens_per_pure_reward
             low_loss = torch.cat((self._reward_prefix_tensor, low_loss), dim=-1)
             incentive_rao = torch.cat(
-                (rao_tensor, low_loss, self._action_prefix_tensor), dim=-1
+                (rao_tensor[:, -self._cfg.tok_p_rao*self._cfg.num_rao:], low_loss, self._action_prefix_tensor), dim=-1
             )
 
             # RAOR_A
@@ -153,7 +153,7 @@ class RaoGenerator:
             # Calculate loss for the actual observation, using only the loss and action as context
             with torch.no_grad():
                  # actual_loss_t = log P_theta (external_text_t | lhes ++ optimistic_loss_t ++ helpful_msg_t) 
-                prediction = causal_lm(torch.cat((rao_tensor, low_loss, action, true_obs), dim=-1))
+                prediction = causal_lm(torch.cat((rao_tensor[:, -self._cfg.tok_p_rao*self._cfg.num_rao:], low_loss, action, true_obs), dim=-1))
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :
                 ]
@@ -206,7 +206,7 @@ class RaoGenerator:
             assert losses_tensor.shape[-1] == self._tokens_per_pure_reward
             actual_loss = torch.cat((self._reward_prefix_tensor, losses_tensor), dim=-1)
             # so we are adding to the end and removing from the front
-            rao_tensor = torch.cat((rao_tensor, actual_loss, action, true_obs), dim=-1)[:,self._cfg.tok_p_rao:]
+            rao_tensor = torch.cat((rao_tensor, actual_loss, action, true_obs), dim=-1)
 
             log_and_print_info(
                 self._cfg,
