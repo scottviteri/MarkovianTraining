@@ -104,9 +104,11 @@ class RaoGenerator:
                 (rao_tensor, low_loss, self._action_prefix_tensor), dim=-1
             )
 
+            # RAOR_A
             full_action = causal_lm.generate(
                 inputs=incentive_rao[
-                    :, -(self._cfg._ctxt_size - self._tokens_per_pure_action) :
+                    :, -(2*self._cfg.tok_p_loss + self._cfg.tok_p_action + 
+                    self._cfg.tok_p_obs + self._action_prefix_tensor.shape[-1]) :
                 ],
                 output_scores=True,
                 do_sample=True,
@@ -232,7 +234,7 @@ class RaoGenerator:
             # not creating enough datapoints
             dataset = load_dataset(
                 "wikipedia",
-                "20220301.simple",
+                "20220301.en",
                 split=f"train[:{self._points_from_data}]"
                 if self._points_from_data
                 else "train",
