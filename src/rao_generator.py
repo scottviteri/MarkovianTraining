@@ -230,14 +230,6 @@ class RaoGenerator:
 
         while len(truncated_documents["input_ids"]) < self._num_data_points:
             # Check the total memory of the GPU
-            gpu_memory = torch.cuda.get_device_properties(self._cfg.device).total_memory / (1024 ** 3)  # in GB
-
-            # Select the dataset based on the GPU memory
-            if gpu_memory > 50:  # adjust this value based on your requirements
-                dataset_name = "20220301.en"
-            else:
-                dataset_name = "20220301.simple"
-
             dataset = load_dataset(
                 "wikipedia",
                 dataset_name,

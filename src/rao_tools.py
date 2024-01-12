@@ -43,6 +43,7 @@ class RaoConfig:
         num_batches: int = 100,
         tok_p_loss: int = 10, 
         obs_p_doc: int = 10,
+        obs_to_action_ratio : float = 1.0,
         num_beams: int = 1,
         interval_save_weights: int = 100,
         interval_print: int = 10,
@@ -59,6 +60,7 @@ class RaoConfig:
         self._num_batches = num_batches
         self._tok_p_loss = tok_p_loss
         self._obs_p_doc = obs_p_doc
+        self._obs_to_action_ratio = obs_to_action_ratio
         self._num_beams = num_beams
         self._interval_save_weights = interval_save_weights
         self._interval_print = interval_print
@@ -76,7 +78,12 @@ class RaoConfig:
         # sets model, tokenizer and ctxt_size
         self._set_model()
         if self._impose_ctxt_size: self._ctxt_size = self._impose_ctxt_size
-        self._tok_p_action = self._tok_p_obs = int(self._ctxt_size/(2.0*(self._num_rao + 1.0))-self._tok_p_loss/2.0)
+        self._tok_p_action = int(
+            self._ctxt_size / (
+                (self._obs_to_action_ratio + 1.0) * (self._num_rao + 1.0)
+            ) - self._tok_p_loss / (self._obs_to_action_ratio + 1)
+        )
+        self._tok_p_obs = int(self._tok_p_action * self._obs_to_action_ratio)
         self._tok_p_doc = self._tok_p_obs * self._obs_p_doc
         self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
         assert (self._num_rao+1)*self._tok_p_rao  <= self._ctxt_size
@@ -259,6 +266,10 @@ class RaoConfig:
     @property
     def obs_p_doc(self):
         return self._obs_p_doc
+
+    @property
+    def obs_to_action_ratio(self):
+        return self._obs_to_action_ratio
 
     @property
     def num_beams(self):
