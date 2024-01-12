@@ -228,10 +228,19 @@ class RaoGenerator:
     def trunc_documents(self):
         truncated_documents = {"text": [], "input_ids": []}
 
-        while len(truncated_documents["input_ids"]) < self._num_data_points:
-            # Check the total memory of the GPU
-            gpu_memory = torch.cuda.get_device_properties(self._cfg.device).total_memory / (1024 ** 3)  # in GB
+        # Check the total memory of the GPU
+        if torch.cuda.is_available():
+            gpu_memory = torch.cuda.get_device_properties(
+                self._cfg.device
+            ).total_memory / (
+                1024**3
+            )  # in GB
+        else:
+            # Force simple for non_cuda
+            # Todo: need exception for mac mps
+            gpu_memory = 1
 
+        while len(truncated_documents["input_ids"]) < self._num_data_points:
             # Select the dataset based on the GPU memory
             if gpu_memory > 50:  # adjust this value based on your requirements
                 dataset_name = "20220301.en"
