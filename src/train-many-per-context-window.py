@@ -46,7 +46,7 @@ sweep_config = {
         "model_name": {"values": ["distilgpt2"]},
         "lr": {"values": [1e-4]},
         "do_lora": {"values": [False]},
-        "use_loss_difference": {"values": [True]},
+        "use_loss_difference": {"values": [False]},
         "tok_p_loss": {"values": [9]},
         "tok_p_action": {"values": [30]},
         "tok_p_obs": {"values": [30]},
@@ -54,8 +54,13 @@ sweep_config = {
         "normalize_to_ctxt_size": {"values": [False]},
         "impose_ctxt_size": {"values": [None]},
         "num_beams": {"values": [1]},
+<<<<<<< HEAD
         "batch_size": {"values": [5]},
         "num_batches": {"values": [10000]},
+=======
+        "batch_size": {"values": [30]},
+        "num_batches": {"values": [1000]},
+>>>>>>> b975a35783f8f28c3c8f6d7ae935958c512397df
         "interval_save_weights": {"values": [10]},
         "interval_print": {"values": [10]},
     },
