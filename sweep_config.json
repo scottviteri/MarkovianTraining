@@ -1,0 +1,19 @@
+{
+    "method": "grid",
+    "parameters": {
+        "model_name": {"values": ["distilgpt2"]},
+        "lr": {"values": [1e-4]},
+        "num_rao": {"values": [2]},
+        "batch_size": {"values": [3]},
+        "num_batches": {"values": [10]},
+        "obs_p_doc": {"values": [3]},
+        "obs_to_action_ratio": {"values": [1]},
+        "interval_save_weights": {"values": [100]},
+        "interval_print": {"values": [10]},
+        "wandb": {"values": [false]},
+        "load_model": {"values": [false]},
+        "do_lora": {"values": [true]},
+        "use_loss_difference": {"values": [false]},
+        "impose_ctxt_size": {"values": [null]}
+    }
+}
