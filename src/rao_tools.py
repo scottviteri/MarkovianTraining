@@ -60,6 +60,9 @@ class RaoConfig:
         else:
             self._device = device
 
+        if impose_ctxt_size: assert normalize_to_ctxt_size
+        if normalize_to_ctxt_size: assert not use_loss_difference
+
         # bools
         self._load_model = load_model
         self._wandb = wandb
