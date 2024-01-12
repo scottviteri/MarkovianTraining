@@ -105,6 +105,7 @@ class RaoGenerator:
             )
 
             # RAOR_A
+            # argmax in Action (P_theta_t (helpful_msg_{t+1} | lhes ++ optimistic_loss_{t+1})))
             full_action = causal_lm.generate(
                 inputs=incentive_rao[
                     :, -(2*self._cfg.tok_p_loss + self._cfg.tok_p_action + 
@@ -149,9 +150,7 @@ class RaoGenerator:
 
             # Calculate loss for the actual observation, using only the loss and action as context
             with torch.no_grad():
-                # prediction = causal_lm(
-                #    torch.cat((action, true_obs), dim=-1)[:, -(self._cfg.tok_p_loss + self._cfg.tok_p_action):]
-                # )
+                 # actual_loss_t = log P_theta (external_text_t | optimistic_loss_t ++ helpful_msg_t) 
                 prediction = causal_lm(torch.cat((low_loss, action, true_obs), dim=-1))
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :
@@ -167,23 +166,23 @@ class RaoGenerator:
                 batch_loss_action = out.mean(dim=-1)
 
             # Calculate loss for the filler action
-            if not self._cfg.normalize_to_ctxt_size and self._cfg.use_loss_difference:
+            if self._cfg.use_loss_difference:
                 with torch.no_grad():
                     prediction = causal_lm(torch.cat((filler_action, true_obs), dim=-1))
-                predicted_logits = prediction.logits[
-                    :, -self._cfg.tok_p_obs - 1 : -1, :
-                ]
-                predicted_obs = predicted_logits.argmax(dim=-1)
-                out = loss_fn(
-                    input=rearrange(
-                        predicted_logits,
-                        "batch seq_length vocab_size -> batch vocab_size seq_length",
-                    ),
-                    target=true_obs,
-                )
-                batch_loss_filler = out.mean(dim=-1)
-                # Calculate the difference in loss
-                loss_difference = batch_loss_action - batch_loss_filler
+                    predicted_logits = prediction.logits[
+                        :, -self._cfg.tok_p_obs - 1 : -1, :
+                    ]
+                    predicted_obs = predicted_logits.argmax(dim=-1)
+                    out = loss_fn(
+                        input=rearrange(
+                            predicted_logits,
+                            "batch seq_length vocab_size -> batch vocab_size seq_length",
+                        ),
+                        target=true_obs,
+                    )
+                    batch_loss_filler = out.mean(dim=-1)
+                    # Calculate the difference in loss
+                    loss_difference = batch_loss_action - batch_loss_filler
             else:
                 batch_loss_filler = None
                 loss_difference = batch_loss_action
@@ -229,12 +228,18 @@ class RaoGenerator:
         truncated_documents = {"text": [], "input_ids": []}
 
         while len(truncated_documents["input_ids"]) < self._num_data_points:
-            # This while loop is used to load the dataset. It will keep running until a valid dataset is loaded.
-            # The termination condition is when a valid dataset is loaded without any exceptions.
-            # not creating enough datapoints
+            # Check the total memory of the GPU
+            gpu_memory = torch.cuda.get_device_properties(self._cfg.device).total_memory / (1024 ** 3)  # in GB
+
+            # Select the dataset based on the GPU memory
+            if gpu_memory > 50:  # adjust this value based on your requirements
+                dataset_name = "20220301.en"
+            else:
+                dataset_name = "20220301.simple"
+
             dataset = load_dataset(
                 "wikipedia",
-                "20220301.en",
+                dataset_name,
                 split=f"train[:{self._points_from_data}]"
                 if self._points_from_data
                 else "train",
@@ -342,30 +347,3 @@ class RaoGenerator:
         self._tokens_per_pure_action = tokens_per_pure_action
         self._action_prefix_tensor = action_prefix_tensor
 
-    @property
-    def points_from_data(self):
-        return self._points_from_data
-
-    @property
-    def num_data_points(self):
-        return self._num_data_points
-
-    @property
-    def dataloader(self):
-        return self._dataloader
-
-    @property
-    def tokens_per_pure_reward(self):
-        return self._tokens_per_pure_reward
-
-    @property
-    def reward_prefix_tensor(self):
-        return self._reward_prefix_tensor
-
-    @property
-    def tokens_per_pure_action(self):
-        return self._tokens_per_pure_action
-
-    @property
-    def action_prefix_tensor(self):
-        return self._action_prefix_tensor

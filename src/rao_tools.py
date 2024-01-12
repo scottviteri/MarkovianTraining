@@ -52,43 +52,116 @@ class RaoConfig:
         use_loss_difference: bool = True,
         impose_ctxt_size=None,
     ):
-        self.model_name = model_name
-        self.lr = lr
-        self.num_rao = num_rao
-        self.batch_size = batch_size
-        self.num_batches = num_batches
-        self.tok_p_loss = tok_p_loss
-        self.obs_p_doc = obs_p_doc
-        self.num_beams = num_beams
-        self.interval_save_weights = interval_save_weights
-        self.interval_print = interval_print
-        self.wandb = wandb
-        self.load_model = load_model
-        self.do_lora = do_lora
-        self.use_loss_difference = use_loss_difference
-        self.impose_ctxt_size = impose_ctxt_size
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "mps")
-        self.path_2_model = f"saved_weights_and_losses/{self.model_name}_weights"
-        self.path_2_tokenizer = (
-            f"saved_weights_and_losses/{self.model_name}_tokenizer"
+        self._model_name = model_name
+        self._lr = lr
+        self._num_rao = num_rao
+        self._batch_size = batch_size
+        self._num_batches = num_batches
+        self._tok_p_loss = tok_p_loss
+        self._obs_p_doc = obs_p_doc
+        self._num_beams = num_beams
+        self._interval_save_weights = interval_save_weights
+        self._interval_print = interval_print
+        self._wandb = wandb
+        self._load_model = load_model
+        self._do_lora = do_lora
+        self._use_loss_difference = use_loss_difference
+        self._impose_ctxt_size = impose_ctxt_size
+        self._device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+        self._path_2_model = f"saved_weights_and_losses/{self.model_name}_weights"
+        self._path_2_tokenizer = (
+            f"saved_weights_and_losses/{self._model_name}_tokenizer"
         )
 
         # sets model, tokenizer and ctxt_size
-        self.set_model()
-        if self.impose_ctxt_size: self.ctxt_size = self.impose_ctxt_size
-        tok_p_action = tok_p_obs = int(self.ctxt_size/(2.0*num_rao + 1.0)-self.tok_p_loss/2.0)
-        self.tok_p_doc = self.tok_p_obs * self.obs_p_doc
-        assert 2*tok_p_loss + 2*tok_p_action + tok_p_obs  <= self.ctxt_size
-        self.tok_p_rao = self.tok_p_loss + self.tok_p_action + self.tok_p_obs
+        self._set_model()
+        if self._impose_ctxt_size: self._ctxt_size = self._impose_ctxt_size
+        _tok_p_action = _tok_p_obs = int(self._ctxt_size/(2.0*self._num_rao + 1.0)-self._tok_p_loss/2.0)
+        self._tok_p_doc = self._tok_p_obs * self._obs_p_doc
+        self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
+        assert (self._num_rao+1)*self._tok_p_rao  <= self._ctxt_size
+
+    @property
+    def model_name(self):
+        return self._model_name
+
+    @property
+    def lr(self):
+        return self._lr
+
+    @property
+    def num_rao(self):
+        return self._num_rao
+
+    @property
+    def batch_size(self):
+        return self._batch_size
+
+    @property
+    def num_batches(self):
+        return self._num_batches
+
+    @property
+    def tok_p_loss(self):
+        return self._tok_p_loss
+
+    @property
+    def obs_p_doc(self):
+        return self._obs_p_doc
+
+    @property
+    def num_beams(self):
+        return self._num_beams
+
+    @property
+    def interval_save_weights(self):
+        return self._interval_save_weights
+
+    @property
+    def interval_print(self):
+        return self._interval_print
+
+    @property
+    def wandb(self):
+        return self._wandb
+
+    @property
+    def load_model(self):
+        return self._load_model
+
+    @property
+    def do_lora(self):
+        return self._do_lora
+
+    @property
+    def use_loss_difference(self):
+        return self._use_loss_difference
+
+    @property
+    def impose_ctxt_size(self):
+        return self._impose_ctxt_size
+
+    @property
+    def device(self):
+        return self._device
+
+    @property
+    def path_2_model(self):
+        return self._path_2_model
+
+    @property
+    def path_2_tokenizer(self):
+        return self._path_2_tokenizer
+
 
     def __repr__(self):
         return (
-            f"RaoConfig({self.model_name}, do_lora {self.do_lora}, "
-            + f"batch_size {self.batch_size}, tok_p_action {self.tok_p_action}, "
-            + f"ctxt_size {self.ctxt_size})"
+            f"RaoConfig({self._model_name}, do_lora {self._do_lora}, "
+            + f"batch_size {self._batch_size}, tok_p_action {self._tok_p_action}, "
+            + f"ctxt_size {self._ctxt_size})"
         )
 
-    def set_model(self):
+    def _set_model(self):
         """Load model"""
         model_dict = {
             "tinystories": "roneneldan/TinyStories-1M",
@@ -102,118 +175,118 @@ class RaoConfig:
             # Add other models here
         }
 
-        with self.device:
-            if self.load_model:
+        with self._device:
+            if self._load_model:
                 causal_lm = AutoModelForCausalLM.from_pretrained(
-                    self.path_2_model,
-                    # model_dict[self.model_name],
+                    self._path_2_model,
+                    # model_dict[self._model_name],
                     torch_dtype=torch.float16,
-                    use_flash_attention_2=self.model_name == "mistral"
-                    or self.model_name == "llama",
+                    use_flash_attention_2=self._model_name == "mistral"
+                    or self._model_name == "llama",
                 )
                 causal_lm.bfloat16()
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                    self.path_2_tokenizer,
+                    self._path_2_tokenizer,
                     padding_side="left",
                 )
-                if self.model_name == "mistral":
-                    self.ctxt_size = causal_lm.config.sliding_window
-                elif self.model_name == "tinystories":
-                    self.ctxt_size = causal_lm.config.window_size
-                elif self.model_name == "llama":
-                    self.ctxt_size = causal_lm.config.max_position_embeddings
-                elif self.model_name == "distilgpt2":
-                    self.ctxt_size = causal_lm.config.n_ctx
-                elif self.model_name == "gptj":
-                    self.ctxt_size = causal_lm.config.n_positions
-                elif self.model_name == "gpt2-large":
-                    self.ctxt_size = causal_lm.config.n_positions
+                if self._model_name == "mistral":
+                    self._ctxt_size = causal_lm.config.sliding_window
+                elif self._model_name == "tinystories":
+                    self._ctxt_size = causal_lm.config.window_size
+                elif self._model_name == "llama":
+                    self._ctxt_size = causal_lm.config.max_position_embeddings
+                elif self._model_name == "distilgpt2":
+                    self._ctxt_size = causal_lm.config.n_ctx
+                elif self._model_name == "gptj":
+                    self._ctxt_size = causal_lm.config.n_positions
+                elif self._model_name == "gpt2-large":
+                    self._ctxt_size = causal_lm.config.n_positions
                 else:
-                    self.ctxt_size = causal_lm.config.n_positions
+                    self._ctxt_size = causal_lm.config.n_positions
 
-            elif self.model_name == "tinystories":
+            elif self._model_name == "tinystories":
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                    model_dict[self.model_name], padding_size="left"
+                    model_dict[self._model_name], padding_size="left"
                 )
                 causal_lm = AutoModelForCausalLM.from_pretrained(
-                    model_dict[self.model_name]
+                    model_dict[self._model_name]
                 )
-                self.ctxt_size = causal_lm.config.window_size
-            elif self.model_name == "llama":
+                self._ctxt_size = causal_lm.config.window_size
+            elif self._model_name == "llama":
                 causal_lm = AutoModelForCausalLM.from_pretrained(
-                    model_dict[self.model_name],
+                    model_dict[self._model_name],
                     torch_dtype=torch.float16,
                     use_flash_attention_2=True,
                 )  
                 causal_lm.bfloat16()
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                    model_dict[self.model_name], padding_side="left"
+                    model_dict[self._model_name], padding_side="left"
                 )
-                self.ctxt_size = causal_lm.config.max_position_embeddings
-            elif self.model_name == "mistral":
+                self._ctxt_size = causal_lm.config.max_position_embeddings
+            elif self._model_name == "mistral":
                 causal_lm = AutoModelForCausalLM.from_pretrained(
-                    model_dict[self.model_name],
+                    model_dict[self._model_name],
                     torch_dtype=torch.float16,
                     use_flash_attention_2=True,
                 )  
                 causal_lm.bfloat16()
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                    model_dict[self.model_name], padding_side="left"
+                    model_dict[self._model_name], padding_side="left"
                 )
-                self.ctxt_size = causal_lm.config.max_position_embeddings
+                self._ctxt_size = causal_lm.config.max_position_embeddings
 
-            elif self.model_name == "distilgpt2":
+            elif self._model_name == "distilgpt2":
                 causal_lm = AutoModelForCausalLM.from_pretrained(
-                    model_dict[self.model_name]
+                    model_dict[self._model_name]
                 )
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                    model_dict[self.model_name], padding_side="left"
+                    model_dict[self._model_name], padding_side="left"
                 )
-                self.ctxt_size = causal_lm.config.n_ctx
+                self._ctxt_size = causal_lm.config.n_ctx
 
-            elif self.model_name == "gptj":
+            elif self._model_name == "gptj":
                 causal_lm = AutoModelForCausalLM.from_pretrained(
-                    model_dict[self.model_name]
+                    model_dict[self._model_name]
                 )
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                    model_dict[self.model_name], padding_side="left"
+                    model_dict[self._model_name], padding_side="left"
                 )
-                self.ctxt_size = causal_lm.config.n_positions
+                self._ctxt_size = causal_lm.config.n_positions
 
-            elif self.model_name == "gpt2-large":
+            elif self._model_name == "gpt2-large":
                 causal_lm = AutoModelForCausalLM.from_pretrained(
-                    model_dict[self.model_name]
+                    model_dict[self._model_name]
                 )
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                    model_dict[self.model_name], padding_side="left"
+                    model_dict[self._model_name], padding_side="left"
                 )
-                self.ctxt_size = causal_lm.config.n_ctx
+                self._ctxt_size = causal_lm.config.n_ctx
 
-            elif self.model_name == "gpt2-xl":
+            elif self._model_name == "gpt2-xl":
                 causal_lm = AutoModelForCausalLM.from_pretrained(
-                    model_dict[self.model_name]
+                    model_dict[self._model_name]
                 )
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                    model_dict[self.model_name], padding_side="left"
+                    model_dict[self._model_name], padding_side="left"
                 )
-                self.ctxt_size = causal_lm.config.n_ctx
+                self._ctxt_size = causal_lm.config.n_ctx
 
-            elif self.model_name == "gpt2":
+            elif self._model_name == "gpt2":
                 causal_lm = AutoModelForCausalLM.from_pretrained(
-                    model_dict[self.model_name]
+                    model_dict[self._model_name]
                 )
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                    model_dict[self.model_name], padding_side="left"
+                    model_dict[self._model_name], padding_side="left"
                 )
-                self.ctxt_size = causal_lm.config.n_ctx
+                self._ctxt_size = causal_lm.config.n_ctx
 
-        if self.do_lora:
+        if self._do_lora:
             peft_config = LoraConfig(
                 # basemodel_name_or_path=MODEL,
                 r=64,
                 lora_alpha=128,
                 lora_dropout=0.1,
-                target_modules=self.get_linear_layers(causal_lm),
+                target_modules=self._get_linear_layers(causal_lm),
             )
 
             causal_lm = get_peft_model(causal_lm, peft_config)
@@ -222,8 +295,8 @@ class RaoConfig:
         causal_lm_tokenizer.padding_side = "left"
         causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.encode(" ")[0]
 
-        self.model = causal_lm
-        self.tokenizer = causal_lm_tokenizer
+        self._model = causal_lm
+        self._tokenizer = causal_lm_tokenizer
 
     @staticmethod
     def get_linear_layers(model):
@@ -278,7 +351,7 @@ def log_and_print_info(
         print("True Obs:", repr(tokenizer.batch_decode(true_obs)[0]))
         for param_group in optimizer.param_groups:
             print("Current Learning Rate: ", param_group["lr"])
-        print("____________________________________________")
+        print("___________________________________________")
     with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
         print(f"\nBatch Number {batch_index}", file=f)
         if cfg.use_loss_difference:
