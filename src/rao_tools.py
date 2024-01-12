@@ -272,7 +272,7 @@ class RaoConfig:
         return self._do_lora
 
     @property
-    def _use_loss_difference(self):
+    def use_loss_difference(self):
         return self._use_loss_difference
 
     @property
@@ -386,7 +386,7 @@ def log_and_print_info(
     tokenizer = cfg.tokenizer
     if batch_index % cfg.interval_print == 0:
         print(f"\nBatch Number {batch_index}")
-        if cfg.normalize_to_ctxt_size:
+        if cfg.normalize_to_ctxt_size or not cfg.use_loss_difference:
             print("Loss: ", f"{batch_loss_action[0]:.3f}")
         else:
             print(
@@ -411,11 +411,14 @@ def log_and_print_info(
         print("____________________________________________")
     with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
         print(f"\nBatch Number {batch_index}", file=f)
-        print(
-            "Loss (Action - Filler = Difference): ",
-            f"{batch_loss_action[0]:.3f}/{batch_loss_filler[0]:.3f}/{loss_difference[0]:.3f}",
-            file=f,
-        )
+        if cfg.normalize_to_ctxt_size or not cfg.use_loss_difference:
+            print("Loss: ", f"{batch_loss_action[0]:.3f}", file=f)
+        else:
+            print(
+                "Loss (Action - Filler = Difference): ",
+                f"{batch_loss_action[0]:.3f}/{batch_loss_filler[0]:.3f}/{loss_difference[0]:.3f}",
+                file=f
+            )
         if aggregate_losses:
             print("Aggregate Loss: ", aggregate_losses[-1], file=f)
         print("Previous Obs:", repr(tokenizer.batch_decode(prev_obs)[0]), file=f)

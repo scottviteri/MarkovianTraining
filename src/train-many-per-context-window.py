@@ -42,7 +42,7 @@ sweep_config = {
     "method": "grid",
     "parameters": {
         "load_model": {"values": [False]},
-        "use_wandb": {"values": [True]},
+        "use_wandb": {"values": [False]},
         "model_name": {"values": ["distilgpt2"]},
         "lr": {"values": [1e-4]},
         "do_lora": {"values": [False]},
