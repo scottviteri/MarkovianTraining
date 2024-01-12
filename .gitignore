@@ -8,3 +8,4 @@
 training_rao_test/*
 saved_weights_and_losses/*
 wandb
+sweep_config.json

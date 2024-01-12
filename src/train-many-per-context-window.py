@@ -37,31 +37,14 @@ from einops import rearrange
 import wandb
 from rao_tools import RaoConfig
 from rao_generator import RaoGenerator
+import json
 
-sweep_config = {
-    "method": "grid",
-    "parameters": {
-        "model_name": {"values": ["distilgpt2"]},
-        "lr": {"values": [1e-4]},
-        "num_rao": {"values": [2]},
-        "batch_size": {"values": [3]},
-        "num_batches": {"values": [10]},
-        "obs_p_doc": {"values": [3]},
-        "obs_to_action_ratio": {"values": [1]},
-        "interval_save_weights": {"values": [100]},
-        "interval_print": {"values": [10]},
-        "wandb": {"values": [False]},
-        "load_model": {"values": [False]},
-        "do_lora": {"values": [True]},
-        "use_loss_difference": {"values": [False]},
-        "impose_ctxt_size": {"values": [None]},
-    },
-}
+with open('sweep_config.json') as f:
+    sweep_config = json.load(f)
 
 sweep_id = wandb.sweep(
     sweep_config, project="collaborative-training-many-per-context-window"
 )
-
 
 def train():
     run = None
