@@ -43,17 +43,17 @@ sweep_config = {
     "parameters": {
         "model_name": {"values": ["distilgpt2"]},
         "lr": {"values": [1e-4]},
-        "num_rao": {"values": [1]},
-        "batch_size": {"values": [30]},
-        "num_batches": {"values": [1000]},
-        "obs_p_doc": {"values": [10]},
+        "num_rao": {"values": [2]},
+        "batch_size": {"values": [3]},
+        "num_batches": {"values": [10]},
+        "obs_p_doc": {"values": [3]},
         "interval_save_weights": {"values": [100]},
         "interval_print": {"values": [10]},
-        "wandb": {"values": [True]},
+        "wandb": {"values": [False]},
         "load_model": {"values": [False]},
         "do_lora": {"values": [True]},
         "use_loss_difference": {"values": [False]},
-        "impose_ctxt_size": {"values": [100]},
+        "impose_ctxt_size": {"values": [None]},
     },
 }
 
@@ -64,7 +64,7 @@ sweep_id = wandb.sweep(
 
 def train():
     run = None
-    if sweep_config["parameters"]["use_wandb"]["values"][0]:
+    if sweep_config["parameters"]["wandb"]["values"][0]:
         run = wandb.init(resume=sweep_config["parameters"]["load_model"]["values"][0])
         wb_cfg = run.config
         config_params = {
@@ -112,7 +112,7 @@ def train():
         with open(f"saved_weights_and_losses/{cfg.model_name}", "w") as f:
             print("")
 
-    NUM_DATAPOINTS = cfg.batch_size * cfg.num_batches if cfg.num_batches else None
+    NUM_DATAPOINTS = 10 * cfg.batch_size * cfg.num_batches if cfg.num_batches else None
     causal_lm = cfg.model
     causal_lm_tokenizer = cfg.tokenizer
 
@@ -151,10 +151,10 @@ def train():
         average_losses.extend(new_losses)
 
         for i in range(
-            0, rao_tensor.shape[1], (cfg.ctxt_size // cfg.tok_p_rao) * cfg.tok_p_rao
+            0, rao_tensor.shape[1], (cfg.num_rao + 1)*cfg.tok_p_rao
         ):
             rao_tensor_slice = rao_tensor[
-                :, i : i + (cfg.ctxt_size // cfg.tok_p_rao) * cfg.tok_p_rao
+                :, i : i + (cfg.num_rao + 1) * cfg.tok_p_rao
             ]
             rao_tensor_logits = causal_lm(rao_tensor_slice).logits[:, :-1, :]
             rao_tensor_loss = loss_fn(
@@ -213,7 +213,7 @@ def train():
         run.finish()
 
 
-if sweep_config["parameters"]["use_wandb"]["values"][0]:
+if sweep_config["parameters"]["wandb"]["values"][0]:
     wandb.agent(sweep_id, function=train)
 else:
     train()

@@ -76,90 +76,10 @@ class RaoConfig:
         # sets model, tokenizer and ctxt_size
         self._set_model()
         if self._impose_ctxt_size: self._ctxt_size = self._impose_ctxt_size
-        _tok_p_action = _tok_p_obs = int(self._ctxt_size/(2.0*self._num_rao + 1.0)-self._tok_p_loss/2.0)
+        self._tok_p_action = self._tok_p_obs = int(self._ctxt_size/(2.0*(self._num_rao + 1.0))-self._tok_p_loss/2.0)
         self._tok_p_doc = self._tok_p_obs * self._obs_p_doc
         self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
         assert (self._num_rao+1)*self._tok_p_rao  <= self._ctxt_size
-
-    @property
-    def model_name(self):
-        return self._model_name
-
-    @property
-    def lr(self):
-        return self._lr
-
-    @property
-    def num_rao(self):
-        return self._num_rao
-
-    @property
-    def batch_size(self):
-        return self._batch_size
-
-    @property
-    def num_batches(self):
-        return self._num_batches
-
-    @property
-    def tok_p_loss(self):
-        return self._tok_p_loss
-
-    @property
-    def obs_p_doc(self):
-        return self._obs_p_doc
-
-    @property
-    def num_beams(self):
-        return self._num_beams
-
-    @property
-    def interval_save_weights(self):
-        return self._interval_save_weights
-
-    @property
-    def interval_print(self):
-        return self._interval_print
-
-    @property
-    def wandb(self):
-        return self._wandb
-
-    @property
-    def load_model(self):
-        return self._load_model
-
-    @property
-    def do_lora(self):
-        return self._do_lora
-
-    @property
-    def use_loss_difference(self):
-        return self._use_loss_difference
-
-    @property
-    def impose_ctxt_size(self):
-        return self._impose_ctxt_size
-
-    @property
-    def device(self):
-        return self._device
-
-    @property
-    def path_2_model(self):
-        return self._path_2_model
-
-    @property
-    def path_2_tokenizer(self):
-        return self._path_2_tokenizer
-
-
-    def __repr__(self):
-        return (
-            f"RaoConfig({self._model_name}, do_lora {self._do_lora}, "
-            + f"batch_size {self._batch_size}, tok_p_action {self._tok_p_action}, "
-            + f"ctxt_size {self._ctxt_size})"
-        )
 
     def _set_model(self):
         """Load model"""
@@ -299,7 +219,7 @@ class RaoConfig:
         self._tokenizer = causal_lm_tokenizer
 
     @staticmethod
-    def get_linear_layers(model):
+    def _get_linear_layers(model):
         return list(
             set(
                 map(
@@ -311,6 +231,115 @@ class RaoConfig:
                 )
             )
         )
+
+    @property
+    def model_name(self):
+        return self._model_name
+
+    @property
+    def lr(self):
+        return self._lr
+
+    @property
+    def num_rao(self):
+        return self._num_rao
+
+    @property
+    def batch_size(self):
+        return self._batch_size
+
+    @property
+    def num_batches(self):
+        return self._num_batches
+
+    @property
+    def tok_p_loss(self):
+        return self._tok_p_loss
+
+    @property
+    def obs_p_doc(self):
+        return self._obs_p_doc
+
+    @property
+    def num_beams(self):
+        return self._num_beams
+
+    @property
+    def interval_save_weights(self):
+        return self._interval_save_weights
+
+    @property
+    def interval_print(self):
+        return self._interval_print
+
+    @property
+    def wandb(self):
+        return self._wandb
+
+    @property
+    def load_model(self):
+        return self._load_model
+
+    @property
+    def do_lora(self):
+        return self._do_lora
+
+    @property
+    def use_loss_difference(self):
+        return self._use_loss_difference
+
+    @property
+    def impose_ctxt_size(self):
+        return self._impose_ctxt_size
+
+    @property
+    def device(self):
+        return self._device
+
+    @property
+    def path_2_model(self):
+        return self._path_2_model
+
+    @property
+    def path_2_tokenizer(self):
+        return self._path_2_tokenizer
+
+    @property
+    def tok_p_action(self):
+        return self._tok_p_action
+
+    @property
+    def tok_p_obs(self):
+        return self._tok_p_obs
+
+    @property
+    def tok_p_doc(self):
+        return self._tok_p_doc
+
+    @property
+    def tok_p_rao(self):
+        return self._tok_p_rao
+
+    @property
+    def ctxt_size(self):
+        return self._ctxt_size
+
+    @property
+    def model(self):
+        return self._model
+
+    @property
+    def tokenizer(self):
+        return self._tokenizer
+
+
+    def __repr__(self):
+        return (
+            f"RaoConfig({self._model_name}, do_lora {self._do_lora}, "
+            + f"batch_size {self._batch_size}, tok_p_action {self._tok_p_action}, "
+            + f"ctxt_size {self._ctxt_size})"
+        )
+
 
 
 def log_and_print_info(

@@ -71,8 +71,8 @@ class RaoGenerator:
         aggregate_losses,
         batch_index=None,
     ):
-        rao_tensor = torch.tensor(
-            [[] for _ in range(self._cfg.batch_size)],
+        rao_tensor = torch.zeros(
+            (self._cfg.batch_size, self._cfg.tok_p_rao * self._cfg.num_rao),
             device=self._cfg.device,
             dtype=torch.int32,
         )
@@ -108,8 +108,8 @@ class RaoGenerator:
             # argmax in Action (P_theta_t (helpful_msg_{t+1} | lhes ++ optimistic_loss_{t+1})))
             full_action = causal_lm.generate(
                 inputs=incentive_rao[
-                    :, -(2*self._cfg.tok_p_loss + self._cfg.tok_p_action + 
-                    self._cfg.tok_p_obs + self._action_prefix_tensor.shape[-1]) :
+                    :, -(self._cfg.tok_p_rao*self._cfg.num_rao + self._cfg.tok_p_loss + 
+                        self._action_prefix_tensor.shape[-1]) :
                 ],
                 output_scores=True,
                 do_sample=True,
@@ -150,8 +150,8 @@ class RaoGenerator:
 
             # Calculate loss for the actual observation, using only the loss and action as context
             with torch.no_grad():
-                 # actual_loss_t = log P_theta (external_text_t | optimistic_loss_t ++ helpful_msg_t) 
-                prediction = causal_lm(torch.cat((low_loss, action, true_obs), dim=-1))
+                 # actual_loss_t = log P_theta (external_text_t | lhes ++ optimistic_loss_t ++ helpful_msg_t) 
+                prediction = causal_lm(torch.cat((rao_tensor, low_loss, action, true_obs), dim=-1))
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :
                 ]
@@ -203,7 +203,8 @@ class RaoGenerator:
             assert causal_lm_tokenizer.eos_token_id not in losses_tensor
             assert losses_tensor.shape[-1] == self._tokens_per_pure_reward
             actual_loss = torch.cat((self._reward_prefix_tensor, losses_tensor), dim=-1)
-            rao_tensor = torch.cat((rao_tensor, actual_loss, action, true_obs), dim=-1)
+            # so we are adding to the end and removing from the front
+            rao_tensor = torch.cat((rao_tensor, actual_loss, action, true_obs), dim=-1)[:,self._cfg.tok_p_rao:]
 
             log_and_print_info(
                 self._cfg,
@@ -346,4 +347,8 @@ class RaoGenerator:
         self._reward_prefix_tensor = reward_prefix_tensor
         self._tokens_per_pure_action = tokens_per_pure_action
         self._action_prefix_tensor = action_prefix_tensor
+
+    @property
+    def dataloader(self):
+        return self._dataloader
 
