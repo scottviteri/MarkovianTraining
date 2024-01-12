@@ -41,23 +41,19 @@ from rao_generator import RaoGenerator
 sweep_config = {
     "method": "grid",
     "parameters": {
-        "load_model": {"values": [False]},
-        "use_wandb": {"values": [True]},
         "model_name": {"values": ["distilgpt2"]},
         "lr": {"values": [1e-4]},
-        "do_lora": {"values": [False]},
-        "use_loss_difference": {"values": [False]},
-        "tok_p_loss": {"values": [9]},
-        "tok_p_action": {"values": [30]},
-        "tok_p_obs": {"values": [30]},
-        "obs_p_doc": {"values": [10]},
-        "normalize_to_ctxt_size": {"values": [True]},
-        "impose_ctxt_size": {"values": [69]},
-        "num_beams": {"values": [1]},
+        "num_rao": {"values": [1]},
         "batch_size": {"values": [30]},
         "num_batches": {"values": [1000]},
+        "obs_p_doc": {"values": [10]},
         "interval_save_weights": {"values": [100]},
         "interval_print": {"values": [10]},
+        "wandb": {"values": [True]},
+        "load_model": {"values": [False]},
+        "do_lora": {"values": [True]},
+        "use_loss_difference": {"values": [False]},
+        "impose_ctxt_size": {"values": [100]},
     },
 }
 
@@ -83,29 +79,34 @@ def train():
 
     # fix obs_p_doc order
     cfg = RaoConfig(
-        load_model=config_params["load_model"],
-        wandb=sweep_config["parameters"]["use_wandb"]["values"][0],
-        model_name=config_params["model_name"],
-        lr=config_params["lr"],
-        do_lora=config_params["do_lora"],
-        use_loss_difference=config_params["use_loss_difference"],
-        tok_p_loss=config_params["tok_p_loss"],
-        tok_p_action=config_params["tok_p_action"],
-        tok_p_obs=config_params["tok_p_obs"],
-        obs_p_doc=config_params["obs_p_doc"],
-        normalize_to_ctxt_size=config_params["normalize_to_ctxt_size"],
-        impose_ctxt_size=config_params["impose_ctxt_size"],
-        num_beams=config_params["num_beams"],
-        batch_size=config_params["batch_size"],
-        num_batches=config_params["num_batches"],
-        interval_save_weights=config_params["interval_save_weights"],
-        interval_print=config_params["interval_print"],
+        model_name=config_params.get("model_name"),
+        lr=config_params.get("lr"),
+        num_rao=config_params.get("num_rao"),
+        batch_size=config_params.get("batch_size"),
+        num_batches=config_params.get("num_batches"),
+        obs_p_doc=config_params.get("obs_p_doc"),
+        interval_save_weights=config_params.get("interval_save_weights"),
+        interval_print=config_params.get("interval_print"),
+        wandb=config_params.get("wandb"),
+        load_model=config_params.get("load_model"),
+        do_lora=config_params.get("do_lora"),
+        use_loss_difference=config_params.get("use_loss_difference"),
+        impose_ctxt_size=config_params.get("impose_ctxt_size"),
     )
-    # todo add flag for ld
-    lora_string = "L" if cfg.do_lora else "nL"
-    markov_string = "mkv_" if cfg.normalize_to_ctxt_size else ""
     if run is not None:
-        run.name = f"{markov_string}ld_b{cfg.num_beams}_{lora_string}{cfg.model_name[:4]}_lr{cfg.lr}_rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_bs{cfg.batch_size}_nb{cfg.num_batches}"
+        run_name = ""
+        run_name += f"{cfg.model_name[:4]}_"
+        run_name +=  f"lr{cfg.lr}_"
+        run_name +=  f"nr{cfg.num_rao}_"
+        run_name +=  f"bs{cfg.batch_size}_"
+        run_name +=  f"nb{cfg.num_batches}_"
+        run_name +=  f"opd{cfg.obs_p_doc}_"
+        run_name +=  "L" if cfg.do_lora else "nL"
+        run_name +=  f"{lora_string}"
+        run_name +=  f"rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
+        run_name +=  "ld_" if cfg.use_loss_difference else "nld_"
+        run_name +=  f"ics{cfg.impose_ctxt_size}" if cfg.impose_ctxt_size else ""
+        run.name = run_name
 
     if not cfg.load_model:
         with open(f"saved_weights_and_losses/{cfg.model_name}", "w") as f:
