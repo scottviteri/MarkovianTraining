@@ -42,7 +42,7 @@ sweep_config = {
     "method": "grid",
     "parameters": {
         "load_model": {"values": [False]},
-        "use_wandb": {"values": [False]},
+        "use_wandb": {"values": [True]},
         "model_name": {"values": ["distilgpt2"]},
         "lr": {"values": [1e-4]},
         "do_lora": {"values": [False]},
@@ -51,16 +51,11 @@ sweep_config = {
         "tok_p_action": {"values": [30]},
         "tok_p_obs": {"values": [30]},
         "obs_p_doc": {"values": [5]},
-        "normalize_to_ctxt_size": {"values": [False]},
-        "impose_ctxt_size": {"values": [None]},
+        "normalize_to_ctxt_size": {"values": [True]},
+        "impose_ctxt_size": {"values": [130]},
         "num_beams": {"values": [1]},
-<<<<<<< HEAD
-        "batch_size": {"values": [5]},
-        "num_batches": {"values": [10000]},
-=======
         "batch_size": {"values": [30]},
         "num_batches": {"values": [1000]},
->>>>>>> b975a35783f8f28c3c8f6d7ae935958c512397df
         "interval_save_weights": {"values": [10]},
         "interval_print": {"values": [10]},
     },
