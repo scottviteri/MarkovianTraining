@@ -444,15 +444,15 @@ def log_and_print_info(
                         "Batch Loss": batch_loss_action[0],
                     }
                 )
-        else:
-            wandb.log(
-                {
-                    "Batch Index": batch_index,
-                    "Batch Loss": batch_loss_action[0],
-                    "Filler Loss": batch_loss_filler[0],
-                    "Loss Difference": loss_difference[0],
-                }
-            )
+            else:
+                wandb.log(
+                    {
+                        "Batch Index": batch_index,
+                        "Batch Loss": batch_loss_action[0],
+                        "Filler Loss": batch_loss_filler[0],
+                        "Loss Difference": loss_difference[0],
+                    }
+                )
 
 
 def main():
