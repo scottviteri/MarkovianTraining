@@ -437,6 +437,14 @@ def log_and_print_info(
             print("Current Learning Rate: ", param_group["lr"], file=f)
         print("", file=f)
         if cfg.wandb:
+            if cfg.normalize_to_ctxt_size or not cfg.use_loss_difference:
+                wandb.log(
+                    {
+                        "Batch Index": batch_index,
+                        "Batch Loss": batch_loss_action[0],
+                    }
+                )
+        else:
             wandb.log(
                 {
                     "Batch Index": batch_index,
