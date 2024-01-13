@@ -35,8 +35,8 @@ import torch
 from tqdm import tqdm
 from einops import rearrange
 import wandb
-from rao_tools import RaoConfig
-from rao_generator import RaoGenerator
+from src.rao_tools import RaoConfig
+from src.rao_generator import RaoGenerator
 import json
 
 with open('sweep_config.json') as f:
@@ -45,6 +45,7 @@ with open('sweep_config.json') as f:
 sweep_id = wandb.sweep(
     sweep_config, project="collaborative-training-many-per-context-window"
 )
+
 
 def train():
     run = None
@@ -100,11 +101,9 @@ def train():
     NUM_DATAPOINTS = 10 * cfg.batch_size * cfg.num_batches if cfg.num_batches else None
     causal_lm = cfg.model
     causal_lm_tokenizer = cfg.tokenizer
+    print(cfg.model_name)
 
-    raogen = RaoGenerator(
-        cfg=cfg,
-        num_data_points=NUM_DATAPOINTS,
-    )
+    raogen = RaoGenerator(cfg=cfg)
     dataloader = raogen.dataloader
 
     average_losses = []
