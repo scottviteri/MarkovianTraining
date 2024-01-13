@@ -35,8 +35,8 @@ import torch
 from tqdm import tqdm
 from einops import rearrange
 import wandb
-from rao_tools import RaoConfig
-from rao_generator import RaoGenerator
+from src.rao_tools import RaoConfig
+from src.rao_generator import RaoGenerator
 import json
 
 with open('sweep_config.json') as f:
@@ -102,10 +102,7 @@ def train():
     causal_lm_tokenizer = cfg.tokenizer
     print(cfg.model_name)
 
-    raogen = RaoGenerator(
-        cfg=cfg,
-        num_data_points=NUM_DATAPOINTS,
-    )
+    raogen = RaoGenerator(cfg=cfg)
     dataloader = raogen.dataloader
 
     average_losses = []

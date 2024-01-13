@@ -37,31 +37,26 @@ import einops
 import torch
 from torchtyping import TensorType
 from torch.utils.data import DataLoader
-from datasets import load_dataset, Dataset, Features, Value, Array2D
+from datasets import load_dataset, Dataset, Features, Value, Array3D
 from einops import repeat, rearrange
 from itertools import islice
 from functools import reduce
 import numpy as np
-from rao_tools import RaoConfig, log_and_print_info
-
-# POINTS_FROM_DATASET = NUM_DATAPOINTS
-
+from src.rao_tools import RaoConfig, log_and_print_info
 
 class RaoGenerator:
     """RaoRaoRaoRaoRaoRaoRaoRaoRaoRao"""
 
     def __init__(
         self,
-        cfg: RaoConfig,
-        num_data_points: int,
+        cfg: RaoConfig
     ):
         self._cfg = cfg
-        self._points_from_data = num_data_points
-        self._num_data_points = num_data_points
 
         # sets self._dataloader, self._tokens_per_pure_reward
         # self._reward_prefix_tensor, self._tokens_per_pure_action,
         # and self._action_prefix_tensor
+        self.set_prefixes()
         self.trunc_documents()
 
     def gen_rao_tensor(
@@ -75,6 +70,8 @@ class RaoGenerator:
     ):
         causal_lm = self._cfg.model
         causal_lm_tokenizer = self._cfg.tokenizer
+
+        input_ids = data["input_ids"][0]
 
         rao_tensor = torch.tensor(
             [[] for _ in range(self._cfg.batch_size)],
@@ -147,14 +144,14 @@ class RaoGenerator:
             )
 
             if observation_index > 0:
-                prev_obs: TensorType["batch", "seq_length"] = data["input_ids"][
+                prev_obs: TensorType["batch", "seq_length"] = input_ids[
                     :, observation_index - 1, :
                 ]
             else:
                 prev_obs: TensorType["batch", "seq_length"] = torch.full_like(
-                    data["input_ids"][:, 0, :], causal_lm_tokenizer.pad_token_id
+                    input_ids[:, 0, :], causal_lm_tokenizer.pad_token_id
                 )
-            true_obs: TensorType["batch", "seq_length"] = data["input_ids"][
+            true_obs: TensorType["batch", "seq_length"] = input_ids[
                 :, observation_index, :
             ]
             true_obs = true_obs.to(self._cfg.device)
@@ -262,44 +259,59 @@ class RaoGenerator:
             "text": d0["text"] + [d1["text"]],
         }
 
-    def get_input_id_tensor(self, data_iterator):
-        # FIXME
-        return map(
-            lambda x: einops.rearrange(
-                torch.tensor(
-                    x["input_ids"][
-                        : int(
-                            len(x["input_ids"])
-                            - (len(x["input_ids"]) % self._cfg.batch_size)
-                        )
-                        / self._cfg.batch_size
-                    ]
-                ),
-                f"(batch_size num_batches) -> batch_size num_batches",
-                batch_size=self._cfg.batch_size,
-            ),
-            data_iterator,
-        )
+    @staticmethod
+    def intersperse_1D_tensors(tensor, interspersed_tensor, interval):
+        # Chunk the tensor into segments of size interval
+        chunks = tensor.chunk(len(tensor) // interval)
+        # Intersperse the interspersed_tensor with the chunks
+        interspersed = torch.cat([torch.cat([interspersed_tensor, chunk]) for chunk in chunks])
+        return interspersed
+
+    @staticmethod
+    def intersperse_lists(list1, list2, interval):
+        # Split list1 into chunks of size interval
+        chunks = [list1[i:i + interval] for i in range(0, len(list1), interval)]
+        # Intersperse list2 with the chunks
+        interspersed = [item for sublist in zip([list2]*len(chunks), chunks) for item in sublist]
+        # Flatten the list
+        interspersed = [item for sublist in interspersed for item in sublist]
+        return interspersed
 
     def cat_raw_data(self, ds_name):
         # eg 20220301.simple
         ds = load_dataset("wikipedia", ds_name, split="train", streaming=True)
         ds = ds.map(
-            lambda example: self._cfg.tokenizer(example["text"]),  # batched=True
+            lambda example: self._cfg.tokenizer(example["text"]),  
         )
-        # ds.set_format(type="torch", columns=["input_ids", "text"])
         ds_iter = iter(ds)
-
-        truncated_documents = {"text": [], "input_ids": []}
+        obs_multiple_batches = {"text": [], "input_ids": []}
         while 1:
             while (
-                len(truncated_documents["input_ids"])
+                len(obs_multiple_batches["input_ids"])
                 < self._cfg.batch_size * self._cfg.tok_p_doc
             ):
                 data = next(ds_iter)
-                truncated_documents = self.merge_dictionaries(truncated_documents, data)
+                obs_multiple_batches = self.merge_dictionaries(obs_multiple_batches, data)
+            # intersperse  self._observation_prefix_tensor (batch_size,  x) in obs_multiple_batches["input_ids"]  (batch_size, y) every self._tokens_per_pure_observation
+            prefixed_input_ids = self.intersperse_lists(
+                list1 = obs_multiple_batches["input_ids"],  
+                list2 = self._observation_prefix_tensor[0].tolist(), 
+                interval = self._tokens_per_pure_observation
+            )    
+            yield {"input_ids": prefixed_input_ids[:self._cfg.batch_size*self._cfg.tok_p_doc], "text": obs_multiple_batches["text"]}
 
-            yield truncated_documents
+    def to_batched_tensor(self, data_iterator):
+        return map(lambda datapt: 
+            {"input_ids": einops.rearrange(
+                torch.tensor(datapt["input_ids"]),
+                f"(batch_size obs_p_doc tok_p_obs) -> batch_size obs_p_doc tok_p_obs",
+                batch_size=self._cfg.batch_size,
+                tok_p_obs=self._cfg.tok_p_obs
+            ),
+                "text": datapt["text"],
+            },
+            data_iterator
+        )
 
     def trunc_documents(self):
         # Select the dataset based on the GPU memory
@@ -321,23 +333,39 @@ class RaoGenerator:
                 )
             }
 
-        # FIXME
         data_set_1 = self.cat_raw_data(dataset_name)
-        # data_set_2 = self.batch(data_set_1)
-        # data_set = self.get_input_id_tensor(data_set_1)
-        data_set = self.get_input_id_tensor(next(data_set_1))
-        # data_set = [next(data_set) for _ in range(self._cfg.num_batches)]
-        # data_set_final = []
+        data_set_2 = self.to_batched_tensor(data_set_1)
+        dataset = {"input_ids":[], "text":[]}
+        for _ in range(self._cfg.num_batches):
+            data = next(data_set_2)
+            dataset["input_ids"].append(data["input_ids"])
+            dataset["text"].append(data["text"])
+        #dataset["input_ids"] = torch.cat(dataset["input_ids"], dim=0)
+
         data_set_features = Features(
             {
                 "text": Value(dtype="string", id=None),
-                #'input_ids': Array2D(shape=(TOKENS_PER_OBSERVATION, OBSERVATIONS_PER_DOCUMENT), dtype='int32')
-                "input_ids": Array2D(
-                    shape=(self._cfg.obs_p_doc, self._cfg.tok_p_obs), dtype="int32"
+                "input_ids": Array3D(
+                    shape=(self._cfg.batch_size, self._cfg.obs_p_doc, self._cfg.tok_p_obs), dtype="int32"
                 ),
             }
         )
 
+        truncated_dataset = Dataset.from_dict(dataset, features=data_set_features)
+        #truncated_dataset = Dataset.from_dict(data_set, features=data_set_features)
+        truncated_dataset.set_format(type="torch", columns=["input_ids", "text"])
+
+        dataloader = DataLoader(
+            truncated_dataset,
+            #batch_size=self._cfg.batch_size,
+            drop_last=True,
+            shuffle=True,
+        )
+
+        self._dataloader = dataloader
+
+
+    def set_prefixes(self):
         observation_prefix = "\nObservation: "
         observation_prefix_tokens = self._cfg.tokenizer.encode(
             observation_prefix, add_special_tokens=False
@@ -373,82 +401,6 @@ class RaoGenerator:
         ).to(self._cfg.device)
         tokens_per_pure_reward = self._cfg.tok_p_loss - len(reward_prefix_tokens)
 
-        # while len(truncated_documents["input_ids"]) < self._num_data_points:
-        #     dataset = load_dataset(
-        #         "wikipedia",
-        #         dataset_name,
-        #         split=f"train[:{self._points_from_data}]"
-        #         if self._points_from_data
-        #         else "train",
-        #     )
-        #     dataset = dataset.map(
-        #         lambda example: self._cfg.tokenizer(example["text"]), batched=True
-        #     )
-        #     dataset.set_format(type="torch", columns=["input_ids", "text"])
-        #
-        #     # Define your features
-        #     truncated_document_features = Features(
-        #         {
-        #             "text": Value(dtype="string", id=None),
-        #             #'input_ids': Array2D(shape=(TOKENS_PER_OBSERVATION, OBSERVATIONS_PER_DOCUMENT), dtype='int32')
-        #             "input_ids": Array2D(
-        #                 shape=(self._cfg.obs_p_doc, self._cfg.tok_p_obs), dtype="int32"
-        #             ),
-        #         }
-        #     )
-        #
-        #     truncated_documents = {"text": [], "input_ids": []}
-        #
-        #
-        #
-        #     # currently need to use tensors in input_ids as per the truncated_document_features
-        #     for document in dataset:
-        #         if (
-        #             self._num_data_points
-        #             and len(truncated_documents["input_ids"]) == self._num_data_points
-        #         ):
-        #             break
-        #         # Only accept long enough samples
-        #         if document["input_ids"].shape[-1] <= self._cfg.tok_p_doc:
-        #             continue
-        #         # truncate documents
-        #         tokens = document["input_ids"].tolist()
-        #         # Inject "Observation: " prefix every TOKENS_PER_OBSERVATION - observation_prefix_tokens
-        #         new_tokens = []
-        #         for j in range(0, len(tokens), tokens_per_pure_observation):
-        #             new_tokens.extend(observation_prefix_tokens)
-        #             # new_tokens.extend(torch.randint(0, causal_lm_tokenizer.vocab_size, (tokens_per_pure_observation,)).tolist())
-        #             new_tokens.extend(tokens[j : j + tokens_per_pure_observation])
-        #         new_document = torch.tensor(new_tokens[: self._cfg.tok_p_doc])
-        #         reshaped_document = new_document.reshape(
-        #             (self._cfg.obs_p_doc, self._cfg.tok_p_obs)
-        #         )
-        #         truncated_documents["input_ids"].append(reshaped_document)
-        #         # random_tokens = torch.randint(0, causal_lm_tokenizer.vocab_size, reshaped_document.shape)
-        #         # truncated_documents["input_ids"].append(random_tokens)
-        #         assert len(new_tokens[: self._cfg.tok_p_doc]) == self._cfg.tok_p_doc
-        #         # leave the text alone (not truncated)
-        #         truncated_documents["text"].append(document["text"])
-        #     if not self._num_data_points:
-        #         num_data_points = len(truncated_documents["text"])
-        #         NUM_BATCHES = num_data_points // self._cfg.batch_size
-        #         break
-        #     self._points_from_data *= 2
-        #
-        # assert len(truncated_documents["input_ids"]) == self._num_data_points
-
-        # Convert the list of dictionaries into a Dataset in one go
-        truncated_dataset = Dataset.from_dict(data_set, features=data_set_features)
-        truncated_dataset.set_format(type="torch", columns=["input_ids", "text"])
-
-        dataloader = DataLoader(
-            truncated_dataset,
-            batch_size=self._cfg.batch_size,
-            drop_last=True,
-            shuffle=True,
-        )
-
-        self._dataloader = dataloader
         self._tokens_per_pure_reward = tokens_per_pure_reward
         self._reward_prefix_tensor = reward_prefix_tensor
         self._tokens_per_pure_action = tokens_per_pure_action
