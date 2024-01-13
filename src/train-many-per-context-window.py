@@ -87,7 +87,6 @@ def train():
         run_name +=  f"nb{cfg.num_batches}_"
         run_name +=  f"opd{cfg.obs_p_doc}_"
         run_name +=  "L" if cfg.do_lora else "nL"
-        run_name +=  f"{lora_string}"
         run_name +=  f"rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
         run_name +=  "ld_" if cfg.use_loss_difference else "nld_"
         run_name +=  f"ics{cfg.impose_ctxt_size}" if cfg.impose_ctxt_size else ""

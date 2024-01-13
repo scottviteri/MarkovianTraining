@@ -74,9 +74,8 @@ class RaoGenerator:
         causal_lm = self._cfg.model
         causal_lm_tokenizer = self._cfg.tokenizer
 
-        rao_tensor = torch.full(
-            (self._cfg.batch_size, self._cfg.tok_p_rao * self._cfg.num_rao),
-            fill_value=causal_lm_tokenizer.pad_token_id,
+        rao_tensor = torch.tensor(
+            [[] for _ in range(self._cfg.batch_size)],
             device=self._cfg.device,
             dtype=torch.int32,
         )
