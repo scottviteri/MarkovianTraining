@@ -46,6 +46,7 @@ sweep_id = wandb.sweep(
     sweep_config, project="collaborative-training-many-per-context-window"
 )
 
+
 def train():
     run = None
     if sweep_config["parameters"]["wandb"]["values"][0]:
@@ -99,6 +100,7 @@ def train():
     NUM_DATAPOINTS = 10 * cfg.batch_size * cfg.num_batches if cfg.num_batches else None
     causal_lm = cfg.model
     causal_lm_tokenizer = cfg.tokenizer
+    print(cfg.model_name)
 
     raogen = RaoGenerator(
         cfg=cfg,

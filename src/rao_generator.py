@@ -33,12 +33,14 @@ The rao_generator.py script is responsible for generating reward-action-observat
 
 In summary, rao_generator.py is responsible for generating RAO sequences from Wikipedia articles using a transformer model, which are then used for training. It uses the RaoConfig class to configure the RAO generation process and the log_and_print_info function to log and print information during the process.
 """
-
+import einops
 import torch
 from torchtyping import TensorType
 from torch.utils.data import DataLoader
 from datasets import load_dataset, Dataset, Features, Value, Array2D
 from einops import repeat, rearrange
+from itertools import islice
+from functools import reduce
 import numpy as np
 from rao_tools import RaoConfig, log_and_print_info
 
@@ -85,12 +87,11 @@ class RaoGenerator:
             optimizer.zero_grad()
             low_loss_value = (
                 round(
-                    np.mean(average_losses)
-                    - np.std(average_losses),
+                    np.mean(average_losses) - np.std(average_losses),
                     3,
                 )
                 if average_losses
-                else 0.5 
+                else 0.5
             )
             low_loss = causal_lm_tokenizer.batch_encode_plus(
                 [str(low_loss_value) for _ in range(self._cfg.batch_size)],
@@ -102,15 +103,24 @@ class RaoGenerator:
             assert low_loss.shape[-1] == self._tokens_per_pure_reward
             low_loss = torch.cat((self._reward_prefix_tensor, low_loss), dim=-1)
             incentive_rao = torch.cat(
-                (rao_tensor[:, -self._cfg.tok_p_rao*self._cfg.num_rao:], low_loss, self._action_prefix_tensor), dim=-1
+                (
+                    rao_tensor[:, -self._cfg.tok_p_rao * self._cfg.num_rao :],
+                    low_loss,
+                    self._action_prefix_tensor,
+                ),
+                dim=-1,
             )
 
             # RAOR_A
             # argmax in Action (P_theta_t (helpful_msg_{t+1} | lhes ++ optimistic_loss_{t+1})))
             full_action = causal_lm.generate(
                 inputs=incentive_rao[
-                    :, -(self._cfg.tok_p_rao*self._cfg.num_rao + self._cfg.tok_p_loss + 
-                        self._action_prefix_tensor.shape[-1]) :
+                    :,
+                    -(
+                        self._cfg.tok_p_rao * self._cfg.num_rao
+                        + self._cfg.tok_p_loss
+                        + self._action_prefix_tensor.shape[-1]
+                    ) :,
                 ],
                 output_scores=True,
                 do_sample=True,
@@ -151,8 +161,18 @@ class RaoGenerator:
 
             # Calculate loss for the actual observation, using only the loss and action as context
             with torch.no_grad():
-                 # actual_loss_t = log P_theta (external_text_t | lhes ++ optimistic_loss_t ++ helpful_msg_t) 
-                prediction = causal_lm(torch.cat((rao_tensor[:, -self._cfg.tok_p_rao*self._cfg.num_rao:], low_loss, action, true_obs), dim=-1))
+                # actual_loss_t = log P_theta (external_text_t | lhes ++ optimistic_loss_t ++ helpful_msg_t)
+                prediction = causal_lm(
+                    torch.cat(
+                        (
+                            rao_tensor[:, -self._cfg.tok_p_rao * self._cfg.num_rao :],
+                            low_loss,
+                            action,
+                            true_obs,
+                        ),
+                        dim=-1,
+                    )
+                )
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :
                 ]
@@ -226,123 +246,199 @@ class RaoGenerator:
 
         return rao_tensor, new_losses
 
-    def trunc_documents(self):
-        truncated_documents = {"text": [], "input_ids": []}
+    def batch(self, iterable):
+        iterator = iter(iterable)
+        while True:
+            chunk = list(islice(iterator, self._cfg.batch_size))
+            if not chunk:
+                return
+            yield chunk
 
-        # Check the total memory of the GPU
+    @staticmethod
+    def merge_dictionaries(d0, d1):
+        # return {k: d0[k] + d1[k] for k in d0.keys()}
+        return {
+            "input_ids": d0["input_ids"] + d1["input_ids"],
+            "text": d0["text"] + [d1["text"]],
+        }
+
+    def get_input_id_tensor(self, data_iterator):
+        # FIXME
+        return map(
+            lambda x: einops.rearrange(
+                torch.tensor(
+                    x["input_ids"][
+                        : int(
+                            len(x["input_ids"])
+                            - (len(x["input_ids"]) % self._cfg.batch_size)
+                        )
+                        / self._cfg.batch_size
+                    ]
+                ),
+                f"(batch_size num_batches) -> batch_size num_batches",
+                batch_size=self._cfg.batch_size,
+            ),
+            data_iterator,
+        )
+
+    def cat_raw_data(self, ds_name):
+        # eg 20220301.simple
+        ds = load_dataset("wikipedia", ds_name, split="train", streaming=True)
+        ds = ds.map(
+            lambda example: self._cfg.tokenizer(example["text"]),  # batched=True
+        )
+        # ds.set_format(type="torch", columns=["input_ids", "text"])
+        ds_iter = iter(ds)
+
+        truncated_documents = {"text": [], "input_ids": []}
+        while 1:
+            while (
+                len(truncated_documents["input_ids"])
+                < self._cfg.batch_size * self._cfg.tok_p_doc
+            ):
+                data = next(ds_iter)
+                truncated_documents = self.merge_dictionaries(truncated_documents, data)
+
+            yield truncated_documents
+
+    def trunc_documents(self):
+        # Select the dataset based on the GPU memory
         if torch.cuda.is_available():
             gpu_memory = torch.cuda.get_device_properties(
                 self._cfg.device
-            ).total_memory / (
-                1024**3
-            )  # in GB
-        else:
-            # Force simple for non_cuda
-            # Todo: need exception for mac mps
-            gpu_memory = 1
-
-        # Select the dataset based on the GPU memory
-        if gpu_memory > 50:  # adjust this value based on your requirements
-            dataset_name = "20220301.en"
+            ).total_memory / (1024**3)
+            if gpu_memory > 50:
+                dataset_name = "20220301.en"
+            else:
+                dataset_name = "20220301.simple"
         else:
             dataset_name = "20220301.simple"
 
-        while len(truncated_documents["input_ids"]) < self._num_data_points:
-            dataset = load_dataset(
-                "wikipedia",
-                dataset_name,
-                split=f"train[:{self._points_from_data}]"
-                if self._points_from_data
-                else "train",
-            )
-            dataset = dataset.map(
-                lambda example: self._cfg.tokenizer(example["text"]), batched=True
-            )
-            dataset.set_format(type="torch", columns=["input_ids", "text"])
-
-            # Define your features
-            truncated_document_features = Features(
-                {
-                    "text": Value(dtype="string", id=None),
-                    #'input_ids': Array2D(shape=(TOKENS_PER_OBSERVATION, OBSERVATIONS_PER_DOCUMENT), dtype='int32')
-                    "input_ids": Array2D(
-                        shape=(self._cfg.obs_p_doc, self._cfg.tok_p_obs), dtype="int32"
-                    ),
-                }
-            )
-
-            truncated_documents = {"text": [], "input_ids": []}
-
-            observation_prefix = "\nObservation: "
-            observation_prefix_tokens = self._cfg.tokenizer.encode(
-                observation_prefix, add_special_tokens=False
-            )
-            tokens_per_pure_observation = self._cfg.tok_p_obs - len(
-                observation_prefix_tokens
-            )
-
-            action_prefix = "\nAction: "
-            action_prefix_tokens = self._cfg.tokenizer.encode(
-                action_prefix, add_special_tokens=False
-            )
-            action_prefix_tensor = repeat(
-                torch.tensor(action_prefix_tokens),
-                "tokens -> batch tokens",
-                batch=self._cfg.batch_size,
-            ).to(self._cfg.device)
-            tokens_per_pure_action = self._cfg.tok_p_action - len(action_prefix_tokens)
-
-            reward_prefix = "\nLoss: "
-            reward_prefix_tokens = self._cfg.tokenizer.encode(
-                reward_prefix, add_special_tokens=False
-            )
-            reward_prefix_tensor = repeat(
-                torch.tensor(reward_prefix_tokens),
-                "tokens -> batch tokens",
-                batch=self._cfg.batch_size,
-            ).to(self._cfg.device)
-            tokens_per_pure_reward = self._cfg.tok_p_loss - len(reward_prefix_tokens)
-
-            # currently need to use tensors in input_ids as per the truncated_document_features
-            for document in dataset:
-                if (
-                    self._num_data_points
-                    and len(truncated_documents["input_ids"]) == self._num_data_points
-                ):
-                    break
-                # Only accept long enough samples
-                if document["input_ids"].shape[-1] <= self._cfg.tok_p_doc:
-                    continue
-                # truncate documents
-                tokens = document["input_ids"].tolist()
-                # Inject "Observation: " prefix every TOKENS_PER_OBSERVATION - observation_prefix_tokens
-                new_tokens = []
-                for j in range(0, len(tokens), tokens_per_pure_observation):
-                    new_tokens.extend(observation_prefix_tokens)
-                    # new_tokens.extend(torch.randint(0, causal_lm_tokenizer.vocab_size, (tokens_per_pure_observation,)).tolist())
-                    new_tokens.extend(tokens[j : j + tokens_per_pure_observation])
-                new_document = torch.tensor(new_tokens[: self._cfg.tok_p_doc])
-                reshaped_document = new_document.reshape(
-                    (self._cfg.obs_p_doc, self._cfg.tok_p_obs)
+        def concat_tensor(batch):
+            return {
+                "input_ids": torch.concat(
+                    [torch.tensor(b["input_ids"]) for b in batch], dim=-1
                 )
-                truncated_documents["input_ids"].append(reshaped_document)
-                # random_tokens = torch.randint(0, causal_lm_tokenizer.vocab_size, reshaped_document.shape)
-                # truncated_documents["input_ids"].append(random_tokens)
-                assert len(new_tokens[: self._cfg.tok_p_doc]) == self._cfg.tok_p_doc
-                # leave the text alone (not truncated)
-                truncated_documents["text"].append(document["text"])
-            if not self._num_data_points:
-                num_data_points = len(truncated_documents["text"])
-                NUM_BATCHES = num_data_points // self._cfg.batch_size
-                break
-            self._points_from_data *= 2
+            }
 
-        assert len(truncated_documents["input_ids"]) == self._num_data_points
+        # FIXME
+        data_set_1 = self.cat_raw_data(dataset_name)
+        # data_set_2 = self.batch(data_set_1)
+        # data_set = self.get_input_id_tensor(data_set_1)
+        data_set = self.get_input_id_tensor(next(data_set_1))
+        # data_set = [next(data_set) for _ in range(self._cfg.num_batches)]
+        # data_set_final = []
+        data_set_features = Features(
+            {
+                "text": Value(dtype="string", id=None),
+                #'input_ids': Array2D(shape=(TOKENS_PER_OBSERVATION, OBSERVATIONS_PER_DOCUMENT), dtype='int32')
+                "input_ids": Array2D(
+                    shape=(self._cfg.obs_p_doc, self._cfg.tok_p_obs), dtype="int32"
+                ),
+            }
+        )
+
+        observation_prefix = "\nObservation: "
+        observation_prefix_tokens = self._cfg.tokenizer.encode(
+            observation_prefix, add_special_tokens=False
+        )
+        observation_prefix_tensor = repeat(
+            torch.tensor(observation_prefix_tokens),
+            "tokens -> batch tokens",
+            batch=self._cfg.batch_size,
+        ).to(self._cfg.device)
+        tokens_per_pure_observation = self._cfg.tok_p_obs - len(
+            observation_prefix_tokens
+        )
+
+        action_prefix = "\nAction: "
+        action_prefix_tokens = self._cfg.tokenizer.encode(
+            action_prefix, add_special_tokens=False
+        )
+        action_prefix_tensor = repeat(
+            torch.tensor(action_prefix_tokens),
+            "tokens -> batch tokens",
+            batch=self._cfg.batch_size,
+        ).to(self._cfg.device)
+        tokens_per_pure_action = self._cfg.tok_p_action - len(action_prefix_tokens)
+
+        reward_prefix = "\nLoss: "
+        reward_prefix_tokens = self._cfg.tokenizer.encode(
+            reward_prefix, add_special_tokens=False
+        )
+        reward_prefix_tensor = repeat(
+            torch.tensor(reward_prefix_tokens),
+            "tokens -> batch tokens",
+            batch=self._cfg.batch_size,
+        ).to(self._cfg.device)
+        tokens_per_pure_reward = self._cfg.tok_p_loss - len(reward_prefix_tokens)
+
+        # while len(truncated_documents["input_ids"]) < self._num_data_points:
+        #     dataset = load_dataset(
+        #         "wikipedia",
+        #         dataset_name,
+        #         split=f"train[:{self._points_from_data}]"
+        #         if self._points_from_data
+        #         else "train",
+        #     )
+        #     dataset = dataset.map(
+        #         lambda example: self._cfg.tokenizer(example["text"]), batched=True
+        #     )
+        #     dataset.set_format(type="torch", columns=["input_ids", "text"])
+        #
+        #     # Define your features
+        #     truncated_document_features = Features(
+        #         {
+        #             "text": Value(dtype="string", id=None),
+        #             #'input_ids': Array2D(shape=(TOKENS_PER_OBSERVATION, OBSERVATIONS_PER_DOCUMENT), dtype='int32')
+        #             "input_ids": Array2D(
+        #                 shape=(self._cfg.obs_p_doc, self._cfg.tok_p_obs), dtype="int32"
+        #             ),
+        #         }
+        #     )
+        #
+        #     truncated_documents = {"text": [], "input_ids": []}
+        #
+        #
+        #
+        #     # currently need to use tensors in input_ids as per the truncated_document_features
+        #     for document in dataset:
+        #         if (
+        #             self._num_data_points
+        #             and len(truncated_documents["input_ids"]) == self._num_data_points
+        #         ):
+        #             break
+        #         # Only accept long enough samples
+        #         if document["input_ids"].shape[-1] <= self._cfg.tok_p_doc:
+        #             continue
+        #         # truncate documents
+        #         tokens = document["input_ids"].tolist()
+        #         # Inject "Observation: " prefix every TOKENS_PER_OBSERVATION - observation_prefix_tokens
+        #         new_tokens = []
+        #         for j in range(0, len(tokens), tokens_per_pure_observation):
+        #             new_tokens.extend(observation_prefix_tokens)
+        #             # new_tokens.extend(torch.randint(0, causal_lm_tokenizer.vocab_size, (tokens_per_pure_observation,)).tolist())
+        #             new_tokens.extend(tokens[j : j + tokens_per_pure_observation])
+        #         new_document = torch.tensor(new_tokens[: self._cfg.tok_p_doc])
+        #         reshaped_document = new_document.reshape(
+        #             (self._cfg.obs_p_doc, self._cfg.tok_p_obs)
+        #         )
+        #         truncated_documents["input_ids"].append(reshaped_document)
+        #         # random_tokens = torch.randint(0, causal_lm_tokenizer.vocab_size, reshaped_document.shape)
+        #         # truncated_documents["input_ids"].append(random_tokens)
+        #         assert len(new_tokens[: self._cfg.tok_p_doc]) == self._cfg.tok_p_doc
+        #         # leave the text alone (not truncated)
+        #         truncated_documents["text"].append(document["text"])
+        #     if not self._num_data_points:
+        #         num_data_points = len(truncated_documents["text"])
+        #         NUM_BATCHES = num_data_points // self._cfg.batch_size
+        #         break
+        #     self._points_from_data *= 2
+        #
+        # assert len(truncated_documents["input_ids"]) == self._num_data_points
 
         # Convert the list of dictionaries into a Dataset in one go
-        truncated_dataset = Dataset.from_dict(
-            truncated_documents, features=truncated_document_features
-        )
+        truncated_dataset = Dataset.from_dict(data_set, features=data_set_features)
         truncated_dataset.set_format(type="torch", columns=["input_ids", "text"])
 
         dataloader = DataLoader(
@@ -357,8 +453,9 @@ class RaoGenerator:
         self._reward_prefix_tensor = reward_prefix_tensor
         self._tokens_per_pure_action = tokens_per_pure_action
         self._action_prefix_tensor = action_prefix_tensor
+        self._tokens_per_pure_observation = tokens_per_pure_observation
+        self._observation_prefix_tensor = observation_prefix_tensor
 
     @property
     def dataloader(self):
         return self._dataloader
-
