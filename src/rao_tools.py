@@ -41,7 +41,7 @@ class RaoConfig:
         num_rao : int = 1,
         batch_size: int = 10,
         num_batches: int = 100,
-        tok_p_loss: int = 10, 
+        tok_p_loss: int = 12, 
         obs_p_doc: int = 10,
         obs_to_action_ratio : float = 1.0,
         num_beams: int = 1,
@@ -106,7 +106,7 @@ class RaoConfig:
                     task_name = "20220301.simple"
             else:
                 task_name = "20220301.simple"
-        elif self._dataset_name == "bigbench":
+        else: #self._dataset_name == "bigbench":
             task_name = "arithmetic"
         return task_name
 
