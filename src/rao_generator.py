@@ -281,8 +281,8 @@ class RaoGenerator:
         ds = iter(load_dataset(self._cfg.dataset_name, self._cfg.task_name, split="train", streaming=True))
         ds_text = map(lambda x: {"text": x["inputs"]+x['targets'][0]}, ds) if self._cfg.dataset_name == "bigbench" else ds
         ds_tokenized = map(lambda x: {"text": x["text"], "input_ids": self._cfg.tokenizer(x["text"])["input_ids"]}, ds_text)
-        obs_multiple_batches = {"text": [], "input_ids": []}
         while 1:
+            obs_multiple_batches = {"text": [], "input_ids": []}
             while (
                 len(obs_multiple_batches["input_ids"])
                 < self._cfg.batch_size * self._cfg.tok_p_doc
