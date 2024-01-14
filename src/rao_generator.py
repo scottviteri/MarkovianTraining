@@ -114,7 +114,7 @@ class RaoGenerator:
                 inputs=incentive_rao[
                     :,
                     -(
-                        self._cfg.tok_p_rao * self._cfg.num_rao
+                        self._cfg.tok_p_rao * (self._cfg.num_rao+1)
                         + self._cfg.tok_p_loss
                         + self._action_prefix_tensor.shape[-1]
                     ) :,
@@ -159,6 +159,7 @@ class RaoGenerator:
             # Calculate loss for the actual observation, using only the loss and action as context
             with torch.no_grad():
                 # actual_loss_t = log P_theta (external_text_t | lhes ++ optimistic_loss_t ++ helpful_msg_t)
+                # target num_rao = 0
                 prediction = causal_lm(
                     torch.cat(
                         (
