@@ -52,6 +52,8 @@ class RaoConfig:
         do_lora: bool = True,
         use_loss_difference: bool = True,
         impose_ctxt_size=None,
+        dataset_name: str = "wikipedia",
+        task_name: str = None
     ):
         self._model_name = model_name
         self._lr = lr
@@ -69,7 +71,10 @@ class RaoConfig:
         self._do_lora = do_lora
         self._use_loss_difference = use_loss_difference
         self._impose_ctxt_size = impose_ctxt_size
+
         self._device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+        self._dataset_name = dataset_name
+        self._task_name = self._set_task_name(task_name)
         self._path_2_model = f"saved_weights_and_losses/{self.model_name}_weights"
         self._path_2_tokenizer = (
             f"saved_weights_and_losses/{self._model_name}_tokenizer"
@@ -87,6 +92,23 @@ class RaoConfig:
         self._tok_p_doc = self._tok_p_obs * self._obs_p_doc
         self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
         assert (self._num_rao+1)*self._tok_p_rao  <= self._ctxt_size
+
+    def _set_task_name(self, task_name):
+        if task_name: return task_name
+        if self._dataset_name == "wikipedia":
+            if torch.cuda.is_available():
+                gpu_memory = torch.cuda.get_device_properties(
+                self.device
+            ).total_memory / (1023**3)
+                if gpu_memory > 49:
+                    task_name = "20220301.en"
+                else:
+                    task_name = "20220301.simple"
+            else:
+                task_name = "20220301.simple"
+        elif self._dataset_name == "bigbench":
+            task_name = "arithmetic"
+        return task_name
 
     def _set_model(self):
         """Load model"""
@@ -306,6 +328,14 @@ class RaoConfig:
     @property
     def device(self):
         return self._device
+
+    @property
+    def dataset_name(self):
+        return self._dataset_name
+
+    @property
+    def task_name(self):
+        return self._task_name
 
     @property
     def path_2_model(self):

@@ -277,20 +277,17 @@ class RaoGenerator:
         interspersed = [item for sublist in interspersed for item in sublist]
         return interspersed
 
-    def cat_raw_data(self, ds_name):
-        # eg 20220301.simple
-        ds = load_dataset("wikipedia", ds_name, split="train", streaming=True)
-        ds = ds.map(
-            lambda example: self._cfg.tokenizer(example["text"]),  
-        )
-        ds_iter = iter(ds)
+    def cat_raw_data(self):
+        ds = iter(load_dataset(self._cfg.dataset_name, self._cfg.task_name, split="train", streaming=True))
+        ds_text = map(lambda x: {"text": x["inputs"]+x['targets'][0]}, ds) if self._cfg.dataset_name == "bigbench" else ds
+        ds_tokenized = map(lambda x: {"text": x["text"], "input_ids": self._cfg.tokenizer(x["text"])["input_ids"]}, ds_text)
         obs_multiple_batches = {"text": [], "input_ids": []}
         while 1:
             while (
                 len(obs_multiple_batches["input_ids"])
                 < self._cfg.batch_size * self._cfg.tok_p_doc
             ):
-                data = next(ds_iter)
+                data = next(ds_tokenized)
                 obs_multiple_batches = self.merge_dictionaries(obs_multiple_batches, data)
             # intersperse  self._observation_prefix_tensor (batch_size,  x) in obs_multiple_batches["input_ids"]  (batch_size, y) every self._tokens_per_pure_observation
             prefixed_input_ids = self.intersperse_lists(
@@ -315,17 +312,6 @@ class RaoGenerator:
 
     def trunc_documents(self):
         # Select the dataset based on the GPU memory
-        if torch.cuda.is_available():
-            gpu_memory = torch.cuda.get_device_properties(
-                self._cfg.device
-            ).total_memory / (1024**3)
-            if gpu_memory > 50:
-                dataset_name = "20220301.en"
-            else:
-                dataset_name = "20220301.simple"
-        else:
-            dataset_name = "20220301.simple"
-
         def concat_tensor(batch):
             return {
                 "input_ids": torch.concat(
@@ -333,14 +319,13 @@ class RaoGenerator:
                 )
             }
 
-        data_set_1 = self.cat_raw_data(dataset_name)
-        data_set_2 = self.to_batched_tensor(data_set_1)
+        data_1D = self.cat_raw_data()
+        data_batched = self.to_batched_tensor(data_1D)
         dataset = {"input_ids":[], "text":[]}
         for _ in range(self._cfg.num_batches):
-            data = next(data_set_2)
+            data = next(data_batched)
             dataset["input_ids"].append(data["input_ids"])
             dataset["text"].append(data["text"])
-        #dataset["input_ids"] = torch.cat(dataset["input_ids"], dim=0)
 
         data_set_features = Features(
             {
