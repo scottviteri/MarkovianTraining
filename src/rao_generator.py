@@ -160,17 +160,18 @@ class RaoGenerator:
             with torch.no_grad():
                 # actual_loss_t = log P_theta (external_text_t | lhes ++ optimistic_loss_t ++ helpful_msg_t)
                 # target num_rao = 0
-                prediction = causal_lm(
-                    torch.cat(
+                context = torch.cat(
                         (
-                            rao_tensor[:, -self._cfg.tok_p_rao * self._cfg.num_rao :],
+                            rao_tensor[:, -self._cfg.tok_p_rao * self._cfg.num_rao :]
+                            if self._cfg.num_rao > 0 
+                            else rao_tensor[:,:0], #torch.tensor([[] for _ in range(rao_tensor.shape[0])]).to(self._cfg.device),
                             low_loss,
                             action,
                             true_obs,
                         ),
                         dim=-1,
                     )
-                )
+                prediction = causal_lm(context)
                 predicted_logits = prediction.logits[
                     :, -self._cfg.tok_p_obs - 1 : -1, :
                 ]
