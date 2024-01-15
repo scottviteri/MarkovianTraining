@@ -138,10 +138,10 @@ def train():
 
         # if num_rao = 0, I want to be slicing by 2
         for i in range(
-            0, rao_tensor.shape[1], (cfg.num_rao + 2)*cfg.tok_p_rao
+            0, rao_tensor.shape[1], (cfg.num_rao + 1)*cfg.tok_p_rao
         ):
             rao_tensor_slice = rao_tensor[
-                :, i : i + (cfg.num_rao + 2) * cfg.tok_p_rao
+                :, i : i + (cfg.num_rao + 1) * cfg.tok_p_rao
             ]
             rao_tensor_logits = causal_lm(rao_tensor_slice).logits[:, :-1, :]
             rao_tensor_loss = loss_fn(
