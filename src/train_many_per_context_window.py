@@ -64,14 +64,13 @@ def train():
             for param in sweep_config["parameters"]
         }
 
-    # fix obs_p_doc order
     cfg = RaoConfig(
         model_name=config_params.get("model_name"),
         lr=config_params.get("lr"),
         num_rao=config_params.get("num_rao"),
         batch_size=config_params.get("batch_size"),
         num_batches=config_params.get("num_batches"),
-        obs_p_doc=config_params.get("obs_p_doc"),
+        obs_between_weight_updates=config_params.get("obs_between_weight_updates"),
         obs_to_action_ratio=config_params.get("obs_to_action_ratio"),
         interval_save_weights=config_params.get("interval_save_weights"),
         interval_print=config_params.get("interval_print"),
@@ -91,7 +90,7 @@ def train():
         run_name += f"nr{cfg.num_rao}_"
         #run_name += f"bs{cfg.batch_size}_"
         run_name += f"nb{cfg.num_batches}_"
-        run_name += f"opd{cfg.obs_p_doc}_"
+        run_name += f"obwu{cfg.obs_between_weight_updates}_"
         if cfg.obs_to_action_ratio != 1: 
             run_name += f"o:a={cfg.obs_to_action_ratio}:1_"
         if cfg.do_lora: run_name += "L_"

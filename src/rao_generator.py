@@ -81,7 +81,7 @@ class RaoGenerator:
             self._cfg.tokenizer, self._cfg.device, self._tokens_per_pure_reward
         )
 
-        for observation_index in range(self._cfg.obs_p_doc):
+        for observation_index in range(self._cfg.obs_between_weight_updates):
             incentive_rao = torch.cat(
                 (
                     condense_triples(rao_tensor_triples[-self._cfg.num_rao:], default_tensor),
@@ -189,7 +189,7 @@ class RaoGenerator:
                             predicted_logits,
                             "batch seq_length vocab_size -> batch vocab_size seq_length",
                         ),
-                        target=true_obs,
+                        target=true_obs[:,1:],
                     )
                     batch_loss = batch_loss - out.mean(dim=-1)
 
@@ -281,7 +281,7 @@ class RaoGenerator:
         return map(lambda datapt: 
             {"input_ids": einops.rearrange(
                 torch.tensor(datapt["input_ids"]),
-                f"(batch_size obs_p_doc tok_p_obs) -> batch_size obs_p_doc tok_p_obs",
+                f"(batch_size obs_between_weight_updates tok_p_obs) -> batch_size obs_between_weight_updates tok_p_obs",
                 batch_size=self._cfg.batch_size,
                 tok_p_obs=self._cfg.tok_p_obs
             ),
@@ -311,7 +311,7 @@ class RaoGenerator:
             {
                 "text": Value(dtype="string", id=None),
                 "input_ids": Array3D(
-                    shape=(self._cfg.batch_size, self._cfg.obs_p_doc, self._cfg.tok_p_obs), dtype="int32"
+                    shape=(self._cfg.batch_size, self._cfg.obs_between_weight_updates, self._cfg.tok_p_obs), dtype="int32"
                 ),
             }
         )
