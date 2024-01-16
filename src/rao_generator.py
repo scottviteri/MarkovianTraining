@@ -133,20 +133,6 @@ class RaoGenerator:
                 :, -self._cfg.tok_p_action :
             ]
 
-            if self._cfg.use_loss_difference:
-                # Generate a filler action of the same length as the actual action
-                filler_action: TensorType["batch", "seq_length"] = torch.cat(
-                    (
-                        self._action_prefix_tensor,
-                        torch.full(
-                            (self._cfg.batch_size, self._tokens_per_pure_action),
-                            causal_lm_tokenizer.pad_token_id,
-                            device=self._cfg.device,
-                        ),
-                    ),
-                    dim=-1,
-                )
-
             if observation_index > 0:
                 prev_obs: TensorType["batch", "seq_length"] = input_ids[
                     :, observation_index - 1, :
