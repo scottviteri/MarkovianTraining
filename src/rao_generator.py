@@ -42,7 +42,7 @@ from einops import repeat, rearrange
 from itertools import islice
 from functools import reduce
 import numpy as np
-from src.rao_tools import RaoConfig, log_and_print_info
+from src.rao_tools import RaoConfig, log_and_print_info, condense_triples, create_loss_tokens_tensor
 
 class RaoGenerator:
     """RaoRaoRaoRaoRaoRaoRaoRaoRaoRao"""
@@ -62,47 +62,30 @@ class RaoGenerator:
     def gen_rao_tensor(
         self,
         data,
-        optimizer,
         loss_fn,
-        average_losses,
         aggregate_losses,
-        batch_index=None,
+        optimistic_loss: float,
+        batch_index
     ):
         causal_lm = self._cfg.model
         causal_lm_tokenizer = self._cfg.tokenizer
 
         input_ids = data["input_ids"][0]
-
-        rao_tensor = torch.tensor(
-            [[] for _ in range(self._cfg.batch_size)],
-            device=self._cfg.device,
-            dtype=torch.int32,
+        rao_tensor_triples = []
+        default_tensor = torch.tensor([[] for _ in range(self._cfg.batch_size)], 
+                                                     dtype=torch.int64, device=self._cfg.device)
+        losses = torch.tensor([[] for _ in range(self._cfg.batch_size)], 
+                                                     dtype=torch.float32, device=self._cfg.device)
+        optimistic_loss_tokens_tensor = create_loss_tokens_tensor(
+            torch.tensor([[optimistic_loss] for _ in range(self._cfg.batch_size)], dtype=torch.float32, device=self._cfg.device),
+            self._cfg.tokenizer, self._cfg.device, self._tokens_per_pure_reward
         )
 
-        new_losses = []
-        for observation_index in range(self._cfg.obs_p_doc):
-            optimizer.zero_grad()
-            low_loss_value = (
-                round(
-                    np.mean(average_losses) - np.std(average_losses),
-                    3,
-                )
-                if average_losses
-                else 0.5
-            )
-            low_loss = causal_lm_tokenizer.batch_encode_plus(
-                [str(low_loss_value) for _ in range(self._cfg.batch_size)],
-                return_tensors="pt",
-                truncation="longest_first",
-                padding="max_length",
-                max_length=self._tokens_per_pure_reward,
-            ).input_ids.to(self._cfg.device)
-            assert low_loss.shape[-1] == self._tokens_per_pure_reward
-            low_loss = torch.cat((self._reward_prefix_tensor, low_loss), dim=-1)
+        for observation_index in range(self._cfg.obs_between_weight_updates):
             incentive_rao = torch.cat(
                 (
-                    rao_tensor[:, -self._cfg.tok_p_rao * self._cfg.num_rao :],
-                    low_loss,
+                    condense_triples(rao_tensor_triples[-self._cfg.num_rao:], default_tensor),
+                    optimistic_loss_tokens_tensor,
                     self._action_prefix_tensor,
                 ),
                 dim=-1,
@@ -124,31 +107,33 @@ class RaoGenerator:
                         + self._action_prefix_tensor.shape[-1]
                     ) :,
                 ]
-            full_action = causal_lm.generate(
-                inputs=action_input,
-                output_scores=True,
-                do_sample=True,
-                num_beams=self._cfg.num_beams,
-                min_new_tokens=self._tokens_per_pure_action,
-                max_new_tokens=self._tokens_per_pure_action,
-                pad_token_id=causal_lm_tokenizer.eos_token_id,
-            )
+            with torch.no_grad():
+                full_action = causal_lm.generate(
+                    inputs=action_input,
+                    output_scores=True,
+                    do_sample=True,
+                    num_beams=self._cfg.num_beams,
+                    min_new_tokens=self._tokens_per_pure_action,
+                    max_new_tokens=self._tokens_per_pure_action,
+                    pad_token_id=causal_lm_tokenizer.eos_token_id,
+                )
             action: TensorType["batch", "seq_length"] = full_action[
                 :, -self._cfg.tok_p_action :
             ]
 
-            # Generate a filler action of the same length as the actual action
-            filler_action: TensorType["batch", "seq_length"] = torch.cat(
-                (
-                    self._action_prefix_tensor,
-                    torch.full(
-                        (self._cfg.batch_size, self._tokens_per_pure_action),
-                        causal_lm_tokenizer.pad_token_id,
-                        device=self._cfg.device,
+            if self._cfg.use_loss_difference:
+                # Generate a filler action of the same length as the actual action
+                filler_action: TensorType["batch", "seq_length"] = torch.cat(
+                    (
+                        self._action_prefix_tensor,
+                        torch.full(
+                            (self._cfg.batch_size, self._tokens_per_pure_action),
+                            causal_lm_tokenizer.pad_token_id,
+                            device=self._cfg.device,
+                        ),
                     ),
-                ),
-                dim=-1,
-            )
+                    dim=-1,
+                )
 
             if observation_index > 0:
                 prev_obs: TensorType["batch", "seq_length"] = input_ids[
@@ -160,44 +145,43 @@ class RaoGenerator:
                 )
             true_obs: TensorType["batch", "seq_length"] = input_ids[
                 :, observation_index, :
-            ]
-            true_obs = true_obs.to(self._cfg.device)
+            ].to(self._cfg.device)
 
             # Calculate loss for the actual observation, using only the loss and action as context
-            with torch.no_grad():
-                # actual_loss_t = log P_theta (external_text_t | lhes ++ optimistic_loss_t ++ helpful_msg_t)
-                # target num_rao = 0
-                context = torch.cat(
-                        (
-                            rao_tensor[:, -self._cfg.tok_p_rao * self._cfg.num_rao :]
-                            if self._cfg.num_rao > 0 
-                            else rao_tensor[:,:0], #torch.tensor([[] for _ in range(rao_tensor.shape[0])]).to(self._cfg.device),
-                            low_loss,
-                            action,
-                            true_obs,
-                        ),
-                        dim=-1,
-                    )
-                prediction = causal_lm(context)
-                predicted_logits = prediction.logits[
-                    :, -self._cfg.tok_p_obs - 1 : -1, :
-                ]
-                predicted_obs = predicted_logits.argmax(dim=-1)
-                out = loss_fn(
-                    input=rearrange(
-                        predicted_logits,
-                        "batch seq_length vocab_size -> batch vocab_size seq_length",
-                    ),
-                    target=true_obs,
-                )
-                batch_loss_action = out.mean(dim=-1)
+            # actual_loss_t = log P_theta (external_text_t | lhes ++ optimistic_loss_t ++ helpful_msg_t)
+            # target num_rao = 0
+            context = torch.cat(
+                (
+                    condense_triples(rao_tensor_triples[-self._cfg.num_rao:], default_tensor)
+                    if self._cfg.num_rao > 0 
+                    else torch.tensor([[] for _ in range(self._cfg.batch_size)], 
+                                                        dtype=torch.int32, device=self._cfg.device),
+                    optimistic_loss_tokens_tensor,
+                    action,
+                    true_obs,
+                ),
+                dim=-1,
+            )
+            prediction = causal_lm(context)
+            predicted_logits = prediction.logits[
+                :, -self._cfg.tok_p_obs - 1 : -1, :
+            ]
+            predicted_obs = predicted_logits.argmax(dim=-1)
+            out = loss_fn(
+                input=rearrange(
+                    predicted_logits,
+                    "batch seq_length vocab_size -> batch vocab_size seq_length",
+                ),
+                target=true_obs,
+            )
+            batch_loss = out.mean(dim=-1, keepdim=True)
 
             # Calculate loss for the filler action
             if self._cfg.use_loss_difference:
                 with torch.no_grad():
-                    prediction = causal_lm(torch.cat((filler_action, true_obs), dim=-1))
+                    prediction = causal_lm(true_obs)
                     predicted_logits = prediction.logits[
-                        :, -self._cfg.tok_p_obs - 1 : -1, :
+                        :,  : -1, :
                     ]
                     predicted_obs = predicted_logits.argmax(dim=-1)
                     out = loss_fn(
@@ -205,60 +189,39 @@ class RaoGenerator:
                             predicted_logits,
                             "batch seq_length vocab_size -> batch vocab_size seq_length",
                         ),
-                        target=true_obs,
+                        target=true_obs[:,1:],
                     )
-                    batch_loss_filler = out.mean(dim=-1)
-                    # Calculate the difference in loss
-                    loss_difference = batch_loss_action - batch_loss_filler
-            else:
-                batch_loss_filler = None
-                loss_difference = batch_loss_action
-            new_losses.append(loss_difference.mean().item())
-            cached_losses.append(loss_difference.tolist())
+                    batch_loss = batch_loss - out.mean(dim=-1)
 
-            # # To have actions based on future desired returns, use rewards-to-go
-            # # sum up trajectories for each previous rao
-            # if self._cfg.use_rewards2go and len(cached_losses) > 1:
-            #     prev_returns = torch.tensor(cached_losses)[:-1].sum(dim=0)
-            #     assert prev_returns.shape[-1] == self._cfg.batch_size
-            #     loss_difference += prev_returns.to(self._cfg.device)
+            def inject_noise(loss: torch.Tensor) -> torch.Tensor:
+                return loss * (0.9 + torch.rand(1)) / 5.0
 
-            string_losses: str = [str(round(r.item(), 3)) for r in loss_difference]
-            losses_tensor: TensorType[
-                "batch", "seq_length"
-            ] = causal_lm_tokenizer.batch_encode_plus(
-                string_losses,
+            optimistic_loss_tokens_tensor = causal_lm_tokenizer.batch_encode_plus(
+                [str(round(inject_noise(optimistic_loss).item(), 3)) for _ in range(self._cfg.batch_size)],
                 return_tensors="pt",
-                padding="max_length",
                 truncation="longest_first",
+                padding="max_length",
                 max_length=self._tokens_per_pure_reward,
-            ).input_ids.to(
-                self._cfg.device
-            )
-            assert causal_lm_tokenizer.eos_token_id not in losses_tensor
-            assert losses_tensor.shape[-1] == self._tokens_per_pure_reward
-            actual_loss = torch.cat((self._reward_prefix_tensor, losses_tensor), dim=-1)
-            # so we are adding to the end and removing from the front
-            rao_tensor = torch.cat((rao_tensor, actual_loss, action, true_obs), dim=-1)
+            ).input_ids.to(self._cfg.device)
+            assert optimistic_loss_tokens_tensor.shape[-1] == self._tokens_per_pure_reward
+            optimistic_loss_tokens_tensor = torch.cat((self._reward_prefix_tensor, optimistic_loss_tokens_tensor), dim=-1)
+
+            losses = torch.cat((losses, batch_loss), dim=-1)
+            rao_tensor_triples.append((optimistic_loss_tokens_tensor, action, true_obs))
 
             log_and_print_info(
                 self._cfg,
                 batch_index,
                 observation_index,
-                batch_loss_action,
-                batch_loss_filler,
-                loss_difference,
+                batch_loss,
                 aggregate_losses,
                 prev_obs,
-                actual_loss,
                 action,
                 predicted_obs,
-                true_obs,
-                optimizer,
-                rao_tensor,
+                true_obs
             )
 
-        return rao_tensor, new_losses
+        return rao_tensor_triples, losses
 
     def batch(self, iterable):
         iterator = iter(iterable)
@@ -318,7 +281,7 @@ class RaoGenerator:
         return map(lambda datapt: 
             {"input_ids": einops.rearrange(
                 torch.tensor(datapt["input_ids"]),
-                f"(batch_size obs_p_doc tok_p_obs) -> batch_size obs_p_doc tok_p_obs",
+                f"(batch_size obs_between_weight_updates tok_p_obs) -> batch_size obs_between_weight_updates tok_p_obs",
                 batch_size=self._cfg.batch_size,
                 tok_p_obs=self._cfg.tok_p_obs
             ),
@@ -348,7 +311,7 @@ class RaoGenerator:
             {
                 "text": Value(dtype="string", id=None),
                 "input_ids": Array3D(
-                    shape=(self._cfg.batch_size, self._cfg.obs_p_doc, self._cfg.tok_p_obs), dtype="int32"
+                    shape=(self._cfg.batch_size, self._cfg.obs_between_weight_updates, self._cfg.tok_p_obs), dtype="int32"
                 ),
             }
         )
@@ -413,3 +376,7 @@ class RaoGenerator:
     @property
     def dataloader(self):
         return self._dataloader
+
+    @property
+    def tokens_per_pure_reward(self):
+        return self._tokens_per_pure_reward

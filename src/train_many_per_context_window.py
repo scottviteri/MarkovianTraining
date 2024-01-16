@@ -32,10 +32,12 @@ High level structure:
 """
 
 import torch
+import numpy as np
 from tqdm import tqdm
 from einops import rearrange
 import wandb
-from src.rao_tools import RaoConfig
+from src.rao_tools import RaoConfig, condense_triples
+from src.rao_tools import compute_cumulative_averages, create_loss_tokens_tensor
 from src.rao_generator import RaoGenerator
 import json
 
@@ -62,14 +64,13 @@ def train():
             for param in sweep_config["parameters"]
         }
 
-    # fix obs_p_doc order
     cfg = RaoConfig(
         model_name=config_params.get("model_name"),
         lr=config_params.get("lr"),
         num_rao=config_params.get("num_rao"),
         batch_size=config_params.get("batch_size"),
         num_batches=config_params.get("num_batches"),
-        obs_p_doc=config_params.get("obs_p_doc"),
+        obs_between_weight_updates=config_params.get("obs_between_weight_updates"),
         obs_to_action_ratio=config_params.get("obs_to_action_ratio"),
         interval_save_weights=config_params.get("interval_save_weights"),
         interval_print=config_params.get("interval_print"),
@@ -78,8 +79,9 @@ def train():
         do_lora=config_params.get("do_lora"),
         use_loss_difference=config_params.get("use_loss_difference"),
         impose_ctxt_size=config_params.get("impose_ctxt_size"),
-        dataset_name=config_params.get("dataset_name"),
         use_multirao_for_action_gen=config_params.get("use_multirao_for_action_gen"),
+        use_rewards_to_go=config_params.get("use_rewards_to_go"),
+        dataset_name=config_params.get("dataset_name"),
     )
     if run is not None:
         run_name = ""
@@ -88,13 +90,16 @@ def train():
         run_name += f"nr{cfg.num_rao}_"
         #run_name += f"bs{cfg.batch_size}_"
         run_name += f"nb{cfg.num_batches}_"
-        #run_name += f"opd{cfg.obs_p_doc}_"
-        run_name += f"o:a={cfg.obs_to_action_ratio}:1_"
-        #run_name += "L_" if cfg.do_lora else "nL_"
+        run_name += f"obwu{cfg.obs_between_weight_updates}_"
+        if cfg.obs_to_action_ratio != 1: 
+            run_name += f"o:a={cfg.obs_to_action_ratio}:1_"
+        if cfg.do_lora: run_name += "L_"
         run_name += f"rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
-        #run_name +=  "ld_" if cfg.use_loss_difference else "nld_"
-        run_name +=  f"ics{cfg.impose_ctxt_size}" if cfg.impose_ctxt_size else ""
-        run_name += "mr_" if cfg.use_multirao_for_action_gen else ""
+        if cfg.use_loss_difference: run_name += "ld_"
+        if cfg.impose_ctxt_size: run_name += f"ics{cfg.impose_ctxt_size}_"
+        if cfg.use_multirao_for_action_gen: 
+            run_name += f"mr{cfg.multirao_for_action_gen}_"
+        if cfg.use_rewards_to_go: run_name += "rtg_"
         run_name += f"{cfg.dataset_name[:3]}"
         run.name = run_name
 
@@ -102,7 +107,6 @@ def train():
         with open(f"saved_weights_and_losses/{cfg.model_name}", "w") as f:
             print("")
 
-    NUM_DATAPOINTS = 10 * cfg.batch_size * cfg.num_batches if cfg.num_batches else None
     causal_lm = cfg.model
     causal_lm_tokenizer = cfg.tokenizer
     print(cfg.model_name)
@@ -112,6 +116,7 @@ def train():
 
     average_losses = []
     aggregate_losses = []
+    optimistic_loss = 0.5
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     optimizer = torch.optim.Adam(causal_lm.parameters(), lr=cfg.lr)
 
@@ -127,24 +132,32 @@ def train():
             causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
             causal_lm.save_pretrained(cfg.path_2_model)
 
-        rao_tensor, new_losses = raogen.gen_rao_tensor(
-            data=data,
-            optimizer=optimizer,
-            loss_fn=loss_fn,
-            average_losses=average_losses,
-            aggregate_losses=aggregate_losses,
-            batch_index=batch_index,
-        )
+        with torch.no_grad():
+            rao_tensor_optimistic_triples, new_losses = raogen.gen_rao_tensor(
+                data=data,
+                loss_fn=loss_fn,
+                aggregate_losses=aggregate_losses,
+                optimistic_loss=optimistic_loss,
+                batch_index=batch_index
+            )
 
-        average_losses.extend(new_losses)
+        if cfg.use_rewards_to_go:
+            new_losses = compute_cumulative_averages(new_losses) #(batch, num_rao)
 
-        # if num_rao = 0, I want to be slicing by 2
+        rao_tensor_triples = []
+        for i, (_, action, observation) in enumerate(rao_tensor_optimistic_triples):
+            loss_tokens_tensor = create_loss_tokens_tensor(new_losses[:,i], causal_lm_tokenizer, cfg.device, raogen.tokens_per_pure_reward)
+            loss_tokens_tensor = torch.cat((raogen._reward_prefix_tensor, loss_tokens_tensor), dim=-1)
+            rao_tensor_triples.append((loss_tokens_tensor, action, observation))
+
+        optimizer.zero_grad()
+        # if num_rao = 0, I want to be slicing by 1
+        default_tensor = torch.tensor([[] for _ in range(cfg.batch_size)], 
+                                                     dtype=torch.int64, device=cfg.device)
         for i in range(
-            0, rao_tensor.shape[1], (cfg.num_rao + 1)*cfg.tok_p_rao
+            0, len(rao_tensor_triples), cfg.num_rao + 1
         ):
-            rao_tensor_slice = rao_tensor[
-                :, i : i + (cfg.num_rao + 1) * cfg.tok_p_rao
-            ]
+            rao_tensor_slice = condense_triples(rao_tensor_triples[i:i+cfg.num_rao+1], default_tensor)
             rao_tensor_logits = causal_lm(rao_tensor_slice).logits[:, :-1, :]
             rao_tensor_loss = loss_fn(
                 input=rearrange(
@@ -153,11 +166,10 @@ def train():
                 ),
                 target=rao_tensor_slice[:, 1:],
             )
-            # Split rao_tensor_loss into loss_loss, action_loss, and observation_loss
-            # rao_tensor.shape == (batch_size, num_tokens)
+            # Calculate the relative weights for each loss component
             with torch.no_grad():
                 sections = rao_tensor_loss.split(cfg.tok_p_rao, dim=-1)
-                rao_triples = [
+                loss_triples = [
                     (
                         section[:, : cfg.tok_p_loss],
                         section[:, cfg.tok_p_loss : cfg.tok_p_loss + cfg.tok_p_action],
@@ -165,7 +177,7 @@ def train():
                     )
                     for section in sections
                 ]
-                loss_loss, action_loss, observation_loss = zip(*rao_triples)
+                loss_loss, action_loss, observation_loss = zip(*loss_triples)
                 loss_loss = torch.cat(loss_loss, dim=-1).mean()
                 action_loss = torch.cat(action_loss, dim=-1).mean()
                 observation_loss = torch.cat(observation_loss, dim=-1).mean()
@@ -179,13 +191,7 @@ def train():
                     print(
                         f"Weighted Loss/Action/Observation loss: {loss_loss * loss_weight}/{action_loss * action_weight}/{observation_loss * observation_weight}"
                     )
-            # Compute the mean of rao_tensor_loss and backward pass as usual
-            aggregate_loss = rao_tensor_loss.mean()
-            aggregate_losses.append(aggregate_loss.item())
-            aggregate_loss.backward()
-            print("Aggregate loss: ", aggregate_loss)
-            # Calculate the relative weights for each loss component
-            # Log the weighted components of the loss
+                       # Log the weighted components of the loss
             if wb_cfg:
                 wandb.log(
                     {
@@ -196,13 +202,18 @@ def train():
                         * observation_weight,
                     }
                 )
+            # Compute the mean of rao_tensor_loss and backward pass as usual
+            aggregate_loss = rao_tensor_loss.mean()
+            aggregate_losses.append(aggregate_loss.item())
+            optimistic_loss = np.mean(aggregate_losses) - np.std(aggregate_losses)
+            aggregate_loss.backward()
+            print("Aggregate loss: ", aggregate_loss)
             optimizer.step()
-
     if wb_cfg:
         run.finish()
-
 
 if sweep_config["parameters"]["wandb"]["values"][0]:
     wandb.agent(sweep_id, function=train)
 else:
     train()
+
