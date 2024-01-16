@@ -37,6 +37,8 @@ class RaoConfig:
     def __init__(
         self,
         model_name: str = "distilgpt2",
+        dataset_name: str = "wikipedia",
+        task_name: str = None,
         lr: float = 1e-4,
         num_rao : int = 1,
         batch_size: int = 10,
@@ -51,9 +53,8 @@ class RaoConfig:
         load_model: bool = False,
         do_lora: bool = True,
         use_loss_difference: bool = True,
+        use_multirao_for_action_gen: bool = False,
         impose_ctxt_size=None,
-        dataset_name: str = "wikipedia",
-        task_name: str = None
     ):
         self._model_name = model_name
         self._lr = lr
@@ -70,6 +71,7 @@ class RaoConfig:
         self._load_model = load_model
         self._do_lora = do_lora
         self._use_loss_difference = use_loss_difference
+        self._use_multirao_for_action_gen = use_multirao_for_action_gen
         self._impose_ctxt_size = impose_ctxt_size
 
         self._device = torch.device("cuda" if torch.cuda.is_available() else "mps")
@@ -320,6 +322,10 @@ class RaoConfig:
     @property
     def use_loss_difference(self):
         return self._use_loss_difference
+
+    @property
+    def use_multirao_for_action_gen(self):
+        return self._use_multirao_for_action_gen
 
     @property
     def impose_ctxt_size(self):

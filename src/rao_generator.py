@@ -110,15 +110,22 @@ class RaoGenerator:
 
             # RAOR_A
             # argmax in Action (P_theta_t (helpful_msg_{t+1} | lhes ++ optimistic_loss_{t+1})))
-            full_action = causal_lm.generate(
-                inputs=incentive_rao[
+            if self._cfg.use_multirao_for_action_gen:
+                action_input = incentive_rao[
+                    :,
+                    -(self._cfg.ctxt_size - self._tokens_per_pure_action) :,
+                ]
+            else:
+                action_input = incentive_rao[
                     :,
                     -(
-                        self._cfg.tok_p_rao * (self._cfg.num_rao+1)
+                        self._cfg.tok_p_rao * (self._cfg.num_rao + 1)
                         + self._cfg.tok_p_loss
                         + self._action_prefix_tensor.shape[-1]
                     ) :,
-                ],
+                ]
+            full_action = causal_lm.generate(
+                inputs=action_input,
                 output_scores=True,
                 do_sample=True,
                 num_beams=self._cfg.num_beams,
