@@ -98,7 +98,7 @@ def train():
         if cfg.use_loss_difference: run_name += "ld_"
         if cfg.impose_ctxt_size: run_name += f"ics{cfg.impose_ctxt_size}_"
         if cfg.use_multirao_for_action_gen: 
-            run_name += f"mr{cfg.multirao_for_action_gen}_"
+            run_name += f"mr{cfg.use_multirao_for_action_gen}_"
         if cfg.use_rewards_to_go: run_name += "rtg_"
         run_name += f"{cfg.dataset_name[:3]}"
         run.name = run_name
