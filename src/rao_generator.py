@@ -218,10 +218,9 @@ class RaoGenerator:
 
             # To have actions based on future desired returns, use rewards-to-go
             # sum up trajectories for each previous rao
-            # if self._cfg.rewards2go:
             if self._cfg.use_rewards2go and len(cached_losses) > 1:
                 prev_returns = torch.tensor(cached_losses)[:-1].sum(dim=0)
-                # assert prev_returns.shape[-1] == self._cfg.batch_size
+                assert prev_returns.shape[-1] == self._cfg.batch_size
                 loss_difference += prev_returns.to(self._cfg.device)
 
             string_losses: str = [str(round(r.item(), 3)) for r in loss_difference]
