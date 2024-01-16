@@ -192,12 +192,9 @@ class RaoGenerator:
                     )
                     batch_loss = batch_loss - out.mean(dim=-1)
 
-            def inject_noise(loss: torch.Tensor) -> torch.Tensor:
-                return loss * (0.9 + torch.rand(1)) / 5.0
-
             optimistic_loss_tokens_tensor = causal_lm_tokenizer.batch_encode_plus(
                 [
-                    str(round(inject_noise(optimistic_loss).item(), 3))
+                    str(round(self.inject_noise(optimistic_loss).item(), 3))
                     for _ in range(self._cfg.batch_size)
                 ],
                 return_tensors="pt",
@@ -236,6 +233,10 @@ class RaoGenerator:
             if not chunk:
                 return
             yield chunk
+
+    @staticmethod
+    def inject_noise(loss: torch.Tensor) -> torch.Tensor:
+        return loss * (1.0 + torch.randn(1) * 0.05)
 
     @staticmethod
     def merge_dictionaries(d0, d1):
