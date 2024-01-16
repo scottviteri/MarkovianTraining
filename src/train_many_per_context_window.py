@@ -201,19 +201,19 @@ def train():
                 loss_weight = cfg.tok_p_loss / cfg.tok_p_rao
                 action_weight = cfg.tok_p_action / cfg.tok_p_rao
                 observation_weight = cfg.tok_p_obs / cfg.tok_p_rao
-                if batch_index % cfg.interval_print == 0:
-                    print(
-                        f"Loss/Action/Observation loss: {loss_loss}/{action_loss}/{observation_loss}"
-                    )
-                    print(
-                        f"Weighted Loss/Action/Observation loss: {loss_loss * loss_weight}/{action_loss * action_weight}/{observation_loss * observation_weight}"
-                    )
+                #if batch_index % cfg.interval_print == 0:
+                #    print(
+                #        f"Loss/Action/Observation loss: {loss_loss}/{action_loss}/{observation_loss}"
+                #    )
+                #    print(
+                #        f"Weighted Loss/Action/Observation loss: {loss_loss * loss_weight}/{action_loss * action_weight}/{observation_loss * observation_weight}"
+                #    )
             # Compute the mean of rao_tensor_loss and backward pass as usual
             aggregate_loss = rao_tensor_loss.mean()
             aggregate_losses.append(aggregate_loss.item())
             optimistic_loss = np.mean(aggregate_losses) - np.std(aggregate_losses)
             aggregate_loss.backward()
-            print("Aggregate loss: ", aggregate_loss)
+            #print("Aggregate loss: ", aggregate_loss)
             optimizer.step()
 
             if wb_cfg:
