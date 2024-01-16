@@ -86,15 +86,16 @@ def train():
     if run is not None:
         run_name = ""
         run_name += f"{cfg.model_name[:4]}_"
-        run_name += f"lr{cfg.lr}_"
-        run_name += f"nr{cfg.num_rao}_"
-        # run_name += f"bs{cfg.batch_size}_"
+        if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
+        if cfg.num_rao != 0: run_name += f"nr{cfg.num_rao}_"
+        if cfg.batch_size != !: run_name += f"bs{cfg.batch_size}_"
         run_name += f"nb{cfg.num_batches}_"
         run_name += f"obwu{cfg.obs_between_weight_updates}_"
         if cfg.obs_to_action_ratio != 1:
             run_name += f"o:a={cfg.obs_to_action_ratio}:1_"
+        if cfg.load_model: run_name += f"lm_"
         if cfg.do_lora:
-            run_name += "L_"
+            run_name += "lora_"
         run_name += f"rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
         if cfg.use_loss_difference:
             run_name += "ld_"
