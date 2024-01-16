@@ -78,21 +78,23 @@ def train():
         do_lora=config_params.get("do_lora"),
         use_loss_difference=config_params.get("use_loss_difference"),
         impose_ctxt_size=config_params.get("impose_ctxt_size"),
-        dataset_name=config_params.get("dataset_name")
+        dataset_name=config_params.get("dataset_name"),
+        use_multirao_for_action_gen=config_params.get("use_multirao_for_action_gen"),
     )
     if run is not None:
         run_name = ""
         run_name += f"{cfg.model_name[:4]}_"
         run_name += f"lr{cfg.lr}_"
         run_name += f"nr{cfg.num_rao}_"
-        run_name += f"bs{cfg.batch_size}_"
+        #run_name += f"bs{cfg.batch_size}_"
         run_name += f"nb{cfg.num_batches}_"
-        run_name += f"opd{cfg.obs_p_doc}_"
+        #run_name += f"opd{cfg.obs_p_doc}_"
         run_name += f"o:a={cfg.obs_to_action_ratio}:1_"
-        run_name += "L_" if cfg.do_lora else "nL_"
+        #run_name += "L_" if cfg.do_lora else "nL_"
         run_name += f"rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
-        run_name +=  "ld_" if cfg.use_loss_difference else "nld_"
-        run_name +=  f"ics{cfg.impose_ctxt_size}" if cfg.impose_ctxt_size else "_"
+        #run_name +=  "ld_" if cfg.use_loss_difference else "nld_"
+        run_name +=  f"ics{cfg.impose_ctxt_size}" if cfg.impose_ctxt_size else ""
+        run_name += "mr_" if cfg.use_multirao_for_action_gen else ""
         run_name += f"{cfg.dataset_name[:3]}"
         run.name = run_name
 
