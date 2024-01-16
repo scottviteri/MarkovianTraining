@@ -86,14 +86,18 @@ def train():
     if run is not None:
         run_name = ""
         run_name += f"{cfg.model_name[:4]}_"
-        if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
-        if cfg.num_rao != 0: run_name += f"nr{cfg.num_rao}_"
-        if cfg.batch_size != !: run_name += f"bs{cfg.batch_size}_"
+        if cfg.lr != 1e-4:
+            run_name += f"lr{cfg.lr}_"
+        if cfg.num_rao != 0:
+            run_name += f"nr{cfg.num_rao}_"
+        if cfg.batch_size != 1:
+            run_name += f"bs{cfg.batch_size}_"
         run_name += f"nb{cfg.num_batches}_"
         run_name += f"obwu{cfg.obs_between_weight_updates}_"
         if cfg.obs_to_action_ratio != 1:
             run_name += f"o:a={cfg.obs_to_action_ratio}:1_"
-        if cfg.load_model: run_name += f"lm_"
+        if cfg.load_model:
+            run_name += f"lm_"
         if cfg.do_lora:
             run_name += "lora_"
         run_name += f"rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
@@ -204,7 +208,7 @@ def train():
                     print(
                         f"Weighted Loss/Action/Observation loss: {loss_loss * loss_weight}/{action_loss * action_weight}/{observation_loss * observation_weight}"
                     )
-           # Compute the mean of rao_tensor_loss and backward pass as usual
+            # Compute the mean of rao_tensor_loss and backward pass as usual
             aggregate_loss = rao_tensor_loss.mean()
             aggregate_losses.append(aggregate_loss.item())
             optimistic_loss = np.mean(aggregate_losses) - np.std(aggregate_losses)
@@ -222,7 +226,7 @@ def train():
                         * observation_weight,
                     }
                 )
- 
+
     if wb_cfg:
         run.finish()
 
