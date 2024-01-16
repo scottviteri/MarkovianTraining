@@ -54,6 +54,7 @@ class RaoConfig:
         do_lora: bool = True,
         use_loss_difference: bool = True,
         use_multirao_for_action_gen: bool = False,
+        use_rewards2go: bool = False,
         impose_ctxt_size=None,
     ):
         self._model_name = model_name
@@ -72,6 +73,7 @@ class RaoConfig:
         self._do_lora = do_lora
         self._use_loss_difference = use_loss_difference
         self._use_multirao_for_action_gen = use_multirao_for_action_gen
+        self._use_rewards2go = use_rewards2go
         self._impose_ctxt_size = impose_ctxt_size
 
         self._device = torch.device("cuda" if torch.cuda.is_available() else "mps")
@@ -326,6 +328,10 @@ class RaoConfig:
     @property
     def use_multirao_for_action_gen(self):
         return self._use_multirao_for_action_gen
+
+    @property
+    def use_rewards2go(self):
+        return self._use_rewards2go
 
     @property
     def impose_ctxt_size(self):
