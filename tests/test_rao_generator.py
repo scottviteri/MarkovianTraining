@@ -24,7 +24,7 @@ cfg = RaoConfig(
     load_model=parameters["load_model"]["values"][0],
     do_lora=parameters["do_lora"]["values"][0],
     use_loss_difference=parameters["use_loss_difference"]["values"][0],
-    impose_ctxt_size=parameters["impose_ctxt_size"]["values"][0],
+    training_ctxt_size=parameters["training_ctxt_size"]["values"][0],
 )
 
 rao_generator = RaoGenerator(cfg)  # Assuming RaoGenerator is the class containing the intersperse_lists method

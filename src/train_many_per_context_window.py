@@ -78,7 +78,7 @@ def train():
         load_model=config_params.get("load_model"),
         do_lora=config_params.get("do_lora"),
         use_loss_difference=config_params.get("use_loss_difference"),
-        impose_ctxt_size=config_params.get("impose_ctxt_size"),
+        training_ctxt_size=config_params.get("training_ctxt_size"),
         use_multirao_for_action_gen=config_params.get("use_multirao_for_action_gen"),
         use_rewards_to_go=config_params.get("use_rewards_to_go"),
         dataset_name=config_params.get("dataset_name"),
@@ -103,8 +103,8 @@ def train():
         run_name += f"rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
         if cfg.use_loss_difference:
             run_name += "ld_"
-        if cfg.impose_ctxt_size:
-            run_name += f"ics{cfg.impose_ctxt_size}_"
+        if cfg.training_ctxt_size:
+            run_name += f"ics{cfg.training_ctxt_size}_"
         if cfg.use_multirao_for_action_gen:
             run_name += f"mr{cfg.use_multirao_for_action_gen}_"
         if cfg.use_rewards_to_go:

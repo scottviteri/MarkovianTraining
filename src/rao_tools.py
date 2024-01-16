@@ -49,7 +49,7 @@ class RaoConfig:
         num_beams: int = 1,
         interval_save_weights: int = 100,
         interval_print: int = 10,
-        impose_ctxt_size=None,
+        training_ctxt_size=None,
         wandb: bool = False,
         load_model: bool = False,
         do_lora: bool = True,
@@ -74,7 +74,7 @@ class RaoConfig:
         self._use_loss_difference = use_loss_difference
         self._use_multirao_for_action_gen = use_multirao_for_action_gen
         self._use_rewards_to_go = use_rewards_to_go
-        self._impose_ctxt_size = impose_ctxt_size
+        self._training_ctxt_size = training_ctxt_size
         self._dataset_name = dataset_name
 
         self._device = torch.device("cuda" if torch.cuda.is_available() else "mps")
@@ -86,8 +86,8 @@ class RaoConfig:
 
         # sets model, tokenizer and ctxt_size
         self._set_model()
-        if self._impose_ctxt_size:
-            self._ctxt_size = self._impose_ctxt_size
+        if self._training_ctxt_size:
+            self._ctxt_size = self._training_ctxt_size
         self._tok_p_action = int(
             self._ctxt_size
             / ((self._obs_to_action_ratio + 1.0) * (self._num_rao + 1.0))
@@ -324,8 +324,8 @@ class RaoConfig:
         return self._use_loss_difference
 
     @property
-    def impose_ctxt_size(self):
-        return self._impose_ctxt_size
+    def training_ctxt_size(self):
+        return self._training_ctxt_size
 
     @property
     def use_multirao_for_action_gen(self):
