@@ -86,17 +86,18 @@ class RaoConfig:
 
         # sets model, tokenizer and ctxt_size
         self._set_model()
-        if self._training_ctxt_size:
-            self._ctxt_size = self._training_ctxt_size
+        if self._training_ctxt_size is None:
+            self._training_ctxt_size = self._ctxt_size
+
         self._tok_p_action = int(
-            self._ctxt_size
+            self._training_ctxt_size
             / ((self._obs_to_action_ratio + 1.0) * (self._num_rao + 1.0))
             - self._tok_p_loss / (self._obs_to_action_ratio + 1)
         )
         self._tok_p_obs = int(self._tok_p_action * self._obs_to_action_ratio)
         self._tok_p_doc = self._tok_p_obs * self._obs_between_weight_updates
         self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
-        assert (self._num_rao + 1) * self._tok_p_rao <= self._ctxt_size
+        assert (self._num_rao + 1) * self._tok_p_rao <= self._training_ctxt_size
 
     def _set_task_name(self, task_name):
         if task_name:
