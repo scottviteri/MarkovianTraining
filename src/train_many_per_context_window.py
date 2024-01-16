@@ -41,7 +41,7 @@ from src.rao_tools import compute_cumulative_averages, create_loss_tokens_tensor
 from src.rao_generator import RaoGenerator
 import json
 
-with open('sweep_config.json') as f:
+with open("sweep_config.json") as f:
     sweep_config = json.load(f)
 
 sweep_id = wandb.sweep(
@@ -88,18 +88,22 @@ def train():
         run_name += f"{cfg.model_name[:4]}_"
         run_name += f"lr{cfg.lr}_"
         run_name += f"nr{cfg.num_rao}_"
-        #run_name += f"bs{cfg.batch_size}_"
+        # run_name += f"bs{cfg.batch_size}_"
         run_name += f"nb{cfg.num_batches}_"
         run_name += f"obwu{cfg.obs_between_weight_updates}_"
-        if cfg.obs_to_action_ratio != 1: 
+        if cfg.obs_to_action_ratio != 1:
             run_name += f"o:a={cfg.obs_to_action_ratio}:1_"
-        if cfg.do_lora: run_name += "L_"
+        if cfg.do_lora:
+            run_name += "L_"
         run_name += f"rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
-        if cfg.use_loss_difference: run_name += "ld_"
-        if cfg.impose_ctxt_size: run_name += f"ics{cfg.impose_ctxt_size}_"
-        if cfg.use_multirao_for_action_gen: 
+        if cfg.use_loss_difference:
+            run_name += "ld_"
+        if cfg.impose_ctxt_size:
+            run_name += f"ics{cfg.impose_ctxt_size}_"
+        if cfg.use_multirao_for_action_gen:
             run_name += f"mr{cfg.use_multirao_for_action_gen}_"
-        if cfg.use_rewards_to_go: run_name += "rtg_"
+        if cfg.use_rewards_to_go:
+            run_name += "rtg_"
         run_name += f"{cfg.dataset_name[:3]}"
         run.name = run_name
 
@@ -138,26 +142,34 @@ def train():
                 loss_fn=loss_fn,
                 aggregate_losses=aggregate_losses,
                 optimistic_loss=optimistic_loss,
-                batch_index=batch_index
+                batch_index=batch_index,
             )
 
         if cfg.use_rewards_to_go:
-            new_losses = compute_cumulative_averages(new_losses) #(batch, num_rao)
+            new_losses = compute_cumulative_averages(new_losses)  # (batch, num_rao)
 
         rao_tensor_triples = []
         for i, (_, action, observation) in enumerate(rao_tensor_optimistic_triples):
-            loss_tokens_tensor = create_loss_tokens_tensor(new_losses[:,i], causal_lm_tokenizer, cfg.device, raogen.tokens_per_pure_reward)
-            loss_tokens_tensor = torch.cat((raogen._reward_prefix_tensor, loss_tokens_tensor), dim=-1)
+            loss_tokens_tensor = create_loss_tokens_tensor(
+                new_losses[:, i],
+                causal_lm_tokenizer,
+                cfg.device,
+                raogen.tokens_per_pure_reward,
+            )
+            loss_tokens_tensor = torch.cat(
+                (raogen._reward_prefix_tensor, loss_tokens_tensor), dim=-1
+            )
             rao_tensor_triples.append((loss_tokens_tensor, action, observation))
 
         optimizer.zero_grad()
         # if num_rao = 0, I want to be slicing by 1
-        default_tensor = torch.tensor([[] for _ in range(cfg.batch_size)], 
-                                                     dtype=torch.int64, device=cfg.device)
-        for i in range(
-            0, len(rao_tensor_triples), cfg.num_rao + 1
-        ):
-            rao_tensor_slice = condense_triples(rao_tensor_triples[i:i+cfg.num_rao+1], default_tensor)
+        default_tensor = torch.tensor(
+            [[] for _ in range(cfg.batch_size)], dtype=torch.int64, device=cfg.device
+        )
+        for i in range(0, len(rao_tensor_triples), cfg.num_rao + 1):
+            rao_tensor_slice = condense_triples(
+                rao_tensor_triples[i : i + cfg.num_rao + 1], default_tensor
+            )
             rao_tensor_logits = causal_lm(rao_tensor_slice).logits[:, :-1, :]
             rao_tensor_loss = loss_fn(
                 input=rearrange(
@@ -191,7 +203,7 @@ def train():
                     print(
                         f"Weighted Loss/Action/Observation loss: {loss_loss * loss_weight}/{action_loss * action_weight}/{observation_loss * observation_weight}"
                     )
-                       # Log the weighted components of the loss
+                    # Log the weighted components of the loss
             if wb_cfg:
                 wandb.log(
                     {
@@ -212,8 +224,8 @@ def train():
     if wb_cfg:
         run.finish()
 
+
 if sweep_config["parameters"]["wandb"]["values"][0]:
     wandb.agent(sweep_id, function=train)
 else:
     train()
-

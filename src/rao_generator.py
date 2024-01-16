@@ -42,15 +42,18 @@ from einops import repeat, rearrange
 from itertools import islice
 from functools import reduce
 import numpy as np
-from src.rao_tools import RaoConfig, log_and_print_info, condense_triples, create_loss_tokens_tensor
+from src.rao_tools import (
+    RaoConfig,
+    log_and_print_info,
+    condense_triples,
+    create_loss_tokens_tensor,
+)
+
 
 class RaoGenerator:
     """RaoRaoRaoRaoRaoRaoRaoRaoRaoRao"""
 
-    def __init__(
-        self,
-        cfg: RaoConfig
-    ):
+    def __init__(self, cfg: RaoConfig):
         self._cfg = cfg
 
         # sets self._dataloader, self._tokens_per_pure_reward
@@ -60,31 +63,40 @@ class RaoGenerator:
         self.trunc_documents()
 
     def gen_rao_tensor(
-        self,
-        data,
-        loss_fn,
-        aggregate_losses,
-        optimistic_loss: float,
-        batch_index
+        self, data, loss_fn, aggregate_losses, optimistic_loss: float, batch_index
     ):
         causal_lm = self._cfg.model
         causal_lm_tokenizer = self._cfg.tokenizer
 
         input_ids = data["input_ids"][0]
         rao_tensor_triples = []
-        default_tensor = torch.tensor([[] for _ in range(self._cfg.batch_size)], 
-                                                     dtype=torch.int64, device=self._cfg.device)
-        losses = torch.tensor([[] for _ in range(self._cfg.batch_size)], 
-                                                     dtype=torch.float32, device=self._cfg.device)
+        default_tensor = torch.tensor(
+            [[] for _ in range(self._cfg.batch_size)],
+            dtype=torch.int64,
+            device=self._cfg.device,
+        )
+        losses = torch.tensor(
+            [[] for _ in range(self._cfg.batch_size)],
+            dtype=torch.float32,
+            device=self._cfg.device,
+        )
         optimistic_loss_tokens_tensor = create_loss_tokens_tensor(
-            torch.tensor([[optimistic_loss] for _ in range(self._cfg.batch_size)], dtype=torch.float32, device=self._cfg.device),
-            self._cfg.tokenizer, self._cfg.device, self._tokens_per_pure_reward
+            torch.tensor(
+                [[optimistic_loss] for _ in range(self._cfg.batch_size)],
+                dtype=torch.float32,
+                device=self._cfg.device,
+            ),
+            self._cfg.tokenizer,
+            self._cfg.device,
+            self._tokens_per_pure_reward,
         )
 
         for observation_index in range(self._cfg.obs_between_weight_updates):
             incentive_rao = torch.cat(
                 (
-                    condense_triples(rao_tensor_triples[-self._cfg.num_rao:], default_tensor),
+                    condense_triples(
+                        rao_tensor_triples[-self._cfg.num_rao :], default_tensor
+                    ),
                     optimistic_loss_tokens_tensor,
                     self._action_prefix_tensor,
                 ),
@@ -152,10 +164,15 @@ class RaoGenerator:
             # target num_rao = 0
             context = torch.cat(
                 (
-                    condense_triples(rao_tensor_triples[-self._cfg.num_rao:], default_tensor)
-                    if self._cfg.num_rao > 0 
-                    else torch.tensor([[] for _ in range(self._cfg.batch_size)], 
-                                                        dtype=torch.int32, device=self._cfg.device),
+                    condense_triples(
+                        rao_tensor_triples[-self._cfg.num_rao :], default_tensor
+                    )
+                    if self._cfg.num_rao > 0
+                    else torch.tensor(
+                        [[] for _ in range(self._cfg.batch_size)],
+                        dtype=torch.int32,
+                        device=self._cfg.device,
+                    ),
                     optimistic_loss_tokens_tensor,
                     action,
                     true_obs,
@@ -163,9 +180,7 @@ class RaoGenerator:
                 dim=-1,
             )
             prediction = causal_lm(context)
-            predicted_logits = prediction.logits[
-                :, -self._cfg.tok_p_obs - 1 : -1, :
-            ]
+            predicted_logits = prediction.logits[:, -self._cfg.tok_p_obs - 1 : -1, :]
             predicted_obs = predicted_logits.argmax(dim=-1)
             out = loss_fn(
                 input=rearrange(
@@ -180,16 +195,14 @@ class RaoGenerator:
             if self._cfg.use_loss_difference:
                 with torch.no_grad():
                     prediction = causal_lm(true_obs)
-                    predicted_logits = prediction.logits[
-                        :,  : -1, :
-                    ]
+                    predicted_logits = prediction.logits[:, :-1, :]
                     predicted_obs = predicted_logits.argmax(dim=-1)
                     out = loss_fn(
                         input=rearrange(
                             predicted_logits,
                             "batch seq_length vocab_size -> batch vocab_size seq_length",
                         ),
-                        target=true_obs[:,1:],
+                        target=true_obs[:, 1:],
                     )
                     batch_loss = batch_loss - out.mean(dim=-1)
 
@@ -197,14 +210,21 @@ class RaoGenerator:
                 return loss * (0.9 + torch.rand(1)) / 5.0
 
             optimistic_loss_tokens_tensor = causal_lm_tokenizer.batch_encode_plus(
-                [str(round(inject_noise(optimistic_loss).item(), 3)) for _ in range(self._cfg.batch_size)],
+                [
+                    str(round(inject_noise(optimistic_loss).item(), 3))
+                    for _ in range(self._cfg.batch_size)
+                ],
                 return_tensors="pt",
                 truncation="longest_first",
                 padding="max_length",
                 max_length=self._tokens_per_pure_reward,
             ).input_ids.to(self._cfg.device)
-            assert optimistic_loss_tokens_tensor.shape[-1] == self._tokens_per_pure_reward
-            optimistic_loss_tokens_tensor = torch.cat((self._reward_prefix_tensor, optimistic_loss_tokens_tensor), dim=-1)
+            assert (
+                optimistic_loss_tokens_tensor.shape[-1] == self._tokens_per_pure_reward
+            )
+            optimistic_loss_tokens_tensor = torch.cat(
+                (self._reward_prefix_tensor, optimistic_loss_tokens_tensor), dim=-1
+            )
 
             losses = torch.cat((losses, batch_loss), dim=-1)
             rao_tensor_triples.append((optimistic_loss_tokens_tensor, action, true_obs))
@@ -218,7 +238,7 @@ class RaoGenerator:
                 prev_obs,
                 action,
                 predicted_obs,
-                true_obs
+                true_obs,
             )
 
         return rao_tensor_triples, losses
@@ -244,23 +264,44 @@ class RaoGenerator:
         # Chunk the tensor into segments of size interval
         chunks = tensor.chunk(len(tensor) // interval)
         # Intersperse the interspersed_tensor with the chunks
-        interspersed = torch.cat([torch.cat([interspersed_tensor, chunk]) for chunk in chunks])
+        interspersed = torch.cat(
+            [torch.cat([interspersed_tensor, chunk]) for chunk in chunks]
+        )
         return interspersed
 
     @staticmethod
     def intersperse_lists(list1, list2, interval):
         # Split list1 into chunks of size interval
-        chunks = [list1[i:i + interval] for i in range(0, len(list1), interval)]
+        chunks = [list1[i : i + interval] for i in range(0, len(list1), interval)]
         # Intersperse list2 with the chunks
-        interspersed = [item for sublist in zip([list2]*len(chunks), chunks) for item in sublist]
+        interspersed = [
+            item for sublist in zip([list2] * len(chunks), chunks) for item in sublist
+        ]
         # Flatten the list
         interspersed = [item for sublist in interspersed for item in sublist]
         return interspersed
 
     def cat_raw_data(self):
-        ds = iter(load_dataset(self._cfg.dataset_name, self._cfg.task_name, split="train", streaming=True))
-        ds_text = map(lambda x: {"text": x["inputs"]+x['targets'][0]}, ds) if self._cfg.dataset_name == "bigbench" else ds
-        ds_tokenized = map(lambda x: {"text": x["text"], "input_ids": self._cfg.tokenizer(x["text"])["input_ids"]}, ds_text)
+        ds = iter(
+            load_dataset(
+                self._cfg.dataset_name,
+                self._cfg.task_name,
+                split="train",
+                streaming=True,
+            )
+        )
+        ds_text = (
+            map(lambda x: {"text": x["inputs"] + x["targets"][0]}, ds)
+            if self._cfg.dataset_name == "bigbench"
+            else ds
+        )
+        ds_tokenized = map(
+            lambda x: {
+                "text": x["text"],
+                "input_ids": self._cfg.tokenizer(x["text"])["input_ids"],
+            },
+            ds_text,
+        )
         while 1:
             obs_multiple_batches = {"text": [], "input_ids": []}
             while (
@@ -268,26 +309,34 @@ class RaoGenerator:
                 < self._cfg.batch_size * self._cfg.tok_p_doc
             ):
                 data = next(ds_tokenized)
-                obs_multiple_batches = self.merge_dictionaries(obs_multiple_batches, data)
+                obs_multiple_batches = self.merge_dictionaries(
+                    obs_multiple_batches, data
+                )
             # intersperse  self._observation_prefix_tensor (batch_size,  x) in obs_multiple_batches["input_ids"]  (batch_size, y) every self._tokens_per_pure_observation
             prefixed_input_ids = self.intersperse_lists(
-                list1 = obs_multiple_batches["input_ids"],  
-                list2 = self._observation_prefix_tensor[0].tolist(), 
-                interval = self._tokens_per_pure_observation
-            )    
-            yield {"input_ids": prefixed_input_ids[:self._cfg.batch_size*self._cfg.tok_p_doc], "text": obs_multiple_batches["text"]}
+                list1=obs_multiple_batches["input_ids"],
+                list2=self._observation_prefix_tensor[0].tolist(),
+                interval=self._tokens_per_pure_observation,
+            )
+            yield {
+                "input_ids": prefixed_input_ids[
+                    : self._cfg.batch_size * self._cfg.tok_p_doc
+                ],
+                "text": obs_multiple_batches["text"],
+            }
 
     def to_batched_tensor(self, data_iterator):
-        return map(lambda datapt: 
-            {"input_ids": einops.rearrange(
-                torch.tensor(datapt["input_ids"]),
-                f"(batch_size obs_between_weight_updates tok_p_obs) -> batch_size obs_between_weight_updates tok_p_obs",
-                batch_size=self._cfg.batch_size,
-                tok_p_obs=self._cfg.tok_p_obs
-            ),
+        return map(
+            lambda datapt: {
+                "input_ids": einops.rearrange(
+                    torch.tensor(datapt["input_ids"]),
+                    f"(batch_size obs_between_weight_updates tok_p_obs) -> batch_size obs_between_weight_updates tok_p_obs",
+                    batch_size=self._cfg.batch_size,
+                    tok_p_obs=self._cfg.tok_p_obs,
+                ),
                 "text": datapt["text"],
             },
-            data_iterator
+            data_iterator,
         )
 
     def trunc_documents(self):
@@ -301,7 +350,7 @@ class RaoGenerator:
 
         data_1D = self.cat_raw_data()
         data_batched = self.to_batched_tensor(data_1D)
-        dataset = {"input_ids":[], "text":[]}
+        dataset = {"input_ids": [], "text": []}
         for _ in range(self._cfg.num_batches):
             data = next(data_batched)
             dataset["input_ids"].append(data["input_ids"])
@@ -311,24 +360,28 @@ class RaoGenerator:
             {
                 "text": Value(dtype="string", id=None),
                 "input_ids": Array3D(
-                    shape=(self._cfg.batch_size, self._cfg.obs_between_weight_updates, self._cfg.tok_p_obs), dtype="int32"
+                    shape=(
+                        self._cfg.batch_size,
+                        self._cfg.obs_between_weight_updates,
+                        self._cfg.tok_p_obs,
+                    ),
+                    dtype="int32",
                 ),
             }
         )
 
         truncated_dataset = Dataset.from_dict(dataset, features=data_set_features)
-        #truncated_dataset = Dataset.from_dict(data_set, features=data_set_features)
+        # truncated_dataset = Dataset.from_dict(data_set, features=data_set_features)
         truncated_dataset.set_format(type="torch", columns=["input_ids", "text"])
 
         dataloader = DataLoader(
             truncated_dataset,
-            #batch_size=self._cfg.batch_size,
+            # batch_size=self._cfg.batch_size,
             drop_last=True,
             shuffle=True,
         )
 
         self._dataloader = dataloader
-
 
     def set_prefixes(self):
         observation_prefix = "\nObservation: "

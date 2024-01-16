@@ -37,25 +37,25 @@ class RaoConfig:
     def __init__(
         self,
         model_name: str = "distilgpt2",
+        dataset_name: str = "wikipedia",
         task_name: str = None,
         lr: float = 1e-4,
-        num_rao : int = 1,
+        num_rao: int = 1,
         batch_size: int = 10,
         num_batches: int = 100,
-        tok_p_loss: int = 12, 
+        tok_p_loss: int = 12,
         obs_between_weight_updates: int = 10,
-        obs_to_action_ratio : float = 1.0,
+        obs_to_action_ratio: float = 1.0,
         num_beams: int = 1,
         interval_save_weights: int = 100,
         interval_print: int = 10,
+        impose_ctxt_size=None,
         wandb: bool = False,
         load_model: bool = False,
         do_lora: bool = True,
         use_loss_difference: bool = True,
-        impose_ctxt_size=None,
         use_multirao_for_action_gen: bool = False,
         use_rewards_to_go: bool = False,
-        dataset_name: str = "wikipedia"
     ):
         self._model_name = model_name
         self._lr = lr
@@ -86,31 +86,33 @@ class RaoConfig:
 
         # sets model, tokenizer and ctxt_size
         self._set_model()
-        if self._impose_ctxt_size: self._ctxt_size = self._impose_ctxt_size
+        if self._impose_ctxt_size:
+            self._ctxt_size = self._impose_ctxt_size
         self._tok_p_action = int(
-            self._ctxt_size / (
-                (self._obs_to_action_ratio + 1.0) * (self._num_rao + 1.0)
-            ) - self._tok_p_loss / (self._obs_to_action_ratio + 1)
+            self._ctxt_size
+            / ((self._obs_to_action_ratio + 1.0) * (self._num_rao + 1.0))
+            - self._tok_p_loss / (self._obs_to_action_ratio + 1)
         )
         self._tok_p_obs = int(self._tok_p_action * self._obs_to_action_ratio)
         self._tok_p_doc = self._tok_p_obs * self._obs_between_weight_updates
         self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
-        assert (self._num_rao+1)*self._tok_p_rao  <= self._ctxt_size
+        assert (self._num_rao + 1) * self._tok_p_rao <= self._ctxt_size
 
     def _set_task_name(self, task_name):
-        if task_name: return task_name
+        if task_name:
+            return task_name
         if self._dataset_name == "wikipedia":
             if torch.cuda.is_available():
                 gpu_memory = torch.cuda.get_device_properties(
-                self.device
-            ).total_memory / (1023**3)
+                    self.device
+                ).total_memory / (1023**3)
                 if gpu_memory > 49:
                     task_name = "20220301.en"
                 else:
                     task_name = "20220301.simple"
             else:
                 task_name = "20220301.simple"
-        else: #self._dataset_name == "bigbench":
+        else:  # self._dataset_name == "bigbench":
             task_name = "arithmetic"
         return task_name
 
@@ -170,7 +172,7 @@ class RaoConfig:
                     model_dict[self._model_name],
                     torch_dtype=torch.float16,
                     use_flash_attention_2=True,
-                )  
+                )
                 causal_lm.bfloat16()
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                     model_dict[self._model_name], padding_side="left"
@@ -181,7 +183,7 @@ class RaoConfig:
                     model_dict[self._model_name],
                     torch_dtype=torch.float16,
                     use_flash_attention_2=True,
-                )  
+                )
                 causal_lm.bfloat16()
                 causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                     model_dict[self._model_name], padding_side="left"
@@ -385,14 +387,12 @@ class RaoConfig:
     def tokenizer(self):
         return self._tokenizer
 
-
     def __repr__(self):
         return (
             f"RaoConfig({self._model_name}, do_lora {self._do_lora}, "
             + f"batch_size {self._batch_size}, tok_p_action {self._tok_p_action}, "
             + f"ctxt_size {self._ctxt_size})"
         )
-
 
 
 def log_and_print_info(
@@ -404,13 +404,14 @@ def log_and_print_info(
     prev_obs,
     action,
     predicted_obs,
-    true_obs
+    true_obs,
 ):
     tokenizer = cfg.tokenizer
     if batch_index % cfg.interval_print == 0:
         print(f"\nBatch Number {batch_index}")
         print("Loss: ", f"{batch_loss[0][0]:.3f}")
-        if aggregate_losses: print("Aggregate Loss: ", aggregate_losses[-1])
+        if aggregate_losses:
+            print("Aggregate Loss: ", aggregate_losses[-1])
         print("Previous Obs:", repr(tokenizer.batch_decode(prev_obs)[0]))
         print("Action: ", repr(tokenizer.batch_decode(action)[0]))
         print(
@@ -422,7 +423,8 @@ def log_and_print_info(
     with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
         print(f"\nBatch Number {batch_index}", file=f)
         print("Loss: ", f"{batch_loss[0][0]:.3f}", file=f)
-        if aggregate_losses: print("Aggregate Loss: ", aggregate_losses[-1], file=f)
+        if aggregate_losses:
+            print("Aggregate Loss: ", aggregate_losses[-1], file=f)
         print("Previous Obs:", repr(tokenizer.batch_decode(prev_obs)[0]), file=f)
         print("Action: ", repr(tokenizer.batch_decode(action)[0]), file=f)
         print(
@@ -439,33 +441,41 @@ def log_and_print_info(
                 }
             )
 
+
 def condense_triples(rao_tensor_triples, default_tensor):
-    if not rao_tensor_triples: return default_tensor
-    return torch.cat([torch.cat(triple, dim=-1) for triple in rao_tensor_triples], dim=-1)
+    if not rao_tensor_triples:
+        return default_tensor
+    return torch.cat(
+        [torch.cat(triple, dim=-1) for triple in rao_tensor_triples], dim=-1
+    )
+
 
 def compute_cumulative_averages(losses: torch.Tensor) -> torch.Tensor:
     # Flip the tensor to compute right-sided cumulative averages
     losses = torch.flip(losses, dims=[1])
-    cumulative_averages = torch.cumsum(losses, dim=1) / torch.arange(1, losses.shape[1] + 1, device=losses.device)
+    cumulative_averages = torch.cumsum(losses, dim=1) / torch.arange(
+        1, losses.shape[1] + 1, device=losses.device
+    )
     # Flip the tensor back
     cumulative_averages = torch.flip(cumulative_averages, dims=[1])
     return cumulative_averages
 
-def create_loss_tokens_tensor(batch_loss: torch.Tensor, tokenizer, device: torch.device, tokens_per_pure_reward):
+
+def create_loss_tokens_tensor(
+    batch_loss: torch.Tensor, tokenizer, device: torch.device, tokens_per_pure_reward
+):
     string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
-    loss_tokens_tensor: TensorType[
-        "batch", "seq_length"
-    ] = tokenizer.batch_encode_plus(
+    loss_tokens_tensor: TensorType["batch", "seq_length"] = tokenizer.batch_encode_plus(
         string_losses,
         return_tensors="pt",
         padding="max_length",
         truncation="longest_first",
         max_length=tokens_per_pure_reward,
     ).input_ids.to(device)
-    assert tokenizer.eos_token_id not in loss_tokens_tensor 
+    assert tokenizer.eos_token_id not in loss_tokens_tensor
     assert loss_tokens_tensor.shape[-1] == tokens_per_pure_reward
     return loss_tokens_tensor
- 
+
 
 def main():
     # define each class in default to check if they work
