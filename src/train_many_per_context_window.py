@@ -127,7 +127,7 @@ def train():
     aggregate_losses = []
     optimistic_loss = 0.5
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    optimizer = torch.optim.Adam(causal_lm.parameters(), lr=cfg.lr)
+    optimizer = torch.optim.SGD(causal_lm.parameters(), lr=cfg.lr)
 
     for batch_index, data in (
         tqdm(enumerate(dataloader), total=cfg.num_batches)
@@ -183,6 +183,9 @@ def train():
                 ),
                 target=rao_tensor_slice[:, 1:],
             )
+            if cfg.use_loss_difference:
+                obs_slice = torch.cat([obs for _, _, obs in rao_tensor_triples[i : i+ cfg.num_rao + 1]], dim=1)
+
             # Calculate the relative weights for each loss component
             with torch.no_grad():
                 sections = rao_tensor_loss.split(cfg.tok_p_rao, dim=-1)
