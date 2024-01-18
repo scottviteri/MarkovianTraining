@@ -117,20 +117,20 @@ def train_alternate(raogen, cfg):
                 next_action_loss = rao_tensor_loss[:, cfg.tok_p_obs:].mean()
             denominator = cfg.tok_p_action + cfg.tok_p_obs 
             if cfg.alternate_training == 1: denominator += cfg.tok_p_action 
-            action_weight = action_loss / denominator
-            observation_weight = observation_loss / denominator
-            if cfg.alternate_training == 1: next_action_weight = next_action_loss / denominator
+            action_weight = cfg.tok_p_action / denominator
+            observation_weight = cfg.tok_p_obs / denominator
+            if cfg.alternate_training == 1: next_action_weight = cfg.tok_p_action / denominator
             if cfg.alternate_training == 1:
-                weighted_action_loss = (action_loss + next_action_loss) * action_weight
+                weighted_action_loss = (action_loss + next_action_loss) / action_weight
             else:
-                weighted_action_loss = action_loss * action_weight
+                weighted_action_loss = action_loss / action_weight
  
             if cfg.wandb:
                wandb.log(
                     {
                         "Aggregate loss": aggregate_loss,
                         "Weighted action loss": weighted_action_loss,
-                        "Weighted observation loss": observation_loss * observation_weight,
+                        "Weighted observation loss": observation_loss / observation_weight,
                     }
                 )
 
@@ -371,10 +371,9 @@ def train():
                 wandb.log(
                     {
                         "Aggregate loss": aggregate_loss,
-                        "Weighted loss loss": loss_loss * loss_weight,
-                        "Weighted action loss": action_loss * action_weight,
-                        "Weighted observation loss": observation_loss
-                        * observation_weight,
+                        "Weighted loss loss": loss_loss / loss_weight,
+                        "Weighted action loss": action_loss / action_weight,
+                        "Weighted observation loss": observation_loss / observation_weight,
                     }
                 )
 
