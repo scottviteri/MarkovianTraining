@@ -60,15 +60,14 @@ class RaoGenerator:
         # self._reward_prefix_tensor, self._tokens_per_pure_action,
         # and self._action_prefix_tensor
         self.set_prefixes()
-        self.trunc_documents()
+        self._dataset = self.prepare_dataset()
 
     def gen_rao_tensor(
-        self, data, loss_fn, aggregate_losses, optimistic_loss: float, batch_index
+        self, input_ids, loss_fn, aggregate_losses, optimistic_loss: float, batch_index
     ):
         causal_lm = self._cfg.model
         causal_lm_tokenizer = self._cfg.tokenizer
 
-        input_ids = data["input_ids"][0]
         rao_tensor_triples = []
         default_tensor = torch.tensor(
             [[] for _ in range(self._cfg.batch_size)],
@@ -226,149 +225,19 @@ class RaoGenerator:
 
         return rao_tensor_triples, losses
 
-    def batch(self, iterable):
-        iterator = iter(iterable)
-        while True:
-            chunk = list(islice(iterator, self._cfg.batch_size))
-            if not chunk:
-                return
-            yield chunk
-
     @staticmethod
     def inject_noise(loss: torch.Tensor) -> torch.Tensor:
         return loss * (1.0 + torch.randn(1) * 0.05)
 
-    @staticmethod
-    def merge_dictionaries(d0, d1):
-        # return {k: d0[k] + d1[k] for k in d0.keys()}
-        return {
-            "input_ids": d0["input_ids"] + d1["input_ids"],
-            "text": d0["text"] + [d1["text"]],
-        }
-
-    @staticmethod
-    def intersperse_1D_tensors(tensor, interspersed_tensor, interval):
-        # Chunk the tensor into segments of size interval
-        chunks = tensor.chunk(len(tensor) // interval)
-        # Intersperse the interspersed_tensor with the chunks
-        interspersed = torch.cat(
-            [torch.cat([interspersed_tensor, chunk]) for chunk in chunks]
-        )
-        return interspersed
-
-    @staticmethod
-    def intersperse_lists(list1, list2, interval):
-        # Split list1 into chunks of size interval
-        chunks = [list1[i : i + interval] for i in range(0, len(list1), interval)]
-        # Intersperse list2 with the chunks
-        interspersed = [
-            item for sublist in zip([list2] * len(chunks), chunks) for item in sublist
-        ]
-        # Flatten the list
-        interspersed = [item for sublist in interspersed for item in sublist]
-        return interspersed
-
-    def cat_raw_data(self):
-        ds = iter(
-            load_dataset(
-                self._cfg.dataset_name,
-                self._cfg.task_name,
-                split="train",
-                streaming=True,
-            )
-        )
-        ds_text = (
-            map(lambda x: {"text": x["inputs"] + x["targets"][0]}, ds)
-            if self._cfg.dataset_name == "bigbench"
-            else ds
-        )
+    def prepare_dataset(self):
+        itr_ds = load_dataset(self._cfg.dataset_name, self._cfg.task_name, split="train", streaming=True)
         ds_tokenized = map(
-            lambda x: {
-                "text": x["text"],
-                "input_ids": self._cfg.tokenizer(x["text"])["input_ids"],
-            },
-            ds_text,
-        )
-        while 1:
-            obs_multiple_batches = {"text": [], "input_ids": []}
-            while (
-                len(obs_multiple_batches["input_ids"])
-                < self._cfg.batch_size * self._cfg.tok_p_doc
-            ):
-                data = next(ds_tokenized)
-                obs_multiple_batches = self.merge_dictionaries(
-                    obs_multiple_batches, data
-                )
-            # intersperse  self._observation_prefix_tensor (batch_size,  x) in obs_multiple_batches["input_ids"]  (batch_size, y) every self._tokens_per_pure_observation
-            prefixed_input_ids = self.intersperse_lists(
-                list1=obs_multiple_batches["input_ids"],
-                list2=self._observation_prefix_tensor[0].tolist(),
-                interval=self._tokens_per_pure_observation,
-            )
-            yield {
-                "input_ids": prefixed_input_ids[
-                    : self._cfg.batch_size * self._cfg.tok_p_doc
-                ],
-                "text": obs_multiple_batches["text"],
-            }
-
-    def to_batched_tensor(self, data_iterator):
-        return map(
-            lambda datapt: {
-                "input_ids": einops.rearrange(
-                    torch.tensor(datapt["input_ids"]),
-                    f"(batch_size obs_between_weight_updates tok_p_obs) -> batch_size obs_between_weight_updates tok_p_obs",
-                    batch_size=self._cfg.batch_size,
-                    tok_p_obs=self._cfg.tok_p_obs,
-                ),
-                "text": datapt["text"],
-            },
-            data_iterator,
-        )
-
-    def trunc_documents(self):
-        # Select the dataset based on the GPU memory
-        def concat_tensor(batch):
-            return {
-                "input_ids": torch.concat(
-                    [torch.tensor(b["input_ids"]) for b in batch], dim=-1
-                )
-            }
-
-        data_1D = self.cat_raw_data()
-        data_batched = self.to_batched_tensor(data_1D)
-        dataset = {"input_ids": [], "text": []}
-        for _ in range(self._cfg.num_batches):
-            data = next(data_batched)
-            dataset["input_ids"].append(data["input_ids"])
-            dataset["text"].append(data["text"])
-
-        data_set_features = Features(
-            {
-                "text": Value(dtype="string", id=None),
-                "input_ids": Array3D(
-                    shape=(
-                        self._cfg.batch_size,
-                        self._cfg.obs_between_weight_updates,
-                        self._cfg.tok_p_obs,
-                    ),
-                    dtype="int32",
-                ),
-            }
-        )
-
-        truncated_dataset = Dataset.from_dict(dataset, features=data_set_features)
-        # truncated_dataset = Dataset.from_dict(data_set, features=data_set_features)
-        truncated_dataset.set_format(type="torch", columns=["input_ids", "text"])
-
-        dataloader = DataLoader(
-            truncated_dataset,
-            # batch_size=self._cfg.batch_size,
-            drop_last=True,
-            shuffle=True,
-        )
-
-        self._dataloader = dataloader
+            lambda x: self._cfg.tokenizer(x["text"], return_tensors="pt")["input_ids"].to(self._cfg.device), 
+            itr_ds)
+        pure_obs = get_pure_obs(self._cfg.batch_size, self._tokens_per_pure_observation, self._cfg.device, ds_tokenized)
+        obs_ds = prepend_obs_tensor(self._observation_prefix_tensor, pure_obs)
+        return take(self._cfg.num_batches, 
+            group_obs_tensors(self._cfg.obs_between_weight_updates, obs_ds))    
 
     def set_prefixes(self):
         observation_prefix = "\nObservation: "
@@ -414,9 +283,35 @@ class RaoGenerator:
         self._observation_prefix_tensor = observation_prefix_tensor
 
     @property
-    def dataloader(self):
-        return self._dataloader
+    def dataset(self):
+        return self._dataset
 
     @property
     def tokens_per_pure_reward(self):
         return self._tokens_per_pure_reward
+
+
+def get_pure_obs(batch_size, tok_per_pure_obs, device, itr_ds):
+    batches = [torch.empty((1,0), dtype=torch.int64, device=device) 
+        for _ in range(batch_size)]
+    while 1:
+        for i in range(len(batches)):
+            while batches[i].shape[1] < tok_per_pure_obs:
+                batches[i] = torch.cat((batches[i], next(itr_ds)),dim=1)
+        for batch in batches: assert  batch.shape[-1] >= tok_per_pure_obs
+        out_tensor = torch.cat([batch[:,:tok_per_pure_obs] for batch in batches], dim=0)
+        for i in range(len(batches)):
+            batches[i] = batches[i][:, tok_per_pure_obs:]
+        yield out_tensor
+    return batches 
+
+def prepend_obs_tensor(obs_prefix_tensor, itr_ds):
+    return map(lambda x: torch.cat((obs_prefix_tensor, x), dim=1), itr_ds)
+
+def group_obs_tensors(obs_per_weight_update, itr_ds):
+    while 1:
+        grouped = torch.stack([next(itr_ds) for _ in range(obs_per_weight_update)])
+        yield einops.rearrange(grouped, 'buffer batch tokens -> batch buffer tokens')
+
+def take(num_batches, itr_ds): 
+    for _ in range(num_batches): yield next(itr_ds)

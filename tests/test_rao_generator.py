@@ -29,35 +29,11 @@ cfg = RaoConfig(
 
 rao_generator = RaoGenerator(cfg)  # Assuming RaoGenerator is the class containing the intersperse_lists method
 
-def test_intersperse_lists():
-    # Test case 1
-    list1 = [1, 2, 3, 4, 5, 6]
-    list2 = ['a']
-    interval = 2
-    result = rao_generator.intersperse_lists(list1, list2, interval)
-    assert result == ['a', 1, 2, 'a', 3, 4, 'a', 5, 6]
-
-    # Test case 2
-    list1 = [1, 2, 3, 4, 5, 6]
-    list2 = ['a', 'b']
-    interval = 3
-    result = rao_generator.intersperse_lists(list1, list2, interval)
-    assert result == ['a', 'b', 1, 2, 3, 'a', 'b', 4, 5, 6]
-
-    # Test case 3
-    list1 = [1, 2, 3, 4, 5, 6]
-    list2 = ['a', 'b', 'c']
-    interval = 1
-    result = rao_generator.intersperse_lists(list1, list2, interval)
-    assert result == ['a', 'b', 'c', 1, 'a', 'b', 'c', 2, 'a', 'b', 'c', 3, 'a', 'b', 'c', 4, 'a', 'b', 'c', 5, 'a', 'b', 'c', 6]
-
-test_intersperse_lists()
-
 def test_dataloader_starts_with_observation():
     rao_generator = RaoGenerator(cfg)  
-    dataloader = iter(rao_generator.dataloader)
+    dataset = rao_generator.dataset
     for _ in range(10):
-        data = next(dataloader)["input_ids"][0]
+        data = next(dataset)
         for i in range(data.shape[1]):
             decoded_data = cfg.tokenizer.batch_decode(data[:, i, :])
             for batch_string in decoded_data:
