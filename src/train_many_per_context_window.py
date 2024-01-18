@@ -75,8 +75,6 @@ def train_alternate(raogen, cfg):
 
     for batch_index, obs in (
         tqdm(enumerate(obs_ds), total=cfg.num_batches)
-        if cfg.num_batches
-        else tqdm(dataloader)
     ):
         if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:
             print(f"Saving trained_{cfg.model_name} \n\n")
@@ -136,6 +134,37 @@ def train_alternate(raogen, cfg):
     
     return 1
 
+def train_regular(raogen, cfg):
+    causal_lm = cfg.model
+    causal_lm_tokenizer = cfg.tokenizer
+    loss_fn = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(causal_lm.parameters(), lr=cfg.lr)
+    itr_ds = load_dataset(cfg.dataset_name, cfg.task_name, split="train", streaming=True)
+    ds_tokenized = map(
+            lambda x: causal_lm_tokenizer(x["text"], return_tensors="pt")["input_ids"].to(cfg.device), 
+            itr_ds)
+    pure_obs = get_pure_obs(cfg.batch_size, 
+        raogen._tokens_per_pure_observation, cfg.device, ds_tokenized)
+    obs_ds = take(cfg.num_batches, pure_obs)
+    # Initialize the list to store the losses
+    losses = []
+    for batch_index, obs in (tqdm(enumerate(obs_ds), total=cfg.num_batches)):
+        optimizer.zero_grad()
+        logits = causal_lm(obs).logits[:,:-1,:]
+        loss = loss_fn(
+            input=rearrange(
+                logits,
+                "batch seq_length vocab_size -> batch vocab_size seq_length",
+            ),
+            target=obs[:, 1:],
+        )
+        loss.backward()
+        optimizer.step()
+        losses.append(loss.item())
+        if cfg.wandb: wandb.log({"Loss": loss.item()})
+        if batch_index % cfg.interval_print == 0:
+            print(f"Batch {batch_index}, Loss: {loss.item()}")
+    return losses
 
 def train():
     run = None
@@ -170,7 +199,8 @@ def train():
         use_multirao_for_action_gen=config_params.get("use_multirao_for_action_gen"),
         use_rewards_to_go=config_params.get("use_rewards_to_go"),
         dataset_name=config_params.get("dataset_name"),
-        alternate_training = config_params.get("alternate_training")
+        alternate_training = config_params.get("alternate_training"),
+        regular_training = config_params.get("regular_training")
     )
     if run is not None:
         run_name = ""
@@ -208,6 +238,8 @@ def train():
     raogen = RaoGenerator(cfg=cfg)
     dataloader = raogen.dataset
 
+    if cfg.regular_training:
+        return train_regular(raogen, cfg)
     if cfg.alternate_training:
         return train_alternate(raogen, cfg)
         
