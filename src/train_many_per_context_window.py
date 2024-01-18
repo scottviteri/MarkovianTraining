@@ -116,24 +116,17 @@ def train_alternate(raogen, cfg):
             observation_loss = rao_tensor_loss[:, cfg.tok_p_action:cfg.tok_p_action+cfg.tok_p_obs].mean()
             if cfg.alternate_training == 1:
                 next_action_loss = rao_tensor_loss[:, cfg.tok_p_obs:].mean()
-            denominator = cfg.tok_p_action + cfg.tok_p_obs 
-            if cfg.alternate_training == 1: denominator += cfg.tok_p_action 
-            action_weight = cfg.tok_p_action / denominator
-            observation_weight = cfg.tok_p_obs / denominator
-            if cfg.alternate_training == 1: next_action_weight = cfg.tok_p_action / denominator
-            if cfg.alternate_training == 1:
-                weighted_action_loss = (action_loss + next_action_loss) / action_weight
-            else:
-                weighted_action_loss = action_loss / action_weight
  
             if cfg.wandb:
                wandb.log(
                     {
-                        "Aggregate loss": aggregate_loss,
-                        "Weighted action loss": weighted_action_loss,
-                        "Weighted observation loss": observation_loss / observation_weight,
+                        "Aggregate Loss": aggregate_loss,
+                        "Action Loss": action_loss,
+                        "Observation loss": observation_loss / observation_weight,
                     }
                 )
+                if cfg.alternate_training == 1: 
+                    wandb.log({"Next Action Loss": next_action_loss})
 
         #printing
         if batch_index % cfg.interval_print == 0:
@@ -183,7 +176,7 @@ def train_regular(raogen, cfg):
         loss.backward()
         optimizer.step()
         losses.append(loss.item())
-        if cfg.wandb: wandb.log({"Weighted observation loss": loss.item()})
+        if cfg.wandb: wandb.log({"Observation Loss": loss.item()})
         if batch_index % cfg.interval_print == 0:
             print(f"Batch {batch_index}, Loss: {loss.item()}")
     return losses
@@ -350,16 +343,6 @@ def train():
                 loss_loss = torch.cat(loss_loss, dim=-1).mean()
                 action_loss = torch.cat(action_loss, dim=-1).mean()
                 observation_loss = torch.cat(observation_loss, dim=-1).mean()
-                loss_weight = cfg.tok_p_loss / cfg.tok_p_rao
-                action_weight = cfg.tok_p_action / cfg.tok_p_rao
-                observation_weight = cfg.tok_p_obs / cfg.tok_p_rao
-                #if batch_index % cfg.interval_print == 0:
-                #    print(
-                #        f"Loss/Action/Observation loss: {loss_loss}/{action_loss}/{observation_loss}"
-                #    )
-                #    print(
-                #        f"Weighted Loss/Action/Observation loss: {loss_loss * loss_weight}/{action_loss * action_weight}/{observation_loss * observation_weight}"
-                #    )
             # Compute the mean of rao_tensor_loss and backward pass as usual
             aggregate_loss = rao_tensor_loss.mean()
             aggregate_losses.append(aggregate_loss.item())
@@ -371,10 +354,10 @@ def train():
             if wb_cfg:
                 wandb.log(
                     {
-                        "Aggregate loss": aggregate_loss,
-                        "Weighted loss loss": loss_loss / loss_weight,
-                        "Weighted action loss": action_loss / action_weight,
-                        "Weighted observation loss": observation_loss / observation_weight,
+                        "Aggregate Loss": aggregate_loss,
+                        "Loss Loss": loss_loss,
+                        "Action Loss": action_loss,
+                        "Observation Loss": observation_loss,
                     }
                 )
 
