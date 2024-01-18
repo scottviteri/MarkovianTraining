@@ -123,7 +123,7 @@ def train_alternate(raogen, cfg):
                 wandb.log({
                         "Aggregate Loss": aggregate_loss,
                         "Action Loss": action_loss,
-                        "Observation loss": observation_loss})
+                        "Observation Loss": observation_loss})
 
         #printing
         if batch_index % cfg.interval_print == 0:
@@ -238,9 +238,9 @@ def train():
                 run_name += f"mr{cfg.use_multirao_for_action_gen}_"
             if cfg.use_rewards_to_go: run_name += "rtg_"
         if cfg.regular_training:
-            run.name = f"{cfg.model_name[:4]}_regular_{cfg.training_ctxt_size}"
-        else:
-            run.name = run_name
+            run_name = f"REG_{cfg.model_name[:4]}_"
+            run_name += f"obs{cfg.tok_p_obs}"
+        run.name = run_name
 
     if not cfg.load_model:
         with open(f"saved_weights_and_losses/{cfg.model_name}", "w") as f:
