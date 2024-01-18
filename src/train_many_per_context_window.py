@@ -51,7 +51,8 @@ sweep_id = wandb.sweep(
 
 def train_alternate(raogen, cfg):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    causal_lm, causal_lm_tokenizer = cfg.model, cfg.tokenizer
+    causal_lm = cfg.model
+    causal_lm_tokenizer = cfg.tokenizer
     optimizer = torch.optim.SGD(causal_lm.parameters(), lr=cfg.lr)
 
     training_ctxt_size = cfg.training_ctxt_size if cfg.training_ctxt_size else cfg.ctxt_size
