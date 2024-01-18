@@ -63,7 +63,7 @@ class RaoGenerator:
         self._dataset = self.prepare_dataset()
 
     def gen_rao_tensor(
-        self, input_ids, loss_fn, aggregate_losses, optimistic_loss: float, batch_index
+        self, input_ids, loss_fn, aggregate_losses, optimistic_loss: float, prev_obs, batch_index
     ):
         causal_lm = self._cfg.model
         causal_lm_tokenizer = self._cfg.tokenizer
@@ -132,14 +132,6 @@ class RaoGenerator:
                 :, -self._cfg.tok_p_action :
             ]
 
-            if observation_index > 0:
-                prev_obs: TensorType["batch", "seq_length"] = input_ids[
-                    :, observation_index - 1, :
-                ]
-            else:
-                prev_obs: TensorType["batch", "seq_length"] = torch.full_like(
-                    input_ids[:, 0, :], causal_lm_tokenizer.pad_token_id
-                )
             true_obs: TensorType["batch", "seq_length"] = input_ids[
                 :, observation_index, :
             ].to(self._cfg.device)
@@ -223,7 +215,7 @@ class RaoGenerator:
                 true_obs,
             )
 
-        return rao_tensor_triples, losses
+        return rao_tensor_triples, losses, true_obs 
 
     @staticmethod
     def inject_noise(loss: torch.Tensor) -> torch.Tensor:
