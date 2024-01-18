@@ -38,8 +38,9 @@ from einops import rearrange
 import wandb
 from src.rao_tools import RaoConfig, condense_triples
 from src.rao_tools import compute_cumulative_averages, create_loss_tokens_tensor
-from src.rao_generator import RaoGenerator
+from src.rao_generator import RaoGenerator, get_pure_obs, take, prepend_obs_tensor
 import json
+from datasets import load_dataset
 
 with open("sweep_config.json") as f:
     sweep_config = json.load(f)
@@ -47,6 +48,86 @@ with open("sweep_config.json") as f:
 sweep_id = wandb.sweep(
     sweep_config, project="collaborative-training-many-per-context-window"
 )
+
+def train_alternate(raogen, cfg):
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    causal_lm, causal_lm_tokenizer = cfg.model, cfg.tokenizer
+    optimizer = torch.optim.SGD(causal_lm.parameters(), lr=cfg.lr)
+
+    training_ctxt_size = cfg.training_ctxt_size if cfg.training_ctxt_size else cfg.ctxt_size
+    tok_p_action = int(training_ctxt_size / (2 + cfg.obs_to_action_ratio))
+    tok_p_obs = int(cfg.obs_to_action_ratio * tok_p_action)
+    tok_p_pure_action = tok_p_action - raogen._action_prefix_tensor.shape[1]
+    tok_p_pure_obs = tok_p_obs - raogen._observation_prefix_tensor.shape[1]
+    assert tok_p_pure_action > 0 and tok_p_pure_obs > 0
+
+    itr_ds = load_dataset(cfg.dataset_name, cfg.task_name, split="train", streaming=True)
+    ds_tokenized = map(
+            lambda x: cfg.tokenizer(x["text"], return_tensors="pt")["input_ids"].to(cfg.device), 
+            itr_ds)
+    pure_obs = get_pure_obs(cfg.batch_size, tok_p_pure_obs, cfg.device, ds_tokenized)
+    obs_ds = take(cfg.num_batches, prepend_obs_tensor(raogen._observation_prefix_tensor, pure_obs))
+    action = torch.cat((raogen._action_prefix_tensor, 
+        torch.full((cfg.batch_size, tok_p_pure_action), fill_value=cfg.tokenizer.pad_token_id, 
+            dtype=torch.int64, device=cfg.device)), dim=1)
+    aggregate_losses = []
+
+    for batch_index, obs in (
+        tqdm(enumerate(obs_ds), total=cfg.num_batches)
+        if cfg.num_batches
+        else tqdm(dataloader)
+    ):
+        if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:
+            print(f"Saving trained_{cfg.model_name} \n\n")
+            causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
+            causal_lm.save_pretrained(cfg.path_2_model)
+
+        with torch.no_grad():
+            next_action = causal_lm.generate(
+                inputs=torch.cat([action, obs, raogen._action_prefix_tensor], dim=1),
+                output_scores=True,
+                do_sample=True,
+                num_beams=cfg.num_beams,
+                min_new_tokens=tok_p_pure_action,
+                max_new_tokens=tok_p_pure_action,
+                pad_token_id=causal_lm_tokenizer.eos_token_id,
+            )[:, -cfg.tok_p_action:]
+
+        optimizer.zero_grad()
+        rao_tensor_logits = causal_lm(torch.cat([action, obs, next_action],dim=1)).logits[:,:-1,:]
+        rao_tensor_loss = loss_fn(
+            input=rearrange(
+                rao_tensor_logits,
+                "batch seq_length vocab_size -> batch vocab_size seq_length",
+            ),
+            target=torch.cat([action, obs, next_action], dim=1)[:, 1:],
+        )
+
+        aggregate_loss = rao_tensor_loss.mean()
+        aggregate_losses.append(aggregate_loss.item())
+        aggregate_loss.backward()
+        optimizer.step()
+
+        with torch.no_grad():
+            action_loss = rao_tensor_loss[:, :cfg.tok_p_action].mean()
+            observation_loss = rao_tensor_loss[:, cfg.tok_p_action:cfg.tok_p_obs].mean()
+            next_action_loss = rao_tensor_loss[:, cfg.tok_p_obs:].mean()
+            if cfg.wandb:
+                wandb.log({"aggregate_loss": aggregate_loss, "action_loss": action_loss, 
+                    "observation_loss": observation_loss, "next_action_loss": next_action_loss})
+        
+        #printing
+        print("Batch", batch_index)
+        print("Aggregate loss: ", aggregate_loss)
+        print("Action/Observation/NextAction loss: ", f"{action_loss}/{observation_loss}/{next_action_loss}")
+        print("Action: ", repr(causal_lm_tokenizer.decode(action[0])))
+        print("Observation: ", repr(causal_lm_tokenizer.decode(obs[0])))
+        print("Next action: ", repr(causal_lm_tokenizer.decode(next_action[0])))
+        print("______________________________________________________\n")
+
+        action = next_action
+    
+    return 1
 
 
 def train():
@@ -82,34 +163,31 @@ def train():
         use_multirao_for_action_gen=config_params.get("use_multirao_for_action_gen"),
         use_rewards_to_go=config_params.get("use_rewards_to_go"),
         dataset_name=config_params.get("dataset_name"),
+        alternate_training = config_params.get("alternate_training")
     )
     if run is not None:
         run_name = ""
+        if cfg.alternate_training: run_name += "ALT_"
         run_name += f"{cfg.model_name[:4]}_"
-        if cfg.lr != 1e-4:
-            run_name += f"lr{cfg.lr}_"
+        if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
         if cfg.num_rao != 0:
             run_name += f"nr{cfg.num_rao}_"
         if cfg.batch_size != 1:
             run_name += f"bs{cfg.batch_size}_"
         run_name += f"nb{cfg.num_batches}_"
-        run_name += f"obwu{cfg.obs_between_weight_updates}_"
         if cfg.obs_to_action_ratio != 1:
             run_name += f"o:a={cfg.obs_to_action_ratio}:1_"
-        if cfg.load_model:
-            run_name += f"lm_"
-        if cfg.do_lora:
-            run_name += "lora_"
+        if cfg.load_model: run_name += f"lm_"
+        if cfg.do_lora: run_name += "lora_"
         run_name += f"rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
-        if cfg.use_loss_difference:
-            run_name += "ld_"
         if cfg.training_ctxt_size:
             run_name += f"ics{cfg.training_ctxt_size}_"
-        if cfg.use_multirao_for_action_gen:
-            run_name += f"mr{cfg.use_multirao_for_action_gen}_"
-        if cfg.use_rewards_to_go:
-            run_name += "rtg_"
-        run_name += f"{cfg.dataset_name[:3]}"
+        if not cfg.alternate_training:
+            run_name += f"obwu{cfg.obs_between_weight_updates}_"
+            if cfg.use_loss_difference: run_name += "ld_"
+            if cfg.use_multirao_for_action_gen:
+                run_name += f"mr{cfg.use_multirao_for_action_gen}_"
+            if cfg.use_rewards_to_go: run_name += "rtg_"
         run.name = run_name
 
     if not cfg.load_model:
@@ -123,12 +201,17 @@ def train():
     raogen = RaoGenerator(cfg=cfg)
     dataloader = raogen.dataset
 
+    if cfg.alternate_training:
+        return train_alternate(raogen, cfg)
+        
     average_losses = []
     aggregate_losses = []
     optimistic_loss = 0.5
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     optimizer = torch.optim.SGD(causal_lm.parameters(), lr=cfg.lr)
-    prev_obs = torch.full((cfg.batch_size, cfg.tok_p_obs), fill_value=cfg.tokenizer.pad_token_id, dtype=torch.int64, device=cfg.device)
+    prev_obs = torch.cat((raogen._observation_prefix_tensor, 
+        torch.full((cfg.batch_size, raogen._tokens_per_pure_observation), fill_value=cfg.tokenizer.pad_token_id, 
+            dtype=torch.int64, device=cfg.device)), dim=1)
 
     for batch_index, input_ids in (
         tqdm(enumerate(dataloader), total=cfg.num_batches)
@@ -240,3 +323,4 @@ if sweep_config["parameters"]["wandb"]["values"][0]:
     wandb.agent(sweep_id, function=train)
 else:
     train()
+

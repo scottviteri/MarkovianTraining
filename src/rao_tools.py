@@ -56,6 +56,7 @@ class RaoConfig:
         use_loss_difference: bool = True,
         use_multirao_for_action_gen: bool = False,
         use_rewards_to_go: bool = False,
+        alternate_training: bool = False
     ):
         self._model_name = model_name
         self._lr = lr
@@ -76,6 +77,7 @@ class RaoConfig:
         self._use_rewards_to_go = use_rewards_to_go
         self._training_ctxt_size = training_ctxt_size
         self._dataset_name = dataset_name
+        self._alternate_training = alternate_training 
 
         self._device = torch.device("cuda" if torch.cuda.is_available() else "mps")
         self._task_name = self._set_task_name(task_name)
@@ -135,7 +137,6 @@ class RaoConfig:
             if self._load_model:
                 causal_lm = AutoModelForCausalLM.from_pretrained(
                     self._path_2_model,
-                    # model_dict[self._model_name],
                     torch_dtype=torch.float16,
                     use_flash_attention_2=self._model_name == "mistral"
                     or self._model_name == "llama",
@@ -387,6 +388,10 @@ class RaoConfig:
     @property
     def tokenizer(self):
         return self._tokenizer
+    
+    @property
+    def alternate_training(self):
+        return self._alternate_training
 
     def __repr__(self):
         return (
