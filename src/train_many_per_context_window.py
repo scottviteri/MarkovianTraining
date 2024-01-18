@@ -110,7 +110,7 @@ def train_alternate(raogen, cfg):
 
         with torch.no_grad():
             action_loss = rao_tensor_loss[:, :cfg.tok_p_action].mean()
-            observation_loss = rao_tensor_loss[:, cfg.tok_p_action:cfg.tok_p_obs].mean()
+            observation_loss = rao_tensor_loss[:, cfg.tok_p_action:cfg.tok_p_action+cfg.tok_p_obs].mean()
             next_action_loss = rao_tensor_loss[:, cfg.tok_p_obs:].mean()
             if cfg.wandb:
                 wandb.log({"aggregate_loss": aggregate_loss, "action_loss": action_loss, 
