@@ -128,6 +128,7 @@ def train():
     optimistic_loss = 0.5
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     optimizer = torch.optim.SGD(causal_lm.parameters(), lr=cfg.lr)
+    prev_obs = torch.full((cfg.batch_size, cfg.tok_p_obs), fill_value=cfg.tokenizer.pad_token_id, dtype=torch.int64, device=cfg.device)
 
     for batch_index, input_ids in (
         tqdm(enumerate(dataloader), total=cfg.num_batches)
@@ -142,11 +143,12 @@ def train():
             causal_lm.save_pretrained(cfg.path_2_model)
 
         with torch.no_grad():
-            rao_tensor_optimistic_triples, new_losses = raogen.gen_rao_tensor(
+            rao_tensor_optimistic_triples, new_losses, prev_obs = raogen.gen_rao_tensor(
                 input_ids=input_ids,
                 loss_fn=loss_fn,
                 aggregate_losses=aggregate_losses,
                 optimistic_loss=optimistic_loss,
+                prev_obs=prev_obs,
                 batch_index=batch_index,
             )
 
