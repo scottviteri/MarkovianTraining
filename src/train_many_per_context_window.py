@@ -71,6 +71,7 @@ def train_alternate(raogen, cfg):
         torch.full((cfg.batch_size, tok_p_pure_action), fill_value=cfg.tokenizer.pad_token_id, 
             dtype=torch.int64, device=cfg.device)), dim=1)
     aggregate_losses = []
+    prev_obs = None
 
     for batch_index, obs in (
         tqdm(enumerate(obs_ds), total=cfg.num_batches)
@@ -94,7 +95,10 @@ def train_alternate(raogen, cfg):
             )[:, -cfg.tok_p_action:]
 
         optimizer.zero_grad()
-        rao_tensor_logits = causal_lm(torch.cat([action, obs, next_action],dim=1)).logits[:,:-1,:]
+        if cfg.alternate_training == 2:
+            rao_tensor_logits = causal_lm(torch.cat([action, obs],dim=1)).logits[:,:-1,:]
+        else:
+            rao_tensor_logits = causal_lm(torch.cat([action, obs, next_action],dim=1)).logits[:,:-1,:]
         rao_tensor_loss = loss_fn(
             input=rearrange(
                 rao_tensor_logits,
@@ -121,12 +125,14 @@ def train_alternate(raogen, cfg):
             print("Batch", batch_index)
             print("Aggregate loss: ", aggregate_loss)
             print("Action/Observation/NextAction loss: ", f"{action_loss}/{observation_loss}/{next_action_loss}")
+            if prev_obs: print("Prev Observation: ", repr(causal_lm_tokenizer.decode(prev_obs[0])))
             print("Action: ", repr(causal_lm_tokenizer.decode(action[0])))
             print("Observation: ", repr(causal_lm_tokenizer.decode(obs[0])))
             print("Next action: ", repr(causal_lm_tokenizer.decode(next_action[0])))
             print("______________________________________________________\n")
 
         action = next_action
+        prev_obs = obs
     
     return 1
 
@@ -168,7 +174,7 @@ def train():
     )
     if run is not None:
         run_name = ""
-        if cfg.alternate_training: run_name += "ALT_"
+        if cfg.alternate_training: run_name += f"ALT{cfg.alternate_training}_"
         run_name += f"{cfg.model_name[:4]}_"
         if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
         if cfg.num_rao != 0:

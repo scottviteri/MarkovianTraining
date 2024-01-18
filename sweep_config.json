@@ -18,7 +18,7 @@
         "use_multirao_for_action_gen": {"values": [false]},
         "use_rewards_to_go": {"values": [false]},
     	"dataset_name": {"values": ["wikipedia"]},
-        "alternate_training": {"values": [true]}
+        "alternate_training": {"values": [1]}
     }
 }
 
