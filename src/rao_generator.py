@@ -214,6 +214,7 @@ class RaoGenerator:
                 predicted_obs,
                 true_obs,
             )
+            prev_obs = true_obs
 
         return rao_tensor_triples, losses, true_obs 
 
