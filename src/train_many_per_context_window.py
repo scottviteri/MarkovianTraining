@@ -95,16 +95,14 @@ def train_alternate(raogen, cfg):
             )[:, -cfg.tok_p_action:]
 
         optimizer.zero_grad()
-        if cfg.alternate_training == 2:
-            rao_tensor_logits = causal_lm(torch.cat([action, obs],dim=1)).logits[:,:-1,:]
-        else:
-            rao_tensor_logits = causal_lm(torch.cat([action, obs, next_action],dim=1)).logits[:,:-1,:]
+        input_sequence = [action, obs, next_action] if cfg.alternate_training == 1 else [action, obs]
+        rao_tensor_logits = causal_lm(torch.cat(input_sequence, dim=1)).logits[:,:-1,:]
         rao_tensor_loss = loss_fn(
             input=rearrange(
                 rao_tensor_logits,
                 "batch seq_length vocab_size -> batch vocab_size seq_length",
             ),
-            target=torch.cat([action, obs, next_action], dim=1)[:, 1:],
+            target=torch.cat(input_sequence, dim=1)[:, 1:],
         )
 
         aggregate_loss = rao_tensor_loss.mean()
@@ -115,17 +113,23 @@ def train_alternate(raogen, cfg):
         with torch.no_grad():
             action_loss = rao_tensor_loss[:, :cfg.tok_p_action].mean()
             observation_loss = rao_tensor_loss[:, cfg.tok_p_action:cfg.tok_p_action+cfg.tok_p_obs].mean()
-            next_action_loss = rao_tensor_loss[:, cfg.tok_p_obs:].mean()
-            denominator = action_loss + observation_loss + next_action_loss
+            if cfg.alternate_training == 1:
+                next_action_loss = rao_tensor_loss[:, cfg.tok_p_obs:].mean()
+            denominator = cfg.tok_p_action + cfg.tok_p_obs 
+            if cfg.alternate_training == 1: denominator += cfg.tok_p_action 
             action_weight = action_loss / denominator
             observation_weight = observation_loss / denominator
-            next_action_weight = next_action_loss / denominator
-
+            if cfg.alternate_training == 1: next_action_weight = next_action_loss / denominator
+            if cfg.alternate_training == 1:
+                weighted_action_loss = (action_loss + next_action_loss) * action_weight
+            else:
+                weighted_action_loss = action_loss * action_weight
+ 
             if cfg.wandb:
-                wandb.log(
+               wandb.log(
                     {
                         "Aggregate loss": aggregate_loss,
-                        "Weighted action loss": (action_loss + next_action_loss) * action_weight,
+                        "Weighted action loss": weighted_action_loss,
                         "Weighted observation loss": observation_loss * observation_weight,
                     }
                 )
@@ -135,7 +139,10 @@ def train_alternate(raogen, cfg):
             with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
                 multi_print(f"Batch {batch_index}", f)
                 multi_print(f"Aggregate loss: {aggregate_loss}", f)
-                multi_print(f"Action/Observation/NextAction loss: {action_loss}/{observation_loss}/{next_action_loss}", f)
+                if cfg.alternate_training == 1:
+                    multi_print(f"Action/Observation/NextAction loss: {action_loss}/{observation_loss}/{next_action_loss}", f)
+                else:
+                    multi_print(f"Action/Observation loss: {action_loss}/{observation_loss}", f)
                 if prev_obs is not None: 
                     multi_print(f"Prev Observation: {repr(causal_lm_tokenizer.decode(prev_obs[0]))}", f)
                 multi_print(f"Action: {repr(causal_lm_tokenizer.decode(action[0]))}", f)
