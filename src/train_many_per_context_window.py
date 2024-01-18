@@ -36,7 +36,7 @@ import numpy as np
 from tqdm import tqdm
 from einops import rearrange
 import wandb
-from src.rao_tools import RaoConfig, condense_triples
+from src.rao_tools import RaoConfig, condense_triples, multi_print
 from src.rao_tools import compute_cumulative_averages, create_loss_tokens_tensor
 from src.rao_generator import RaoGenerator, get_pure_obs, take, prepend_obs_tensor
 import json
@@ -72,6 +72,8 @@ def train_alternate(raogen, cfg):
             dtype=torch.int64, device=cfg.device)), dim=1)
     aggregate_losses = []
     prev_obs = None
+    with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
+        f.write("")
 
     for batch_index, obs in (
         tqdm(enumerate(obs_ds), total=cfg.num_batches)
@@ -120,14 +122,16 @@ def train_alternate(raogen, cfg):
         
         #printing
         if batch_index % cfg.interval_print == 0:
-            print("Batch", batch_index)
-            print("Aggregate loss: ", aggregate_loss)
-            print("Action/Observation/NextAction loss: ", f"{action_loss}/{observation_loss}/{next_action_loss}")
-            if prev_obs: print("Prev Observation: ", repr(causal_lm_tokenizer.decode(prev_obs[0])))
-            print("Action: ", repr(causal_lm_tokenizer.decode(action[0])))
-            print("Observation: ", repr(causal_lm_tokenizer.decode(obs[0])))
-            print("Next action: ", repr(causal_lm_tokenizer.decode(next_action[0])))
-            print("______________________________________________________\n")
+            with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
+                multi_print(f"Batch {batch_index}", f)
+                multi_print(f"Aggregate loss: {aggregate_loss}", f)
+                multi_print(f"Action/Observation/NextAction loss: {action_loss}/{observation_loss}/{next_action_loss}", f)
+                if prev_obs is not None: 
+                    multi_print(f"Prev Observation: {repr(causal_lm_tokenizer.decode(prev_obs[0]))}", f)
+                multi_print(f"Action: {repr(causal_lm_tokenizer.decode(action[0]))}", f)
+                multi_print(f"Observation: {repr(causal_lm_tokenizer.decode(obs[0]))}", f)
+                multi_print(f"Next action: {repr(causal_lm_tokenizer.decode(next_action[0]))}", f)
+                multi_print("______________________________________________________", f)
 
         action = next_action
         prev_obs = obs

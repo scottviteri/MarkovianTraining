@@ -407,6 +407,9 @@ class RaoConfig:
         )
 
 
+def multi_print(string, f):
+    print(string); print(string, file=f)
+
 def log_and_print_info(
     cfg,
     batch_index,
@@ -420,31 +423,16 @@ def log_and_print_info(
 ):
     tokenizer = cfg.tokenizer
     if batch_index % cfg.interval_print == 0:
-        print(f"\nBatch Number {batch_index}")
-        print("Loss: ", f"{batch_loss[0][0]:.3f}")
-        if aggregate_losses:
-            print("Aggregate Loss: ", aggregate_losses[-1])
-        print("Previous Obs:", repr(tokenizer.batch_decode(prev_obs)[0]))
-        print("Action: ", repr(tokenizer.batch_decode(action)[0]))
-        print(
-            "Predicted Obs: ",
-            repr(tokenizer.batch_decode(predicted_obs)[0].encode("utf-8")),
-        )
-        print("True Obs:", repr(tokenizer.batch_decode(true_obs)[0]))
-        print("___________________________________________")
-    with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
-        print(f"\nBatch Number {batch_index}", file=f)
-        print("Loss: ", f"{batch_loss[0][0]:.3f}", file=f)
-        if aggregate_losses:
-            print("Aggregate Loss: ", aggregate_losses[-1], file=f)
-        print("Previous Obs:", repr(tokenizer.batch_decode(prev_obs)[0]), file=f)
-        print("Action: ", repr(tokenizer.batch_decode(action)[0]), file=f)
-        print(
-            "Predicted Obs: ",
-            repr(tokenizer.batch_decode(predicted_obs)[0].encode("utf-8")),
-            file=f,
-        )
-        print("True Obs:", repr(tokenizer.batch_decode(true_obs)[0]), file=f)
+        with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
+            multi_print(f"\nBatch Number {batch_index}", f)
+            multi_print(f"Loss: {batch_loss[0][0]:.3f}", f)
+            if aggregate_losses:
+                multi_print(f"Aggregate Loss: {aggregate_losses[-1]}", f)
+            multi_print(f"Previous Obs: {repr(tokenizer.batch_decode(prev_obs)[0])}", f)
+            multi_print(f"Action: {repr(tokenizer.batch_decode(action)[0])}", f)
+            multi_print(f"Predicted Obs: {repr(tokenizer.batch_decode(predicted_obs)[0])}", f)
+            multi_print(f"True Obs: {repr(tokenizer.batch_decode(true_obs)[0])}", f)
+            multi_print("___________________________________________", f)
         if cfg.wandb:
             wandb.log(
                 {
