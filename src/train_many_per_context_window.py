@@ -118,15 +118,12 @@ def train_alternate(raogen, cfg):
                 next_action_loss = rao_tensor_loss[:, cfg.tok_p_obs:].mean()
  
             if cfg.wandb:
-               wandb.log(
-                    {
-                        "Aggregate Loss": aggregate_loss,
-                        "Action Loss": action_loss,
-                        "Observation loss": observation_loss / observation_weight,
-                    }
-                )
                 if cfg.alternate_training == 1: 
                     wandb.log({"Next Action Loss": next_action_loss})
+                wandb.log({
+                        "Aggregate Loss": aggregate_loss,
+                        "Action Loss": action_loss,
+                        "Observation loss": observation_loss})
 
         #printing
         if batch_index % cfg.interval_print == 0:
