@@ -117,13 +117,14 @@ def train_alternate(raogen, cfg):
                     "observation_loss": observation_loss, "next_action_loss": next_action_loss})
         
         #printing
-        print("Batch", batch_index)
-        print("Aggregate loss: ", aggregate_loss)
-        print("Action/Observation/NextAction loss: ", f"{action_loss}/{observation_loss}/{next_action_loss}")
-        print("Action: ", repr(causal_lm_tokenizer.decode(action[0])))
-        print("Observation: ", repr(causal_lm_tokenizer.decode(obs[0])))
-        print("Next action: ", repr(causal_lm_tokenizer.decode(next_action[0])))
-        print("______________________________________________________\n")
+        if batch_index % cfg.interval_print == 0:
+            print("Batch", batch_index)
+            print("Aggregate loss: ", aggregate_loss)
+            print("Action/Observation/NextAction loss: ", f"{action_loss}/{observation_loss}/{next_action_loss}")
+            print("Action: ", repr(causal_lm_tokenizer.decode(action[0])))
+            print("Observation: ", repr(causal_lm_tokenizer.decode(obs[0])))
+            print("Next action: ", repr(causal_lm_tokenizer.decode(next_action[0])))
+            print("______________________________________________________\n")
 
         action = next_action
     
