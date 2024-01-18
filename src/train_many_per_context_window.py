@@ -121,7 +121,7 @@ def train():
     print(cfg.model_name)
 
     raogen = RaoGenerator(cfg=cfg)
-    dataloader = raogen.dataloader
+    dataloader = raogen.dataset
 
     average_losses = []
     aggregate_losses = []
@@ -129,7 +129,7 @@ def train():
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     optimizer = torch.optim.SGD(causal_lm.parameters(), lr=cfg.lr)
 
-    for batch_index, data in (
+    for batch_index, input_ids in (
         tqdm(enumerate(dataloader), total=cfg.num_batches)
         if cfg.num_batches
         else tqdm(dataloader)
@@ -143,7 +143,7 @@ def train():
 
         with torch.no_grad():
             rao_tensor_optimistic_triples, new_losses = raogen.gen_rao_tensor(
-                data=data,
+                input_ids=input_ids,
                 loss_fn=loss_fn,
                 aggregate_losses=aggregate_losses,
                 optimistic_loss=optimistic_loss,
