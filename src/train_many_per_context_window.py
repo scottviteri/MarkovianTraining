@@ -229,7 +229,10 @@ def train():
             if cfg.use_multirao_for_action_gen:
                 run_name += f"mr{cfg.use_multirao_for_action_gen}_"
             if cfg.use_rewards_to_go: run_name += "rtg_"
-        run.name = run_name
+        if cfg.regular_training:
+            run.name = f"{cfg.model_name[:4]}_regular_{cfg.training_ctxt_size}"
+        else:
+            run.name = run_name
 
     if not cfg.load_model:
         with open(f"saved_weights_and_losses/{cfg.model_name}", "w") as f:

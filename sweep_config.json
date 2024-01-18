@@ -10,7 +10,7 @@
         "obs_to_action_ratio": {"values": [1]},
         "interval_save_weights": {"values": [5]},
         "interval_print": {"values": [2]},
-        "wandb": {"values": [false]},
+        "wandb": {"values": [true]},
         "load_model": {"values": [false]},
         "do_lora": {"values": [false]},
         "use_loss_difference": {"values": [false]},
@@ -19,7 +19,7 @@
         "use_rewards_to_go": {"values": [false]},
     	"dataset_name": {"values": ["wikipedia"]},
         "alternate_training": {"values": [false]},
-        "regular_training": {"values": [false]}
+        "regular_training": {"values": [true]}
     }
 }
 
