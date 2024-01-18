@@ -116,10 +116,20 @@ def train_alternate(raogen, cfg):
             action_loss = rao_tensor_loss[:, :cfg.tok_p_action].mean()
             observation_loss = rao_tensor_loss[:, cfg.tok_p_action:cfg.tok_p_action+cfg.tok_p_obs].mean()
             next_action_loss = rao_tensor_loss[:, cfg.tok_p_obs:].mean()
+            denominator = action_loss + observation_loss + next_action_loss
+            action_weight = action_loss / denominator
+            observation_weight = observation_loss / denominator
+            next_action_weight = next_action_loss / denominator
+
             if cfg.wandb:
-                wandb.log({"aggregate_loss": aggregate_loss, "action_loss": action_loss, 
-                    "observation_loss": observation_loss, "next_action_loss": next_action_loss})
-        
+                wandb.log(
+                    {
+                        "Aggregate loss": aggregate_loss,
+                        "Weighted action loss": (action_loss + next_action_loss) * action_weight,
+                        "Weighted observation loss": observation_loss * observation_weight,
+                    }
+                )
+
         #printing
         if batch_index % cfg.interval_print == 0:
             with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
@@ -165,7 +175,7 @@ def train_regular(raogen, cfg):
         loss.backward()
         optimizer.step()
         losses.append(loss.item())
-        if cfg.wandb: wandb.log({"observation_loss": loss.item()})
+        if cfg.wandb: wandb.log({"Weighted observation loss": loss.item()})
         if batch_index % cfg.interval_print == 0:
             print(f"Batch {batch_index}, Loss: {loss.item()}")
     return losses
