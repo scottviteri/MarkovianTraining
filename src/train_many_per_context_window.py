@@ -165,7 +165,7 @@ def train_regular(raogen, cfg):
         loss.backward()
         optimizer.step()
         losses.append(loss.item())
-        if cfg.wandb: wandb.log({"Loss": loss.item()})
+        if cfg.wandb: wandb.log({"observation_loss": loss.item()})
         if batch_index % cfg.interval_print == 0:
             print(f"Batch {batch_index}, Loss: {loss.item()}")
     return losses
