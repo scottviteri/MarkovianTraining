@@ -455,7 +455,7 @@ def evaluate_via_gpt(model_name, num_batches, use_wandb, gpt_eval):
         a = throttle(a)
         a = map(openai_rating, a)
         a = map(wandb_log, a)
-        print_all(a)
+        print_all(enumerate(a))
 
     client = OpenAI()
     with open(f"saved_weights_and_losses/{model_name}_log.txt", "r") as file:
