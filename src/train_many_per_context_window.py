@@ -194,17 +194,25 @@ def train():
             for param in sweep_config["parameters"]
         }
 
+    model_name = config_params.get("model_name")
+    num_batches = config_params.get("num_batches")
+    use_wandb = config_params.get("wandb")
+    gpt_eval = config_params.get("gpt_eval")
+
+    if gpt_eval:
+        return evaluate_via_gpt(model_name, num_batches, use_wandb, gpt_eval)
+
     cfg = RaoConfig(
-        model_name=config_params.get("model_name"),
+        model_name=model_name,
         lr=config_params.get("lr"),
         num_rao=config_params.get("num_rao"),
         batch_size=config_params.get("batch_size"),
-        num_batches=config_params.get("num_batches"),
+        num_batches=num_batches,
         obs_between_weight_updates=config_params.get("obs_between_weight_updates"),
         obs_to_action_ratio=config_params.get("obs_to_action_ratio"),
         interval_save_weights=config_params.get("interval_save_weights"),
         interval_print=config_params.get("interval_print"),
-        wandb=config_params.get("wandb"),
+        wandb=use_wandb,
         load_model=config_params.get("load_model"),
         do_lora=config_params.get("do_lora"),
         use_loss_difference=config_params.get("use_loss_difference"),
@@ -214,7 +222,7 @@ def train():
         dataset_name=config_params.get("dataset_name"),
         alternate_training = config_params.get("alternate_training"),
         regular_training = config_params.get("regular_training"),
-        gpt_eval = config_params.get("gpt_eval")
+        gpt_eval = gpt_eval
 
     )
     if run is not None:
@@ -247,6 +255,7 @@ def train():
             run_name = f"gpt_eval_{cfg.gpt_eval}_{cfg.model_name[:4]}"
         run.name = run_name
 
+
     if not cfg.load_model:
         with open(f"saved_weights_and_losses/{cfg.model_name}", "w") as f:
             print("")
@@ -258,8 +267,6 @@ def train():
     raogen = RaoGenerator(cfg=cfg)
     dataloader = raogen.dataset
 
-    if cfg.gpt_eval:
-        return evaluate_via_gpt( cfg)
     if cfg.regular_training:
         return train_regular(raogen, cfg)
     if cfg.alternate_training:
@@ -368,15 +375,12 @@ def train():
     if wb_cfg:
         run.finish()
 
-def evaluate_via_gpt(cfg):
-    with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "r") as file:
-        log_itr = iter(file.readlines())
-
+def evaluate_via_gpt(model_name, num_batches, use_wandb, gpt_eval):
     def log_filter(line):
         if line == "\n": return False
         if line.startswith("Batch"): return True
         if line.startswith("Action:"): return True
-        if line.startswith("Obsrvation:"): return True
+        if line.startswith("Observation:"): return True
         if line.startswith("True Obs:"): return True
         return False
 
@@ -406,7 +410,7 @@ def evaluate_via_gpt(cfg):
             yield d
 
     def throttle(itr):
-        thresholds = torch.linspace(0, cfg.num_batches, cfg.gpt_eval).tolist()
+        thresholds = torch.linspace(0, num_batches, gpt_eval).tolist()
         current_index = -1
         for t in thresholds:
             #print("threshold: ",t)
@@ -415,7 +419,6 @@ def evaluate_via_gpt(cfg):
                 current_index = int(d["Batch"])
             yield d
 
-    client = OpenAI()
     def openai_rating(d):
         act, obs = d["Action"], d["Observation"]
         response = client.chat.completions.create(
@@ -430,27 +433,18 @@ def evaluate_via_gpt(cfg):
         )
         return (int(d["Batch"]), float(response.choices[0].message.content))
 
-    #def check_number(line):
-    #    try:
-    #        float(line[1])
-    #        return True
-    #    except ValueError:
-    #        return False
+    def wandb_log(line):
+        if use_wandb:
+            wandb.log({"Batch": line[0], "Rating": line[1]})
+        return line
 
-    def log_all(itr):
-        for i in itr:
-            if cfg.wandb:
-                wandb.log({"Batch": i[0], "Rating": i[1]})
-            else:
-                print(i)
-
-    with open("sweep_config.json") as f:
-        sweep_config = json.load(f)
+    def take(n, itr):
+        for _ in range(n):
+            yield next(itr)
     
-    if cfg.wandb:
-        sweep_id = wandb.sweep(
-            sweep_config, project="collaborative-training-many-per-context-window"
-        )
+    def print_all(itr):
+        for i in itr:
+            print(i)
 
     def log_result(log_itr):
         a = log_itr
@@ -460,8 +454,12 @@ def evaluate_via_gpt(cfg):
         a = collect_dictionaries(a)
         a = throttle(a)
         a = map(openai_rating, a)
-        log_all(a)
+        a = map(wandb_log, a)
+        print_all(a)
 
+    client = OpenAI()
+    with open(f"saved_weights_and_losses/{model_name}_log.txt", "r") as file:
+        log_itr = iter(file.readlines())
     log_result(log_itr)
 
 if sweep_config["parameters"]["wandb"]["values"][0]:
