@@ -100,7 +100,6 @@ class RaoConfig:
             / ((self._obs_to_action_ratio + 1.0) * (self._num_rao + 1.0))
             - self._tok_p_loss / (self._obs_to_action_ratio + 1)
         )
-        self._training_ctxt_size = self.regular_training
         if isinstance(self._regular_training, int):
             self._tok_p_obs = self._regular_training
         else:
