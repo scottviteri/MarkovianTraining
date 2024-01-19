@@ -100,10 +100,10 @@ class RaoConfig:
             / ((self._obs_to_action_ratio + 1.0) * (self._num_rao + 1.0))
             - self._tok_p_loss / (self._obs_to_action_ratio + 1)
         )
-        if isinstance(self._regular_training, int):
-            self._tok_p_obs = self._regular_training
-        else:
+        if self._regular_training is None:
             self._tok_p_obs = int(self._tok_p_action * self._obs_to_action_ratio)
+        else:
+            self._tok_p_obs = self._regular_training
         self._tok_p_doc = self._tok_p_obs * self._obs_between_weight_updates
         self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
         if not self._regular_training:

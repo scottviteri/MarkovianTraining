@@ -60,7 +60,17 @@ class RaoGenerator:
         # self._reward_prefix_tensor, self._tokens_per_pure_action,
         # and self._action_prefix_tensor
         self.set_prefixes()
-        self._dataset = self.prepare_dataset()
+        self._dataset = prepare_dataset(
+            self._cfg.dataset_name,
+            self._cfg.task_name,
+            self._cfg.tokenizer,
+            self._cfg.device,
+            self._cfg.num_batches,
+            self._cfg.obs_between_weight_updates,
+            self._tokens_per_pure_observation,
+            self._cfg.batch_size,
+            self._observation_prefix_tensor
+        )
 
     def gen_rao_tensor(
         self, input_ids, loss_fn, aggregate_losses, optimistic_loss: float, prev_obs, batch_index
@@ -222,16 +232,6 @@ class RaoGenerator:
     def inject_noise(loss: torch.Tensor) -> torch.Tensor:
         return loss * (1.0 + torch.randn(1) * 0.05)
 
-    def prepare_dataset(self):
-        itr_ds = load_dataset(self._cfg.dataset_name, self._cfg.task_name, split="train", streaming=True)
-        ds_tokenized = map(
-            lambda x: self._cfg.tokenizer(x["text"], return_tensors="pt")["input_ids"].to(self._cfg.device), 
-            itr_ds)
-        pure_obs = get_pure_obs(self._cfg.batch_size, self._tokens_per_pure_observation, self._cfg.device, ds_tokenized)
-        obs_ds = prepend_obs_tensor(self._observation_prefix_tensor, pure_obs)
-        return take(self._cfg.num_batches, 
-            group_obs_tensors(self._cfg.obs_between_weight_updates, obs_ds))    
-
     def set_prefixes(self):
         observation_prefix = "\nObservation: "
         observation_prefix_tokens = self._cfg.tokenizer.encode(
@@ -270,8 +270,10 @@ class RaoGenerator:
 
         self._tokens_per_pure_reward = tokens_per_pure_reward
         self._reward_prefix_tensor = reward_prefix_tensor
+
         self._tokens_per_pure_action = tokens_per_pure_action
         self._action_prefix_tensor = action_prefix_tensor
+
         self._tokens_per_pure_observation = tokens_per_pure_observation
         self._observation_prefix_tensor = observation_prefix_tensor
 
@@ -279,17 +281,41 @@ class RaoGenerator:
     def dataset(self):
         return self._dataset
 
+    # reward
     @property
     def tokens_per_pure_reward(self):
         return self._tokens_per_pure_reward
 
     @property
+    def reward_prefix_tensor(self):
+        return self._reward_prefix_tensor
+
+    # action
+    @property
+    def tokens_per_pure_action(self):
+        return self._tokens_per_pure_action
+
+    @property
+    def action_prefix_tensor(self):
+        return self._action_prefix_tensor
+
+    # observation
+    @property
     def tokens_per_pure_observation(self):
         return self._tokens_per_pure_observation
 
     @property
-    def tokens_per_pure_action(self):
-        return self._tokens_per_pure_action
+    def observation_prefix_tensor(self):
+        return self._observation_prefix_tensor
+
+def prepare_dataset(dataset_name, task_name, tokenizer, device, num_batches, obs_between_weight_updates, tokens_per_pure_observation, batch_size, observation_prefix_tensor):
+    itr_ds = load_dataset(dataset_name, task_name, split="train", streaming=True)
+    ds_tokenized = map(
+        lambda x: tokenizer(x["text"], return_tensors="pt")["input_ids"].to(device), 
+        itr_ds)
+    pure_obs = get_pure_obs(batch_size, tokens_per_pure_observation, device, ds_tokenized)
+    obs_ds = prepend_obs_tensor(observation_prefix_tensor, pure_obs)
+    return take(num_batches, group_obs_tensors(obs_between_weight_updates, obs_ds))    
 
 
 def get_pure_obs(batch_size, tok_per_pure_obs, device, itr_ds):
