@@ -57,7 +57,8 @@ class RaoConfig:
         use_multirao_for_action_gen: bool = False,
         use_rewards_to_go: bool = False,
         alternate_training: bool = False,
-        regular_training: bool = False
+        regular_training: bool = False,
+        gpt_eval: bool = False 
     ):
         self._model_name = model_name
         self._lr = lr
@@ -80,6 +81,7 @@ class RaoConfig:
         self._dataset_name = dataset_name
         self._alternate_training = alternate_training 
         self._regular_training = regular_training
+        self._gpt_eval = gpt_eval 
 
         self._device = torch.device("cuda" if torch.cuda.is_available() else "mps")
         self._task_name = self._set_task_name(task_name)
@@ -98,10 +100,13 @@ class RaoConfig:
             / ((self._obs_to_action_ratio + 1.0) * (self._num_rao + 1.0))
             - self._tok_p_loss / (self._obs_to_action_ratio + 1)
         )
-        self._tok_p_obs = int(self._tok_p_action * self._obs_to_action_ratio)
-        self._tok_p_doc = self._tok_p_obs * self._obs_between_weight_updates
-        self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
-        assert (self._num_rao + 1) * self._tok_p_rao <= self._training_ctxt_size
+        if self.regular_training:
+            self._tok_p_obs = self._ctxt_size
+        else:
+            self._tok_p_obs = int(self._tok_p_action * self._obs_to_action_ratio)
+            self._tok_p_doc = self._tok_p_obs * self._obs_between_weight_updates
+            self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
+            assert (self._num_rao + 1) * self._tok_p_rao <= self._training_ctxt_size
 
     def _set_task_name(self, task_name):
         if task_name:
@@ -398,6 +403,10 @@ class RaoConfig:
     @property
     def regular_training(self):
         return self._regular_training
+
+    @property
+    def gpt_eval(self):
+        return self._gpt_eval
 
     def __repr__(self):
         return (

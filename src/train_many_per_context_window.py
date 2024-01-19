@@ -41,6 +41,7 @@ from src.rao_tools import compute_cumulative_averages, create_loss_tokens_tensor
 from src.rao_generator import RaoGenerator, get_pure_obs, take, prepend_obs_tensor
 import json
 from datasets import load_dataset
+from openai import OpenAI
 
 with open("sweep_config.json") as f:
     sweep_config = json.load(f)
@@ -155,8 +156,11 @@ def train_regular(raogen, cfg):
     ds_tokenized = map(
             lambda x: causal_lm_tokenizer(x["text"], return_tensors="pt")["input_ids"].to(cfg.device), 
             itr_ds)
-    pure_obs = get_pure_obs(cfg.batch_size, 
-        raogen._tokens_per_pure_observation, cfg.device, ds_tokenized)
+    if cfg.training_ctxt_size:
+        obs_size =  raogen.tokens_per_pure_observation
+    else:
+        obs_size = cfg.ctxt_size
+    pure_obs = get_pure_obs(cfg.batch_size, obs_size, cfg.device, ds_tokenized)
     obs_ds = take(cfg.num_batches, pure_obs)
     # Initialize the list to store the losses
     losses = []
@@ -212,7 +216,9 @@ def train():
         use_rewards_to_go=config_params.get("use_rewards_to_go"),
         dataset_name=config_params.get("dataset_name"),
         alternate_training = config_params.get("alternate_training"),
-        regular_training = config_params.get("regular_training")
+        regular_training = config_params.get("regular_training"),
+        gpt_eval = config_params.get("gpt_eval")
+
     )
     if run is not None:
         run_name = ""
@@ -240,6 +246,8 @@ def train():
         if cfg.regular_training:
             run_name = f"REG_{cfg.model_name[:4]}_"
             run_name += f"obs{cfg.tok_p_obs}"
+        if cfg.gpt_eval:
+            run_name = f"gpt_eval_{cfg.model_name[:4]}"
         run.name = run_name
 
     if not cfg.load_model:
@@ -253,6 +261,8 @@ def train():
     raogen = RaoGenerator(cfg=cfg)
     dataloader = raogen.dataset
 
+    if cfg.gpt_eval:
+        return evaluate_via_gpt( cfg)
     if cfg.regular_training:
         return train_regular(raogen, cfg)
     if cfg.alternate_training:
@@ -264,7 +274,7 @@ def train():
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     optimizer = torch.optim.SGD(causal_lm.parameters(), lr=cfg.lr)
     prev_obs = torch.cat((raogen._observation_prefix_tensor, 
-        torch.full((cfg.batch_size, raogen._tokens_per_pure_observation), fill_value=cfg.tokenizer.pad_token_id, 
+        torch.full((cfg.batch_size, raogen.tokens_per_pure_observation), fill_value=cfg.tokenizer.pad_token_id, 
             dtype=torch.int64, device=cfg.device)), dim=1)
 
     for batch_index, input_ids in (
@@ -361,6 +371,91 @@ def train():
     if wb_cfg:
         run.finish()
 
+def evaluate_via_gpt(cfg):
+    with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "r") as file:
+        log_itr = iter(file.readlines())
+
+    def log_filter(line):
+        if line == "\n": return False
+        if line.startswith("Batch"): return True
+        if line.startswith("Action:"): return True
+        if line.startswith("Obsrvation:"): return True
+        if line.startswith("True Obs:"): return True
+        return False
+
+    def true_obs_to_obs(line):
+        if line.startswith("True Obs:"):
+            return "Observation:"+line[9:]
+        return line
+
+    def reformat_batch(line):
+        if line.startswith("Batch"):
+            batch_number = line.split(" ")[-1]
+            return f"Batch: {batch_number}"
+        return line
+
+    def remove_duplicates(itr):
+        order, i = ["Batch", "Action", "Observation"], 0
+        while 1:
+            next_line = next(itr)
+            if next_line.startswith(order[i]):
+                yield next_line
+                i = (i + 1) % len(order)
+
+    def collect_dictionaries(itr):
+        dict_keys = ["Batch: ", "Action: ", "Observation: "]
+        while 1:
+            d = {}
+            for k in dict_keys:
+                next_line = next(itr)
+                d[k[:-2]] = next_line[len(k):]
+            yield d
+
+    client = OpenAI()
+    def openai_rating(d):
+        act, obs = d["Action"], d["Observation"]
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Output a single number with no other text."},
+                {"role": "user", "content": 
+            f"""Look at the following pair of strings, and give a numerical response from 1 to 10 saying how much the first string would help you predict the second string. 
+            String 1: {act} 
+            String 2: {obs}
+            """}]
+        )
+        return response.choices[0].message.content
+
+    def check_number(line):
+        try:
+            float(line)
+            return True
+        except ValueError:
+            return False
+
+    def print_all(itr):
+        for i in itr:
+            print(i)
+
+    with open("sweep_config.json") as f:
+        sweep_config = json.load(f)
+
+    sweep_id = wandb.sweep(
+        sweep_config, project="collaborative-training-many-per-context-window"
+    )
+
+    def log_result(log_itr):
+        a = log_itr
+        a = filter(log_filter, a)
+        a = map(true_obs_to_obs, a)
+        a = map(reformat_batch, a)
+        a = remove_duplicates(a)
+        a = collect_dictionaries(a)
+        a = map(openai_rating, a)
+        a = filter(check_number, a)
+        print_all(take(1000, a))
+
+    log_result(log_itr)
 
 if sweep_config["parameters"]["wandb"]["values"][0]:
     wandb.agent(sweep_id, function=train)
