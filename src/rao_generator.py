@@ -283,6 +283,14 @@ class RaoGenerator:
     def tokens_per_pure_reward(self):
         return self._tokens_per_pure_reward
 
+    @property
+    def tokens_per_pure_observation(self):
+        return self._tokens_per_pure_observation
+
+    @property
+    def tokens_per_pure_action(self):
+        return self._tokens_per_pure_action
+
 
 def get_pure_obs(batch_size, tok_per_pure_obs, device, itr_ds):
     batches = [torch.empty((1,0), dtype=torch.int64, device=device) 

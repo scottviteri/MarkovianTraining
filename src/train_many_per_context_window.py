@@ -247,7 +247,7 @@ def train():
             run_name = f"REG_{cfg.model_name[:4]}_"
             run_name += f"obs{cfg.tok_p_obs}"
         if cfg.gpt_eval:
-            run_name = f"gpt_eval_{cfg.model_name[:4]}"
+            run_name = f"gpt_eval_{cfg.gpt_eval}_{cfg.model_name[:4]}"
         run.name = run_name
 
     if not cfg.load_model:
@@ -383,13 +383,10 @@ def evaluate_via_gpt(cfg):
         if line.startswith("True Obs:"): return True
         return False
 
-    def true_obs_to_obs(line):
+    def reformat(line):
         if line.startswith("True Obs:"):
             return "Observation:"+line[9:]
-        return line
-
-    def reformat_batch(line):
-        if line.startswith("Batch"):
+        elif line.startswith("Batch"):
             batch_number = line.split(" ")[-1]
             return f"Batch: {batch_number}"
         return line
@@ -408,7 +405,17 @@ def evaluate_via_gpt(cfg):
             d = {}
             for k in dict_keys:
                 next_line = next(itr)
-                d[k[:-2]] = next_line[len(k):]
+                d[k[:-2]] = next_line[len(k):-1] # remove the newline character
+            yield d
+
+    def throttle(itr):
+        thresholds = torch.linspace(0, cfg.num_batches, cfg.gpt_eval).tolist()
+        current_index = -1
+        for t in thresholds:
+            #print("threshold: ",t)
+            while current_index < t:
+                d = next(itr)
+                current_index = int(d["Batch"])
             yield d
 
     client = OpenAI()
@@ -424,36 +431,39 @@ def evaluate_via_gpt(cfg):
             String 2: {obs}
             """}]
         )
-        return response.choices[0].message.content
+        return (int(d["Batch"]), float(response.choices[0].message.content))
 
-    def check_number(line):
-        try:
-            float(line)
-            return True
-        except ValueError:
-            return False
+    #def check_number(line):
+    #    try:
+    #        float(line[1])
+    #        return True
+    #    except ValueError:
+    #        return False
 
-    def print_all(itr):
+    def log_all(itr):
         for i in itr:
-            print(i)
+            if cfg.wandb:
+                wandb.log({"Batch": i[0], "Rating": i[1]})
+            else:
+                print(i)
 
     with open("sweep_config.json") as f:
         sweep_config = json.load(f)
-
-    sweep_id = wandb.sweep(
-        sweep_config, project="collaborative-training-many-per-context-window"
-    )
+    
+    if cfg.wandb:
+        sweep_id = wandb.sweep(
+            sweep_config, project="collaborative-training-many-per-context-window"
+        )
 
     def log_result(log_itr):
         a = log_itr
         a = filter(log_filter, a)
-        a = map(true_obs_to_obs, a)
-        a = map(reformat_batch, a)
+        a = map(reformat, a)
         a = remove_duplicates(a)
         a = collect_dictionaries(a)
+        a = throttle(a)
         a = map(openai_rating, a)
-        a = filter(check_number, a)
-        print_all(take(1000, a))
+        log_all(a)
 
     log_result(log_itr)
 
