@@ -150,6 +150,7 @@ def train_alternate(raogen, cfg):
 def train_regular(raogen, cfg):
     causal_lm = cfg.model
     causal_lm_tokenizer = cfg.tokenizer
+    return cfg.ctxt_size 
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.SGD(causal_lm.parameters(), lr=cfg.lr)
     itr_ds = load_dataset(cfg.dataset_name, cfg.task_name, split="train", streaming=True)
