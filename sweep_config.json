@@ -19,8 +19,8 @@
         "use_rewards_to_go": {"values": [false]},
     	"dataset_name": {"values": ["wikipedia"]},
         "alternate_training": {"values": [false]},
-        "regular_training": {"values": [false]},
-        "gpt_eval": {"values": [10]}
+        "regular_training": {"values": [100]},
+        "gpt_eval": {"values": [false]}
     }
 }
 

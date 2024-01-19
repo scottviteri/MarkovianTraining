@@ -100,12 +100,14 @@ class RaoConfig:
             / ((self._obs_to_action_ratio + 1.0) * (self._num_rao + 1.0))
             - self._tok_p_loss / (self._obs_to_action_ratio + 1)
         )
-        if self.regular_training:
-            self._tok_p_obs = self._ctxt_size
+        self._training_ctxt_size = self.regular_training
+        if isinstance(self._regular_training, int):
+            self._tok_p_obs = self._regular_training
         else:
             self._tok_p_obs = int(self._tok_p_action * self._obs_to_action_ratio)
-            self._tok_p_doc = self._tok_p_obs * self._obs_between_weight_updates
-            self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
+        self._tok_p_doc = self._tok_p_obs * self._obs_between_weight_updates
+        self._tok_p_rao = self._tok_p_loss + self._tok_p_action + self._tok_p_obs
+        if not self._regular_training:
             assert (self._num_rao + 1) * self._tok_p_rao <= self._training_ctxt_size
 
     def _set_task_name(self, task_name):
