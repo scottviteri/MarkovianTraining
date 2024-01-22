@@ -1,4 +1,3 @@
-
 from src.types_and_utilities import InitialConfig, InitTrainingType, AR, GptEval, AO, AOA, RAOInit
 
 gpt2_AOA = InitialConfig(
@@ -41,5 +40,5 @@ gpt2_RAO = InitialConfig(
                 )
 )
 
-example_configs = [gpt2_AOA, gpt2_RAO]
+example_configs = [gpt2_RAO, gpt2_AOA]
 

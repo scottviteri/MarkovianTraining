@@ -257,41 +257,6 @@ def log_and_print_info(
             )
 
 
-def condense_triples(rao_tensor_triples, default_tensor):
-    if not rao_tensor_triples:
-        return default_tensor
-    return torch.cat(
-        [torch.cat(triple, dim=-1) for triple in rao_tensor_triples], dim=-1
-    )
-
-
-def compute_cumulative_averages(losses: torch.Tensor) -> torch.Tensor:
-    # Flip the tensor to compute right-sided cumulative averages
-    losses = torch.flip(losses, dims=[1])
-    cumulative_averages = torch.cumsum(losses, dim=1) / torch.arange(
-        1, losses.shape[1] + 1, device=losses.device
-    )
-    # Flip the tensor back
-    cumulative_averages = torch.flip(cumulative_averages, dims=[1])
-    return cumulative_averages
-
-
-def create_loss_tokens_tensor(
-    batch_loss: torch.Tensor, tokenizer, device: torch.device, tokens_per_pure_reward
-):
-    string_losses: str = [str(round(r.item(), 3)) for r in batch_loss]
-    loss_tokens_tensor: TensorType["batch", "seq_length"] = tokenizer.batch_encode_plus(
-        string_losses,
-        return_tensors="pt",
-        padding="max_length",
-        truncation="longest_first",
-        max_length=tokens_per_pure_reward,
-    ).input_ids.to(device)
-    assert tokenizer.eos_token_id not in loss_tokens_tensor
-    assert loss_tokens_tensor.shape[-1] == tokens_per_pure_reward
-    return loss_tokens_tensor
-
-
 def get_prefixes(
     tokenizer:PreTrainedTokenizer, batch_size:int, device:torch.device, 
     tok_p_obs: Optional[int], tok_p_action: Optional[int], tok_p_loss: Optional[int]):
