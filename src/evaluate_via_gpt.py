@@ -3,12 +3,14 @@ from tqdm import tqdm
 import wandb
 import einops
 from typing import List
+from openai import OpenAI
+import time
 
 from src.types_and_utilities import InitialConfig, InitTrainingType, Config
 from src.types_and_utilities import AR, GptEval, AO, AOA, RAOInit
 from src.types_and_utilities import log_and_print_info
 
-def evaluate_via_gpt(model_name, num_batches, use_wandb, gpt_eval):
+def evaluate_via_gpt(cfg : Config):
     def log_filter(line):
         if line == "\n":
             return False
@@ -47,8 +49,8 @@ def evaluate_via_gpt(model_name, num_batches, use_wandb, gpt_eval):
                 d[k[:-2]] = next_line[len(k) : -1]  # remove the newline character
             yield d
 
-    def throttle(itr):
-        thresholds = torch.linspace(0, num_batches, gpt_eval).tolist()
+    def throttle(num_batches, itr):
+        thresholds = torch.linspace(0, num_batches, cfg.training_type.num_evals).tolist()
         current_index = -1
         for t in thresholds:
             # print("threshold: ",t)
@@ -60,25 +62,32 @@ def evaluate_via_gpt(model_name, num_batches, use_wandb, gpt_eval):
     def openai_rating(d):
         act, obs = d["Action"], d["Observation"]
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4",
             messages=[
                 {
                     "role": "system",
-                    "content": "Output a single number with no other text.",
+                    "content": 
+"""
+Look at helpful_msg and observation, and give a numerical response from 0 to 1 saying how much the helpful_msg helps you predict the observation. 
+0 denotes that the helpful_msg that you would do just as well or better at predicting the observation without the helpful_msg.
+1 denotes that you can now completely predict the observation, and that you would otherwise have no idea what the observation would be.
+Output a single floating point number from 0 to 1 with no other text.
+""",
                 },
                 {
                     "role": "user",
-                    "content": f"""Look at the following pair of strings, and give a numerical response from 1 to 10 saying how much the first string would help you predict the second string. 
-            String 1: {act} 
-            String 2: {obs}
-            """,
+                    "content": 
+f"""
+    <helpful_msg> {act} </helpful_msg>
+    <observation> {obs} </observation>
+""",
                 },
             ],
         )
         return (int(d["Batch"]), float(response.choices[0].message.content))
 
     def wandb_log(line):
-        if use_wandb:
+        if cfg.wandb:
             wandb.log({"Batch": line[0], "Rating": line[1]})
         return line
 
@@ -86,23 +95,36 @@ def evaluate_via_gpt(model_name, num_batches, use_wandb, gpt_eval):
         for _ in range(n):
             yield next(itr)
 
-    def print_all(itr):
+    def collect_and_print(itr):
+        out_lst = []
         for i in itr:
             print(i)
+            time.sleep(0.1)
+            out_lst.append(i[1][1])
+        return out_lst
 
-    def log_result(log_itr):
+
+    def log_result(num_batches, log_itr):
         a = log_itr
         a = filter(log_filter, a)
         a = map(reformat, a)
         a = remove_duplicates(a)
         a = collect_dictionaries(a)
-        a = throttle(a)
+        a = throttle(num_batches, a)
         a = map(openai_rating, a)
         a = map(wandb_log, a)
-        print_all(enumerate(a))
+        return collect_and_print(enumerate(a))
+
+    def get_num_batches():
+        with open(cfg.path_2_log, "r") as file:
+            lines = file.readlines()
+        batch_lines = filter(lambda x: x.startswith("Batch"), lines)
+        batch_numbers = map(lambda x: int(x.split(" ")[-1]), batch_lines)
+        return max(batch_numbers)
 
     client = OpenAI()
+    num_batches = get_num_batches()
     with open(cfg.path_2_log, "r") as file:
         log_itr = iter(file.readlines())
-    log_result(log_itr)
+    return log_result(num_batches, log_itr)
 

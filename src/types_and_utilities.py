@@ -52,8 +52,8 @@ def load_cfg_from_file(file_location : str) -> InitialConfig:
 @dataclass
 class Config:
     model_name: str
-    causal_lm: PreTrainedModel
-    causal_lm_tokenizer: PreTrainedTokenizer
+    causal_lm: Optional[PreTrainedModel]
+    causal_lm_tokenizer: Optional[PreTrainedTokenizer]
     lr: float
     batch_size: int
     num_batches: int
@@ -76,20 +76,21 @@ class Config:
     tok_p_pure_obs : Optional[int]
     action_prefix_tensor: Optional[torch.Tensor]
     obs_prefix_tensor: Optional[torch.Tensor]
-    ctxt_size: int
+    ctxt_size: Optional[int]
     dataloader : Iterable[torch.Tensor]
     training_type: TrainingType
 
 def extend_initial_config(init_cfg: InitialConfig) -> Config:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     task_name = get_task_name(init_cfg.task_name, init_cfg.dataset_name, device)
-    path_2_log = f"../saved_weights_and_losses/{init_cfg.model_name}_log.txt"
-    path_2_model = f"../saved_weights_and_losses/{init_cfg.model_name}_weights"
-    path_2_tokenizer = f"../saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
+    path_2_log = f"saved_weights_and_losses/{init_cfg.model_name}_log.txt"
+    path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
+    path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
+
     causal_lm, causal_lm_tokenizer, ctxt_size =  get_model(
         device, init_cfg.load_model, init_cfg.model_name, 
         path_2_tokenizer, path_2_model, init_cfg.do_lora
-    )
+    ) if not isinstance(init_cfg.training_type, GptEval) else (None, None, None)
 
     tok_p_loss, tok_p_action, tok_p_loss = None, None, None
     if isinstance(init_cfg.training_type,  RAOInit):
@@ -201,7 +202,7 @@ def create_run_name(init_config : InitialConfig,
         if init_config.use_rewards_to_go: run_name += "rtg_"
 
     elif isinstance(init_config.training_type, GptEval): 
-        run_name += f"GptEval{init_config.training_type.observation_size}_"
+        run_name += f"GptEval{init_config.training_type.num_evals}_"
 
     elif isinstance(init_config.training_type, AO):
         run_name += f"AO_"
@@ -324,7 +325,6 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
          "gpt2": "gpt2",
          # Add other models here
      }
-
      with device:
          if load_model:
              causal_lm = AutoModelForCausalLM.from_pretrained(

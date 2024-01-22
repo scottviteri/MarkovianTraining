@@ -42,6 +42,7 @@ def train(initial_cfg : InitialConfig):
         aggregate_losses = train_specific_type(cfg)
         plt.figure()
         plt.plot(aggregate_losses)
+        plt.show()
 
 
 
