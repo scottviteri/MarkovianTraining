@@ -15,8 +15,9 @@ GptEval = NamedTuple("GptEval", [("num_evals", int)])
 AO = NamedTuple("AO", [("use_gumbel", bool)])
 AOA = NamedTuple("AOA", [("use_gumbel", bool)])
 RAOInit = NamedTuple("RAO",
-    [("training_ctxt_size", int), ("num_rao", int),  ("obs_between_weight_updates", int), 
-    ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), ("use_rewards_to_go", bool)])
+    [("num_rao", int),  ("obs_between_weight_updates", int), 
+    ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), 
+    ("use_rewards_to_go", bool)])
 RAO = NamedTuple("RAO",
     [("num_rao", int),  ("obs_between_weight_updates", int), 
     ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), ("use_rewards_to_go", bool),
@@ -41,6 +42,12 @@ class InitialConfig:
     dataset_name: str
     task_name: Optional[str]
     training_type : InitTrainingType
+
+def load_cfg_from_file(file_location : str) -> InitialConfig:
+    with open(file_location) as f:
+        cfg_dict = json.load(f)["parameters"]
+    cfg_dict["training_type"] = eval(cfg_dict["training_type"][0])(**cfg_dict["training_type"][1])
+    return InitialConfig(**cfg_dict)
 
 @dataclass
 class Config:
@@ -81,20 +88,22 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     path_2_tokenizer = f"../saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
     causal_lm, causal_lm_tokenizer, ctxt_size =  get_model(
         device, init_cfg.load_model, init_cfg.model_name, 
-        path_2_tokenizer, path_2_model, init_cfg.do_lora)
+        path_2_tokenizer, path_2_model, init_cfg.do_lora
+    )
 
     tok_p_loss, tok_p_action, tok_p_loss = None, None, None
     if isinstance(init_cfg.training_type,  RAOInit):
         training_ctxt_size = ctxt_size if init_cfg.training_ctxt_size is None else init_cfg.training_ctxt_size 
+        tok_p_loss = 12
         tok_p_action = int(
                 training_ctxt_size 
             / ((init_cfg.obs_to_action_ratio + 1.0) * (init_cfg.training_type.num_rao + 1.0))
             - tok_p_loss / (init_cfg.obs_to_action_ratio + 1)
         )
         tok_p_obs = int(tok_p_action * init_cfg.obs_to_action_ratio)
-        tok_p_loss = 12
-        tok_p_doc = tok_p_obs * obs_between_weight_updates
+        tok_p_doc = tok_p_obs * init_cfg.training_type.obs_between_weight_updates
         tok_p_rao = tok_p_loss + tok_p_action + tok_p_obs
+        assert tok_p_loss < init_cfg.training_ctxt_size
         assert (init_cfg.training_type.num_rao + 1) * tok_p_rao <= init_cfg.training_ctxt_size
 
     elif isinstance(init_cfg.training_type,  AO) or isinstance(init_cfg.training_type,  AOA):
@@ -121,24 +130,24 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     tok_p_pure_loss, tok_p_pure_action, tok_p_pure_obs = tok_per_pure
     loss_prefix, act_prefix, obs_prefix = prefix_tensors
 
-    if isinstance(init_cfg.training_type,  RAO):
-        training_type = RAO(init_cfg.training_type.num_rao, init_cfg.training_type.obs_between_weight_updates, 
-            cfg.training_type.use_loss_difference, cfg.training_type.use_multirao_for_action_gen, cfg.training_type.use_rewards_to_go, 
-            tok_p_loss, tok_p_pure_loss, loss_prefix, tok_p_doc, tok_p_rao)
-    else:
-        training_type = init_cfg.training_type
-
     dataloader = prepare_dataset(
             init_cfg.dataset_name,
             task_name,
             causal_lm_tokenizer,
             device,
             init_cfg.num_batches,
-            init_cfg.obs_between_weight_updates if isinstance(init_cfg.training_type,  RAO) else 1,
+            init_cfg.training_type.obs_between_weight_updates if isinstance(init_cfg.training_type,  RAOInit) else 1,
             tok_p_pure_obs,
             init_cfg.batch_size,
             obs_prefix 
         )
+
+    if isinstance(init_cfg.training_type,  RAOInit):
+        training_type = RAO(init_cfg.training_type.num_rao, init_cfg.training_type.obs_between_weight_updates, 
+            init_cfg.training_type.use_loss_difference, init_cfg.training_type.use_multirao_for_action_gen, init_cfg.training_type.use_rewards_to_go, 
+            tok_p_loss, tok_p_pure_loss, loss_prefix, tok_p_doc, tok_p_rao)
+    else:
+        training_type = init_cfg.training_type
 
     return Config(
         model_name=init_cfg.model_name,
@@ -228,17 +237,16 @@ def log_and_print_info(
     predicted_obs,
     true_obs,
 ):
-    tokenizer = cfg.tokenizer
     if batch_index % cfg.interval_print == 0:
-        with open(f"saved_weights_and_losses/{cfg.model_name}_log.txt", "a") as f:
+        with open(cfg.path_2_log, "a") as f:
             multi_print(f"\nBatch Number {batch_index}", f)
             multi_print(f"Loss: {batch_loss[0][0]:.3f}", f)
             if aggregate_losses:
                 multi_print(f"Aggregate Loss: {aggregate_losses[-1]}", f)
-            multi_print(f"Previous Obs: {repr(tokenizer.batch_decode(prev_obs)[0])}", f)
-            multi_print(f"Action: {repr(tokenizer.batch_decode(action)[0])}", f)
-            multi_print(f"Predicted Obs: {repr(tokenizer.batch_decode(predicted_obs)[0])}", f)
-            multi_print(f"True Obs: {repr(tokenizer.batch_decode(true_obs)[0])}", f)
+            multi_print(f"Previous Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(prev_obs)[0])}", f)
+            multi_print(f"Action: {repr(cfg.causal_lm_tokenizer.batch_decode(action)[0])}", f)
+            multi_print(f"Predicted Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(predicted_obs)[0])}", f)
+            multi_print(f"True Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(true_obs)[0])}", f)
             multi_print("___________________________________________", f)
         if cfg.wandb:
             wandb.log(

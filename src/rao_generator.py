@@ -7,7 +7,7 @@ from einops import repeat, rearrange
 from itertools import islice
 from functools import reduce
 import numpy as np
-from src.rao_tools import (
+from src.types_and_utilities import (
     Config,
     log_and_print_info,
     condense_triples,
@@ -20,9 +20,6 @@ def inject_noise(loss: torch.Tensor) -> torch.Tensor:
 def gen_rao_tensor(
     cfg:Config, input_ids, loss_fn, aggregate_losses, optimistic_loss: float, prev_obs, batch_index
 ):
-    causal_lm = cfg.model
-    causal_lm_tokenizer = cfg.tokenizer
-
     rao_tensor_triples = []
     default_tensor = torch.tensor(
         [[] for _ in range(cfg.batch_size)],
@@ -40,16 +37,16 @@ def gen_rao_tensor(
             dtype=torch.float32,
             device=cfg.device
         ),
-        cfg.tokenizer,
+        cfg.causal_lm_tokenizer,
         cfg.device,
         cfg.training_type.tok_p_pure_loss,
     )
 
-    for observation_index in range(cfg.obs_between_weight_updates):
+    for observation_index in range(cfg.training_type.obs_between_weight_updates):
         incentive_rao = torch.cat(
             (
                 condense_triples(
-                    rao_tensor_triples[-cfg.num_rao :], default_tensor
+                    rao_tensor_triples[-cfg.training_type.num_rao :], default_tensor
                 ),
                 optimistic_loss_tokens_tensor,
                 cfg.action_prefix_tensor,
@@ -59,10 +56,10 @@ def gen_rao_tensor(
 
         # RAOR_A
         # argmax in Action (P_theta_t (helpful_msg_{t+1} | lhes ++ optimistic_loss_{t+1})))
-        if cfg.use_multirao_for_action_gen:
+        if cfg.training_type.use_multirao_for_action_gen:
             action_input = incentive_rao[
                 :,
-                -(cfg.ctxt_size - self._tokens_per_pure_action) :,
+                -(cfg.ctxt_size - cfg.tok_p_pure_action) :,
             ]
         else:
             action_input = incentive_rao[
@@ -74,14 +71,13 @@ def gen_rao_tensor(
                 ) :,
             ]
         with torch.no_grad():
-            full_action = causal_lm.generate(
+            full_action = cfg.causal_lm.generate(
                 inputs=action_input,
                 output_scores=True,
                 do_sample=True,
-                num_beams=cfg.num_beams,
                 min_new_tokens=cfg.tok_p_pure_action,
                 max_new_tokens=cfg.tok_p_pure_action,
-                pad_token_id=causal_lm_tokenizer.eos_token_id,
+                pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
             )
         action: TensorType["batch", "seq_length"] = full_action[
             :, -cfg.tok_p_action :
@@ -97,9 +93,9 @@ def gen_rao_tensor(
         context = torch.cat(
             (
                 condense_triples(
-                    rao_tensor_triples[-cfg.num_rao :], default_tensor
+                    rao_tensor_triples[-cfg.training_type.num_rao:], default_tensor
                 )
-                if cfg.num_rao > 0
+                if cfg.training_type.num_rao > 0
                 else torch.tensor(
                     [[] for _ in range(cfg.batch_size)],
                     dtype=torch.int32,
@@ -111,7 +107,7 @@ def gen_rao_tensor(
             ),
             dim=-1,
         )
-        prediction = causal_lm(context)
+        prediction = cfg.causal_lm(context)
         predicted_logits = prediction.logits[:, -cfg.tok_p_obs - 1 : -1, :]
         predicted_obs = predicted_logits.argmax(dim=-1)
         out = loss_fn(
@@ -124,9 +120,9 @@ def gen_rao_tensor(
         batch_loss = out.mean(dim=-1, keepdim=True)
 
         # Calculate loss for the filler action
-        if cfg.use_loss_difference:
+        if cfg.training_type.use_loss_difference:
             with torch.no_grad():
-                prediction = causal_lm(true_obs)
+                prediction = cfg.causal_lm(true_obs)
                 predicted_logits = prediction.logits[:, :-1, :]
                 predicted_obs = predicted_logits.argmax(dim=-1)
                 out = loss_fn(
@@ -138,7 +134,7 @@ def gen_rao_tensor(
                 )
                 batch_loss = batch_loss - out.mean(dim=-1)
 
-        optimistic_loss_tokens_tensor = causal_lm_tokenizer.batch_encode_plus(
+        optimistic_loss_tokens_tensor = cfg.causal_lm_tokenizer.batch_encode_plus(
             [
                 str(round(inject_noise(optimistic_loss).item(), 3))
                 for _ in range(cfg.batch_size)
@@ -146,13 +142,13 @@ def gen_rao_tensor(
             return_tensors="pt",
             truncation="longest_first",
             padding="max_length",
-            max_length=cfg.training_type.tokens_per_pure_reward,
+            max_length=cfg.training_type.tok_p_pure_loss,
         ).input_ids.to(cfg.device)
         assert (
-            optimistic_loss_tokens_tensor.shape[-1] == self._tokens_per_pure_reward
+            optimistic_loss_tokens_tensor.shape[-1] == cfg.training_type.tok_p_pure_loss
         )
         optimistic_loss_tokens_tensor = torch.cat(
-            (loss_prefix_tensor, optimistic_loss_tokens_tensor), dim=-1
+            (cfg.training_type.loss_prefix_tensor, optimistic_loss_tokens_tensor), dim=-1
         )
 
         losses = torch.cat((losses, batch_loss), dim=-1)
