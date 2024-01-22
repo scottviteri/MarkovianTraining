@@ -18,32 +18,32 @@ def train_ao_or_aoa(cfg: Config):
 
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     optimizer = torch.optim.SGD(cfg.causal_lm.parameters(), lr=cfg.lr)
-    training_ctxt_size = (
-        cfg.training_ctxt_size if cfg.training_ctxt_size else cfg.ctxt_size
-    )
+    #training_ctxt_size = (
+    #    cfg.training_ctxt_size if cfg.training_ctxt_size else cfg.ctxt_size
+    #)
+    #tok_p_action = int(training_ctxt_size / (2 + cfg.obs_to_action_ratio))
+    #tok_p_obs = int(cfg.obs_to_action_ratio * tok_p_action)
+    #tok_p_pure_action = tok_p_action - cfg.action_prefix_tensor.shape[1]
+    #tok_p_pure_obs = tok_p_obs - cfg.obs_prefix_tensor.shape[1]
+    #assert tok_p_pure_action > 0 and tok_p_pure_obs > 0
 
-    tok_p_action = int(training_ctxt_size / (2 + cfg.obs_to_action_ratio))
-    tok_p_obs = int(cfg.obs_to_action_ratio * tok_p_action)
-    tok_p_pure_action = tok_p_action - cfg.action_prefix_tensor.shape[1]
-    tok_p_pure_obs = tok_p_obs - cfg.obs_prefix_tensor.shape[1]
-    assert tok_p_pure_action > 0 and tok_p_pure_obs > 0
-
-    itr_ds = load_dataset(
-        cfg.dataset_name, cfg.task_name, split="train", streaming=True
-    )
-    ds_tokenized = map(
-        lambda x: cfg.causal_lm_tokenizer(x["text"], return_tensors="pt")[
-            "input_ids"
-        ].to(cfg.device),
-        itr_ds,
-    )
-    pure_obs = get_pure_obs(cfg.batch_size, tok_p_pure_obs, cfg.device, ds_tokenized)
-    obs_ds = take(cfg.num_batches, prepend_obs_tensor(cfg.obs_prefix_tensor, pure_obs))
+    #itr_ds = load_dataset(
+    #    cfg.dataset_name, cfg.task_name, split="train", streaming=True
+    #)
+    #ds_tokenized = map(
+    #    lambda x: cfg.causal_lm_tokenizer(x["text"], return_tensors="pt")[
+    #        "input_ids"
+    #    ].to(cfg.device),
+    #    itr_ds,
+    #)
+    #pure_obs = get_pure_obs(cfg.batch_size, tok_p_pure_obs, cfg.device, ds_tokenized)
+    #obs_ds = take(cfg.num_batches, prepend_obs_tensor(cfg.obs_prefix_tensor, pure_obs))
+    obs_ds = cfg.dataloader
     action = torch.cat(
         (
             cfg.action_prefix_tensor,
             torch.full(
-                (cfg.batch_size, tok_p_pure_action),
+                (cfg.batch_size, cfg.tok_p_pure_action),
                 fill_value=cfg.causal_lm_tokenizer.pad_token_id,
                 dtype=torch.int64,
                 device=cfg.device,
@@ -67,8 +67,8 @@ def train_ao_or_aoa(cfg: Config):
                 inputs=torch.cat([action, obs, cfg.action_prefix_tensor], dim=1),
                 output_scores=True,
                 do_sample=True,
-                min_new_tokens=tok_p_pure_action,
-                max_new_tokens=tok_p_pure_action,
+                min_new_tokens=cfg.tok_p_pure_action,
+                max_new_tokens=cfg.tok_p_pure_action,
                 pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
             )[:, -cfg.tok_p_action :]
 

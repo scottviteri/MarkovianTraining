@@ -58,11 +58,11 @@ gpt2_eval = InitialConfig(
                 training_type=GptEval(num_evals=10)
 )
 
-gpt2_eval = InitialConfig(
+gptj_eval = InitialConfig(
                 model_name="gptj",
                 lr=1e-3,
                 batch_size=2,
-                num_batches=1000,
+                num_batches=100,
                 obs_to_action_ratio=2,
                 interval_save_weights=2,
                 interval_print=2,
@@ -72,9 +72,10 @@ gpt2_eval = InitialConfig(
                 training_ctxt_size=300,
                 dataset_name="wikipedia",
                 task_name=None,
-                training_type=GptEval(num_evals=1000)
+                training_type=GptEval(num_evals=100)
 )
 
 
-example_configs = [gpt2_eval]  #[gpt2_RAO, gpt2_AOA]
+example_configs =  [gptj_eval]
+#[gpt2_eval]  #[gpt2_RAO, gpt2_AOA]
 

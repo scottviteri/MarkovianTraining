@@ -132,15 +132,8 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     loss_prefix, act_prefix, obs_prefix = prefix_tensors
 
     dataloader = prepare_dataset(
-            init_cfg.dataset_name,
-            task_name,
-            causal_lm_tokenizer,
-            device,
-            init_cfg.num_batches,
-            init_cfg.training_type.obs_between_weight_updates if isinstance(init_cfg.training_type,  RAOInit) else 1,
-            tok_p_pure_obs,
-            init_cfg.batch_size,
-            obs_prefix 
+            init_cfg, task_name, causal_lm_tokenizer,
+            device, tok_p_pure_obs, obs_prefix 
         )
 
     if isinstance(init_cfg.training_type,  RAOInit):
@@ -477,14 +470,17 @@ def get_linear_layers(model):
     )
 
 
-def prepare_dataset(dataset_name, task_name, tokenizer, device, num_batches, obs_between_weight_updates, tokens_per_pure_observation, batch_size, observation_prefix_tensor):
-    itr_ds = load_dataset(dataset_name, task_name, split="train", streaming=True)
+def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure_obs, obs_prefix):
+    itr_ds = load_dataset(init_cfg.dataset_name, task_name, split="train", streaming=True)
     ds_tokenized = map(
-        lambda x: tokenizer(x["text"], return_tensors="pt")["input_ids"].to(device), 
+        lambda x: causal_lm_tokenizer(x["text"], return_tensors="pt")["input_ids"].to(device), 
         itr_ds)
-    pure_obs = get_pure_obs(batch_size, tokens_per_pure_observation, device, ds_tokenized)
-    obs_ds = prepend_obs_tensor(observation_prefix_tensor, pure_obs)
-    return take(num_batches, group_obs_tensors(obs_between_weight_updates, obs_ds))    
+    pure_obs = get_pure_obs(init_cfg.batch_size, tok_p_pure_obs, device, ds_tokenized)
+    obs_ds = prepend_obs_tensor(obs_prefix, pure_obs)
+    if isinstance(init_cfg.training_type, RAOInit):
+        return take(init_cfg.num_batches, group_obs_tensors(init_cfg.training_type.obs_between_weight_updates, obs_ds))    
+    else: # AOA or AO
+        return take(init_cfg.num_batches, obs_ds)
 
 def get_pure_obs(batch_size, tok_per_pure_obs, device, itr_ds):
     batches = [torch.empty((1,0), dtype=torch.int64, device=device) 
