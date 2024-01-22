@@ -1,84 +1,21 @@
-
-from dataclasses import dataclass
 import torch
 import torchtyping
 from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer
 from peft import LoraConfig, get_peft_model
 import wandb
 from dataclasses import dataclass
-from typing import Optional, Union, NamedTuple, Iterable
 import einops
 from datasets import load_dataset
+import json
 
-AR = NamedTuple("AR", [("observation_size", int)])
-GptEval = NamedTuple("GptEval", [("num_evals", int)])
-AO = NamedTuple("AO", [("use_gumbel", bool)])
-AOA = NamedTuple("AOA", [("use_gumbel", bool)])
-RAOInit = NamedTuple("RAO",
-    [("num_rao", int),  ("obs_between_weight_updates", int), 
-    ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), 
-    ("use_rewards_to_go", bool)])
-RAO = NamedTuple("RAO",
-    [("num_rao", int),  ("obs_between_weight_updates", int), 
-    ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), ("use_rewards_to_go", bool),
-    ("tok_p_loss", int), ("tok_p_pure_loss", int), ("loss_prefix_tensor", torch.Tensor), ("tok_p_doc", int), ("tok_p_rao", int)])
-
-InitTrainingType = Union[AR, GptEval, RAOInit, AOA, AO]
-TrainingType = Union[AR, GptEval, RAO, AOA, AO]
-
-@dataclass
-class InitialConfig:
-    model_name: str
-    lr: float
-    batch_size: int
-    num_batches: int
-    obs_to_action_ratio: float
-    interval_save_weights: int
-    interval_print: int
-    wandb: bool
-    load_model: bool
-    do_lora : bool
-    training_ctxt_size: Optional[int]
-    dataset_name: str
-    task_name: Optional[str]
-    training_type : InitTrainingType
+from src.training_types import *
+from src.prepare_dataset import prepare_dataset
 
 def load_cfg_from_file(file_location : str) -> InitialConfig:
     with open(file_location) as f:
         cfg_dict = json.load(f)["parameters"]
     cfg_dict["training_type"] = eval(cfg_dict["training_type"][0])(**cfg_dict["training_type"][1])
     return InitialConfig(**cfg_dict)
-
-@dataclass
-class Config:
-    model_name: str
-    causal_lm: Optional[PreTrainedModel]
-    causal_lm_tokenizer: Optional[PreTrainedTokenizer]
-    lr: float
-    batch_size: int
-    num_batches: int
-    obs_to_action_ratio: float
-    interval_save_weights: int
-    interval_print: int
-    wandb: bool
-    load_model: bool
-    do_lora: bool
-    training_ctxt_size: int
-    device: str
-    dataset_name: str
-    task_name: str
-    path_2_log: str
-    path_2_model: str
-    path_2_tokenizer: str
-    tok_p_action: Optional[int]
-    tok_p_obs: Optional[int]
-    tok_p_pure_action : Optional[int]
-    tok_p_pure_obs : Optional[int]
-    action_prefix_tensor: Optional[torch.Tensor]
-    obs_prefix_tensor: Optional[torch.Tensor]
-    ctxt_size: Optional[int]
-    dataloader : Iterable[torch.Tensor]
-    training_type: TrainingType
 
 def extend_initial_config(init_cfg: InitialConfig) -> Config:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -468,41 +405,3 @@ def get_linear_layers(model):
             )
         )
     )
-
-
-def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure_obs, obs_prefix):
-    itr_ds = load_dataset(init_cfg.dataset_name, task_name, split="train", streaming=True)
-    ds_tokenized = map(
-        lambda x: causal_lm_tokenizer(x["text"], return_tensors="pt")["input_ids"].to(device), 
-        itr_ds)
-    pure_obs = get_pure_obs(init_cfg.batch_size, tok_p_pure_obs, device, ds_tokenized)
-    obs_ds = prepend_obs_tensor(obs_prefix, pure_obs)
-    if isinstance(init_cfg.training_type, RAOInit):
-        return take(init_cfg.num_batches, group_obs_tensors(init_cfg.training_type.obs_between_weight_updates, obs_ds))    
-    else: # AOA or AO
-        return take(init_cfg.num_batches, obs_ds)
-
-def get_pure_obs(batch_size, tok_per_pure_obs, device, itr_ds):
-    batches = [torch.empty((1,0), dtype=torch.int64, device=device) 
-        for _ in range(batch_size)]
-    while 1:
-        for i in range(len(batches)):
-            while batches[i].shape[1] < tok_per_pure_obs:
-                batches[i] = torch.cat((batches[i], next(itr_ds)),dim=1)
-        for batch in batches: assert  batch.shape[-1] >= tok_per_pure_obs
-        out_tensor = torch.cat([batch[:,:tok_per_pure_obs] for batch in batches], dim=0)
-        for i in range(len(batches)):
-            batches[i] = batches[i][:, tok_per_pure_obs:]
-        yield out_tensor
-    return batches 
-
-def prepend_obs_tensor(obs_prefix_tensor, itr_ds):
-    return map(lambda x: torch.cat((obs_prefix_tensor, x), dim=1), itr_ds)
-
-def group_obs_tensors(obs_per_weight_update, itr_ds):
-    while 1:
-        grouped = torch.stack([next(itr_ds) for _ in range(obs_per_weight_update)])
-        yield einops.rearrange(grouped, 'buffer batch tokens -> batch buffer tokens')
-
-def take(num_batches, itr_ds): 
-    for _ in range(num_batches): yield next(itr_ds)

@@ -10,7 +10,9 @@ from datasets import load_dataset
 from openai import OpenAI
 from matplotlib import pyplot as plt
 
-from src.types_and_utilities import *
+from src.training_types import *
+from src.utilities import extend_initial_config, log_and_print_info
+
 from src.train_rao import train_rao
 from src.train_ao_or_aoa import train_ao_or_aoa
 from src.evaluate_via_gpt import evaluate_via_gpt

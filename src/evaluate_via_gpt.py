@@ -6,9 +6,8 @@ from typing import List
 from openai import OpenAI
 import time
 
-from src.types_and_utilities import InitialConfig, InitTrainingType, Config
-from src.types_and_utilities import AR, GptEval, AO, AOA, RAOInit
-from src.types_and_utilities import log_and_print_info
+from src.training_types import *
+from src.utilities import log_and_print_info
 
 def evaluate_via_gpt(cfg : Config):
     def log_filter(line):

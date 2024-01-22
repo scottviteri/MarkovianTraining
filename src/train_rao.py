@@ -4,11 +4,8 @@ import wandb
 import einops
 from typing import List
 
-from src.types_and_utilities import InitialConfig, InitTrainingType, Config
-from src.types_and_utilities import AR, GptEval, AO, AOA, RAOInit
-from src.types_and_utilities import log_and_print_info
-
-
+from src.training_types import *
+from src.utilities import log_and_print_info
 
 def train_rao(cfg : Config):
 
@@ -37,7 +34,7 @@ def train_rao(cfg : Config):
     for batch_index, input_ids in (
         tqdm(enumerate(cfg.dataloader), total=cfg.num_batches)
         if cfg.num_batches
-        else tqdm(dataloader)
+        else tqdm(cfg.dataloader)
     ):
         if cfg.num_batches and batch_index > cfg.num_batches:
             break

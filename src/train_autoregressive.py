@@ -5,10 +5,7 @@ import einops
 from typing import List
 from datasets import load_dataset
 
-from src.types_and_utilities import InitialConfig, InitTrainingType, Config
-from src.types_and_utilities import AR, GptEval, AO, AOA, RAOInit
-from src.types_and_utilities import log_and_print_info
-
+from src.training_types import *
 
 
 def train_autoregressive(cfg):

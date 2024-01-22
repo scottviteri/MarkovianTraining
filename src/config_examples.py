@@ -1,10 +1,10 @@
-from src.types_and_utilities import InitialConfig, InitTrainingType, AR, GptEval, AO, AOA, RAOInit
+from src.training_types import *
 
 gpt2_AOA = InitialConfig(
         model_name="distilgpt2",
         lr=1e-4,
         batch_size=1,
-        num_batches=100,
+        num_batches=10,
         obs_to_action_ratio=1,
         interval_save_weights=1000,
         interval_print=1,
@@ -14,7 +14,8 @@ gpt2_AOA = InitialConfig(
         training_ctxt_size=300,
         dataset_name="wikipedia",
         task_name=None,
-        training_type=AOA(use_gumbel=False)
+        training_type=AOA(use_gumbel=False),
+        repeat_first_datapoint=False
 )
 
 gpt2_RAO = InitialConfig(
@@ -37,7 +38,8 @@ gpt2_RAO = InitialConfig(
                         use_loss_difference=True,
                         use_multirao_for_action_gen=False,
                         use_rewards_to_go=True
-                )
+                ),
+                repeat_first_datapoint=False
 )
 
 # should only use model name, lr, observation_size, and wandb
@@ -45,17 +47,18 @@ gpt2_AR =  InitialConfig(
         model_name="distilgpt2",
         lr=1e-4,
         batch_size=1,
-        num_batches=10,
+        num_batches=100,
         obs_to_action_ratio=1,
         interval_save_weights=1000,
         interval_print=1,
         wandb=False,
         load_model=False,
         do_lora=False,
-        training_ctxt_size=10000,
+        training_ctxt_size=10000, #not used
         dataset_name="wikipedia",
         task_name=None,
-        training_type=AR(observation_size=300)
+        training_type=AR(observation_size=300),
+        repeat_first_datapoint=True
 )
 
 def gen_eval(model_name, num_evals, wandb):
@@ -74,9 +77,11 @@ def gen_eval(model_name, num_evals, wandb):
                         training_ctxt_size=300,
                         dataset_name="wikipedia",
                         task_name=None,
-                        training_type=GptEval(num_evals=num_evals)
+                        training_type=GptEval(num_evals=num_evals),
+                        repeat_first_datapoint=False
         )
 
 
-#example_configs =  [gen_eval("mistral", 100, False)]
-example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AR]
+example_configs =  [gen_eval("mistral", 10, False)]
+example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AR, gen_eval("mistral", 10, False)]
+#example_configs = [gpt2_AR]

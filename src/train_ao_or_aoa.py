@@ -4,10 +4,8 @@ import wandb
 import einops
 from datasets import load_dataset
 
-from src.types_and_utilities import InitialConfig, InitTrainingType, Config
-from src.types_and_utilities import AR, GptEval, AO, AOA, RAOInit
-from src.types_and_utilities import log_and_print_info, multi_print
-from src.types_and_utilities import get_pure_obs, prepend_obs_tensor, take
+from src.training_types import *
+from src.utilities import log_and_print_info, multi_print
 
 
 def train_ao_or_aoa(cfg: Config):
@@ -18,27 +16,6 @@ def train_ao_or_aoa(cfg: Config):
 
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     optimizer = torch.optim.SGD(cfg.causal_lm.parameters(), lr=cfg.lr)
-    #training_ctxt_size = (
-    #    cfg.training_ctxt_size if cfg.training_ctxt_size else cfg.ctxt_size
-    #)
-    #tok_p_action = int(training_ctxt_size / (2 + cfg.obs_to_action_ratio))
-    #tok_p_obs = int(cfg.obs_to_action_ratio * tok_p_action)
-    #tok_p_pure_action = tok_p_action - cfg.action_prefix_tensor.shape[1]
-    #tok_p_pure_obs = tok_p_obs - cfg.obs_prefix_tensor.shape[1]
-    #assert tok_p_pure_action > 0 and tok_p_pure_obs > 0
-
-    #itr_ds = load_dataset(
-    #    cfg.dataset_name, cfg.task_name, split="train", streaming=True
-    #)
-    #ds_tokenized = map(
-    #    lambda x: cfg.causal_lm_tokenizer(x["text"], return_tensors="pt")[
-    #        "input_ids"
-    #    ].to(cfg.device),
-    #    itr_ds,
-    #)
-    #pure_obs = get_pure_obs(cfg.batch_size, tok_p_pure_obs, cfg.device, ds_tokenized)
-    #obs_ds = take(cfg.num_batches, prepend_obs_tensor(cfg.obs_prefix_tensor, pure_obs))
-    obs_ds = cfg.dataloader
     action = torch.cat(
         (
             cfg.action_prefix_tensor,
@@ -56,7 +33,7 @@ def train_ao_or_aoa(cfg: Config):
     with open(cfg.path_2_log, "a") as f:
         f.write("")
 
-    for batch_index, obs in tqdm(enumerate(obs_ds), total=cfg.num_batches):
+    for batch_index, obs in tqdm(enumerate(cfg.dataloader), total=cfg.num_batches):
         if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:
             print(f"Saving trained_{cfg.model_name} \n\n")
             cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
