@@ -40,42 +40,43 @@ gpt2_RAO = InitialConfig(
                 )
 )
 
-# for GptEval, only model_name,  num_evals are used
-gpt2_eval = InitialConfig(
-                model_name="distilgpt2",
-                lr=1e-3,
-                batch_size=2,
-                num_batches=1000,
-                obs_to_action_ratio=2,
-                interval_save_weights=2,
-                interval_print=2,
-                wandb=False,
-                load_model=False,
-                do_lora=True,
-                training_ctxt_size=300,
-                dataset_name="wikipedia",
-                task_name=None,
-                training_type=GptEval(num_evals=10)
+# should only use model name, lr, observation_size, and wandb
+gpt2_AR =  InitialConfig(
+        model_name="distilgpt2",
+        lr=1e-4,
+        batch_size=1,
+        num_batches=10,
+        obs_to_action_ratio=1,
+        interval_save_weights=1000,
+        interval_print=1,
+        wandb=False,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=10000,
+        dataset_name="wikipedia",
+        task_name=None,
+        training_type=AR(observation_size=300)
 )
 
-gptj_eval = InitialConfig(
-                model_name="gptj",
-                lr=1e-3,
-                batch_size=2,
-                num_batches=100,
-                obs_to_action_ratio=2,
-                interval_save_weights=2,
-                interval_print=2,
-                wandb=False,
-                load_model=False,
-                do_lora=True,
-                training_ctxt_size=300,
-                dataset_name="wikipedia",
-                task_name=None,
-                training_type=GptEval(num_evals=100)
-)
+def gen_eval(model_name, num_evals, wandb):
+        # for GptEval, only model_name,  num_evals are used
+        return InitialConfig(
+                        model_name=model_name,
+                        lr=1e-3,
+                        batch_size=2,
+                        num_batches=1000,
+                        obs_to_action_ratio=2,
+                        interval_save_weights=2,
+                        interval_print=2,
+                        wandb=wandb,
+                        load_model=False,
+                        do_lora=True,
+                        training_ctxt_size=300,
+                        dataset_name="wikipedia",
+                        task_name=None,
+                        training_type=GptEval(num_evals=num_evals)
+        )
 
 
-example_configs =  [gptj_eval]
-#[gpt2_eval]  #[gpt2_RAO, gpt2_AOA]
-
+#example_configs =  [gen_eval("mistral", 100, False)]
+example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AR]

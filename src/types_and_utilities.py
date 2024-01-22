@@ -115,7 +115,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
 
     elif isinstance(init_cfg.training_type,  AR):
         tok_p_action = None
-        tok_p_obs = training_type.AR.observation_size
+        tok_p_obs = init_cfg.training_type.observation_size
         tok_p_loss = None
     
     elif isinstance(init_cfg.training_type,  GptEval):

@@ -14,6 +14,7 @@ from src.types_and_utilities import *
 from src.train_rao import train_rao
 from src.train_ao_or_aoa import train_ao_or_aoa
 from src.evaluate_via_gpt import evaluate_via_gpt
+from src.train_autoregressive import train_autoregressive
 from src.config_examples import gpt2_AOA, gpt2_RAO, example_configs
 
 
@@ -43,8 +44,6 @@ def train(initial_cfg : InitialConfig):
         plt.figure()
         plt.plot(aggregate_losses)
         plt.show()
-
-
 
 def test():
     for config in example_configs:
