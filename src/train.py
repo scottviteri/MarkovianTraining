@@ -15,7 +15,7 @@ from src.utilities import extend_initial_config, log_and_print_info
 from src.utilities import create_run_name
 
 from src.train_rao import train_rao
-from src.train_ao_or_aoa import train_ao_or_aoa
+from src.train_aoa import train_aoa
 from src.evaluate_via_gpt import evaluate_via_gpt
 from src.train_autoregressive import train_autoregressive
 
@@ -29,8 +29,8 @@ def train(initial_cfg : InitialConfig):
         train_specific_type = train_autoregressive
     elif isinstance(cfg.training_type, GptEval):
         train_specific_type = evaluate_via_gpt
-    elif isinstance(cfg.training_type, AO) or isinstance(cfg.training_type, AOA):
-        train_specific_type = train_ao_or_aoa
+    elif isinstance(cfg.training_type, AOA):
+        train_specific_type = train_aoa 
     elif isinstance(cfg.training_type, RAO):
         train_specific_type = train_rao
     else:

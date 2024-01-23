@@ -8,7 +8,7 @@ from src.training_types import *
 from src.utilities import log_and_print_info, multi_print
 
 
-def train_ao_or_aoa(cfg: Config):
+def train_aoa(cfg: Config):
     if cfg.training_type.use_gumbel:
         return train_gumbel(cfg)
     else:
@@ -57,33 +57,36 @@ def train_without_gumbel(cfg):
 
         optimizer.zero_grad()
         input_sequence = (
-            [action, obs, next_action]
-            if isinstance(cfg.training_type, AOA)
-            else [action, obs]
+            [action, obs]
+            if cfg.training_type.ignore_second_action
+            else [action, obs, next_action]
         )
-        rao_tensor_logits = cfg.causal_lm(torch.cat(input_sequence, dim=1)).logits[
+        logits = cfg.causal_lm(torch.cat(input_sequence, dim=1)).logits[
             :, :-1, :
         ]
-        rao_tensor_loss = loss_fn(
+        loss_tensor = loss_fn(
             input=einops.rearrange(
-                rao_tensor_logits,
+                logits,
                 "batch seq_length vocab_size -> batch vocab_size seq_length",
             ),
             target=torch.cat(input_sequence, dim=1)[:, 1:],
         )
 
-        aggregate_loss = rao_tensor_loss.mean()
+        if cfg.training_type.ignore_first_action:
+            aggregate_loss = loss_tensor[:, cfg.tok_p_action:].mean()
+        else:
+            aggregate_loss = loss_tensor.mean()
         aggregate_losses.append(aggregate_loss.item())
         aggregate_loss.backward()
         optimizer.step()
 
         with torch.no_grad():
-            action_loss = rao_tensor_loss[:, : cfg.tok_p_action].mean()
-            observation_loss = rao_tensor_loss[
+            action_loss = loss_tensor[:, : cfg.tok_p_action].mean()
+            observation_loss = loss_tensor[
                 :, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs
             ].mean()
             if isinstance(cfg.training_type, AOA):
-                next_action_loss = rao_tensor_loss[:, cfg.tok_p_obs :].mean()
+                next_action_loss = loss_tensor[:, cfg.tok_p_obs :].mean()
 
             if cfg.wandb:
                 if isinstance(cfg.training_type, AOA):

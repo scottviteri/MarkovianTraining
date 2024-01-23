@@ -44,7 +44,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         assert tok_p_loss < init_cfg.training_ctxt_size
         assert (init_cfg.training_type.num_rao + 1) * tok_p_rao <= init_cfg.training_ctxt_size
 
-    elif isinstance(init_cfg.training_type,  AO) or isinstance(init_cfg.training_type,  AOA):
+    elif isinstance(init_cfg.training_type,  AOA):
         training_ctxt_size = ctxt_size if init_cfg.training_ctxt_size is None else init_cfg.training_ctxt_size 
         tok_p_action = int(training_ctxt_size / (init_cfg.obs_to_action_ratio + 2))
         tok_p_obs = int(tok_p_action * init_cfg.obs_to_action_ratio)
@@ -403,13 +403,14 @@ def create_run_name(cfg : Config) -> str:
     elif isinstance(cfg.training_type, GptEval): 
         run_name += f"GptEval{cfg.training_type.num_evals}_"
 
-    elif isinstance(cfg.training_type, AO):
-        run_name += f"AO_"
-        run_name += f"ao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
-
     elif isinstance(cfg.training_type, AOA):
-        run_name += f"AOA_"
-        run_name += f"ao{cfg.tok_p_action}/{cfg.tok_p_obs}_"
+        if cfg.training_type.ignore_first_action:
+            run_name += "OA"
+        elif cfg.training_type.ignore_second_action:
+            run_name += "AO"
+        else:
+            run_name += "AOA"
+        run_name += f"{cfg.tok_p_action}/{cfg.tok_p_obs}_"
 
     else: 
         assert f"Wrong training type: {cfg.training_type}"

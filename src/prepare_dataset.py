@@ -2,9 +2,7 @@ import torch
 import einops
 from datasets import load_dataset
 
-from src.training_types import InitialConfig, InitTrainingType, Config
-from src.training_types import AR, GptEval, AO, AOA, RAOInit
-
+from src.training_types import *
 
 def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure_obs, obs_prefix):
     itr_ds = load_dataset(init_cfg.dataset_name, task_name, split="train", streaming=True)

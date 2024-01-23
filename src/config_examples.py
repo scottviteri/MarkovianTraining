@@ -14,9 +14,28 @@ gpt2_AOA = InitialConfig(
         training_ctxt_size=300,
         dataset_name="wikipedia",
         task_name=None,
-        training_type=AOA(use_gumbel=False),
+        training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=False),
         repeat_first_datapoint=True
 )
+
+gpt2_OA = InitialConfig(
+        model_name="distilgpt2",
+        lr=1e-4,
+        batch_size=2,
+        num_batches=100,
+        obs_to_action_ratio=1,
+        interval_save_weights=1000,
+        interval_print=10,
+        wandb=False,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=300,
+        dataset_name="wikipedia",
+        task_name=None,
+        training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=False),
+        repeat_first_datapoint=True
+)
+
 
 phi2_AOA = InitialConfig(
         model_name="phi2",
@@ -32,7 +51,7 @@ phi2_AOA = InitialConfig(
         training_ctxt_size=300,
         dataset_name="wikipedia",
         task_name=None,
-        training_type=AOA(use_gumbel=False),
+        training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=False),
         repeat_first_datapoint=False
 )
 
@@ -52,7 +71,7 @@ gpt2_AOA_gumbel = InitialConfig(
         training_ctxt_size=300,
         dataset_name="wikipedia",
         task_name=None,
-        training_type=AOA(use_gumbel=True),
+        training_type=AOA(use_gumbel=True, ignore_first_action=False, ignore_second_action=False),
         repeat_first_datapoint=False
 )
 
@@ -71,7 +90,7 @@ gpt2_AO = InitialConfig(
         training_ctxt_size=300,
         dataset_name="wikipedia",
         task_name=None,
-        training_type=AO(use_gumbel=False),
+        training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=True),
         repeat_first_datapoint=True
 )
 
@@ -169,6 +188,6 @@ def gen_eval(model_name, num_evals, wandb):
 #example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AO, gpt2_AR, gen_eval("mistral", 10, False)]
 #example_configs = [gpt2_RAO]
 #example_configs = [gpt2_AR]
-example_configs = [phi2_AOA]
+example_configs = [gpt2_OA]
 #example_configs = [gpt2_RAO_nr0_obwu0]
 #gpt2_RAO_nr0_obwu4,
