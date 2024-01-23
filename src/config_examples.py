@@ -15,7 +15,7 @@ gpt2_AOA = InitialConfig(
         dataset_name="wikipedia",
         task_name=None,
         training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=False),
-        repeat_first_datapoint=True
+        debug=Debug.REPEAT_SINGLE_POINT
 )
 
 gpt2_OA = InitialConfig(
@@ -33,7 +33,7 @@ gpt2_OA = InitialConfig(
         dataset_name="wikipedia",
         task_name=None,
         training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=False),
-        repeat_first_datapoint=True
+        debug=Debug.REPEAT_SINGLE_POINT
 )
 
 
@@ -52,7 +52,7 @@ phi2_AOA = InitialConfig(
         dataset_name="wikipedia",
         task_name=None,
         training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=False),
-        repeat_first_datapoint=False
+        debug=None
 )
 
 
@@ -72,7 +72,7 @@ gpt2_AOA_gumbel = InitialConfig(
         dataset_name="wikipedia",
         task_name=None,
         training_type=AOA(use_gumbel=True, ignore_first_action=False, ignore_second_action=False),
-        repeat_first_datapoint=False
+        debug=None
 )
 
 
@@ -91,7 +91,7 @@ gpt2_AO = InitialConfig(
         dataset_name="wikipedia",
         task_name=None,
         training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=True),
-        repeat_first_datapoint=True
+        debug=Debug.REPEAT_SINGLE_POINT
 )
 
 
@@ -116,7 +116,7 @@ gpt2_RAO_nr0_obwu4 = InitialConfig(
                         use_multirao_for_action_gen=False,
                         use_rewards_to_go=False
                 ),
-                repeat_first_datapoint=True
+                debug=Debug.REPEAT_SINGLE_POINT
 )
 
 gpt2_RAO_nr0_obwu0 = InitialConfig(
@@ -140,7 +140,7 @@ gpt2_RAO_nr0_obwu0 = InitialConfig(
                         use_multirao_for_action_gen=False,
                         use_rewards_to_go=False
                 ),
-                repeat_first_datapoint=True
+                debug=Debug.REPEAT_SINGLE_POINT
 )
 
 
@@ -160,7 +160,7 @@ gpt2_AR =  InitialConfig(
         dataset_name="wikipedia",
         task_name=None,
         training_type=AR(observation_size=300),
-        repeat_first_datapoint=True
+        debug=Debug.REPEAT_SINGLE_POINT
 )
 
 def gen_eval(model_name, num_evals, wandb):
@@ -180,7 +180,7 @@ def gen_eval(model_name, num_evals, wandb):
                         dataset_name="wikipedia",
                         task_name=None,
                         training_type=GptEval(num_evals=num_evals),
-                        repeat_first_datapoint=False
+                        debug=None                        
         )
 
 

@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Optional, Union, NamedTuple, Iterable
 from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer
 import torch
+from enum import Enum
 
 AR = NamedTuple("AR", [("observation_size", int)])
 GptEval = NamedTuple("GptEval", [("num_evals", int)])
@@ -19,6 +20,10 @@ RAO = NamedTuple("RAO",
 InitTrainingType = Union[AR, GptEval, RAOInit, AOA]
 TrainingType = Union[AR, GptEval, RAO, AOA]
 
+class Debug(Enum):
+    REPEAT_SINGLE_POINT = 1
+    REPEAT_EVERY_POINT_ONCE = 2
+
 @dataclass
 class InitialConfig:
     model_name: str
@@ -35,7 +40,7 @@ class InitialConfig:
     dataset_name: str
     task_name: Optional[str]
     training_type : InitTrainingType
-    repeat_first_datapoint : bool 
+    debug : Optional[Debug]
 
 @dataclass
 class Config:
@@ -67,3 +72,4 @@ class Config:
     ctxt_size: Optional[int]
     dataloader : Iterable[torch.Tensor]
     training_type: TrainingType
+    debug : Optional[Debug]

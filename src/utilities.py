@@ -106,7 +106,8 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         ctxt_size = ctxt_size,
         causal_lm = causal_lm,
         causal_lm_tokenizer = causal_lm_tokenizer,
-        training_type = training_type 
+        training_type = training_type ,
+        debug = init_cfg.debug
     )
 
 
@@ -414,6 +415,9 @@ def create_run_name(cfg : Config) -> str:
 
     else: 
         assert f"Wrong training type: {cfg.training_type}"
+        
+    if cfg.debug == Debug.REPEAT_SINGLE_POINT: run_name += "rep_"
+    elif cfg.debug == Debug.REPEAT_EVERY_POINT_ONCE: run_name += "ro_"
 
     if cfg.batch_size != 1: run_name += f"bs{cfg.batch_size}_"
     run_name += f"nb{cfg.num_batches}_"

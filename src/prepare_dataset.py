@@ -15,8 +15,10 @@ def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure
     #  this would make them not comparable to AO, unless we divide by obs per weight update
     if isinstance(init_cfg.training_type, RAOInit):
         obs_ds = group_obs_tensors(init_cfg.training_type.obs_between_weight_updates, obs_ds)
-    if init_cfg.repeat_first_datapoint:
+    if init_cfg.debug == Debug.REPEAT_SINGLE_POINT:
         obs_ds = repeat(obs_ds)
+    elif init_cfg.debug == Debug.REPEAT_EVERY_POINT_ONCE:
+        obs_ds = repeat_n(2, obs_ds)
     return take(init_cfg.num_batches, obs_ds)
 
 def get_pure_obs(batch_size, tok_per_pure_obs, device, itr_ds):
@@ -47,4 +49,11 @@ def take(num_batches, itr_ds):
 def repeat(itr):
     first_val = next(itr)
     while 1: yield first_val
+
+def repeat_n(n, itr):
+    while 1:
+        next_val = next(itr)
+        for _ in range(n): 
+            yield next_val
+
 
