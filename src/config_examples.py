@@ -18,22 +18,23 @@ gpt2_AOA = InitialConfig(
         repeat_first_datapoint=True
 )
 
+# only run this on large GPU
 gpt2_AOA_gumbel = InitialConfig(
         model_name="distilgpt2",
         lr=1e-4,
-        batch_size=1,
+        batch_size=5,
         num_batches=100,
         obs_to_action_ratio=1,
         interval_save_weights=1000,
         interval_print=10,
-        wandb=False,
+        wandb=True,
         load_model=False,
         do_lora=False,
         training_ctxt_size=300,
         dataset_name="wikipedia",
         task_name=None,
         training_type=AOA(use_gumbel=True),
-        repeat_first_datapoint=True
+        repeat_first_datapoint=False
 )
 
 
@@ -86,7 +87,7 @@ gpt2_RAO_nr0_obwu0 = InitialConfig(
                 batch_size=2,
                 num_batches=100,
                 obs_to_action_ratio=1,
-                interval_save_weights=1000,
+                interval_save_weights=100,
                 interval_print=10,
                 wandb=False,
                 load_model=False,

@@ -20,9 +20,9 @@ def load_cfg_from_file(file_location : str) -> InitialConfig:
 def extend_initial_config(init_cfg: InitialConfig) -> Config:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     task_name = get_task_name(init_cfg.task_name, init_cfg.dataset_name, device)
-    path_2_log = f"../saved_weights_and_losses/{init_cfg.model_name}_log.txt"
-    path_2_model = f"../saved_weights_and_losses/{init_cfg.model_name}_weights"
-    path_2_tokenizer = f"../saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
+    path_2_log = f"saved_weights_and_losses/{init_cfg.model_name}_log.txt"
+    path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
+    path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 
     causal_lm, causal_lm_tokenizer, ctxt_size =  get_model(
         device, init_cfg.load_model, init_cfg.model_name, 
