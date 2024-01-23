@@ -18,6 +18,25 @@ gpt2_AOA = InitialConfig(
         repeat_first_datapoint=True
 )
 
+phi2_AOA = InitialConfig(
+        model_name="phi2",
+        lr=1e-4,
+        batch_size=16,
+        num_batches=10000,
+        obs_to_action_ratio=1,
+        interval_save_weights=1000,
+        interval_print=10,
+        wandb=True,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=300,
+        dataset_name="wikipedia",
+        task_name=None,
+        training_type=AOA(use_gumbel=False),
+        repeat_first_datapoint=False
+)
+
+
 # only run this on large GPU
 gpt2_AOA_gumbel = InitialConfig(
         model_name="distilgpt2",
@@ -150,6 +169,6 @@ def gen_eval(model_name, num_evals, wandb):
 #example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AO, gpt2_AR, gen_eval("mistral", 10, False)]
 #example_configs = [gpt2_RAO]
 #example_configs = [gpt2_AR]
-example_configs = [gpt2_AOA_gumbel]
+example_configs = [phi2_AOA]
 #example_configs = [gpt2_RAO_nr0_obwu0]
 #gpt2_RAO_nr0_obwu4,

@@ -12,6 +12,7 @@ from matplotlib import pyplot as plt
 
 from src.training_types import *
 from src.utilities import extend_initial_config, log_and_print_info
+from src.utilities import create_run_name
 
 from src.train_rao import train_rao
 from src.train_ao_or_aoa import train_ao_or_aoa
@@ -39,6 +40,7 @@ def train(initial_cfg : InitialConfig):
         #    sweep_config, project="collaborative-training-many-per-context-window"
         #)
         run = wandb.init(project="collaborative-training-many-per-context-window")
+        run.name = create_run_name(cfg)
         #wandb.agent(sweep_id, function=train_specific_type)
         aggregate_losses = train_specific_type(cfg)
         run.finish()
@@ -55,3 +57,4 @@ def test():
 if __name__ == "__main__":
    #train(gpt2_RAO) 
    test()
+
