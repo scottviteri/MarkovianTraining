@@ -39,15 +39,18 @@ def train_ao_or_aoa(cfg: Config):
             cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
             cfg.causal_lm.save_pretrained(cfg.path_2_model)
 
-        with torch.no_grad():
-            next_action = cfg.causal_lm.generate(
-                inputs=torch.cat([action, obs, cfg.action_prefix_tensor], dim=1),
-                output_scores=True,
-                do_sample=True,
-                min_new_tokens=cfg.tok_p_pure_action,
-                max_new_tokens=cfg.tok_p_pure_action,
-                pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
-            )[:, -cfg.tok_p_action :]
+        if cfg.training_type.use_gumbel:
+            next_action = gumbel_generate(cfg, action, obs)
+        else:
+            with torch.no_grad():
+                next_action = cfg.causal_lm.generate(
+                    inputs=torch.cat([action, obs, cfg.action_prefix_tensor], dim=1),
+                    output_scores=True,
+                    do_sample=True,
+                    min_new_tokens=cfg.tok_p_pure_action,
+                    max_new_tokens=cfg.tok_p_pure_action,
+                    pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
+                )[:, -cfg.tok_p_action :]
 
         optimizer.zero_grad()
         input_sequence = (
@@ -123,3 +126,16 @@ def train_ao_or_aoa(cfg: Config):
         action = next_action
         prev_obs = obs
     return aggregate_losses
+
+def gumbel_generate(cfg: Config, action, obs):
+    with torch.no_grad():
+        embed = cfg.causal_lm.get_input_embeddings()
+        embed_weight = embed.weight
+        inputs = embed(torch.cat([action, obs, cfg.action_prefix_tensor], dim=1) )
+    for i in range(cfg.tok_p_pure_action):
+        logits = cfg.causal_lm(inputs_embeds=inputs).logits[:, -1, :] # batch x vocab
+        next_token = torch.nn.functional.gumbel_softmax(logits, tau=1, hard=True, dim=-1)
+        emb_next_token = (next_token @ embed_weight).unsqueeze(1)
+        inputs = torch.cat([inputs, emb_next_token], dim=1)
+    return inputs[:, -cfg.tok_p_action :]
+

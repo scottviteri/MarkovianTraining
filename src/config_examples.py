@@ -3,11 +3,11 @@ from src.training_types import *
 gpt2_AOA = InitialConfig(
         model_name="distilgpt2",
         lr=1e-4,
-        batch_size=1,
-        num_batches=10,
+        batch_size=2,
+        num_batches=100,
         obs_to_action_ratio=1,
         interval_save_weights=1000,
-        interval_print=1,
+        interval_print=10,
         wandb=False,
         load_model=False,
         do_lora=False,
@@ -15,38 +15,101 @@ gpt2_AOA = InitialConfig(
         dataset_name="wikipedia",
         task_name=None,
         training_type=AOA(use_gumbel=False),
-        repeat_first_datapoint=False
+        repeat_first_datapoint=True
 )
 
-gpt2_RAO = InitialConfig(
+gpt2_AOA_gumbel = InitialConfig(
+        model_name="distilgpt2",
+        lr=1e-4,
+        batch_size=1,
+        num_batches=100,
+        obs_to_action_ratio=1,
+        interval_save_weights=1000,
+        interval_print=10,
+        wandb=False,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=300,
+        dataset_name="wikipedia",
+        task_name=None,
+        training_type=AOA(use_gumbel=True),
+        repeat_first_datapoint=True
+)
+
+
+gpt2_AO = InitialConfig(
+        model_name="distilgpt2",
+        lr=1e-4,
+        batch_size=2,
+        num_batches=100,
+        obs_to_action_ratio=1,
+        interval_save_weights=1000,
+        interval_print=10,
+        wandb=False,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=300,
+        dataset_name="wikipedia",
+        task_name=None,
+        training_type=AO(use_gumbel=False),
+        repeat_first_datapoint=True
+)
+
+
+gpt2_RAO_nr0_obwu4 = InitialConfig(
                 model_name="distilgpt2",
                 lr=1e-3,
                 batch_size=2,
-                num_batches=5,
-                obs_to_action_ratio=2,
-                interval_save_weights=2,
-                interval_print=2,
+                num_batches=50,
+                obs_to_action_ratio=1,
+                interval_save_weights=1000,
+                interval_print=10,
                 wandb=False,
                 load_model=False,
-                do_lora=True,
+                do_lora=False,
                 training_ctxt_size=300,
                 dataset_name="wikipedia",
                 task_name=None,
                 training_type=RAOInit(
-                        num_rao=3,
+                        num_rao=0,
                         obs_between_weight_updates=4,
-                        use_loss_difference=True,
+                        use_loss_difference=False,
                         use_multirao_for_action_gen=False,
-                        use_rewards_to_go=True
+                        use_rewards_to_go=False
                 ),
-                repeat_first_datapoint=False
+                repeat_first_datapoint=True
 )
+
+gpt2_RAO_nr0_obwu0 = InitialConfig(
+                model_name="distilgpt2",
+                lr=1e-3,
+                batch_size=2,
+                num_batches=100,
+                obs_to_action_ratio=1,
+                interval_save_weights=1000,
+                interval_print=10,
+                wandb=False,
+                load_model=False,
+                do_lora=False,
+                training_ctxt_size=300,
+                dataset_name="wikipedia",
+                task_name=None,
+                training_type=RAOInit(
+                        num_rao=0,
+                        obs_between_weight_updates=4,
+                        use_loss_difference=False,
+                        use_multirao_for_action_gen=False,
+                        use_rewards_to_go=False
+                ),
+                repeat_first_datapoint=True
+)
+
 
 # should only use model name, lr, observation_size, and wandb
 gpt2_AR =  InitialConfig(
         model_name="distilgpt2",
         lr=1e-4,
-        batch_size=1,
+        batch_size=2,
         num_batches=100,
         obs_to_action_ratio=1,
         interval_save_weights=1000,
@@ -82,6 +145,10 @@ def gen_eval(model_name, num_evals, wandb):
         )
 
 
-example_configs =  [gen_eval("mistral", 10, False)]
-example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AR, gen_eval("mistral", 10, False)]
+#example_configs =  [gen_eval("mistral", 10, False)]
+#example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AO, gpt2_AR, gen_eval("mistral", 10, False)]
+#example_configs = [gpt2_RAO]
 #example_configs = [gpt2_AR]
+example_configs = [gpt2_AOA_gumbel]
+#example_configs = [gpt2_RAO_nr0_obwu0]
+#gpt2_RAO_nr0_obwu4,
