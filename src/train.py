@@ -6,6 +6,7 @@ from tqdm import tqdm
 from einops import rearrange
 import wandb
 import json
+import random
 from datasets import load_dataset
 from openai import OpenAI
 from matplotlib import pyplot as plt
@@ -21,8 +22,17 @@ from src.train_autoregressive import train_autoregressive
 
 import src.config_examples
 
+#def debug():
+#    initial_cfg = src.config_examples.gpt2_bb
+#    cfg = extend_initial_config(initial_cfg)
+#    agg_losses = train_autoregressive(cfg)
+#    return agg_losses
 
 def train(initial_cfg : InitialConfig):
+    seed = 42
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
     cfg = extend_initial_config(initial_cfg)
     train_specific_type = None
     if isinstance(cfg.training_type, AR):
@@ -55,6 +65,7 @@ def test():
         train(config)
 
 if __name__ == "__main__":
-   #train(gpt2_RAO) 
-   test()
+   train(gpt2_RAO) 
+   #test()
+   #debug()
 
