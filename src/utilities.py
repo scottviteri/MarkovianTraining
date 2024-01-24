@@ -418,6 +418,8 @@ def create_run_name(cfg : Config) -> str:
         
     if cfg.debug == Debug.REPEAT_SINGLE_POINT: run_name += "rep_"
     elif cfg.debug == Debug.REPEAT_EVERY_POINT_ONCE: run_name += "ro_"
+    elif cfg.debug == Debug.RANDOM_DATA: run_name += "rd_"
+    elif cfg.debug == Debug.NO_WEIGHT_UPDATES: run_name += "nwu_"
 
     if cfg.batch_size != 1: run_name += f"bs{cfg.batch_size}_"
     run_name += f"nb{cfg.num_batches}_"
