@@ -65,7 +65,7 @@ def test():
         train(config)
 
 if __name__ == "__main__":
-   train(gpt2_RAO) 
-   #test()
+   #train(gpt2_RAO) 
+   test()
    #debug()
 
