@@ -392,14 +392,14 @@ def create_run_name(cfg : Config) -> str:
 
     elif isinstance(cfg.training_type, RAO): 
         run_name += f"RAO_"
-        run_name += f"nr{cfg.RAO.num_rao}_"
-        run_name += f"rao{cfg.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
-        run_name += f"obwu{cfg.obs_between_weight_updates}_"
+        run_name += f"nr{cfg.training_type.num_rao}_"
+        run_name += f"rao{cfg.training_type.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
+        run_name += f"obwu{cfg.training_type.obs_between_weight_updates}_"
         if cfg.do_lora: run_name += "lora_"
         if cfg.training_type.use_loss_difference: run_name += "ld_"
-        if cfg.use_multirao_for_action_gen:
-            run_name += f"mr{cfg.use_multirao_for_action_gen}_"
-        if cfg.use_rewards_to_go: run_name += "rtg_"
+        if cfg.training_type.use_multirao_for_action_gen:
+            run_name += f"mr{cfg.training_type.use_multirao_for_action_gen}_"
+        if cfg.training_type.use_rewards_to_go: run_name += "rtg_"
 
     elif isinstance(cfg.training_type, GptEval): 
         run_name += f"GptEval{cfg.training_type.num_evals}_"
