@@ -23,6 +23,8 @@ TrainingType = Union[AR, GptEval, RAO, AOA]
 class Debug(Enum):
     REPEAT_SINGLE_POINT = 1
     REPEAT_EVERY_POINT_ONCE = 2
+    RANDOM_DATA = 3
+    NO_WEIGHT_UPDATES = 4
 
 @dataclass
 class InitialConfig:

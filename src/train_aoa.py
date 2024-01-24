@@ -78,7 +78,8 @@ def train_without_gumbel(cfg):
             aggregate_loss = loss_tensor.mean()
         aggregate_losses.append(aggregate_loss.item())
         aggregate_loss.backward()
-        optimizer.step()
+        if cfg.debug != Debug.NO_WEIGHT_UPDATES:
+            optimizer.step()
 
         with torch.no_grad():
             action_loss = loss_tensor[:, : cfg.tok_p_action].mean()
