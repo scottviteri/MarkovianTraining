@@ -405,10 +405,12 @@ def create_run_name(cfg : Config) -> str:
         run_name += f"GptEval{cfg.training_type.num_evals}_"
 
     elif isinstance(cfg.training_type, AOA):
-        if cfg.training_type.ignore_first_action:
+        if cfg.training_type.ignore_first_action and not cfg.training_type.ignore_second_action:
             run_name += "OA"
-        elif cfg.training_type.ignore_second_action:
+        elif cfg.training_type.ignore_second_action and not cfg.training_type.ignore_first_action:
             run_name += "AO"
+        elif cfg.training_type.ignore_second_action and cfg.training_type.ignore_first_action:
+            run_name += "O"
         else:
             run_name += "AOA"
         run_name += f"{cfg.tok_p_action}/{cfg.tok_p_obs}_"
