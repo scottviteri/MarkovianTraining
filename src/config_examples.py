@@ -15,7 +15,7 @@ gpt2_AOA = InitialConfig(
         dataset_name="wikipedia",
         task_name=None,
         training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=False),
-        debug=Debug.REPEAT_SINGLE_POINT
+        debug=RepeatNPoints(num_points=1)
 )
 
 gpt2_OA = InitialConfig(
@@ -33,8 +33,27 @@ gpt2_OA = InitialConfig(
         dataset_name="wikipedia",
         task_name=None,
         training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=False),
-        debug=Debug.REPEAT_SINGLE_POINT
+        debug=RepeatNPoints(num_points=1)
 )
+
+gpt2_bb = InitialConfig(
+        model_name="distilgpt2",
+        lr=1e-4,
+        batch_size=2,
+        num_batches=100,
+        obs_to_action_ratio=1,
+        interval_save_weights=1000,
+        interval_print=10,
+        wandb=False,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=300,
+        dataset_name="bigbench",
+        task_name=None,
+        training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=False),
+        debug=None
+)
+
 
 
 phi2_AOA = InitialConfig(
@@ -91,7 +110,7 @@ gpt2_AO = InitialConfig(
         dataset_name="wikipedia",
         task_name=None,
         training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=True),
-        debug=Debug.REPEAT_SINGLE_POINT
+        debug=RepeatNPoints(num_points=1)
 )
 
 
@@ -116,7 +135,7 @@ gpt2_RAO_nr0_obwu4 = InitialConfig(
                         use_multirao_for_action_gen=False,
                         use_rewards_to_go=False
                 ),
-                debug=Debug.REPEAT_SINGLE_POINT
+                debug=RepeatNPoints(num_points=1)
 )
 
 gpt2_RAO_nr0_obwu0 = InitialConfig(
@@ -140,7 +159,7 @@ gpt2_RAO_nr0_obwu0 = InitialConfig(
                         use_multirao_for_action_gen=False,
                         use_rewards_to_go=False
                 ),
-                debug=Debug.REPEAT_SINGLE_POINT
+                debug=RepeatNPoints(num_points=1)
 )
 
 
@@ -160,7 +179,7 @@ gpt2_AR =  InitialConfig(
         dataset_name="wikipedia",
         task_name=None,
         training_type=AR(observation_size=300),
-        debug=Debug.REPEAT_SINGLE_POINT
+        debug=RepeatNPoints(num_points=1)
 )
 
 def gen_eval(model_name, num_evals, wandb):
@@ -183,11 +202,36 @@ def gen_eval(model_name, num_evals, wandb):
                         debug=None                        
         )
 
+def test_debug_template(debug_type):
+    return InitialConfig(
+        model_name="distilgpt2",
+        lr=1e-3,
+        batch_size=2,
+        num_batches=10,
+        obs_to_action_ratio=1,
+        interval_save_weights=20,
+        interval_print=1,
+        wandb=False,
+        load_model=False,
+        do_lora=True,
+        training_ctxt_size=300,
+        dataset_name="wikipedia",
+        task_name=None,
+        training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=False),
+        debug=debug_type
+    ) 
+
+debug_types = [
+        RepeatNPoints(num_points=1) , RepeatNPoints(num_points=2), 
+        RepeatPointNTimes(num_times=1), RepeatPointNTimes(num_times=2), 
+        ReplaceWithRandomTokens(), NoWeightUpdates()
+]
+#example_configs = [test_debug_template(x) for x in debug_types]
 
 #example_configs =  [gen_eval("mistral", 10, False)]
 #example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AO, gpt2_AR, gen_eval("mistral", 10, False)]
 #example_configs = [gpt2_RAO]
 #example_configs = [gpt2_AR]
-example_configs = [gpt2_OA]
+example_configs = [gpt2_AO]
 #example_configs = [gpt2_RAO_nr0_obwu0]
 #gpt2_RAO_nr0_obwu4,

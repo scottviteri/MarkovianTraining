@@ -78,7 +78,7 @@ def train_without_gumbel(cfg):
             aggregate_loss = loss_tensor.mean()
         aggregate_losses.append(aggregate_loss.item())
         aggregate_loss.backward()
-        if cfg.debug != Debug.NO_WEIGHT_UPDATES:
+        if not isinstance(cfg.debug, NoWeightUpdates):
             optimizer.step()
 
         with torch.no_grad():
@@ -86,11 +86,11 @@ def train_without_gumbel(cfg):
             observation_loss = loss_tensor[
                 :, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs
             ].mean()
-            if isinstance(cfg.training_type, AOA):
+            if cfg.training_type.ignore_second_action:
                 next_action_loss = loss_tensor[:, cfg.tok_p_obs :].mean()
 
             if cfg.wandb:
-                if isinstance(cfg.training_type, AOA):
+                if cfg.training_type.ignore_second_action:
                     wandb.log({"Next Action Loss": next_action_loss})
                 wandb.log(
                     {
@@ -105,7 +105,7 @@ def train_without_gumbel(cfg):
             with open(cfg.path_2_log, "a") as f:
                 multi_print(f"Batch {batch_index}", f)
                 multi_print(f"Aggregate loss: {aggregate_loss}", f)
-                if isinstance(cfg.training_type, AOA):
+                if cfg.training_type.ignore_second_action:
                     multi_print(
                         f"Action/Observation/NextAction loss: {action_loss}/{observation_loss}/{next_action_loss}",
                         f,

@@ -20,11 +20,12 @@ RAO = NamedTuple("RAO",
 InitTrainingType = Union[AR, GptEval, RAOInit, AOA]
 TrainingType = Union[AR, GptEval, RAO, AOA]
 
-class Debug(Enum):
-    REPEAT_SINGLE_POINT = 1
-    REPEAT_EVERY_POINT_ONCE = 2
-    RANDOM_DATA = 3
-    NO_WEIGHT_UPDATES = 4
+RepeatNPoints = NamedTuple("RepeatNPoints", [("num_points", int)])
+RepeatPointNTimes = NamedTuple("RepeatPointNTimes", [("num_times", int)])
+ReplaceWithRandomTokens = NamedTuple("ReplaceWithRandomTokens", [])
+NoWeightUpdates = NamedTuple("NoWeightUpdates", [])
+
+DebugType = Union[RepeatNPoints, RepeatPointNTimes, ReplaceWithRandomTokens, NoWeightUpdates]
 
 @dataclass
 class InitialConfig:
@@ -42,7 +43,7 @@ class InitialConfig:
     dataset_name: str
     task_name: Optional[str]
     training_type : InitTrainingType
-    debug : Optional[Debug]
+    debug : Optional[DebugType]
 
 @dataclass
 class Config:
@@ -74,4 +75,4 @@ class Config:
     ctxt_size: Optional[int]
     dataloader : Iterable[torch.Tensor]
     training_type: TrainingType
-    debug : Optional[Debug]
+    debug : Optional[DebugType]
