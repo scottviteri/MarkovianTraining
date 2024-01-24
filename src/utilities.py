@@ -418,10 +418,10 @@ def create_run_name(cfg : Config) -> str:
     else: 
         assert f"Wrong training type: {cfg.training_type}"
         
-    if cfg.debug == Debug.REPEAT_SINGLE_POINT: run_name += "rep_"
-    elif cfg.debug == Debug.REPEAT_EVERY_POINT_ONCE: run_name += "ro_"
-    elif cfg.debug == Debug.RANDOM_DATA: run_name += "rd_"
-    elif cfg.debug == Debug.NO_WEIGHT_UPDATES: run_name += "nwu_"
+    if isinstance(cfg.debug, RepeatNPoints): run_name += f"r{cfg.debug.num_points}_"
+    elif isinstance(cfg.debug, RepeatPointNTimes): run_name += f"re{cfg.debug.num_times}_"
+    elif isinstance(cfg.debug, ReplaceWithRandomTokens): run_name += "rd_"
+    elif isinstance(cfg.debug, NoWeightUpdates): run_name += "nwu_"
 
     if cfg.batch_size != 1: run_name += f"bs{cfg.batch_size}_"
     run_name += f"nb{cfg.num_batches}_"
