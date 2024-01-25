@@ -5,7 +5,6 @@ import einops
 from typing import List
 from openai import OpenAI
 import time
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.training_types import *
 from src.utilities import log_and_print_info
@@ -87,15 +86,11 @@ f"""
         return (int(d["Batch"]), float(response.choices[0].message.content))
 
 
-    if cfg.training_type.use_gptj:
-        model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-j-6b")
-        tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-j-6b")
-
     def gptj_rating(d):
         act, obs = d["Action"], d["Observation"]
-        input_ids = tokenizer.encode(act + obs, return_tensors='pt')
+        input_ids = cfg.causal_lm_tokenizer.encode(act + obs, return_tensors='pt')
         with torch.no_grad():
-            logits = model(input_ids).logits[:,:-1,:]
+            logits = cfg.causal_lm(input_ids).logits[:,:-1,:]
         loss_fn = torch.nn.CrossEntropyLoss()
         loss = loss_fn(target=input_ids[:,1:], input=einops.rearrange(logits, "b s v -> b v s"))
         return (int(d["Batch"]), float(loss.item()))

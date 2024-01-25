@@ -24,10 +24,15 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 
-    causal_lm, causal_lm_tokenizer, ctxt_size =  get_model(
-        device, init_cfg.load_model, init_cfg.model_name, 
+    if isinstance(init_cfg.training_type, GptEval) and init_cfg.training_type.use_gptj:
+        causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-j-6b")
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-j-6b", padding_side="left")
+        ctxt_size = causal_lm.config.n_positions
+    else:
+        causal_lm, causal_lm_tokenizer, ctxt_size =  get_model(
+            device, init_cfg.load_model, init_cfg.model_name, 
         path_2_tokenizer, path_2_model, init_cfg.do_lora
-    ) if not isinstance(init_cfg.training_type, GptEval) else (None, None, None)
+    ) 
 
     tok_p_loss, tok_p_action, tok_p_obs  = None, None, None
     if isinstance(init_cfg.training_type,  RAOInit):
