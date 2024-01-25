@@ -54,12 +54,50 @@ gptj_OA = InitialConfig(
         debug=RepeatNPoints(num_points=3)
 )
 
+gptj_bb_e3 = InitialConfig(
+        model_name="gptj",
+        lr=1e-3,
+        batch_size=1,
+        num_batches=5000,
+        obs_to_action_ratio=1,
+        interval_save_weights=100,
+        interval_print=31,
+        wandb=True,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=300,
+        dataset_name="wikipedia",
+        task_name=None,
+        training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=False),
+        debug=None
+)
+
+gptj_bb_e2 = InitialConfig(
+        model_name="gptj",
+        lr=1e-2,
+        batch_size=1,
+        num_batches=5000,
+        obs_to_action_ratio=1,
+        interval_save_weights=100,
+        interval_print=31,
+        wandb=True,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=300,
+        dataset_name="wikipedia",
+        task_name=None,
+        training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=False),
+        debug=None
+)
+
+
+
 
 gpt2_bb = InitialConfig(
         model_name="distilgpt2",
         lr=1e-4,
-        batch_size=2,
-        num_batches=100,
+        batch_size=3,
+        num_batches=2000,
         obs_to_action_ratio=1,
         interval_save_weights=1000,
         interval_print=10,
@@ -247,7 +285,9 @@ debug_types = [
 ]
 #example_configs = [test_debug_template(x) for x in debug_types]
 
-example_configs =  [gen_eval("gptj", 10, False, use_gptj=True)]
+#example_configs =  [gen_eval("gptj", 10, False, use_gptj=True)]
+example_configs = [gptj_bb_e2]
+#example_configs = [gptj_bb_e3]
 #example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AO, gpt2_AR, gen_eval("mistral", 10, False, use_gptj=False)]
 #example_configs = [gpt2_RAO]
 #example_configs = [gpt2_AR]

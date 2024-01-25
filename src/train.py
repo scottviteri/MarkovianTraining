@@ -22,11 +22,11 @@ from src.train_autoregressive import train_autoregressive
 
 import src.config_examples
 
-#def debug():
-#    initial_cfg = src.config_examples.gpt2_bb
-#    cfg = extend_initial_config(initial_cfg)
-#    agg_losses = train_autoregressive(cfg)
-#    return agg_losses
+def debug():
+    initial_cfg = src.config_examples.gpt2_bb
+    cfg = extend_initial_config(initial_cfg)
+    agg_losses = train_autoregressive(cfg)
+    return agg_losses
 
 def train(initial_cfg : InitialConfig):
     seed = 42

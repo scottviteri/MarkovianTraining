@@ -1,7 +1,7 @@
 import torch
 import einops
 from datasets import load_dataset
-from itertools import islice
+from itertools import islice, tee
 
 from src.training_types import *
 
@@ -13,10 +13,15 @@ def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure
             itr_ds)
         pure_obs = get_pure_obs(init_cfg.batch_size, tok_p_pure_obs, device, ds_tokenized)
     elif init_cfg.dataset_name == "bigbench":
-        itrs = nth_iterators(init_cfg.num_batches, itr_ds)
-        return itrs
-        unbatched_bb = map(lambda itr: prep_bb(causal_lm_tokenizer, device, tok_p_pure_obs, itr), itrs)
-        pure_obs = batch(init_cfg.batch_size, unbatched_bb)
+        # could have also batched first, then impose pairs ordering
+        itr = batch(init_cfg.batch_size, itr_ds)
+        itr = group_pairs(itr)
+        itr = map(lambda x: map(mergeQA, x[0], x[1]), itr)
+        itr = map(
+            lambda batch: list(map(lambda i: fill_to_size(causal_lm_tokenizer, i[0], i[1], tok_p_pure_obs), batch)), 
+            itr)
+        itr = map(lambda batch: torch.stack(batch, dim=0).to(device), itr)
+        pure_obs = concat_batches_to_len(tok_p_pure_obs, itr)
     else:
         assert False, "Unknown dataset"
     if isinstance(init_cfg.debug, ReplaceWithRandomTokens):
@@ -31,6 +36,23 @@ def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure
     elif isinstance(init_cfg.debug, RepeatPointNTimes): #1 time is identity
         obs_ds = repeat_point_n_times(init_cfg.debug.num_times, obs_ds)
     return take(init_cfg.num_batches, obs_ds)
+
+def concat_batches_to_len(length, itr):
+    batch = next(itr)
+    while 1:
+        while batch.shape[1] < length:
+            batch = torch.cat((batch, next(itr)), dim=1)
+        yield batch[:,:length]
+        batch = batch[:,length:]
+
+def batch(batch_size, itr):
+    while 1:
+        yield [next(itr) for _ in range(batch_size)]
+
+def flatten(itrs):
+    while 1:
+        for itr in itrs:
+            yield next(itr)
 
 def replace_with_random_tokens(vocab_size, pure_obs):
    while True:
@@ -52,8 +74,13 @@ def split3(itr):
         i3()
     return i1(itr), i2(itr), i3(itr)
 
+#def nth_iterators(n, itr):
+#    return (islice(itr, i, None, n) for i in range(n))
+#
+
 def nth_iterators(n, itr):
-    return (islice(itr, i, None, n) for i in range(n))
+    itrs = tee(itr, n)
+    return (islice(itr, i, None, n) for i, itr in enumerate(itrs))
 
 def group_pairs(itr):
     first = next(itr)
@@ -74,6 +101,9 @@ def prep_bb(tokenizer, device, tok_per_pure_obs, itr):
     itr = map(lambda x: fill_to_size(tokenizer, x[0], x[1], tok_per_pure_obs), itr)
     return map(lambda x:x.to(device), itr)
 
+def mergeQA(d1, d2):
+    return ("A: "+d1["targets"][0] + "\n", d2["inputs"].split("?")[0] + "?\n")
+    
 def get_pure_obs(batch_size, tok_per_pure_obs, device, itr_ds):
     batches = [torch.empty((1,0), dtype=torch.int64, device=device) 
         for _ in range(batch_size)]
