@@ -108,7 +108,8 @@ f"""
         out_lst = []
         for i in itr:
             print(i)
-            time.sleep(0.1)
+            if not cfg.training_type.use_gptj:
+                time.sleep(0.1)
             out_lst.append(i[1][1])
         return out_lst
 
