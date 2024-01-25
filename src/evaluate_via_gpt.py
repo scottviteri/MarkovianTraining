@@ -95,7 +95,7 @@ f"""
         input_ids = tokenizer.encode(act, return_tensors='pt')
         output_ids = tokenizer.encode(obs, return_tensors='pt')
         with torch.no_grad():
-            outputs = model(input_ids)
+            outputs = model(torch.cat([input_ids, output_ids]))
         logits = outputs.logits
         mean_logit = torch.mean(logits[:, -len(output_ids):])
         return (int(d["Batch"]), float(mean_logit.item()))
