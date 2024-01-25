@@ -88,6 +88,7 @@ f"""
 
     def gptj_rating(d):
         act, obs = d["Action"], d["Observation"]
+        print(act, obs)
         input_ids = cfg.causal_lm_tokenizer.encode(act + obs, return_tensors='pt')
         with torch.no_grad():
             logits = cfg.causal_lm(input_ids).logits[:,:-1,:]
