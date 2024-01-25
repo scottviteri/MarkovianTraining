@@ -36,6 +36,25 @@ gpt2_OA = InitialConfig(
         debug=RepeatNPoints(num_points=1)
 )
 
+gptj_OA = InitialConfig(
+        model_name="gptj",
+        lr=1e-3,
+        batch_size=1,
+        num_batches=1000,
+        obs_to_action_ratio=1,
+        interval_save_weights=100,
+        interval_print=31,
+        wandb=True,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=300,
+        dataset_name="wikipedia",
+        task_name=None,
+        training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=False),
+        debug=RepeatNPoints(num_points=3)
+)
+
+
 gpt2_bb = InitialConfig(
         model_name="distilgpt2",
         lr=1e-4,
@@ -182,7 +201,7 @@ gpt2_AR =  InitialConfig(
         debug=RepeatNPoints(num_points=1)
 )
 
-def gen_eval(model_name, num_evals, wandb):
+def gen_eval(model_name, num_evals, wandb, use_gptj):
         # for GptEval, only model_name,  num_evals are used
         return InitialConfig(
                         model_name=model_name,
@@ -198,7 +217,7 @@ def gen_eval(model_name, num_evals, wandb):
                         training_ctxt_size=300,
                         dataset_name="wikipedia",
                         task_name=None,
-                        training_type=GptEval(num_evals=num_evals),
+                        training_type=GptEval(num_evals=num_evals, use_gptj=use_gptj),
                         debug=None                        
         )
 
@@ -228,10 +247,10 @@ debug_types = [
 ]
 #example_configs = [test_debug_template(x) for x in debug_types]
 
-#example_configs =  [gen_eval("mistral", 10, False)]
-#example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AO, gpt2_AR, gen_eval("mistral", 10, False)]
+example_configs =  [gen_eval("gptj", 10, False, use_gptj=True)]
+#example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AO, gpt2_AR, gen_eval("mistral", 10, False, use_gptj=False)]
 #example_configs = [gpt2_RAO]
 #example_configs = [gpt2_AR]
-example_configs = [gpt2_AO]
+#example_configs = [gpt2_AO]
 #example_configs = [gpt2_RAO_nr0_obwu0]
 #gpt2_RAO_nr0_obwu4,

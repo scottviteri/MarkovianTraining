@@ -403,6 +403,7 @@ def create_run_name(cfg : Config) -> str:
 
     elif isinstance(cfg.training_type, GptEval): 
         run_name += f"GptEval{cfg.training_type.num_evals}_"
+        run_name += "gptj" if cfg.training_type.use_gptj else "openai"
 
     elif isinstance(cfg.training_type, AOA):
         if cfg.training_type.ignore_first_action and not cfg.training_type.ignore_second_action:

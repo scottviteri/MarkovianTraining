@@ -85,6 +85,16 @@ f"""
         )
         return (int(d["Batch"]), float(response.choices[0].message.content))
 
+    def gptj_rating(tokenizer, d):
+        act, obs = d["Action"], d["Observation"]
+        input_ids = tokenizer.encode(act, return_tensors='pt')
+        output_ids = tokenizer.encode(obs, return_tensors='pt')
+        with torch.no_grad():
+            outputs = model(input_ids)
+        logits = outputs.logits
+        mean_logit = torch.mean(logits[:, -len(output_ids):])
+        return (int(d["Batch"]), float(mean_logit.item()))
+
     def wandb_log(line):
         if cfg.wandb:
             wandb.log({"Batch": line[0], "Rating": line[1]})
@@ -110,7 +120,10 @@ f"""
         a = remove_duplicates(a)
         a = collect_dictionaries(a)
         a = throttle(num_batches, a)
-        a = map(openai_rating, a)
+        if cfg.training_type.use_gptj:
+            a = map(gptj_rating, a)
+        else:
+            a = map(openai_rating, a)
         a = map(wandb_log, a)
         return collect_and_print(enumerate(a))
 
