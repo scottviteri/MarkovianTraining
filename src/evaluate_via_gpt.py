@@ -113,7 +113,7 @@ f"""
         return out_lst
 
 
-    def log_result(num_batches, log_itr):
+    def log_result(tokenizer, num_batches, log_itr):
         a = log_itr
         a = filter(log_filter, a)
         a = map(reformat, a)
@@ -121,7 +121,7 @@ f"""
         a = collect_dictionaries(a)
         a = throttle(num_batches, a)
         if cfg.training_type.use_gptj:
-            a = map(gptj_rating, a)
+            a = map(lambda x: gptj_rating(tokenizer, x), a)
         else:
             a = map(openai_rating, a)
         a = map(wandb_log, a)
@@ -138,5 +138,5 @@ f"""
     num_batches = get_num_batches()
     with open(cfg.path_2_log, "r") as file:
         log_itr = iter(file.readlines())
-    return log_result(num_batches, log_itr)
+    return log_result(cfg.causal_lm_tokenizer, num_batches, log_itr)
 
