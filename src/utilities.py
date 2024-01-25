@@ -27,9 +27,13 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     causal_lm, causal_lm_tokenizer, ctxt_size =  get_model(
         device, init_cfg.load_model, init_cfg.model_name, 
         path_2_tokenizer, path_2_model, init_cfg.do_lora
-    ) if not isinstance(init_cfg.training_type, GptEval) else (None, None, None)
+    ) if not isinstance(init_cfg.training_type, GptEval) else (None, AutoTokenizer.from_pretrained(
+                path_2_tokenizer,
+                padding_side="left",
+            )
+, None)
 
-    tok_p_loss, tok_p_action, tok_p_loss = None, None, None
+    tok_p_loss, tok_p_action, tok_p_obs  = None, None, None
     if isinstance(init_cfg.training_type,  RAOInit):
         training_ctxt_size = ctxt_size if init_cfg.training_ctxt_size is None else init_cfg.training_ctxt_size 
         tok_p_loss = 12
