@@ -5,6 +5,7 @@ import einops
 from typing import List
 from openai import OpenAI
 import time
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.training_types import *
 from src.utilities import log_and_print_info
@@ -92,13 +93,12 @@ f"""
 
     def gptj_rating(d):
         act, obs = d["Action"], d["Observation"]
-        input_ids = tokenizer.encode(act, return_tensors='pt')
-        output_ids = tokenizer.encode(obs, return_tensors='pt')
+        input_ids = tokenizer.encode(act + obs, return_tensors='pt')
         with torch.no_grad():
-            outputs = model(torch.cat([input_ids, output_ids]))
-        logits = outputs.logits
-        mean_logit = torch.mean(logits[:, -len(output_ids):])
-        return (int(d["Batch"]), float(mean_logit.item()))
+            logits = model(input_ids).logits[:,:-1,:]
+        loss_fn = torch.nn.CrossEntropyLoss()
+        loss = loss_fn(target=input_ids[:,1:], inputs=einops.rearrange(logits, "b s v -> b v s"))
+        return (int(d["Batch"]), float(loss.item()))
 
     def wandb_log(line):
         if cfg.wandb:
