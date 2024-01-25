@@ -97,7 +97,7 @@ f"""
         with torch.no_grad():
             logits = model(input_ids).logits[:,:-1,:]
         loss_fn = torch.nn.CrossEntropyLoss()
-        loss = loss_fn(target=input_ids[:,1:], inputs=einops.rearrange(logits, "b s v -> b v s"))
+        loss = loss_fn(target=input_ids[:,1:], input=einops.rearrange(logits, "b s v -> b v s"))
         return (int(d["Batch"]), float(loss.item()))
 
     def wandb_log(line):
