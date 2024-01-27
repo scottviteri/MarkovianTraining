@@ -60,24 +60,6 @@ def replace_with_random_tokens(vocab_size, pure_obs):
        random_tokens = torch.randint(0, vocab_size, batch.shape, device=batch.device, dtype=batch.dtype)
        yield random_tokens
 
-def split3(itr):
-    def i1():
-        while 1: 
-            yield next(itr)
-            i2()
-    def i2():
-        while 1: 
-            yield next(itr)
-        i3()
-    def i3():
-        while 1: yield next(itr)
-        i3()
-    return i1(itr), i2(itr), i3(itr)
-
-#def nth_iterators(n, itr):
-#    return (islice(itr, i, None, n) for i in range(n))
-#
-
 def nth_iterators(n, itr):
     itrs = tee(itr, n)
     return (islice(itr, i, None, n) for i, itr in enumerate(itrs))

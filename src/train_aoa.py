@@ -40,6 +40,7 @@ def train_without_gumbel(cfg):
         f.write("")
 
     for batch_index, obs in tqdm(enumerate(cfg.dataloader), total=cfg.num_batches):
+
         if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:
             print(f"Saving trained_{cfg.model_name} \n\n")
             cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
@@ -47,13 +48,13 @@ def train_without_gumbel(cfg):
 
         with torch.no_grad():
             next_action = cfg.causal_lm.generate(
-                inputs=torch.cat([action, obs, cfg.action_prefix_tensor], dim=1),
-                output_scores=True,
-                do_sample=True,
-                min_new_tokens=cfg.tok_p_pure_action,
-                max_new_tokens=cfg.tok_p_pure_action,
-                pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
-            )[:, -cfg.tok_p_action :]
+            inputs=torch.cat([action, obs, cfg.action_prefix_tensor], dim=1),
+            output_scores=True,
+            do_sample=True,
+            min_new_tokens=cfg.tok_p_pure_action,
+            max_new_tokens=cfg.tok_p_pure_action,
+            pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
+        )[:, -cfg.tok_p_action :]
 
         optimizer.zero_grad()
         input_sequence = (
@@ -72,8 +73,17 @@ def train_without_gumbel(cfg):
             target=torch.cat(input_sequence, dim=1)[:, 1:],
         )
 
-        if cfg.training_type.ignore_first_action:
-            aggregate_loss = loss_tensor[:, cfg.tok_p_action:].mean()
+        action_tensor = loss_tensor[:, : cfg.tok_p_action]
+        observation_tensor = loss_tensor[:, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
+        if not cfg.training_type.ignore_second_action:
+            next_action_tensor = loss_tensor[:, cfg.tok_p_action + cfg.tok_p_obs :]
+
+        if cfg.training_type.ignore_first_action and cfg.training_type.ignore_second_action:
+            aggregate_loss = observation_tensor.mean()
+        elif cfg.training_type.ignore_first_action and not cfg.training_type.ignore_second_action:
+            aggregate_loss = torch.cat([observation_tensor, next_action_tensor], dim=1).mean()
+        elif not cfg.training_type.ignore_first_action and cfg.training_type.ignore_second_action:
+            aggregate_loss = torch.cat([action_tensor, observation_tensor], dim=1).mean()
         else:
             aggregate_loss = loss_tensor.mean()
         aggregate_losses.append(aggregate_loss.item())
@@ -82,18 +92,17 @@ def train_without_gumbel(cfg):
             optimizer.step()
 
         with torch.no_grad():
-            action_loss = loss_tensor[:, : cfg.tok_p_action].mean()
-            observation_loss = loss_tensor[
-                :, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs
-            ].mean()
-            if cfg.training_type.ignore_second_action:
-                next_action_loss = loss_tensor[:, cfg.tok_p_obs :].mean()
+            action_loss = action_tensor.mean()
+            observation_loss = observation_tensor.mean()
+            if not cfg.training_type.ignore_second_action:
+                next_action_loss = next_action_tensor.mean()
 
             if cfg.wandb:
-                if cfg.training_type.ignore_second_action:
+                if not cfg.training_type.ignore_second_action:
                     wandb.log({"Next Action Loss": next_action_loss})
                 wandb.log(
                     {
+                        "Batch Index": batch_index,
                         "Aggregate Loss": aggregate_loss,
                         "Action Loss": action_loss,
                         "Observation Loss": observation_loss,
@@ -105,7 +114,7 @@ def train_without_gumbel(cfg):
             with open(cfg.path_2_log, "a") as f:
                 multi_print(f"Batch {batch_index}", f)
                 multi_print(f"Aggregate loss: {aggregate_loss}", f)
-                if cfg.training_type.ignore_second_action:
+                if not cfg.training_type.ignore_second_action:
                     multi_print(
                         f"Action/Observation/NextAction loss: {action_loss}/{observation_loss}/{next_action_loss}",
                         f,

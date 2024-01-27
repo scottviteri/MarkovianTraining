@@ -26,7 +26,10 @@ def train_autoregressive(cfg):
         optimizer.step()
         losses.append(loss.item())
         if cfg.wandb:
-            wandb.log({"Observation Loss": loss.item()})
+            wandb.log({
+                "Batch Index": batch_index,
+                "Observation Loss": loss.item()
+                })
         if batch_index % cfg.interval_print == 0:
             print(f"Batch {batch_index}, Loss: {loss.item()}")
     return losses

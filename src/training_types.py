@@ -16,14 +16,17 @@ RAO = NamedTuple("RAO",
     [("num_rao", int),  ("obs_between_weight_updates", int), 
     ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), ("use_rewards_to_go", bool),
     ("tok_p_loss", int), ("tok_p_pure_loss", int), ("loss_prefix_tensor", torch.Tensor), ("tok_p_doc", int), ("tok_p_rao", int)])
+GptSummarize = NamedTuple("GptSummarize", [])
 
-InitTrainingType = Union[AR, GptEval, RAOInit, AOA]
-TrainingType = Union[AR, GptEval, RAO, AOA]
+InitTrainingType = Union[AR, GptEval, RAOInit, AOA, GptSummarize]
+TrainingType = Union[AR, GptEval, RAO, AOA, GptSummarize]
 
 RepeatNPoints = NamedTuple("RepeatNPoints", [("num_points", int)])
 RepeatPointNTimes = NamedTuple("RepeatPointNTimes", [("num_times", int)])
 ReplaceWithRandomTokens = NamedTuple("ReplaceWithRandomTokens", [])
 NoWeightUpdates = NamedTuple("NoWeightUpdates", [])
+DatasetType = NamedTuple("DatasetType", 
+  [("name", str), ("task", Optional[str]), ("teacher_frequency", Optional[int])])
 
 DebugType = Union[RepeatNPoints, RepeatPointNTimes, ReplaceWithRandomTokens, NoWeightUpdates]
 
