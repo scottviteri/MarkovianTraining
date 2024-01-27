@@ -19,11 +19,11 @@ gpt2_AO = InitialConfig(
 )
 
 
-gj_OA_wk_15k = InitialConfig(
+gj_OA_wk_20k = InitialConfig(
         model_name="gptj",
         lr=1e-3,
         batch_size=1,
-        num_batches=15000,
+        num_batches=20000,
         obs_to_action_ratio=1,
         interval_save_weights=1000,
         interval_print=10,
@@ -37,11 +37,11 @@ gj_OA_wk_15k = InitialConfig(
         debug=None
 )
 
-gj_O_wk_15k = InitialConfig(
+gj_O_wk_20k = InitialConfig(
         model_name="gptj",
         lr=1e-3,
         batch_size=1,
-        num_batches=1000,
+        num_batches=20000,
         obs_to_action_ratio=1,
         interval_save_weights=1000,
         interval_print=31,
@@ -55,11 +55,11 @@ gj_O_wk_15k = InitialConfig(
         debug=None
 )
 
-gj_O_bb_15k = InitialConfig(
+gj_O_bb_20k = InitialConfig(
         model_name="gptj",
         lr=1e-3,
         batch_size=1,
-        num_batches=15000,
+        num_batches=20000,
         obs_to_action_ratio=1,
         interval_save_weights=1000,
         interval_print=31,
@@ -73,11 +73,11 @@ gj_O_bb_15k = InitialConfig(
         debug=None
 )
 
-mst_O_wk_15k = InitialConfig(
+mst_O_wk_20k = InitialConfig(
         model_name="mistral",
         lr=1e-3,
         batch_size=1,
-        num_batches=15000,
+        num_batches=20000,
         obs_to_action_ratio=1,
         interval_save_weights=1000,
         interval_print=31,
@@ -93,11 +93,11 @@ mst_O_wk_15k = InitialConfig(
 
 
 # should only use model name, lr, observation_size, and wandb
-gj_AR_15k =  InitialConfig(
+gj_AR_20k =  InitialConfig(
         model_name="gptj",
         lr=1e-3,
         batch_size=1,
-        num_batches=15000,
+        num_batches=20000,
         obs_to_action_ratio=1,
         interval_save_weights=1000,
         interval_print=1,
@@ -160,7 +160,8 @@ debug_types = [
 #example_configs =  [gen_eval("gptj", 10, False, use_gptj=True)]
 #example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AO, gpt2_AR, gen_eval("mistral", 10, False, use_gptj=False)]
 example_configs = [gpt2_AO]
-#example_configs = [gj_OA_wk_15k]
-#example_configs = [gj_O_wk_15k]
-#example_configs = [gj_O_bb_15k]
-#example_configs = [gj_AR_15k]
+#example_configs = [gj_OA_wk_20k]
+#example_configs = [gj_O_wk_20k]
+#example_configs = [gj_O_bb_20k]
+#example_configs = [mst_O_wk_20k]
+#example_configs = [gj_AR_20k]
