@@ -100,7 +100,7 @@ gpt2_arith_O_local = InitialConfig(
         do_lora=False,
         training_ctxt_size=125,
         dataset=InitDatasetType(name="arithmetic_explanations.jsonl", task=None, peek_every=1),
-        training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
+        training_type=AR(observation_size=50), #AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
         debug=NoWeightUpdates()
 )
 
@@ -120,6 +120,24 @@ gpt2_arith_O = InitialConfig(
         training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
         debug=NoWeightUpdates()
 )
+
+gptj_arith_O = InitialConfig(
+        model_name="gptj",
+        lr=1e-3,
+        batch_size=1,
+        num_batches=9500,
+        obs_to_action_ratio=0.5,
+        interval_save_weights=3000,
+        interval_print=31,
+        wandb=True,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=125,
+        dataset=InitDatasetType(name=os.getcwd()+"/src/arithmetic_explanations.jsonl", task=None, peek_every=1),
+        training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=False),
+        debug=None
+)
+
 
 # should only use model name, lr, observation_size, and wandb
 gpt2_arith_AR =  InitialConfig(
@@ -192,3 +210,4 @@ debug_types = [
 #example_configs = [gj_O_bb_20k]
 #example_configs = [mst_O_wk_20k]
 #example_configs = [gj_AR_20k]
+examples_configs = [gpt2_arith_O_local]
