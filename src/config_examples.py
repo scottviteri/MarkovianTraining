@@ -87,7 +87,7 @@ mst_O_wk_20k = InitialConfig(
         debug=None
 )
 
-gpt2_arith_O = InitialConfig(
+gpt2_arith_O_local = InitialConfig(
         model_name="distilgpt2",
         lr=1e-3,
         batch_size=1,
@@ -104,7 +104,7 @@ gpt2_arith_O = InitialConfig(
         debug=NoWeightUpdates()
 )
 
-a100_gpt2_arith_O = InitialConfig(
+gpt2_arith_O = InitialConfig(
         model_name="distilgpt2",
         lr=1e-3,
         batch_size=16,

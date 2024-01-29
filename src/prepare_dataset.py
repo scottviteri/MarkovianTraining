@@ -58,7 +58,7 @@ def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure
         dict_ds = repeat_every_n_points(init_cfg.debug.num_points, dict_ds)
     elif isinstance(init_cfg.debug, RepeatPointNTimes): #1 time is identity
         dict_ds = repeat_point_n_times(init_cfg.debug.num_times, dict_ds)
-    return dict_ds
+    return take(init_cfg.num_batches, dict_ds)
 
 def peek_every_n(n, dict_itr):
     for i, d in enumerate(dict_itr):
