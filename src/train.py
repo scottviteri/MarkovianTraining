@@ -65,7 +65,7 @@ def test():
         train(config)
 
 if __name__ == "__main__":
-   train(src.config_examples.gpt2_arith_O) 
-   #test()
+   #train(src.config_examples.gpt2_arith_O) 
+   test()
    #debug()
 
