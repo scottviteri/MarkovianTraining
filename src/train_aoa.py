@@ -39,22 +39,25 @@ def train_without_gumbel(cfg):
     with open(cfg.path_2_log, "a") as f:
         f.write("")
 
-    for batch_index, obs in tqdm(enumerate(cfg.dataloader), total=cfg.num_batches):
+    for batch_index, datapt in tqdm(enumerate(cfg.dataset.dataloader), total=cfg.num_batches):
+        obs = datapt["Observation"]
+        next_action = datapt["Action"] if "Action" in datapt else None
 
         if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:
             print(f"Saving trained_{cfg.model_name} \n\n")
             cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
             cfg.causal_lm.save_pretrained(cfg.path_2_model)
 
-        with torch.no_grad():
-            next_action = cfg.causal_lm.generate(
-            inputs=torch.cat([action, obs, cfg.action_prefix_tensor], dim=1),
-            output_scores=True,
-            do_sample=True,
-            min_new_tokens=cfg.tok_p_pure_action,
-            max_new_tokens=cfg.tok_p_pure_action,
-            pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
-        )[:, -cfg.tok_p_action :]
+        if next_action is None:
+            with torch.no_grad():
+                next_action = cfg.causal_lm.generate(
+                inputs=torch.cat([action, obs, cfg.action_prefix_tensor], dim=1),
+                output_scores=True,
+                do_sample=True,
+                min_new_tokens=cfg.tok_p_pure_action,
+                max_new_tokens=cfg.tok_p_pure_action,
+                pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
+            )[:, -cfg.tok_p_action :]
 
         optimizer.zero_grad()
         input_sequence = (
@@ -70,7 +73,7 @@ def train_without_gumbel(cfg):
                 logits,
                 "batch seq_length vocab_size -> batch vocab_size seq_length",
             ),
-            target=torch.cat(input_sequence, dim=1)[:, 1:],
+            target=torch.cat(input_sequence, dim=1)[:, 1:]
         )
 
         action_tensor = loss_tensor[:, : cfg.tok_p_action]

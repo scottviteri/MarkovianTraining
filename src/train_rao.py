@@ -31,11 +31,12 @@ def train_rao(cfg : Config):
         dim=1,
     )
 
-    for batch_index, input_ids in (
+    for batch_index, datapt in (
         tqdm(enumerate(cfg.dataloader), total=cfg.num_batches)
         if cfg.num_batches
         else tqdm(cfg.dataloader)
     ):
+        input_ids = datapt["Observation"]
         if cfg.num_batches and batch_index > cfg.num_batches:
             break
         if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:
