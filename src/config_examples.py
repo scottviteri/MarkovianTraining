@@ -1,4 +1,5 @@
 from src.training_types import *
+import os
 
 gpt2_AO = InitialConfig(
         model_name="distilgpt2",
@@ -99,6 +100,23 @@ gpt2_arith_O = InitialConfig(
         do_lora=False,
         training_ctxt_size=125,
         dataset=InitDatasetType(name="arithmetic_explanations.jsonl", task=None, peek_every=1),
+        training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
+        debug=NoWeightUpdates()
+)
+
+a100_gpt2_arith_O = InitialConfig(
+        model_name="distilgpt2",
+        lr=1e-3,
+        batch_size=16,
+        num_batches=400,
+        obs_to_action_ratio=0.5,
+        interval_save_weights=3000,
+        interval_print=100,
+        wandb=True,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=125,
+        dataset=InitDatasetType(name=os.getcwd()+"/src/arithmetic_explanations.jsonl", task=None, peek_every=1),
         training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
         debug=NoWeightUpdates()
 )
