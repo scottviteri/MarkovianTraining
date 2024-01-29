@@ -77,7 +77,10 @@ def train_without_gumbel(cfg):
         )
 
         action_tensor = loss_tensor[:, : cfg.tok_p_action]
-        observation_tensor = loss_tensor[:, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
+        if "arithmetic_explanations" in cfg.dataset.name:
+            observation_tensor = loss_tensor[:, cfg.tok_p_action : cfg.tok_p_action + 10]
+        else:
+            observation_tensor = loss_tensor[:, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
         if not cfg.training_type.ignore_second_action:
             next_action_tensor = loss_tensor[:, cfg.tok_p_action + cfg.tok_p_obs :]
 
