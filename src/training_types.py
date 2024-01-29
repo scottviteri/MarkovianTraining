@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Union, NamedTuple, Iterable
+from typing import Optional, Union, NamedTuple, Iterable, Dict
 from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer
 import torch
 from enum import Enum
@@ -16,17 +16,19 @@ RAO = NamedTuple("RAO",
     [("num_rao", int),  ("obs_between_weight_updates", int), 
     ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), ("use_rewards_to_go", bool),
     ("tok_p_loss", int), ("tok_p_pure_loss", int), ("loss_prefix_tensor", torch.Tensor), ("tok_p_doc", int), ("tok_p_rao", int)])
-GptSummarize = NamedTuple("GptSummarize", [])
 
-InitTrainingType = Union[AR, GptEval, RAOInit, AOA, GptSummarize]
-TrainingType = Union[AR, GptEval, RAO, AOA, GptSummarize]
+InitTrainingType = Union[AR, GptEval, RAOInit, AOA]
+TrainingType = Union[AR, GptEval, RAO, AOA]
 
 RepeatNPoints = NamedTuple("RepeatNPoints", [("num_points", int)])
 RepeatPointNTimes = NamedTuple("RepeatPointNTimes", [("num_times", int)])
 ReplaceWithRandomTokens = NamedTuple("ReplaceWithRandomTokens", [])
 NoWeightUpdates = NamedTuple("NoWeightUpdates", [])
+InitDatasetType = NamedTuple("InitDatasetType", 
+  [("name", str), ("task", Optional[str]), ("peek_every", Optional[int])])
+
 DatasetType = NamedTuple("DatasetType", 
-  [("name", str), ("task", Optional[str]), ("teacher_frequency", Optional[int])])
+  [("name", str), ("task", str), ("peek_every", Optional[int]), ("dataloader", Iterable[Dict[str, torch.Tensor]])])
 
 DebugType = Union[RepeatNPoints, RepeatPointNTimes, ReplaceWithRandomTokens, NoWeightUpdates]
 
@@ -43,8 +45,7 @@ class InitialConfig:
     load_model: bool
     do_lora : bool
     training_ctxt_size: Optional[int]
-    dataset_name: str
-    task_name: Optional[str]
+    dataset: InitDatasetType
     training_type : InitTrainingType
     debug : Optional[DebugType]
 
@@ -64,8 +65,6 @@ class Config:
     do_lora: bool
     training_ctxt_size: int
     device: str
-    dataset_name: str
-    task_name: str
     path_2_log: str
     path_2_model: str
     path_2_tokenizer: str
@@ -76,6 +75,6 @@ class Config:
     action_prefix_tensor: Optional[torch.Tensor]
     obs_prefix_tensor: Optional[torch.Tensor]
     ctxt_size: Optional[int]
-    dataloader : Iterable[torch.Tensor]
+    dataset : DatasetType
     training_type: TrainingType
     debug : Optional[DebugType]

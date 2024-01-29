@@ -15,11 +15,12 @@ def load_cfg_from_file(file_location : str) -> InitialConfig:
     with open(file_location) as f:
         cfg_dict = json.load(f)["parameters"]
     cfg_dict["training_type"] = eval(cfg_dict["training_type"][0])(**cfg_dict["training_type"][1])
+    cfg_dict["dataset"] = eval(cfg_dict["dataset"][0])(**cfg_dict["dataset"][1])
     return InitialConfig(**cfg_dict)
 
 def extend_initial_config(init_cfg: InitialConfig) -> Config:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    task_name = get_task_name(init_cfg.task_name, init_cfg.dataset_name, device)
+    task_name = get_task_name(init_cfg.dataset.task, init_cfg.dataset.name, device)
     path_2_log = f"saved_weights_and_losses/{init_cfg.model_name}_log.txt"
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
@@ -67,13 +68,15 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         assert "Invalid training type"
 
     tok_per_pure, prefix_tensors = get_prefixes(
-        causal_lm_tokenizer, init_cfg.batch_size, device, tok_p_obs, tok_p_action, tok_p_loss)
+        causal_lm_tokenizer, init_cfg.batch_size, device, init_cfg.dataset.name,
+        tok_p_loss, tok_p_action, tok_p_obs
+    )
     tok_p_pure_loss, tok_p_pure_action, tok_p_pure_obs = tok_per_pure
-    loss_prefix, act_prefix, obs_prefix = prefix_tensors
+    loss_prefix, action_prefix, obs_prefix = prefix_tensors
 
-    dataloader = prepare_dataset(
+    dataset = prepare_dataset(
             init_cfg, task_name, causal_lm_tokenizer,
-            device, tok_p_pure_obs, obs_prefix 
+            device, tok_p_pure_action, tok_p_pure_obs, action_prefix, obs_prefix 
         )
 
     if isinstance(init_cfg.training_type,  RAOInit):
@@ -96,9 +99,12 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         do_lora = init_cfg.do_lora,
         training_ctxt_size = init_cfg.training_ctxt_size,
         device = device,
-        dataset_name = init_cfg.dataset_name,
-        dataloader = dataloader,
-        task_name = get_task_name(init_cfg.task_name, init_cfg.dataset_name, device),
+        dataset = DatasetType(
+            name=init_cfg.dataset.name, 
+            task=task_name,
+            peek_every=init_cfg.dataset.peek_every, 
+            dataloader=dataset
+        ),
         path_2_log = path_2_log,
         path_2_model = path_2_model,
         path_2_tokenizer = path_2_tokenizer,
@@ -106,12 +112,12 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         tok_p_obs = tok_p_obs,
         tok_p_pure_action = tok_p_pure_action,
         tok_p_pure_obs = tok_p_pure_obs,
-        action_prefix_tensor=act_prefix,
+        action_prefix_tensor=action_prefix,
         obs_prefix_tensor=obs_prefix,
         ctxt_size = ctxt_size,
         causal_lm = causal_lm,
         causal_lm_tokenizer = causal_lm_tokenizer,
-        training_type = training_type ,
+        training_type = training_type,
         debug = init_cfg.debug
     )
 
@@ -151,8 +157,8 @@ def log_and_print_info(
 
 
 def get_prefixes(
-    tokenizer:PreTrainedTokenizer, batch_size:int, device:torch.device, 
-    tok_p_obs: Optional[int], tok_p_action: Optional[int], tok_p_loss: Optional[int]):
+    tokenizer:PreTrainedTokenizer, batch_size:int, device:torch.device, dataset_name : str, 
+    tok_p_loss: Optional[int], tok_p_action: Optional[int], tok_p_obs: Optional[int]):
 
     if tok_p_obs:
         observation_prefix = "\nObservation: "
@@ -355,8 +361,7 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
 
 
 def get_task_name(task_name, dataset_name, device):
-    if task_name:
-        return task_name
+    if task_name: return task_name
     if dataset_name == "wikipedia":
         if torch.cuda.is_available():
             gpu_memory = torch.cuda.get_device_properties(
@@ -368,8 +373,10 @@ def get_task_name(task_name, dataset_name, device):
                 task_name = "20220301.simple"
         else:
             task_name = "20220301.simple"
-    else:  # cfg.dataset_name == "bigbench":
+    elif dataset_name == "bigbench":
         task_name = "arithmetic"
+    else:
+        task_name = None 
     return task_name
 
 def get_linear_layers(model):
@@ -388,10 +395,12 @@ def get_linear_layers(model):
 def create_run_name(cfg : Config) -> str:
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
-    run_name += f"{cfg.dataset_name[:2]}_"
+    run_name += f"{cfg.dataset.name[:2]}_"
     if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
     if isinstance(cfg.training_type, AR): 
         run_name += f"AR_obs{cfg.tok_p_obs}_"
+    if cfg.dataset.peek_every is not None:
+        run_name += f"pe{cfg.dataset.peek_every}_"
 
     elif isinstance(cfg.training_type, RAO): 
         run_name += f"RAO_"

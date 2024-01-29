@@ -12,8 +12,7 @@ gpt2_AO = InitialConfig(
         load_model=False,
         do_lora=False,
         training_ctxt_size=300,
-        dataset_name="wikipedia",
-        task_name=None,
+        dataset = InitDatasetType(name="wikipedia", task=None, peek_every=None),
         training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=True),
         debug=None
 )
@@ -31,8 +30,7 @@ gj_OA_wk_20k = InitialConfig(
         load_model=False,
         do_lora=False,
         training_ctxt_size=300,
-        dataset_name="wikipedia",
-        task_name=None,
+        dataset = InitDatasetType(name="wikipedia", task=None, peek_every=None),
         training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=False),
         debug=None
 )
@@ -49,8 +47,7 @@ gj_O_wk_20k = InitialConfig(
         load_model=False,
         do_lora=False,
         training_ctxt_size=300,
-        dataset_name="wikipedia",
-        task_name=None,
+        dataset = InitDatasetType(name="wikipedia", task=None, peek_every=None),
         training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
         debug=None
 )
@@ -67,8 +64,7 @@ gj_O_bb_20k = InitialConfig(
         load_model=False,
         do_lora=False,
         training_ctxt_size=300,
-        dataset_name="bigbench",
-        task_name=None,
+        dataset=InitDatasetType(name="bigbench", task=None, peek_every=None),
         training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
         debug=None
 )
@@ -85,31 +81,46 @@ mst_O_wk_20k = InitialConfig(
         load_model=False,
         do_lora=False,
         training_ctxt_size=300,
-        dataset_name="wikipedia",
-        task_name=None,
+        dataset = InitDatasetType(name="wikipedia", task=None, peek_every=None),
         training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
         debug=None
 )
 
-
-# should only use model name, lr, observation_size, and wandb
-gj_AR_20k =  InitialConfig(
-        model_name="gptj",
+gpt2_arith_O = InitialConfig(
+        model_name="distilgpt2",
         lr=1e-3,
         batch_size=1,
-        num_batches=20000,
-        obs_to_action_ratio=1,
-        interval_save_weights=1000,
-        interval_print=1,
+        num_batches=2700,
+        obs_to_action_ratio=0.5,
+        interval_save_weights=3000,
+        interval_print=100,
+        wandb=True,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=125,
+        dataset=InitDatasetType(name="arithmetic_explanations.jsonl", task=None, peek_every=1),
+        training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
+        debug=NoWeightUpdates()
+)
+
+# should only use model name, lr, observation_size, and wandb
+gpt2_arith_AR =  InitialConfig(
+        model_name="distilgpt2",
+        lr=1e-3,
+        batch_size=1,
+        num_batches=2700,
+        obs_to_action_ratio=15.0/40.0,
+        interval_save_weights=10000,
+        interval_print=500,
         wandb=True,
         load_model=False,
         do_lora=False,
         training_ctxt_size=0, #not used
-        dataset_name="wikipedia",
-        task_name=None,
-        training_type=AR(observation_size=100),
+        dataset=InitDatasetType(name="arithmetic_explanations.jsonl", task=None, peek_every=None),
+        training_type=AR(observation_size=40),
         debug=None
 )
+
 
 def gen_eval(model_name, num_evals, wandb, use_gptj):
         # for GptEval, only model_name,  num_evals are used
@@ -125,8 +136,7 @@ def gen_eval(model_name, num_evals, wandb, use_gptj):
                         load_model=False,
                         do_lora=True,
                         training_ctxt_size=300,
-                        dataset_name="wikipedia",
-                        task_name=None,
+                        dataset = InitDatasetType(name="wikipedia", task=None, peek_every=None),
                         training_type=GptEval(num_evals=num_evals, use_gptj=use_gptj),
                         debug=None                        
         )
@@ -144,8 +154,7 @@ def test_debug_template(debug_type):
         load_model=False,
         do_lora=True,
         training_ctxt_size=300,
-        dataset_name="wikipedia",
-        task_name=None,
+        dataset = InitDatasetType(name="wikipedia", task=None, peek_every=None),
         training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=False),
         debug=debug_type
     ) 
@@ -159,7 +168,7 @@ debug_types = [
 #example_configs = [test_debug_template(x) for x in debug_types]
 #example_configs =  [gen_eval("gptj", 10, False, use_gptj=True)]
 #example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AO, gpt2_AR, gen_eval("mistral", 10, False, use_gptj=False)]
-example_configs = [gpt2_AO]
+#example_configs = [gpt2_AO]
 #example_configs = [gj_OA_wk_20k]
 #example_configs = [gj_O_wk_20k]
 #example_configs = [gj_O_bb_20k]
