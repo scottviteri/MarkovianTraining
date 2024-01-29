@@ -64,7 +64,8 @@ def peek_every_n(n, dict_itr):
     for i, d in enumerate(dict_itr):
         if i % n == 0:
             yield d
-        yield {"Observation" : d["Observation"]}
+        else:
+            yield {"Observation" : d["Observation"]}
 
 def jsonl_to_dict_iterator(filename: str) -> Iterator[Dict]:
     with open(filename, 'r') as infile:
