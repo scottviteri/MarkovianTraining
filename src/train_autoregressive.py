@@ -17,15 +17,18 @@ def train_autoregressive(cfg):
     for batch_index, pair in tqdm(enumerate(data), total=cfg.num_batches):
         d1, d2 = pair
         o1, o2 = d1["Observation"], d2["Observation"]
-        obs = torch.cat([o1, o2], dim=1)
+        if "arithmetic_explanations" in cfg.dataset.name:
+            obs = torch.cat([o1, o2[:,:10]], dim=1)
+        else:
+            obs = torch.cat([o1, o2], dim=1)
         optimizer.zero_grad()
-        logits = cfg.causal_lm(obs).logits[:, -cfg.tok_p_obs-1:-1, :]
+        logits = cfg.causal_lm(obs).logits[:, cfg.tok_p_obs-1:-1, :]
         loss = loss_fn(
             input=einops.rearrange(
                 logits,
                 "batch seq_length vocab_size -> batch vocab_size seq_length",
             ),
-            target=obs[:, -cfg.tok_p_obs:]
+            target=obs[:, cfg.tok_p_obs:]
         )
         loss.backward()
         if not isinstance(cfg.debug, NoWeightUpdates):
