@@ -46,7 +46,9 @@ def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure
                                  "Observation": torch.randint(0, causal_lm_tokenizer.vocab_size,d["Observation"].shape, 
                                                           device=d["Observation"].device, dtype=d["Observation"].dtype)}, dict_ds)
 
-    if init_cfg.dataset.peek_every is not None:
+    if init_cfg.dataset.peek_every is None:
+        dict_ds = map(lambda d: {"Observation": d["Observation"]}, dict_ds)
+    else:
         dict_ds = peek_every_n(init_cfg.dataset.peek_every, dict_ds)
     #dict_ds = prepend_prefix_tensors(obs_prefix, action_prefix, dict_ds)
     # Note: is it true that RAO uses the same num_batches to count the number of weight updates?
