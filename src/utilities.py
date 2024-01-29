@@ -395,7 +395,7 @@ def get_linear_layers(model):
 def create_run_name(cfg : Config) -> str:
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
-    run_name += f"{cfg.dataset.name[:2]}_"
+    run_name += f"{cfg.dataset.name.split('/')[-1][:2]}_"
     if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
     if isinstance(cfg.training_type, AR): 
         run_name += f"AR_obs{cfg.tok_p_obs}_"
