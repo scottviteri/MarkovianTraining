@@ -4,7 +4,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, P
 import torch
 from enum import Enum
 
-AR = NamedTuple("AR", [("observation_size", int)])
+AR = NamedTuple("AR", [])
 GptEval = NamedTuple("GptEval", [("num_evals", int), ("use_gptj", bool)])
 AOA = NamedTuple("AOA", 
 [("use_gumbel", bool), ("ignore_first_action", bool), ("ignore_second_action", bool)])

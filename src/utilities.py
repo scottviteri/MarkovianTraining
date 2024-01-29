@@ -50,17 +50,12 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         assert tok_p_loss < init_cfg.training_ctxt_size
         assert (init_cfg.training_type.num_rao + 1) * tok_p_rao <= init_cfg.training_ctxt_size
 
-    elif isinstance(init_cfg.training_type,  AOA):
+    elif isinstance(init_cfg.training_type,  AOA) or isinstance(init_cfg.training_type, AR):
         training_ctxt_size = ctxt_size if init_cfg.training_ctxt_size is None else init_cfg.training_ctxt_size 
         tok_p_action = int(training_ctxt_size / (init_cfg.obs_to_action_ratio + 2))
         tok_p_obs = int(tok_p_action * init_cfg.obs_to_action_ratio)
         tok_p_loss = None
 
-    elif isinstance(init_cfg.training_type,  AR):
-        tok_p_action = None
-        tok_p_obs = init_cfg.training_type.observation_size
-        tok_p_loss = None
-    
     elif isinstance(init_cfg.training_type,  GptEval):
         tok_p_action, tok_p_obs, tok_p_loss = None, None, None
 
