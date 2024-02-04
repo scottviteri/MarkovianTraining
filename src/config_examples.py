@@ -125,7 +125,7 @@ gptj_arith_O = InitialConfig(
         model_name="gptj",
         lr=1e-3,
         batch_size=1,
-        num_batches=9500,
+        num_batches=10,
         obs_to_action_ratio=0.5,
         interval_save_weights=3000,
         interval_print=31,
@@ -144,7 +144,7 @@ gpt2_arith_AR =  InitialConfig(
         model_name="distilgpt2",
         lr=1e-3,
         batch_size=1,
-        num_batches=2700,
+        num_batches=10,
         obs_to_action_ratio=15.0/40.0,
         interval_save_weights=10000,
         interval_print=500,
@@ -203,11 +203,11 @@ debug_types = [
 
 #example_configs = [test_debug_template(x) for x in debug_types]
 #example_configs =  [gen_eval("gptj", 10, False, use_gptj=True)]
-#example_configs = [gpt2_RAO, gpt2_AOA, gpt2_AO, gpt2_AR, gen_eval("mistral", 10, False, use_gptj=False)]
+example_configs = [gpt2_AO, gen_eval("distilgpt2", 10, False, use_gptj=False)]
 #example_configs = [gpt2_AO]
 #example_configs = [gj_OA_wk_20k]
 #example_configs = [gj_O_wk_20k]
 #example_configs = [gj_O_bb_20k]
 #example_configs = [mst_O_wk_20k]
 #example_configs = [gj_AR_20k]
-example_configs = [gpt2_arith_O_local]
+#example_configs = [gpt2_arith_O_local]

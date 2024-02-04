@@ -19,7 +19,7 @@ def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure
         dict_ds = map(stack_batch, unstacked_ds)
 
     elif dataset_name == "wikipedia":
-        itr_ds = iter(load_dataset(init_cfg.dataset_name, task_name, split="train", streaming=True))
+        itr_ds = iter(load_dataset(dataset_name, task_name, split="train", streaming=True))
         ds_tokenized = map(
             lambda x: causal_lm_tokenizer(x["text"], return_tensors="pt")["input_ids"].to(device), 
             itr_ds)
@@ -27,7 +27,7 @@ def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure
         dict_ds = map(lambda x: {"Observation": x}, pure_obs)
 
     elif dataset_name == "bigbench":
-        itr_ds = iter(load_dataset(init_cfg.dataset_name, task_name, split="train", streaming=True))
+        itr_ds = iter(load_dataset(dataset_name, task_name, split="train", streaming=True))
         batched_itr = batch(init_cfg.batch_size, itr_ds)
         paired_batches = group_pairs(batched_itr)
         itr = map(lambda x: map(merge_qa_bigbench, x[0], x[1]), paired_batches)
