@@ -8,15 +8,22 @@ import json
 
 from src.training_types import *
 
-def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure_action, tok_p_pure_obs, action_prefix, obs_prefix):
+def prepare_dataset(
+        init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure_action, 
+        tok_p_pure_obs, action_prefix, obs_prefix):
     dataset_name = init_cfg.dataset.name
 
     if dataset_name[-5:] == "jsonl":
         itr_ds = jsonl_to_dict_iterator(dataset_name)
-        batches = batch(init_cfg.batch_size, itr_ds)
-        batch_pairs = group_pairs(batches)
-        unstacked_ds = map(lambda x: list(map(merge_qa(device, causal_lm_tokenizer, tok_p_pure_action, tok_p_pure_obs), x[0], x[1])), batch_pairs)
-        dict_ds = map(stack_batch, unstacked_ds)
+        qa_traj_itr = to_qa_traj_itr(itr_ds)
+        qa_batch_lst_itr  = traj_itr_to_batch_lst(init_cfg.batch_size, qa_traj_itr)
+        qa_tokenized_itr_ds = map(lambda batch_lst:
+            [tokenize_and_pad(device, causal_lm_tokenizer, tok_p_pure_obs, b)
+                for b in batch_lst], 
+                qa_batch_lst_itr)
+
+        stacked_dict_ds = map(lambda b: torch.stack(b, dim=0), qa_tokenized_itr_ds)
+        dict_ds = map(lambda x: {"Observation": x}, stacked_dict_ds)
 
     elif dataset_name == "wikipedia":
         itr_ds = iter(load_dataset(dataset_name, task_name, split="train", streaming=True))
@@ -26,17 +33,30 @@ def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure
         pure_obs = get_pure_obs(init_cfg.batch_size, tok_p_pure_obs, device, ds_tokenized)
         dict_ds = map(lambda x: {"Observation": x}, pure_obs)
 
-    elif dataset_name == "bigbench":
-        itr_ds = iter(load_dataset(dataset_name, task_name, split="train", streaming=True))
-        batched_itr = batch(init_cfg.batch_size, itr_ds)
-        paired_batches = group_pairs(batched_itr)
-        itr = map(lambda x: map(merge_qa_bigbench, x[0], x[1]), paired_batches)
-        itr = map(
-            lambda batch: list(map(lambda i: fill_to_size(causal_lm_tokenizer, i[0], i[1], tok_p_pure_obs), batch)), 
-            itr)
-        itr = map(lambda batch: torch.stack(batch, dim=0).to(device), itr)
-        pure_obs = concat_batches_to_len(tok_p_pure_obs, itr)
-        dict_ds = map(lambda x: {"Observation": x}, pure_obs)
+    #elif dataset_name == "bigbench":
+    #    itr_ds = iter(load_dataset(dataset_name, task_name, split="train", streaming=True))
+    #    tokenized_ds = map(
+    #        lambda x: causal_lm_tokenizer(x, return_tensors="pt")["input_ids"].to(device)[0], 
+    #        qa_ds)
+    #    filled_ds = map(
+    #        lambda x: torch.cat([x, 
+    #                             torch.full((tok_p_pure_obs - x.shape[-1],), 
+    #                                        causal_lm_tokenizer.pad_token_id, dtype=torch.int64, device=device)
+    #        ], dim=-1),
+    #        tokenized_ds
+    #    )
+    #    #filled_ds = fill_to_size(causal_lm_tokenizer, tokenized_ds)
+    #    #torch.full((size - len(begin_tok) - len(end_tok),), tokenizer.pad_token_id, dtype=torch.int64)
+    #    batched_itr = batch(init_cfg.batch_size, filled_ds)
+    #    #paired_batches = group_pairs(batched_itr)
+    #    #itr = map(lambda x: map(merge_qa_bigbench, x[0], x[1]), batched_itr)
+    #    #itr = map(
+    #    #    lambda batch: list(map(lambda i: fill_to_size(causal_lm_tokenizer, i[0], i[1], tok_p_pure_obs), batch)), 
+    #    #    itr)
+    #    itr = map(lambda batch: torch.stack(batch, dim=0).to(device), batched_itr)
+    #    #pure_obs = concat_batches_to_len(tok_p_pure_obs, itr)
+    #    dict_ds = map(lambda x: {"Observation": x}, itr)
+    #    print(next(dict_ds))
 
     else:
         assert False, "Unknown dataset"
@@ -54,7 +74,7 @@ def prepare_dataset(init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure
     # Note: is it true that RAO uses the same num_batches to count the number of weight updates?
     #  this would make them not comparable to AO, unless we divide by obs per weight update
     if isinstance(init_cfg.training_type, RAOInit):
-        trajectory_itr = batch(init_cfg.obs_per_weight_update, dict_ds)
+        trajectory_itr = batch(init_cfg.training_type.obs_per_weight_update, dict_ds)
         dict_ds = stack_buffer(trajectory_itr)
     if isinstance(init_cfg.debug, RepeatNPoints):
         dict_ds = repeat_every_n_points(init_cfg.debug.num_points, dict_ds)
@@ -84,7 +104,9 @@ def concat_batches_to_len(length, itr):
 
 def batch(batch_size, itr):
     while 1:
-        yield [next(itr) for _ in range(batch_size)]
+        new_list =  [next(itr) for _ in range(batch_size)]
+        print(new_list)
+        yield new_list
 
 def flatten(itrs):
     while 1:
@@ -102,10 +124,18 @@ def group_pairs(itr):
         yield (first, second)
         first = second
 
+def tokenize_and_pad(device, tokenizer, size, begin):
+    begin_tok = tokenizer(begin, return_tensors="pt")["input_ids"][0].to(device)
+    end_tok = torch.full((size - len(begin_tok),), 
+                            tokenizer.pad_token_id, dtype=torch.int64, 
+                            device=device)
+    return torch.cat((begin_tok, end_tok))
+
 def fill_to_size(tokenizer, begin, end, size):
     begin_tok = tokenizer(begin, return_tensors="pt")["input_ids"][0]
     end_tok = tokenizer(end, return_tensors="pt")["input_ids"][0]
-    middle_tok = torch.full((size - len(begin_tok) - len(end_tok),), tokenizer.pad_token_id, dtype=torch.int64)
+    middle_tok = torch.full((size - len(begin_tok) - len(end_tok),), 
+                            tokenizer.pad_token_id, dtype=torch.int64)
     return torch.cat((begin_tok, middle_tok, end_tok))
 
 def prep_bb(tokenizer, device, tok_per_pure_obs, itr):
@@ -113,6 +143,11 @@ def prep_bb(tokenizer, device, tok_per_pure_obs, itr):
     itr = map(lambda x:("A: "+x[0]["targets"][0] + "\n", x[1]["inputs"].split("?")[0] + "?\n"), itr)
     itr = map(lambda x: fill_to_size(tokenizer, x[0], x[1], tok_per_pure_obs), itr)
     return map(lambda x:x.to(device), itr)
+
+def to_qa_traj_itr(itr):
+    while 1:
+        d = next(itr)
+        yield iter([d["Question"], d["Answer"]])
 
 def merge_qa(device, tokenizer, tok_p_pure_action, tok_p_pure_obs):
     assert tok_p_pure_action >=40 
@@ -147,6 +182,19 @@ def get_pure_obs(batch_size, tok_per_pure_obs, device, itr_ds):
             batches[i] = batches[i][:, tok_per_pure_obs:]
         yield out_tensor
     return batches 
+
+def traj_itr_to_batch_lst(batch_size, traj_itr):
+    batch_itrs = [next(traj_itr) for _ in range(batch_size)]
+    while 1:
+        out_lst = []
+        for i in range(batch_size):
+            try:
+                next_item = next(batch_itrs[i])
+            except StopIteration:
+                batch_itrs[i] = next(traj_itr)
+                next_item = next(batch_itrs[i])
+            out_lst.append(next_item)
+        yield out_lst 
 
 def prepend_prefix_tensors(obs_prefix_tensor, action_prefix_tensor, itr_ds):
     out_d = {}
@@ -184,6 +232,16 @@ def repeat_every_n_points(n, itr):
     while 1: 
         yield first_n_vals[i]
         i = (i+1) % n
+
+def debug(itr):
+    next_val = next(itr)
+    print(next_val)
+    yield next_val
+
+def debug_shape(itr):
+    next_val = next(itr)
+    print(next_val.shape)
+    yield next_val
 
 def repeat_point_n_times(n, itr):
     while 1:
