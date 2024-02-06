@@ -138,7 +138,7 @@ def log_and_print_info(
             if aggregate_losses:
                 multi_print(f"Aggregate Loss: {aggregate_losses[-1]}", f)
             multi_print(f"Previous Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(prev_obs)[0])}", f)
-            multi_print(f"Action: {repr(cfg.causal_lm_tokenizer.batch_decode(action)[0])}", f)
+            multi_print(f"StepByStep: {repr(cfg.causal_lm_tokenizer.batch_decode(action)[0])}", f)
             multi_print(f"Predicted Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(predicted_obs)[0])}", f)
             multi_print(f"True Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(true_obs)[0])}", f)
             multi_print("___________________________________________", f)
@@ -171,7 +171,7 @@ def get_prefixes(
         tokens_per_pure_observation = None
 
     if tok_p_action:
-        action_prefix = "\nAction: "
+        action_prefix = "\nStepByStep: "
         action_prefix_tokens = tokenizer.encode(
             action_prefix, add_special_tokens=False
         )
