@@ -388,6 +388,7 @@ def get_linear_layers(model):
     )
 
 def create_run_name(cfg : Config) -> str:
+    print("Training type", cfg.training_type)
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
     run_name += f"{cfg.dataset.name.split('/')[-1][:2]}_"
