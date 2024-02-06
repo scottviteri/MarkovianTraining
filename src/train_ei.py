@@ -73,9 +73,7 @@ def train_ei(cfg: Config):
                     min_loss_index = losses.index(min(losses))
                     next_action = next_action_candidates[min_loss_index]
 
-            if cfg.training_type.ignore_observation:
-                input_sequence = [action]
-            elif cfg.training_type.ignore_second_action:
+            if cfg.training_type.ignore_second_action:
                 input_sequence = [action, prev_obs]
             else: 
                 input_sequence = [action, prev_obs, next_action]
