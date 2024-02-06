@@ -16,18 +16,7 @@ def train_ei(cfg: Config):
 
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     optimizer = torch.optim.SGD(cfg.causal_lm.parameters(), lr=cfg.lr)
-    action = torch.cat(
-        (
-            cfg.action_prefix_tensor,
-            torch.full(
-                (cfg.batch_size, cfg.tok_p_pure_action),
-                fill_value=cfg.causal_lm_tokenizer.pad_token_id,
-                dtype=torch.int64,
-                device=cfg.device,
-            ),
-        ),
-        dim=1,
-    )
+    
     aggregate_losses = []
     prev_obs = None
     with open(cfg.path_2_log, "a") as f:
@@ -35,16 +24,28 @@ def train_ei(cfg: Config):
 
     for batch_index, datapt in tqdm(enumerate(cfg.dataset.dataloader), total=cfg.num_batches):
         obs = datapt["Observation"]
-        next_action = datapt["Action"] if "Action" in datapt else None
-        if cfg.dataset.peek_every is None: assert next_action is None
-
-        if prev_obs is not None:
+        if prev_obs is None:
+            next_action = torch.cat(
+                    (
+                        cfg.action_prefix_tensor,
+                        torch.full(
+                            (cfg.batch_size, cfg.tok_p_pure_action),
+                            fill_value=cfg.causal_lm_tokenizer.pad_token_id,
+                            dtype=torch.int64,
+                            device=cfg.device,
+                        ),
+                    ),
+                    dim=1,
+                )
+        else:
             if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:
                 print(f"Saving trained_{cfg.model_name} \n\n")
                 cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
                 cfg.causal_lm.save_pretrained(cfg.path_2_model)
 
-            if next_action is None:
+            if "Action" in datapt:
+                next_action = datapt["Action"]
+            else:
                 with torch.no_grad():
                     next_action_candidates = [
                         cfg.causal_lm.generate(
