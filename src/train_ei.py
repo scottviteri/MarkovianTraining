@@ -52,7 +52,7 @@ def train_ei(cfg: Config):
                             inputs=torch.cat([action, prev_obs, cfg.action_prefix_tensor], dim=1),
                             output_scores=True,
                             do_sample=True,
-                            temperature=2.0,
+                            temperature=1.0,
                             min_new_tokens=cfg.tok_p_pure_action,
                             max_new_tokens=cfg.tok_p_pure_action,
                             pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
