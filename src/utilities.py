@@ -50,7 +50,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         assert tok_p_loss < init_cfg.training_ctxt_size
         assert (init_cfg.training_type.num_rao + 1) * tok_p_rao <= init_cfg.training_ctxt_size
 
-    elif isinstance(init_cfg.training_type,  AOA) or isinstance(init_cfg.training_type, AR):
+    elif isinstance(init_cfg.training_type,  AOA) or isinstance(init_cfg.training_type, AR) or isinstance(init_cfg.training_type, EI):
         training_ctxt_size = ctxt_size if init_cfg.training_ctxt_size is None else init_cfg.training_ctxt_size 
         tok_p_action = int(training_ctxt_size / (init_cfg.obs_to_action_ratio + 2))
         tok_p_obs = int(tok_p_action * init_cfg.obs_to_action_ratio)
@@ -412,7 +412,9 @@ def create_run_name(cfg : Config) -> str:
         run_name += f"GptEval{cfg.training_type.num_evals}_"
         run_name += "gptj" if cfg.training_type.use_gptj else "openai"
 
-    elif isinstance(cfg.training_type, AOA):
+    elif isinstance(cfg.training_type, AOA) or isinstance(cfg.training_type, EI):
+        if isinstance(cfg.training_type, EI):
+            run_name += f"EI_ns{cfg.training_type.num_samples}_"
         ignore_first = cfg.training_type.ignore_first_action
         ignore_second = cfg.training_type.ignore_second_action
         if ignore_first and not ignore_second:

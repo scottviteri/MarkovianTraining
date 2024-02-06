@@ -17,6 +17,7 @@ from src.utilities import create_run_name
 
 from src.train_rao import train_rao
 from src.train_aoa import train_aoa
+from src.train_ei import train_ei
 from src.evaluate_via_gpt import evaluate_via_gpt
 from src.train_autoregressive import train_autoregressive
 
@@ -43,6 +44,8 @@ def train(initial_cfg : InitialConfig):
         train_specific_type = train_aoa 
     elif isinstance(cfg.training_type, RAO):
         train_specific_type = train_rao
+    elif isinstance(cfg.training_type, EI):
+        train_specific_type = train_ei
     else:
         assert "Invalid training type"
     if cfg.wandb:

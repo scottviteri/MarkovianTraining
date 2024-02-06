@@ -8,6 +8,8 @@ AR = NamedTuple("AR", [])
 GptEval = NamedTuple("GptEval", [("num_evals", int), ("use_gptj", bool)])
 AOA = NamedTuple("AOA", 
 [("use_gumbel", bool), ("ignore_first_action", bool), ("ignore_second_action", bool)])
+EI = NamedTuple("EI", 
+  [("ignore_first_action", bool), ("ignore_second_action", bool), ("num_samples", int)])
 RAOInit = NamedTuple("RAO",
     [("num_rao", int),  ("obs_between_weight_updates", int), 
     ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), 
@@ -17,8 +19,8 @@ RAO = NamedTuple("RAO",
     ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), ("use_rewards_to_go", bool),
     ("tok_p_loss", int), ("tok_p_pure_loss", int), ("loss_prefix_tensor", torch.Tensor), ("tok_p_doc", int), ("tok_p_rao", int)])
 
-InitTrainingType = Union[AR, GptEval, RAOInit, AOA]
-TrainingType = Union[AR, GptEval, RAO, AOA]
+InitTrainingType = Union[AR, GptEval, RAOInit, AOA, EI]
+TrainingType = Union[AR, GptEval, RAO, AOA, EI]
 
 RepeatNPoints = NamedTuple("RepeatNPoints", [("num_points", int)])
 RepeatPointNTimes = NamedTuple("RepeatPointNTimes", [("num_times", int)])
