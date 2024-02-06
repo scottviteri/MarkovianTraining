@@ -74,10 +74,7 @@ def train_ei(cfg: Config):
                     min_loss_index = losses.index(min(losses))
                     next_action = next_action_candidates[min_loss_index]
 
-            if cfg.training_type.ignore_second_action:
-                input_sequence = [action, prev_obs]
-            else: 
-                input_sequence = [action, prev_obs, next_action]
+            input_sequence = [action, prev_obs, next_action]
             logits = cfg.causal_lm(torch.cat(input_sequence, dim=1)).logits[
                 :, :-1, :
             ]
@@ -91,59 +88,46 @@ def train_ei(cfg: Config):
 
             action_tensor = loss_tensor[:, : cfg.tok_p_action]
             observation_tensor = loss_tensor[:, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
-            if not cfg.training_type.ignore_second_action:
-                next_action_tensor = loss_tensor[:, cfg.tok_p_action + cfg.tok_p_obs :]
+            next_action_tensor = loss_tensor[:, cfg.tok_p_action + cfg.tok_p_obs :]
+            action_loss = action_tensor.mean()
+            observation_loss = observation_tensor.mean()
+            next_action_loss = next_action_tensor.mean()
 
-            if cfg.training_type.ignore_observation:
-                aggregate_loss = action_tensor.mean()
-            elif cfg.training_type.ignore_first_action and cfg.training_type.ignore_second_action:
-                aggregate_loss = observation_tensor.mean()
-            elif cfg.training_type.ignore_first_action and not cfg.training_type.ignore_second_action:
-                aggregate_loss = torch.cat([observation_tensor, next_action_tensor], dim=1).mean()
-            elif not cfg.training_type.ignore_first_action and cfg.training_type.ignore_second_action:
-                aggregate_loss = torch.cat([action_tensor, observation_tensor], dim=1).mean()
-            else:
-                aggregate_loss = loss_tensor.mean()
+            aggregate_loss = torch.tensor(0, device=cfg.device, dtype=torch.float32)
+            if cfg.training_type.action:
+                aggregate_loss += action_loss
+            if cfg.training_type.observation:
+                aggregate_loss += observation_loss
+            if cfg.training_type.next_action: 
+                aggregate_loss += next_action_loss
 
             is_first = "First" in datapt and datapt["First"]
             if not is_first: aggregate_losses.append(aggregate_loss.item())
-            aggregate_loss.backward()
 
             if not isinstance(cfg.debug, NoWeightUpdates) and not is_first:
+                aggregate_loss.backward()
                 optimizer.step()
 
-            with torch.no_grad():
-                action_loss = action_tensor.mean()
-                observation_loss = observation_tensor.mean()
-                if not cfg.training_type.ignore_second_action:
-                    next_action_loss = next_action_tensor.mean()
-
-                if cfg.wandb and not is_first:
-                    if not cfg.training_type.ignore_second_action:
-                        wandb.log({"Next Action Loss": next_action_loss})
-                    wandb.log(
-                        {
-                            "Batch Index": batch_index,
-                            "Aggregate Loss": aggregate_loss,
-                            "Action Loss": action_loss,
-                            "Observation Loss": observation_loss,
-                        }
-                    )
+            if cfg.wandb and not is_first:
+                wandb.log(
+                    {
+                        "Batch Index": batch_index,
+                        "Aggregate Loss": aggregate_loss,
+                        "Action Loss": action_loss,
+                        "Observation Loss": observation_loss,
+                        "Next Action Loss": next_action_loss
+                    }
+                )
 
             # printing
             if batch_index % cfg.interval_print == 0 and not is_first:
                 with open(cfg.path_2_log, "a") as f:
                     multi_print(f"Batch {batch_index}", f)
                     multi_print(f"Aggregate loss: {aggregate_loss}", f)
-                    if not cfg.training_type.ignore_second_action:
-                        multi_print(
-                            f"Action/Observation/NextAction loss: {action_loss}/{observation_loss}/{next_action_loss}",
-                            f,
-                        )
-                    else:
-                        multi_print(
-                            f"Action/Observation loss: {action_loss}/{observation_loss}", f
-                        )
+                    multi_print(
+                        f"Action/Observation/NextAction loss: {action_loss}/{observation_loss}/{next_action_loss}",
+                        f,
+                    )
                     if prev_obs is not None:
                         multi_print(
                             f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",

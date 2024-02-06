@@ -132,14 +132,14 @@ gpt2_arith_EI_local = InitialConfig(
         obs_to_action_ratio=1,
         interval_save_weights=3000,
         interval_print=1,
-        wandb=True,
+        wandb=False,
         load_model=False,
         do_lora=False,
         training_ctxt_size=125,
         dataset=InitDatasetType(
               name=os.getcwd()+"/arithmetic_explanations.jsonl", 
-              task=None, peek_every=3),
-        training_type=EI(ignore_first_action=False, ignore_observation=True, ignore_second_action=True, num_samples=3),
+              task=None, peek_every=None),
+        training_type=EI(action=False, observation=True, next_action=True, num_samples=3),
         debug=None
 )
 
