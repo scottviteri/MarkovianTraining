@@ -24,7 +24,8 @@ def prepare_dataset(
 
         dict_ds = map(lambda batch: 
                       {"Observation": torch.stack([d["Observation"] for d in batch], dim=0), 
-                       "Action": torch.stack([d["Action"] for d in batch], dim=0)}, 
+                       "Action": torch.stack([d["Action"] for d in batch], dim=0),
+                       "First": batch[0]["First"]}, 
                     qa_tokenized_itr_ds)
 
     elif dataset_name == "wikipedia":
@@ -107,7 +108,6 @@ def concat_batches_to_len(length, itr):
 def batch(batch_size, itr):
     while 1:
         new_list =  [next(itr) for _ in range(batch_size)]
-        print(new_list)
         yield new_list
 
 def flatten(itrs):
@@ -126,20 +126,21 @@ def group_pairs(itr):
         yield (first, second)
         first = second
 
-def tokenize_and_pad(device, tokenizer, tok_p_pure_action, tok_p_pure_obs, begin):
-    obs_tok = tokenizer(begin["Observation"], return_tensors="pt")["input_ids"][0].to(device)
+def tokenize_and_pad(device, tokenizer, tok_p_pure_action, tok_p_pure_obs, d):
+    obs_tok = tokenizer(d["Observation"], return_tensors="pt")["input_ids"][0].to(device)
     obs_pad_tok = torch.full((tok_p_pure_obs - len(obs_tok),), 
                             tokenizer.pad_token_id, dtype=torch.int64, 
                             device=device)
-    if "Action" in begin:
-        action_tok = tokenizer(begin["Action"], return_tensors="pt")["input_ids"][0].to(device)
+    if "Action" in d:
+        action_tok = tokenizer(d["Action"], return_tensors="pt")["input_ids"][0].to(device)
     else:
         action_tok = torch.tensor([], dtype=torch.int64, device=device)
     action_pad_tok = torch.full((tok_p_pure_action - len(action_tok),), 
                         tokenizer.pad_token_id, dtype=torch.int64, 
                         device=device)
     return {"Observation": torch.cat([obs_tok, obs_pad_tok]), 
-            "Action": torch.cat([action_tok, action_pad_tok])}
+            "Action": torch.cat([action_tok, action_pad_tok]),
+            "First": d["First"]}
 
     return torch.cat((begin_tok, end_tok))
 
@@ -160,11 +161,11 @@ def to_qa_traj_itr(itr):
     while 1:
         d = next(itr)
         if "Explanation" in d:
-            yield iter([{"Observation":d["Question"], "Action":d["Explanation"]}, 
-                                {"Observation":d["Answer"]}])
+            yield iter([{"Observation":d["Question"], "Action":d["Explanation"], "First": True}, 
+                                {"Observation":d["Answer"], "First": False}])
         else:
-            yield iter([{"Observation":d["Question"]}, 
-                                {"Observation":d["Answer"]}])
+            yield iter([{"Observation":d["Question"], "First": True}, 
+                                {"Observation":d["Answer"], "First": False}])
 
 def merge_qa(device, tokenizer, tok_p_pure_action, tok_p_pure_obs):
     assert tok_p_pure_action >=40 

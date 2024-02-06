@@ -109,17 +109,17 @@ gpt2_arith_AO_local = InitialConfig(
         model_name="distilgpt2",
         lr=1e-3,
         batch_size=2,
-        num_batches=10,
+        num_batches=15,
         obs_to_action_ratio=1,
         interval_save_weights=3000,
-        interval_print=10,
+        interval_print=1,
         wandb=False,
         load_model=False,
         do_lora=False,
         training_ctxt_size=125,
         dataset=InitDatasetType(
               name=os.getcwd()+"/arithmetic_explanations.jsonl", 
-              task=None, peek_every=None),
+              task=None, peek_every=1),
         training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=True),
         debug=None
 )
@@ -243,7 +243,7 @@ debug_types = [
 
 #example_configs = [test_debug_template(x) for x in debug_types]
 #example_configs =  [gen_eval("gptj", 10, False, use_gptj=True)]
-example_configs = [gpt2_arith_AO_local, gpt2_wiki_AO_local]
+example_configs = [gpt2_arith_AO_local]#, gpt2_wiki_AO_local]
 #example_configs = [gpt2_AO]
 #example_configs = [gj_OA_wk_20k]
 #example_configs = [gj_O_wk_20k]

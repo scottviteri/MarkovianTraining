@@ -92,9 +92,12 @@ def train_without_gumbel(cfg):
             aggregate_loss = torch.cat([action_tensor, observation_tensor], dim=1).mean()
         else:
             aggregate_loss = loss_tensor.mean()
-        aggregate_losses.append(aggregate_loss.item())
+
+        is_first = "First" in datapt and datapt["First"]
+        if not is_first: aggregate_losses.append(aggregate_loss.item())
         aggregate_loss.backward()
-        if not isinstance(cfg.debug, NoWeightUpdates):
+
+        if not isinstance(cfg.debug, NoWeightUpdates) and not is_first:
             optimizer.step()
 
         with torch.no_grad():
@@ -103,7 +106,7 @@ def train_without_gumbel(cfg):
             if not cfg.training_type.ignore_second_action:
                 next_action_loss = next_action_tensor.mean()
 
-            if cfg.wandb:
+            if cfg.wandb and not is_first:
                 if not cfg.training_type.ignore_second_action:
                     wandb.log({"Next Action Loss": next_action_loss})
                 wandb.log(
@@ -116,7 +119,7 @@ def train_without_gumbel(cfg):
                 )
 
         # printing
-        if batch_index % cfg.interval_print == 0:
+        if batch_index % cfg.interval_print == 0 and not is_first:
             with open(cfg.path_2_log, "a") as f:
                 multi_print(f"Batch {batch_index}", f)
                 multi_print(f"Aggregate loss: {aggregate_loss}", f)
