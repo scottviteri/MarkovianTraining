@@ -397,7 +397,7 @@ def create_run_name(cfg : Config) -> str:
     if cfg.dataset.peek_every is not None:
         run_name += f"pe{cfg.dataset.peek_every}_"
 
-    elif isinstance(cfg.training_type, RAO): 
+    if isinstance(cfg.training_type, RAO): 
         run_name += f"RAO_"
         run_name += f"nr{cfg.training_type.num_rao}_"
         run_name += f"rao{cfg.training_type.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
