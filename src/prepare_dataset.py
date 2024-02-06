@@ -9,7 +9,8 @@ import json
 from src.training_types import *
 
 def prepare_dataset(
-        init_cfg, task_name, causal_lm_tokenizer, device, tok_p_pure_action, 
+        init_cfg, task_name, causal_lm_tokenizer, device, 
+        action_prefix_tensor, obs_prefix_tensor, tok_p_pure_action, 
         tok_p_pure_obs, action_prefix, obs_prefix):
     dataset_name = init_cfg.dataset.name
 
@@ -18,14 +19,20 @@ def prepare_dataset(
         qa_traj_itr = to_qa_traj_itr(itr_ds)
         qa_batch_lst_itr  = traj_itr_to_batch_lst(init_cfg.batch_size, qa_traj_itr)
         qa_tokenized_itr_ds = map(lambda batch_lst:
-            [tokenize_and_pad(device, causal_lm_tokenizer, tok_p_pure_action, tok_p_pure_obs, b)
-                for b in batch_lst], 
-                qa_batch_lst_itr)
+                [tokenize_and_pad(
+                        device, causal_lm_tokenizer, action_prefix_tensor, obs_prefix_tensor,
+                        tok_p_pure_action, tok_p_pure_obs, b)
+                    for b in batch_lst], 
+            qa_batch_lst_itr)
 
-        dict_ds = map(lambda batch: 
-                      {"Observation": torch.stack([d["Observation"] for d in batch], dim=0), 
-                       "Action": torch.stack([d["Action"] for d in batch], dim=0),
-                       "First": batch[0]["First"]}, 
+        # we only support synchronized batches (as in have the same Action existence ordering)
+        #each batch is a list of dicts -> turn into a single dict
+        # indexed by the keys of the first dictionary
+        dict_ds = map(lambda batch_list: 
+            {k: (torch.stack([d[k] for d in batch_list], dim=0) 
+                    if isinstance(batch_list[0][k], torch.Tensor) 
+                    else batch_list[0][k])
+             for k in batch_list[0]},
                     qa_tokenized_itr_ds)
 
     elif dataset_name == "wikipedia":
@@ -86,9 +93,14 @@ def prepare_dataset(
     return take(init_cfg.num_batches, dict_ds)
 
 def peek_every_n(n, dict_itr):
-    for i, d in enumerate(dict_itr):
-        if i % n == 0:
-            yield d
+    i = 0
+    for d in dict_itr:
+        if "Action" in d:
+            if i % n == 0:
+                yield d
+            else:
+                yield {"Observation" : d["Observation"], "First": d["First"]}
+            i += 1
         else:
             yield {"Observation" : d["Observation"], "First": d["First"]}
 
@@ -126,24 +138,22 @@ def group_pairs(itr):
         yield (first, second)
         first = second
 
-def tokenize_and_pad(device, tokenizer, tok_p_pure_action, tok_p_pure_obs, d):
+def tokenize_and_pad(device, tokenizer, action_prefix_tensor, obs_prefix_tensor, tok_p_pure_action, tok_p_pure_obs, d):
     obs_tok = tokenizer(d["Observation"], return_tensors="pt")["input_ids"][0].to(device)
     obs_pad_tok = torch.full((tok_p_pure_obs - len(obs_tok),), 
                             tokenizer.pad_token_id, dtype=torch.int64, 
                             device=device)
     if "Action" in d:
         action_tok = tokenizer(d["Action"], return_tensors="pt")["input_ids"][0].to(device)
+        action_pad_tok = torch.full((tok_p_pure_action - len(action_tok),), 
+                            tokenizer.pad_token_id, dtype=torch.int64, 
+                            device=device)
+        return {"Observation": torch.cat([obs_prefix_tensor[0], obs_tok, obs_pad_tok]), 
+                "Action": torch.cat([action_prefix_tensor[0], action_tok, action_pad_tok]),
+                "First": d["First"]}
     else:
-        action_tok = torch.tensor([], dtype=torch.int64, device=device)
-    action_pad_tok = torch.full((tok_p_pure_action - len(action_tok),), 
-                        tokenizer.pad_token_id, dtype=torch.int64, 
-                        device=device)
-    return {"Observation": torch.cat([obs_tok, obs_pad_tok]), 
-            "Action": torch.cat([action_tok, action_pad_tok]),
-            "First": d["First"]}
-
-    return torch.cat((begin_tok, end_tok))
-
+        return {"Observation": torch.cat([obs_prefix_tensor[0], obs_tok, obs_pad_tok]), "First": d["First"]}
+ 
 def fill_to_size(tokenizer, begin, end, size):
     begin_tok = tokenizer(begin, return_tensors="pt")["input_ids"][0]
     end_tok = tokenizer(end, return_tensors="pt")["input_ids"][0]

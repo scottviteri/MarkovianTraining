@@ -70,8 +70,9 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     loss_prefix, action_prefix, obs_prefix = prefix_tensors
 
     dataset = prepare_dataset(
-            init_cfg, task_name, causal_lm_tokenizer,
-            device, tok_p_pure_action, tok_p_pure_obs, action_prefix, obs_prefix 
+            init_cfg, task_name, causal_lm_tokenizer, device, 
+            action_prefix, obs_prefix,
+            tok_p_pure_action, tok_p_pure_obs, action_prefix, obs_prefix 
         )
 
     if isinstance(init_cfg.training_type,  RAOInit):
