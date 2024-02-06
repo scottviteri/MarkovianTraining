@@ -31,7 +31,7 @@ def train_ei(cfg: Config):
                 action = datapt["Action"]
             else:
                 action = cfg.causal_lm.generate(
-                            inputs=torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1),
+                            inputs=torch.cat([obs, cfg.action_prefix_tensor], dim=1),
                             output_scores=True,
                             do_sample=True,
                             temperature=1.0,
