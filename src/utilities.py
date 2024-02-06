@@ -425,6 +425,8 @@ def create_run_name(cfg : Config) -> str:
             run_name += "O"
         elif not ignore_first and not ignore_second:
             run_name += "AOA"
+        elif isinstance(cfg.training_type, EI) and cfg.training_type.ignore_observation:
+            pass
         else:
             raise ValueError("Invalid AOA configuration")
         run_name += f"{cfg.tok_p_action}/{cfg.tok_p_obs}_"

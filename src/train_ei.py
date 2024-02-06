@@ -73,11 +73,12 @@ def train_ei(cfg: Config):
                     min_loss_index = losses.index(min(losses))
                     next_action = next_action_candidates[min_loss_index]
 
-            input_sequence = (
-                [action, prev_obs]
-                if cfg.training_type.ignore_second_action
-                else [action, prev_obs, next_action]
-            )
+            if cfg.training_type.ignore_observation:
+                input_sequence = [action]
+            elif cfg.training_type.ignore_second_action:
+                input_sequence = [action, prev_obs]
+            else: 
+                input_sequence = [action, prev_obs, next_action]
             logits = cfg.causal_lm(torch.cat(input_sequence, dim=1)).logits[
                 :, :-1, :
             ]
@@ -94,7 +95,9 @@ def train_ei(cfg: Config):
             if not cfg.training_type.ignore_second_action:
                 next_action_tensor = loss_tensor[:, cfg.tok_p_action + cfg.tok_p_obs :]
 
-            if cfg.training_type.ignore_first_action and cfg.training_type.ignore_second_action:
+            if cfg.training_type.ignore_observation:
+                aggregate_loss = action_tensor.mean()
+            elif cfg.training_type.ignore_first_action and cfg.training_type.ignore_second_action:
                 aggregate_loss = observation_tensor.mean()
             elif cfg.training_type.ignore_first_action and not cfg.training_type.ignore_second_action:
                 aggregate_loss = torch.cat([observation_tensor, next_action_tensor], dim=1).mean()

@@ -9,7 +9,9 @@ GptEval = NamedTuple("GptEval", [("num_evals", int), ("use_gptj", bool)])
 AOA = NamedTuple("AOA", 
 [("use_gumbel", bool), ("ignore_first_action", bool), ("ignore_second_action", bool)])
 EI = NamedTuple("EI", 
-  [("ignore_first_action", bool), ("ignore_second_action", bool), ("num_samples", int)])
+  [("ignore_first_action", bool), ("ignore_second_action", bool), 
+   ("ignore_observation", bool), ("num_samples", int)
+   ])
 RAOInit = NamedTuple("RAO",
     [("num_rao", int),  ("obs_between_weight_updates", int), 
     ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), 
