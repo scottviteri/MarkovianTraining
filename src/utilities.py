@@ -413,14 +413,18 @@ def create_run_name(cfg : Config) -> str:
         run_name += "gptj" if cfg.training_type.use_gptj else "openai"
 
     elif isinstance(cfg.training_type, AOA):
-        if cfg.training_type.ignore_first_action and not cfg.training_type.ignore_second_action:
+        ignore_first = cfg.training_type.ignore_first_action
+        ignore_second = cfg.training_type.ignore_second_action
+        if ignore_first and not ignore_second:
             run_name += "OA"
-        elif cfg.training_type.ignore_second_action and not cfg.training_type.ignore_first_action:
+        elif not ignore_first and ignore_second:
             run_name += "AO"
-        elif cfg.training_type.ignore_second_action and cfg.training_type.ignore_first_action:
+        elif ignore_first and ignore_second:
             run_name += "O"
-        else:
+        elif not ignore_first and not ignore_second:
             run_name += "AOA"
+        else:
+            raise ValueError("Invalid AOA configuration")
         run_name += f"{cfg.tok_p_action}/{cfg.tok_p_obs}_"
 
     else: 
