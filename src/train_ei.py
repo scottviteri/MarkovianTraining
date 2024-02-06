@@ -58,14 +58,15 @@ def train_ei(cfg: Config):
                         for _ in range(cfg.training_type.num_samples)
                     ]
                     losses = []
-                    for next_action in enumerate(next_action_candidates):
-                        input_sequence = torch.cat([next_action, obs], dim=1).logits[:, :-1, :]
+                    for next_action in next_action_candidates:
+                        input_sequence = torch.cat([next_action, obs], dim=1)
+                        logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
                         loss_tensor = loss_fn(
                             input=einops.rearrange(
                                 logits,
                                 "batch seq_length vocab_size -> batch vocab_size seq_length",
                             ),
-                            target=torch.cat(input_sequence, dim=1)[:, 1:]
+                            target=input_sequence[:, 1:]
                         )
                         loss = loss_tensor[:,-cfg.tok_p_obs:].mean().item()
                         losses.append(loss)
