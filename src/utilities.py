@@ -432,11 +432,11 @@ def create_run_name(cfg : Config) -> str:
 
     if isinstance(cfg.training_type, EI):
             run_name += f"EI_ns{cfg.training_type.num_samples}_"
-            if cfg.training_type.action:
+            if cfg.training_type.prev_action:
                 run_name += "A"
-            if cfg.training_type.observation:
+            if cfg.training_type.prev_observation:
                 run_name += "O"
-            if cfg.training_type.next_action:
+            if cfg.training_type.action:
                 run_name += "A2"
     else: 
         assert f"Wrong training type: {cfg.training_type}"
