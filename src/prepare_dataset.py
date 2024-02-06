@@ -18,12 +18,14 @@ def prepare_dataset(
         qa_traj_itr = to_qa_traj_itr(itr_ds)
         qa_batch_lst_itr  = traj_itr_to_batch_lst(init_cfg.batch_size, qa_traj_itr)
         qa_tokenized_itr_ds = map(lambda batch_lst:
-            [tokenize_and_pad(device, causal_lm_tokenizer, tok_p_pure_obs, b)
+            [tokenize_and_pad(device, causal_lm_tokenizer, tok_p_pure_action, tok_p_pure_obs, b)
                 for b in batch_lst], 
                 qa_batch_lst_itr)
 
-        stacked_dict_ds = map(lambda b: torch.stack(b, dim=0), qa_tokenized_itr_ds)
-        dict_ds = map(lambda x: {"Observation": x}, stacked_dict_ds)
+        dict_ds = map(lambda batch: 
+                      {"Observation": torch.stack([d["Observation"] for d in batch], dim=0), 
+                       "Action": torch.stack([d["Action"] for d in batch], dim=0)}, 
+                    qa_tokenized_itr_ds)
 
     elif dataset_name == "wikipedia":
         itr_ds = iter(load_dataset(dataset_name, task_name, split="train", streaming=True))
@@ -124,11 +126,21 @@ def group_pairs(itr):
         yield (first, second)
         first = second
 
-def tokenize_and_pad(device, tokenizer, size, begin):
-    begin_tok = tokenizer(begin, return_tensors="pt")["input_ids"][0].to(device)
-    end_tok = torch.full((size - len(begin_tok),), 
+def tokenize_and_pad(device, tokenizer, tok_p_pure_action, tok_p_pure_obs, begin):
+    obs_tok = tokenizer(begin["Observation"], return_tensors="pt")["input_ids"][0].to(device)
+    obs_pad_tok = torch.full((tok_p_pure_obs - len(obs_tok),), 
                             tokenizer.pad_token_id, dtype=torch.int64, 
                             device=device)
+    if "Action" in begin:
+        action_tok = tokenizer(begin["Action"], return_tensors="pt")["input_ids"][0].to(device)
+    else:
+        action_tok = torch.tensor([], dtype=torch.int64, device=device)
+    action_pad_tok = torch.full((tok_p_pure_action - len(action_tok),), 
+                        tokenizer.pad_token_id, dtype=torch.int64, 
+                        device=device)
+    return {"Observation": torch.cat([obs_tok, obs_pad_tok]), 
+            "Action": torch.cat([action_tok, action_pad_tok])}
+
     return torch.cat((begin_tok, end_tok))
 
 def fill_to_size(tokenizer, begin, end, size):
@@ -147,7 +159,12 @@ def prep_bb(tokenizer, device, tok_per_pure_obs, itr):
 def to_qa_traj_itr(itr):
     while 1:
         d = next(itr)
-        yield iter([d["Question"], d["Answer"]])
+        if "Explanation" in d:
+            yield iter([{"Observation":d["Question"], "Action":d["Explanation"]}, 
+                                {"Observation":d["Answer"]}])
+        else:
+            yield iter([{"Observation":d["Question"]}, 
+                                {"Observation":d["Answer"]}])
 
 def merge_qa(device, tokenizer, tok_p_pure_action, tok_p_pure_obs):
     assert tok_p_pure_action >=40 
