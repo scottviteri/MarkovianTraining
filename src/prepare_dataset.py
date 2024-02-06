@@ -70,7 +70,7 @@ def prepare_dataset(
                                                           device=d["Observation"].device, dtype=d["Observation"].dtype)}, dict_ds)
 
     if init_cfg.dataset.peek_every is None:
-        dict_ds = map(lambda d: {"Observation": d["Observation"]}, dict_ds)
+        dict_ds = map(lambda d: {"Observation": d["Observation"], "First": d["First"]}, dict_ds)
     else:
         dict_ds = peek_every_n(init_cfg.dataset.peek_every, dict_ds)
     #dict_ds = prepend_prefix_tensors(obs_prefix, action_prefix, dict_ds)
