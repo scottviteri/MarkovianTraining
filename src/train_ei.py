@@ -172,31 +172,37 @@ def train_ei(cfg: Config):
 
         if cfg.training_type.reinforce:
             with torch.no_grad():
-                input_sequence = torch.cat([action, obs], dim=1)
-                logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
-                loss_tensor = loss_fn(
+                rf_input_sequence = torch.cat([action, obs], dim=1)
+                rf_logits = cfg.causal_lm(rf_input_sequence).logits[:, :-1, :]
+                rf_loss_tensor = loss_fn(
                     input=einops.rearrange(
-                        logits,
+                        rf_logits,
                         "batch seq_length vocab_size -> batch vocab_size seq_length",
                     ),
-                    target=input_sequence[:, 1:]
+                    target=rf_input_sequence[:, 1:]
                 )
                 reinforce_loss = loss_tensor[:,-cfg.tok_p_obs:].mean()
+
                 if cfg.training_type.rf_baseline:
-                    input_sequence = torch.cat([prev_action, obs], dim=1)
-                    logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
-                    loss_tensor = loss_fn(
+                    rfbl_input_sequence = torch.cat([prev_action, obs], dim=1)
+                    rfbl_logits = cfg.causal_lm(rfbl_input_sequence).logits[:, :-1, :]
+                    rfbl_loss_tensor = loss_fn(
                         input=einops.rearrange(
-                            logits,
+                            rfbl_logits,
                             "batch seq_length vocab_size -> batch vocab_size seq_length",
                         ),
-                        target=input_sequence[:, 1:]
+                        target=rfbl_input_sequence[:, 1:]
                     )
-                    reinforce_loss = (loss_tensor[:,-cfg.tok_p_obs:].mean() / reinforce_loss).item()
+                    reinforce_bl_loss = (rfbl_loss_tensor[:,-cfg.tok_p_obs:].mean() / reinforce_loss)
 
-            aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
-                [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
-                [prev_action_loss, prev_observation_loss, action_loss]))) * reinforce_loss
+            if cfg.training_type.rf_baseline:
+                aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
+                    [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
+                    [prev_action_loss, prev_observation_loss, action_loss]))) * reinforce_bl_loss
+            else:
+                aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
+                    [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
+                    [prev_action_loss, prev_observation_loss, action_loss]))) * reinforce_loss
 
         elif cfg.training_type.autoregressive:
             input_sequence = torch.cat([prev_obs, obs], dim=1)
@@ -287,7 +293,7 @@ def train_ei(cfg: Config):
         for datapt_pair in tqdm(cfg.dataset.dataloader, total=cfg.num_batches):
             aggregate_loss = pi()
             if aggregate_loss is not None: aggregate_losses.append(aggregate_loss)
-            trainer_state = update(datapt_pair)
+            update(datapt_pair)
         return aggregate_losses
 
     if not cfg.load_model:

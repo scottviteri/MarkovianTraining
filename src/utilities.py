@@ -271,7 +271,7 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 model_dict[model_name],
                 torch_dtype=torch.float16,
-                use_flash_attention_2=True,
+                use_flash_attention_2=True
             )
             causal_lm.bfloat16()
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
