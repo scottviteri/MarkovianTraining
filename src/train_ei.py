@@ -104,11 +104,10 @@ def train_ei(cfg: Config):
                     f,
                 )
  
-    def log_print_oa(batch_index, prev_action, prev_obs, action, obs, is_first):
+    def log_print_oa(batch_index, prev_action, prev_obs, action, obs):
         if batch_index % cfg.interval_print == 0:
             with open(cfg.path_2_log, "a") as f:
                 multi_print(f"Batch Index: {batch_index}", f)
-                multi_print(f"Is First: {is_first}", f)
                 multi_print(
                     f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0]))}", f
                 )
@@ -166,9 +165,9 @@ def train_ei(cfg: Config):
             action = datapt["Action"]
         else:
             action = pick_good_action_before_current_observation(prev_action, prev_obs, obs) 
-        log_print_oa(batch_index, prev_action, prev_obs, action, obs, is_first)
         # notice that I am using skipping over the current action if is_first on purpose!
         if is_first: return prev_action, obs, batch_index + 1, None
+        log_print_oa(batch_index, prev_action, prev_obs, action, obs)
         aggregate_loss, loss_tensors, losses = \
             train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action)
         log_wandb(batch_index, aggregate_loss, losses)
@@ -207,14 +206,14 @@ def train_ei(cfg: Config):
                                 max_new_tokens=cfg.tok_p_pure_action,
                                 pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
                             )[:, -cfg.tok_p_action :]
-                log_print_oa(batch_index, prev_action, prev_obs, action, obs, is_first)
+                log_print_oa(batch_index, prev_action, prev_obs, action, obs)
 
             else:
                 if "Action" in datapt:
                     action = datapt["Action"]
                 else:
                     action = pick_good_action_before_current_observation(prev_action, prev_obs, obs) 
-                log_print_oa(batch_index, prev_action, prev_obs, action, obs, is_first)
+                log_print_oa(batch_index, prev_action, prev_obs, action, obs)
                 aggregate_loss, loss_tensors, losses = train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action)
                 prev_action_tensor, prev_observation_tensor, action_tensor = loss_tensors
                 aggregate_losses.append(aggregate_loss.item())
