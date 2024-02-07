@@ -1,152 +1,7 @@
 from src.training_types import *
 import os
 
-gpt2_AO = InitialConfig(
-        model_name="distilgpt2",
-        lr=1e-3,
-        batch_size=1,
-        num_batches=10,
-        obs_to_action_ratio=1,
-        interval_save_weights=1000,
-        interval_print=1,
-        wandb=False,
-        load_model=False,
-        do_lora=False,
-        training_ctxt_size=300,
-        dataset = InitDatasetType(name="wikipedia", task=None, peek_every=None),
-        training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=True),
-        debug=None
-)
-
-gpt2_bb_AO = InitialConfig(
-        model_name="distilgpt2",
-        lr=1e-3,
-        batch_size=2,
-        num_batches=10,
-        obs_to_action_ratio=1,
-        interval_save_weights=1000,
-        interval_print=1,
-        wandb=False,
-        load_model=False,
-        do_lora=False,
-        training_ctxt_size=300,
-        dataset = InitDatasetType(name="bigbench", task=None, peek_every=5),
-        training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=True),
-        debug=None
-)
-
-
-
-gj_OA_wk_20k = InitialConfig(
-        model_name="gptj",
-        lr=1e-3,
-        batch_size=1,
-        num_batches=20000,
-        obs_to_action_ratio=1,
-        interval_save_weights=1000,
-        interval_print=10,
-        wandb=False,
-        load_model=False,
-        do_lora=False,
-        training_ctxt_size=300,
-        dataset = InitDatasetType(name="wikipedia", task=None, peek_every=None),
-        training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=False),
-        debug=None
-)
-
-gj_O_wk_20k = InitialConfig(
-        model_name="gptj",
-        lr=1e-3,
-        batch_size=1,
-        num_batches=20000,
-        obs_to_action_ratio=1,
-        interval_save_weights=1000,
-        interval_print=31,
-        wandb=True,
-        load_model=False,
-        do_lora=False,
-        training_ctxt_size=300,
-        dataset = InitDatasetType(name="wikipedia", task=None, peek_every=None),
-        training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
-        debug=None
-)
-
-gj_O_arith_20k = InitialConfig(
-        model_name="gptj",
-        lr=1e-3,
-        batch_size=1,
-        num_batches=20000,
-        obs_to_action_ratio=1,
-        interval_save_weights=1000,
-        interval_print=31,
-        wandb=True,
-        load_model=False,
-        do_lora=False,
-        training_ctxt_size=300,
-        dataset=InitDatasetType(name="arithmetic_explanations.jsonl", task=None, peek_every=None),
-        training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
-        debug=None
-)
-
-mst_O_wk_20k = InitialConfig(
-        model_name="mistral",
-        lr=1e-3,
-        batch_size=1,
-        num_batches=20000,
-        obs_to_action_ratio=1,
-        interval_save_weights=1000,
-        interval_print=31,
-        wandb=True,
-        load_model=False,
-        do_lora=False,
-        training_ctxt_size=300,
-        dataset = InitDatasetType(name="wikipedia", task=None, peek_every=None),
-        training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
-        debug=None
-)
-
-gpt2_arith_AO_local = InitialConfig(
-        model_name="distilgpt2",
-        lr=1e-3,
-        batch_size=2,
-        num_batches=15,
-        obs_to_action_ratio=1,
-        interval_save_weights=3000,
-        interval_print=1,
-        wandb=False,
-        load_model=False,
-        do_lora=False,
-        training_ctxt_size=300,
-        dataset=InitDatasetType(
-              name=os.getcwd()+"/arithmetic_explanations.jsonl", 
-              task=None, peek_every=1),
-        training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=True),
-        debug=None
-)
-
-gpt2_arith_EI_local = InitialConfig(
-        model_name="distilgpt2",
-        lr=1e-3,
-        batch_size=1,
-        num_batches=100,
-        obs_to_action_ratio=1,
-        interval_save_weights=3000,
-        interval_print=1,
-        wandb=False,
-        load_model=False,
-        do_lora=False,
-        training_ctxt_size=300,
-        dataset=InitDatasetType(
-              name=os.getcwd()+"/arithmetic_explanations.jsonl", 
-              task=None, peek_every=None),
-        training_type=EI(
-                prev_action=False, prev_observation=False, action=True, 
-                num_samples=3, reinforce=False, rf_baseline=False, autoregressive=False,
-                markovian=False),
-        debug=None
-)
-
-gpt2_EI_p2 = InitialConfig(
+g2_p2 = InitialConfig(
         model_name="distilgpt2",
         lr=1e-3,
         batch_size=1,
@@ -168,78 +23,25 @@ gpt2_EI_p2 = InitialConfig(
         debug=None
 )
 
-
-
-gpt2_wiki_AO_local = InitialConfig(
-        model_name="distilgpt2",
+gj_p2 = InitialConfig(
+        model_name="gptj",
         lr=1e-3,
-        batch_size=2,
-        num_batches=10,
-        obs_to_action_ratio=1,
+        batch_size=1,
+        num_batches=100,
+        obs_to_action_ratio=0.5,
         interval_save_weights=3000,
-        interval_print=1,
+        interval_print=5,
         wandb=False,
         load_model=False,
         do_lora=False,
         training_ctxt_size=125,
         dataset=InitDatasetType(
-              name="wikipedia",
-              task=None, peek_every=None),
-        training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=True),
-        debug=None
-)
-
-
-gpt2_arith_O = InitialConfig(
-        model_name="distilgpt2",
-        lr=1e-3,
-        batch_size=16,
-        num_batches=400,
-        obs_to_action_ratio=0.5,
-        interval_save_weights=3000,
-        interval_print=100,
-        wandb=True,
-        load_model=False,
-        do_lora=False,
-        training_ctxt_size=125,
-        dataset=InitDatasetType(name=os.getcwd()+"/src/arithmetic_explanations.jsonl", task=None, peek_every=1),
-        training_type=AOA(use_gumbel=False, ignore_first_action=True, ignore_second_action=True),
-        debug=NoWeightUpdates()
-)
-
-gptj_arith_O = InitialConfig(
-        model_name="gptj",
-        lr=1e-3,
-        batch_size=1,
-        num_batches=10,
-        obs_to_action_ratio=0.5,
-        interval_save_weights=3000,
-        interval_print=31,
-        wandb=True,
-        load_model=False,
-        do_lora=False,
-        training_ctxt_size=125,
-        dataset=InitDatasetType(name=os.getcwd()+"/src/arithmetic_explanations.jsonl", task=None, peek_every=1),
-        training_type=AOA(use_gumbel=False, ignore_first_action=False, ignore_second_action=False),
-        debug=None
-)
-
-
-# should only use model name, lr, observation_size, and wandb
-gpt2_arith_AR =  InitialConfig(
-        model_name="distilgpt2",
-        lr=1e-3,
-        batch_size=1,
-        num_batches=10,
-        obs_to_action_ratio=15.0/40.0,
-        interval_save_weights=10000,
-        interval_print=500,
-        wandb=True,
-        load_model=False,
-        do_lora=False,
-        training_ctxt_size=0, #not used
-        dataset=InitDatasetType(name="arithmetic_explanations.jsonl", task=None, peek_every=None),
-        training_type=AR(),
+              name="arithmetic_explanations.jsonl", 
+              task=None, peek_every=2),
+        training_type=EI(
+                prev_action=False, prev_observation=False, action=False, num_samples=3, 
+                reinforce=False, rf_baseline=False, autoregressive=False, 
+                markovian=True),
         debug=None
 )
 
@@ -291,4 +93,4 @@ debug_types = [
 #example_configs =  [gen_eval("gptj", 10, False, use_gptj=True)]
 #example_configs = [gpt2_arith_AO_local]#, gpt2_wiki_AO_local]
 #example_configs = [gpt2_arith_EI_local]
-example_configs = [gpt2_EI_p2]
+example_configs = [gj_p2, g2_p2]
