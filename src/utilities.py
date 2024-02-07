@@ -442,6 +442,8 @@ def create_run_name(cfg : Config) -> str:
                 run_name += "rf_"
                 if cfg.training_type.rf_baseline:
                     run_name += "bl_"
+            elif cfg.training_type.autoregressive:
+                run_name += "auto_"
     else: 
         assert f"Wrong training type: {cfg.training_type}"
         
