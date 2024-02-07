@@ -23,6 +23,29 @@ g2_p2 = InitialConfig(
         debug=None
 )
 
+g2_ar = InitialConfig(
+        model_name="distilgpt2",
+        lr=1e-3,
+        batch_size=1,
+        num_batches=100,
+        obs_to_action_ratio=0.5,
+        interval_save_weights=3000,
+        interval_print=1,
+        wandb=False,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=125,
+        dataset=InitDatasetType(
+              name="arithmetic_explanations.jsonl", 
+              task=None, peek_every=2),
+        training_type=EI(
+                prev_action=False, prev_observation=False, action=False, num_samples=3, 
+                reinforce=False, rf_baseline=False, autoregressive=True, 
+                markovian=True),
+        debug=None
+)
+
+
 gj_p2 = InitialConfig(
         model_name="gptj",
         lr=1e-3,
@@ -91,6 +114,5 @@ debug_types = [
 
 #example_configs = [test_debug_template(x) for x in debug_types]
 #example_configs =  [gen_eval("gptj", 10, False, use_gptj=True)]
-#example_configs = [gpt2_arith_AO_local]#, gpt2_wiki_AO_local]
-#example_configs = [gpt2_arith_EI_local]
-example_configs = [gj_p2, g2_p2]
+#example_configs = [g2_p2, g2_ar]
+example_configs = [gj_p2]
