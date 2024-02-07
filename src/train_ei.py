@@ -104,10 +104,11 @@ def train_ei(cfg: Config):
                     f,
                 )
  
-    def log_print_oa(batch_index, prev_action, prev_obs, action, obs):
+    def log_print_oa(batch_index, prev_action, prev_obs, action, obs, is_first):
         if batch_index % cfg.interval_print == 0:
             with open(cfg.path_2_log, "a") as f:
                 multi_print(f"Batch Index: {batch_index}", f)
+                multi_print(f"Is First: {is_first}", f)
                 multi_print(
                     f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
                     f,
@@ -165,7 +166,7 @@ def train_ei(cfg: Config):
             action = datapt["Action"]
         else:
             action = pick_good_action_before_current_observation(prev_action, prev_obs, obs) 
-        log_print_oa(batch_index, prev_action, prev_obs, action, obs)
+        log_print_oa(batch_index, prev_action, prev_obs, action, obs, is_first)
         if is_first: return action, obs, batch_index + 1, None
         aggregate_loss, loss_tensors, losses = \
             train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action)
@@ -205,14 +206,14 @@ def train_ei(cfg: Config):
                                 max_new_tokens=cfg.tok_p_pure_action,
                                 pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
                             )[:, -cfg.tok_p_action :]
-                log_print_oa(batch_index, prev_action, prev_obs, action, obs)
+                log_print_oa(batch_index, prev_action, prev_obs, action, obs, is_first)
 
             else:
                 if "Action" in datapt:
                     action = datapt["Action"]
                 else:
                     action = pick_good_action_before_current_observation(prev_action, prev_obs, obs) 
-                log_print_oa(batch_index, prev_action, prev_obs, action, obs)
+                log_print_oa(batch_index, prev_action, prev_obs, action, obs, is_first)
                 aggregate_loss, loss_tensors, losses = train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action)
                 prev_action_tensor, prev_observation_tensor, action_tensor = loss_tensors
                 aggregate_losses.append(aggregate_loss.item())
