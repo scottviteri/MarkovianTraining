@@ -341,13 +341,15 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
             ctxt_size = causal_lm.config.n_positions
 
     if do_lora:
+        linear_layers = get_linear_layers(causal_lm)
         peft_config = LoraConfig(
             # basemodel_name_or_path=MODEL,
             r=64,
             lora_alpha=128,
             lora_dropout=0.1,
-            target_modules=get_linear_layers(causal_lm),
+            target_modules=linear_layers
         )
+        print("Num Linear Layers: ", len(linear_layers))
 
         causal_lm = get_peft_model(causal_lm, peft_config)
 
