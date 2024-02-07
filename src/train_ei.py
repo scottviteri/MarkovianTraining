@@ -110,18 +110,18 @@ def train_ei(cfg: Config):
                 multi_print(f"Batch Index: {batch_index}", f)
                 multi_print(f"Is First: {is_first}", f)
                 multi_print(
+                    f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0]))}", f
+                )
+                multi_print(
                     f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
                     f,
                 )
                 multi_print(
-                    f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0]))}", f
+                    f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
+                    f,
                 )
                 multi_print(
                     f"Observation: {repr(cfg.causal_lm_tokenizer.decode(obs[0]))}", f
-                )
-                multi_print(
-                    f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
-                    f,
                 )
                 multi_print("______________________________________________________", f)
 
