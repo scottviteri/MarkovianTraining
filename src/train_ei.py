@@ -161,7 +161,7 @@ def train_ei(cfg: Config):
                     ),
                     target=input_sequence[:, 1:]
                 )
-                reinforce_loss = loss_tensor[:,-cfg.tok_p_obs:].mean().item()
+                reinforce_loss = loss_tensor[:,-cfg.tok_p_obs:].mean()
                 if cfg.training_type.rf_baseline:
                     input_sequence = torch.cat([prev_action, obs], dim=1)
                     logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
@@ -172,7 +172,7 @@ def train_ei(cfg: Config):
                         ),
                         target=input_sequence[:, 1:]
                     )
-                    reinforce_loss = loss_tensor[:,-cfg.tok_p_obs:].mean().item() / reinforce_loss
+                    reinforce_loss = loss_tensor[:,-cfg.tok_p_obs:].mean() / reinforce_loss
 
             aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
                 [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
@@ -188,8 +188,7 @@ def train_ei(cfg: Config):
                 ),
                 target=input_sequence[:, 1:]
             )
-            aggregate_loss = loss_tensor[:,-cfg.tok_p_obs:].mean().item()
-            return aggregate_loss, None, None
+            aggregate_loss = loss_tensor[:,-cfg.tok_p_obs:].mean()
 
         else:
             aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
@@ -201,6 +200,7 @@ def train_ei(cfg: Config):
             aggregate_loss.backward()
             optimizer.step()
         
+        if cfg.training_type.autoregressive: return aggregate_loss.item(), None, None
         loss_tensors = prev_action_tensor, prev_observation_tensor, action_tensor
         losses = prev_action_loss, prev_observation_loss, action_loss
         return aggregate_loss.item(), loss_tensors, losses
