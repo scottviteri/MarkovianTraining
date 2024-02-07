@@ -192,7 +192,7 @@ def train_ei(cfg: Config):
                         ),
                         target=input_sequence[:, 1:]
                     )
-                    reinforce_loss = loss_tensor[:,-cfg.tok_p_obs:].mean() / reinforce_loss
+                    reinforce_loss = (loss_tensor[:,-cfg.tok_p_obs:].mean() / reinforce_loss).item()
 
             aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
                 [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
