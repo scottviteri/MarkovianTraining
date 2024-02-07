@@ -264,8 +264,9 @@ def train_ei(cfg: Config):
             prev_action, batch_index, _ = state
             prev_obs, obs = prev_datapt["Observation"], datapt["Observation"]
             if is_first: 
+                prev_action = default_action()
                 log_print_oa(batch_index, prev_action, prev_obs, None, obs, "Action" in datapt, is_first)
-                state = [default_action(), batch_index + 1, None]
+                state = [prev_action, batch_index + 1, None]
                 return
             # now can assume that prev_datapt contains the question and datapt contains the Answer
             if "Action" in datapt: 
