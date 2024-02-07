@@ -126,7 +126,7 @@ def train_ei(cfg: Config):
 
 
 
-    def train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action):
+    def train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action, obs):
         input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
         logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
         loss_tensor = loss_fn(
@@ -144,9 +144,26 @@ def train_ei(cfg: Config):
         prev_observation_loss = prev_observation_tensor.mean()
         action_loss = action_tensor.mean()
 
-        aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
-            [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
-            [prev_action_loss, prev_observation_loss, action_loss])))
+        if cfg.training_type.reinforce:
+            with torch.no_grad():
+                input_sequence = torch.cat([action, obs], dim=1)
+                logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
+                loss_tensor = loss_fn(
+                    input=einops.rearrange(
+                        logits,
+                        "batch seq_length vocab_size -> batch vocab_size seq_length",
+                    ),
+                    target=input_sequence[:, 1:]
+                )
+                reinforce_loss = loss_tensor[:,-cfg.tok_p_obs:].mean().item()
+            aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
+                [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
+                [prev_action_loss, prev_observation_loss, action_loss]))) * reinforce_loss
+        else:
+            aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
+                [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
+                [prev_action_loss, prev_observation_loss, action_loss])))
+
 
         if not isinstance(cfg.debug, NoWeightUpdates):
             aggregate_loss.backward()
@@ -169,7 +186,7 @@ def train_ei(cfg: Config):
         if is_first: return prev_action, obs, batch_index + 1, None
         log_print_oa(batch_index, prev_action, prev_obs, action, obs)
         aggregate_loss, loss_tensors, losses = \
-            train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action)
+            train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action, obs)
         log_wandb(batch_index, aggregate_loss, losses)
         log_print_losses(batch_index, aggregate_loss, losses)
         return [action, obs, batch_index + 1, aggregate_loss]
@@ -183,44 +200,6 @@ def train_ei(cfg: Config):
             if pi(state) is not None: aggregate_losses.append(pi(state))
             if datapt["First"]: state[0], state[1] = reset_action_obs()
             state = update(datapt, state)
-        return aggregate_losses
-
-
-    def train_regular():
-        aggregate_losses = []
-        for batch_index, datapt in tqdm(enumerate(cfg.dataset.dataloader), total=cfg.num_batches):
-            save_weights(batch_index)
-            obs = datapt["Observation"]
-            is_first = "First" in datapt and datapt["First"]
-            if is_first:
-                prev_obs, prev_action = reset_action_obs()
-                if "Action" in datapt:
-                    action = datapt["Action"]
-                else:
-                    action = cfg.causal_lm.generate(
-                                inputs=torch.cat([prev_action, obs, cfg.action_prefix_tensor], dim=1),
-                                output_scores=True,
-                                do_sample=True,
-                                temperature=1.0,
-                                min_new_tokens=cfg.tok_p_pure_action,
-                                max_new_tokens=cfg.tok_p_pure_action,
-                                pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
-                            )[:, -cfg.tok_p_action :]
-                log_print_oa(batch_index, prev_action, prev_obs, action, obs)
-
-            else:
-                if "Action" in datapt:
-                    action = datapt["Action"]
-                else:
-                    action = pick_good_action_before_current_observation(prev_action, prev_obs, obs) 
-                log_print_oa(batch_index, prev_action, prev_obs, action, obs)
-                aggregate_loss, loss_tensors, losses = train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action)
-                prev_action_tensor, prev_observation_tensor, action_tensor = loss_tensors
-                aggregate_losses.append(aggregate_loss.item())
-                log_wandb(batch_index, aggregate_loss, losses)
-                log_print_losses(batch_index, aggregate_loss, losses)
-            prev_action = action
-            prev_obs = obs
         return aggregate_losses
 
     if not cfg.load_model:
