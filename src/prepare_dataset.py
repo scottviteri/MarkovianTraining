@@ -140,13 +140,13 @@ def group_pairs(itr):
 
 def tokenize_and_pad(device, tokenizer, action_prefix_tensor, obs_prefix_tensor, tok_p_pure_action, tok_p_pure_obs, d):
     obs_tok = tokenizer(d["Observation"], return_tensors="pt")["input_ids"][0].to(device)
-    assert len(obs_tok) > tok_p_pure_obs
+    assert len(obs_tok) < tok_p_pure_obs
     obs_pad_tok = torch.full((tok_p_pure_obs - len(obs_tok),), 
                             tokenizer.pad_token_id, dtype=torch.int64, 
                             device=device)
     if "Action" in d:
         action_tok = tokenizer(d["Action"], return_tensors="pt")["input_ids"][0].to(device)
-        assert len(action_tok) > tok_p_pure_action
+        assert len(action_tok) < tok_p_pure_action
         action_pad_tok = torch.full((tok_p_pure_action - len(action_tok),), 
                             tokenizer.pad_token_id, dtype=torch.int64, 
                             device=device)
