@@ -220,22 +220,15 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
     }
     with device:
         if load_model:
-            # if load_model, add a case for attention_
-            if model_name in ["llama", "mistral"]:
-                causal_lm = AutoModelForCausalLM.from_pretrained(
-                    path_2_model,
-                    torch_dtype=torch.float16,
-                    attention_implementation="flash_attention_2"
-                )
-                #causal_lm.bfloat16()
-            else:
-                causal_lm = AutoModelForCausalLM.from_pretrained(
-                    path_2_model,
-                    torch_dtype=torch.float16,
-                )
+            causal_lm = AutoModelForCausalLM.from_pretrained(
+                path_2_model,
+                torch_dtype=torch.float16,
+            )
+            causal_lm.bfloat16()
+            # maybe change the padding side for certain cases
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                 path_2_tokenizer,
-                padding_side="left",
+                padding_side="left"
             )
             if model_name == "mistral":
                 ctxt_size = causal_lm.config.sliding_window
@@ -266,9 +259,9 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 model_dict[model_name],
                 torch_dtype=torch.float16,
-                attention_implementation="flash_attention_2"
+                use_flash_attention_2=True
             )
-            #causal_lm.bfloat16()
+            causal_lm.bfloat16()
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                 model_dict[model_name], padding_side="left"
             )
@@ -277,12 +270,13 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 model_dict[model_name],
                 torch_dtype=torch.float16,
-                attention_implementation="flash_attention_2"
+                use_flash_attention_2=True
             )
-            causal_lm.bfloat16() # try not using this?
+            causal_lm.bfloat16()
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_side="left"
+                model_dict[model_name], padding_side="right"
             )
+            causal_lm_tokenizer.padding_side = "right"
             ctxt_size = causal_lm.config.max_position_embeddings
 
         elif model_name == "phi2":

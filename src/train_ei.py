@@ -122,7 +122,6 @@ def train_ei(cfg: Config):
 
     def sample(prev_action, prev_obs, observation):
         with torch.no_grad():
-            cfg.causal_lm_tokenizer.padding_side = "left"
             action_candidates = [
                 cfg.causal_lm.generate(
                     inputs=torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1),
