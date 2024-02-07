@@ -437,13 +437,15 @@ def create_run_name(cfg : Config) -> str:
             if cfg.training_type.prev_observation:
                 run_name += "O"
             if cfg.training_type.action:
-                run_name += "A2"
+                run_name += "EI_"
             if cfg.training_type.reinforce:
                 run_name += "rf_"
                 if cfg.training_type.rf_baseline:
                     run_name += "bl_"
             elif cfg.training_type.autoregressive:
                 run_name += "auto_"
+            if cfg.training_type.markovian:
+                run_name += "M_"
     else: 
         assert f"Wrong training type: {cfg.training_type}"
         
