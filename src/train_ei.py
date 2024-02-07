@@ -222,7 +222,7 @@ def train_ei(cfg: Config):
         aggregate_loss, loss_tensors, losses = \
             train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action, obs)
         if cfg.training_type.autoregressive: 
-            wandb.log({"Batch Index": batch_index, "Previous Observation Loss": aggregate_loss})
+            if cfg.wandb: wandb.log({"Batch Index": batch_index, "Previous Observation Loss": aggregate_loss})
             return [action, obs, batch_index + 1, aggregate_loss]
         log_wandb(batch_index, aggregate_loss, losses)
         log_print_losses(batch_index, aggregate_loss, losses)
