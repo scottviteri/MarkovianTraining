@@ -227,7 +227,7 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
                     torch_dtype=torch.float16,
                     attention_implementation="flash_attention_2"
                 )
-                causal_lm.bfloat16()
+                #causal_lm.bfloat16()
             else:
                 causal_lm = AutoModelForCausalLM.from_pretrained(
                     path_2_model,
@@ -268,7 +268,7 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
                 torch_dtype=torch.float16,
                 attention_implementation="flash_attention_2"
             )
-            causal_lm.bfloat16()
+            #causal_lm.bfloat16()
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                 model_dict[model_name], padding_side="left"
             )
