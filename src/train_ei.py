@@ -178,6 +178,19 @@ def train_ei(cfg: Config):
                 [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
                 [prev_action_loss, prev_observation_loss, action_loss]))) * reinforce_loss
 
+        elif cfg.training_type.autoregressive:
+            input_sequence = torch.cat([prev_obs, obs], dim=1)
+            logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
+            loss_tensor = loss_fn(
+                input=einops.rearrange(
+                    logits,
+                    "batch seq_length vocab_size -> batch vocab_size seq_length",
+                ),
+                target=input_sequence[:, 1:]
+            )
+            aggregate_loss = loss_tensor[:,-cfg.tok_p_obs:].mean().item()
+            return aggregate_loss, None, None
+
         else:
             aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
                 [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
@@ -199,6 +212,8 @@ def train_ei(cfg: Config):
         save_weights(batch_index)
         if "Action" in datapt:
             action = datapt["Action"]
+        elif cfg.training_type.autoregressive:
+            action = prev_action
         else:
             action = pick_good_action_before_current_observation(prev_action, prev_obs, obs) 
         # notice that I am using skipping over the current action if is_first on purpose!
@@ -206,6 +221,7 @@ def train_ei(cfg: Config):
         log_print_oa(batch_index, prev_action, prev_obs, action, obs, "Action" in datapt)
         aggregate_loss, loss_tensors, losses = \
             train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action, obs)
+        if cfg.training_type.autoregressive: return [action, obs, batch_index + 1, aggregate_loss]
         log_wandb(batch_index, aggregate_loss, losses)
         log_print_losses(batch_index, aggregate_loss, losses)
         return [action, obs, batch_index + 1, aggregate_loss]
