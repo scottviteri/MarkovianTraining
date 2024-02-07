@@ -223,13 +223,12 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 path_2_model,
                 torch_dtype=torch.float16,
-                use_flash_attention_2=model_name == "mistral"
-                or model_name == "llama",
             )
             causal_lm.bfloat16()
+            # maybe change the padding side for certain cases
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                 path_2_tokenizer,
-                padding_side="left",
+                padding_side="left"
             )
             if model_name == "mistral":
                 ctxt_size = causal_lm.config.sliding_window
@@ -260,7 +259,7 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 model_dict[model_name],
                 torch_dtype=torch.float16,
-                use_flash_attention_2=True,
+                use_flash_attention_2=True
             )
             causal_lm.bfloat16()
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
@@ -275,8 +274,9 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
             )
             causal_lm.bfloat16()
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_side="left"
+                model_dict[model_name], padding_side="right"
             )
+            causal_lm_tokenizer.padding_side = "right"
             ctxt_size = causal_lm.config.max_position_embeddings
 
         elif model_name == "phi2":
@@ -341,13 +341,15 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
             ctxt_size = causal_lm.config.n_positions
 
     if do_lora:
+        linear_layers = get_linear_layers(causal_lm)
         peft_config = LoraConfig(
             # basemodel_name_or_path=MODEL,
             r=64,
             lora_alpha=128,
             lora_dropout=0.1,
-            target_modules=get_linear_layers(causal_lm),
+            target_modules=linear_layers
         )
+        print("Num Linear Layers: ", len(linear_layers))
 
         causal_lm = get_peft_model(causal_lm, peft_config)
 

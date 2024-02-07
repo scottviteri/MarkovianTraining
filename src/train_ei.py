@@ -122,7 +122,6 @@ def train_ei(cfg: Config):
 
     def sample(prev_action, prev_obs, observation):
         with torch.no_grad():
-            cfg.causal_lm_tokenizer.padding_side = "left"
             action_candidates = [
                 cfg.causal_lm.generate(
                     inputs=torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1),
@@ -193,7 +192,7 @@ def train_ei(cfg: Config):
                         ),
                         target=rfbl_input_sequence[:, 1:]
                     )
-                    reinforce_bl_loss = (rfbl_loss_tensor[:,-cfg.tok_p_obs:].mean() / reinforce_loss)
+                    reinforce_bl_loss = torch.exp(reinforce_loss - rfbl_loss_tensor[:,-cfg.tok_p_obs:].mean())
 
             if cfg.training_type.rf_baseline:
                 aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
@@ -264,8 +263,9 @@ def train_ei(cfg: Config):
             prev_action, batch_index, _ = state
             prev_obs, obs = prev_datapt["Observation"], datapt["Observation"]
             if is_first: 
+                prev_action = default_action()
                 log_print_oa(batch_index, prev_action, prev_obs, None, obs, "Action" in datapt, is_first)
-                state = [default_action(), batch_index + 1, None]
+                state = [prev_action, batch_index + 1, None]
                 return
             # now can assume that prev_datapt contains the question and datapt contains the Answer
             if "Action" in datapt: 
