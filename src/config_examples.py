@@ -139,7 +139,10 @@ gpt2_arith_EI_local = InitialConfig(
         dataset=InitDatasetType(
               name=os.getcwd()+"/arithmetic_explanations.jsonl", 
               task=None, peek_every=None),
-        training_type=EI(prev_action=False, prev_observation=False, action=True, num_samples=3, reinforce=False, rf_baseline=False),
+        training_type=EI(
+                prev_action=False, prev_observation=False, action=True, 
+                num_samples=3, reinforce=False, rf_baseline=False, autoregressive=False,
+                markovian=False),
         debug=None
 )
 
@@ -158,7 +161,10 @@ gpt2_EI_p2 = InitialConfig(
         dataset=InitDatasetType(
               name="arithmetic_explanations.jsonl", 
               task=None, peek_every=2),
-        training_type=EI(prev_action=False, prev_observation=False, action=True, num_samples=3, reinforce=True, rf_baseline=True),
+        training_type=EI(
+                prev_action=False, prev_observation=False, action=False, num_samples=3, 
+                reinforce=False, rf_baseline=False, autoregressive=False, 
+                markovian=True),
         debug=None
 )
 
