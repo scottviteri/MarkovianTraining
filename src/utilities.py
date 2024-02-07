@@ -440,6 +440,8 @@ def create_run_name(cfg : Config) -> str:
                 run_name += "A2"
             if cfg.training_type.reinforce:
                 run_name += "rf_"
+                if cfg.training_type.rf_baseline:
+                    run_name += "bl_"
     else: 
         assert f"Wrong training type: {cfg.training_type}"
         

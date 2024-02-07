@@ -10,8 +10,7 @@ AOA = NamedTuple("AOA",
 [("use_gumbel", bool), ("ignore_first_action", bool), ("ignore_second_action", bool)])
 EI = NamedTuple("EI", 
   [("prev_action", bool), ("prev_observation", bool), 
-   ("action", bool), ("num_samples", int), ("reinforce", bool)
-  ])
+   ("action", bool), ("num_samples", int), ("reinforce", bool), ("rf_baseline", bool)])
 RAOInit = NamedTuple("RAO",
     [("num_rao", int),  ("obs_between_weight_updates", int), 
     ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), 
