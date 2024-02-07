@@ -104,7 +104,7 @@ def train_ei(cfg: Config):
                     f,
                 )
  
-    def log_print_oa(batch_index, prev_action, prev_obs, action, obs):
+    def log_print_oa(batch_index, prev_action, prev_obs, action, obs, is_guidance_action):
         if batch_index % cfg.interval_print == 0:
             with open(cfg.path_2_log, "a") as f:
                 multi_print(f"Batch Index: {batch_index}", f)
@@ -115,6 +115,16 @@ def train_ei(cfg: Config):
                     f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
                     f,
                 )
+                if is_guidance_action:
+                    multi_print(
+                        f"Guidance Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
+                        f,
+                    )
+                else:
+                    multi_print(
+                        f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
+                        f,
+                    )
                 multi_print(
                     f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
                     f,
@@ -197,7 +207,7 @@ def train_ei(cfg: Config):
             action = pick_good_action_before_current_observation(prev_action, prev_obs, obs) 
         # notice that I am using skipping over the current action if is_first on purpose!
         if is_first: return prev_action, obs, batch_index + 1, None
-        log_print_oa(batch_index, prev_action, prev_obs, action, obs)
+        log_print_oa(batch_index, prev_action, prev_obs, action, obs, "Action" in datapt)
         aggregate_loss, loss_tensors, losses = \
             train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action, obs)
         log_wandb(batch_index, aggregate_loss, losses)
