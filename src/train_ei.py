@@ -18,7 +18,7 @@ def train_ei(cfg: Config):
             cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
             cfg.causal_lm.save_pretrained(cfg.path_2_model)
 
-    def reset_obs_action():
+    def reset_action_obs():
         prev_obs = torch.cat(
             (
                 cfg.action_prefix_tensor,
@@ -47,7 +47,7 @@ def train_ei(cfg: Config):
             ),
             dim=1,
         )
-        return prev_obs, prev_action
+        return prev_action, prev_obs
 
 
     def pick_good_action_before_current_observation(prev_action, prev_obs, obs):
@@ -176,10 +176,10 @@ def train_ei(cfg: Config):
 
     def train_via_update():
         aggregate_losses = []
-        state =  [*reset_obs_action(), 0, 1.0]
+        state =  [*reset_action_obs(), 0, 1.0]
         for datapt in tqdm(cfg.dataset.dataloader, total=cfg.num_batches):
             if pi(state) is not None: aggregate_losses.append(pi(state))
-            if datapt["First"]: state[0], state[1] = reset_obs_action()
+            if datapt["First"]: state[0], state[1] = reset_action_obs()
             state = update(datapt, state)
         return aggregate_losses
 
@@ -191,7 +191,7 @@ def train_ei(cfg: Config):
             obs = datapt["Observation"]
             is_first = "First" in datapt and datapt["First"]
             if is_first:
-                prev_obs, prev_action = reset_obs_action()
+                prev_obs, prev_action = reset_action_obs()
                 if "Action" in datapt:
                     action = datapt["Action"]
                 else:
