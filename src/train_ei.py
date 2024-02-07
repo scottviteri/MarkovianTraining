@@ -126,10 +126,6 @@ def train_ei(cfg: Config):
                         f,
                     )
                 multi_print(
-                    f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
-                    f,
-                )
-                multi_print(
                     f"Observation: {repr(cfg.causal_lm_tokenizer.decode(obs[0]))}", f
                 )
                 multi_print("______________________________________________________", f)
