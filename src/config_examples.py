@@ -1,10 +1,32 @@
 from src.training_types import *
 import os
 
-gj_M_p2 = InitialConfig(
+gj_rf_p2 = InitialConfig(
         model_name="gptj",
-        lr=1e-3,
+        lr=1e-4,
         batch_size=1,
+        num_batches=1000,
+        obs_to_action_ratio=0.5,
+        interval_save_weights=3000,
+        interval_print=21,
+        wandb=True,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=150,
+        dataset=InitDatasetType(
+              name="arithmetic_explanations.jsonl", 
+              task=None, peek_every=2),
+        training_type=EI(
+                prev_action=False, prev_observation=False, action=True, num_samples=3, 
+                reinforce=True, rf_baseline=False, autoregressive=False, 
+                markovian=False),
+        debug=None
+)
+
+gj_Mns_p2 = InitialConfig(
+        model_name="gptj",
+        lr=1e-4,
+        batch_size=3,
         num_batches=1000,
         obs_to_action_ratio=0.5,
         interval_save_weights=3000,
@@ -17,15 +39,16 @@ gj_M_p2 = InitialConfig(
               name="arithmetic_explanations.jsonl", 
               task=None, peek_every=2),
         training_type=EI(
-                prev_action=False, prev_observation=False, action=False, num_samples=3, 
+                prev_action=False, prev_observation=False, action=False, num_samples=1, 
                 reinforce=False, rf_baseline=False, autoregressive=False, 
                 markovian=True),
         debug=None
 )
 
+
 gj_EI_p2 = InitialConfig(
         model_name="gptj",
-        lr=1e-3,
+        lr=1e-5,
         batch_size=1,
         num_batches=1000,
         obs_to_action_ratio=0.5,
@@ -33,21 +56,20 @@ gj_EI_p2 = InitialConfig(
         interval_print=21,
         wandb=True,
         load_model=False,
-        do_lora=False,
+        do_lora=True,
         training_ctxt_size=125,
         dataset=InitDatasetType(
               name="arithmetic_explanations.jsonl", 
               task=None, peek_every=2),
         training_type=EI(
                 prev_action=False, prev_observation=False, action=True, num_samples=3, 
-                reinforce=False, rf_baseline=False, autoregressive=False, 
-                markovian=False),
+                reinforce=False, rf_baseline=False, autoregressive=False, markovian=False),
         debug=None
 )
 
-gj_EIM_p2 = InitialConfig(
+gj_EIM_p2_ns10 = InitialConfig(
         model_name="gptj",
-        lr=1e-3,
+        lr=1e-4,
         batch_size=1,
         num_batches=1000,
         obs_to_action_ratio=0.5,
@@ -61,7 +83,7 @@ gj_EIM_p2 = InitialConfig(
               name="arithmetic_explanations.jsonl", 
               task=None, peek_every=2),
         training_type=EI(
-                prev_action=False, prev_observation=False, action=True, num_samples=3, 
+                prev_action=False, prev_observation=False, action=True, num_samples=10, 
                 reinforce=False, rf_baseline=False, autoregressive=False, 
                 markovian=True),
         debug=None
@@ -71,7 +93,7 @@ gj_EIM_p2 = InitialConfig(
 
 g2_ar = InitialConfig(
         model_name="distilgpt2",
-        lr=1e-3,
+        lr=1e-4,
         batch_size=1,
         num_batches=100,
         obs_to_action_ratio=0.5,
@@ -95,7 +117,7 @@ g2_ar = InitialConfig(
 
 gj_p2 = InitialConfig(
         model_name="gptj",
-        lr=1e-3,
+        lr=1e-4,
         batch_size=1,
         num_batches=100,
         obs_to_action_ratio=0.5,
@@ -120,7 +142,7 @@ def gen_eval(model_name, num_evals, wandb, use_gptj):
         # for GptEval, only model_name,  num_evals are used
         return InitialConfig(
                         model_name=model_name,
-                        lr=1e-3,
+                        lr=1e-4,
                         batch_size=2,
                         num_batches=1000,
                         obs_to_action_ratio=2,
@@ -138,7 +160,7 @@ def gen_eval(model_name, num_evals, wandb, use_gptj):
 def test_debug_template(debug_type):
     return InitialConfig(
         model_name="distilgpt2",
-        lr=1e-3,
+        lr=1e-4,
         batch_size=2,
         num_batches=10,
         obs_to_action_ratio=1,
@@ -162,4 +184,8 @@ debug_types = [
 #example_configs = [test_debug_template(x) for x in debug_types]
 #example_configs =  [gen_eval("gptj", 10, False, use_gptj=True)]
 #example_configs = [g2_p2, g2_ar]
-example_configs = [gj_M_p2, gj_EI_p2, gj_EIM_p2]
+example_configs = [gj_EI_p2]
+#, gj_EIM_p2
+#gj_M_p2, 
+#example_configs = [gj_EIM_p2_ns10]
+#example_configs = [gj_rf_p2]
