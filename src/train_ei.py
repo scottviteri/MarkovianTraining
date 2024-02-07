@@ -167,7 +167,8 @@ def train_ei(cfg: Config):
         else:
             action = pick_good_action_before_current_observation(prev_action, prev_obs, obs) 
         log_print_oa(batch_index, prev_action, prev_obs, action, obs, is_first)
-        if is_first: return action, obs, batch_index + 1, None
+        # notice that I am using skipping over the current action if is_first on purpose!
+        if is_first: return prev_action, obs, batch_index + 1, None
         aggregate_loss, loss_tensors, losses = \
             train_to_generate_good_action_before_current_observation(prev_action, prev_obs, action)
         log_wandb(batch_index, aggregate_loss, losses)
