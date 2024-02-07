@@ -171,8 +171,8 @@ def to_qa_traj_itr(itr):
     while 1:
         d = next(itr)
         if "Explanation" in d:
-            yield iter([{"Observation":d["Question"], "Action":d["Explanation"], "First": True}, 
-                                {"Observation":d["Answer"], "First": False}])
+            yield iter([{"Observation":d["Question"], "First": True}, 
+                                {"Action":d["Explanation"], "Observation":d["Answer"], "First": False}])
         else:
             yield iter([{"Observation":d["Question"], "First": True}, 
                                 {"Observation":d["Answer"], "First": False}])
