@@ -220,13 +220,19 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
     }
     with device:
         if load_model:
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                path_2_model,
-                torch_dtype=torch.float16,
-                use_flash_attention_2=model_name == "mistral"
-                or model_name == "llama",
-            )
-            causal_lm.bfloat16()
+            # if load_model, add a case for attention_
+            if model_name in ["llama", "mistral"]:
+                causal_lm = AutoModelForCausalLM.from_pretrained(
+                    path_2_model,
+                    torch_dtype=torch.float16,
+                    attention_implementation="flash_attention_2"
+                )
+                causal_lm.bfloat16()
+            else:
+                causal_lm = AutoModelForCausalLM.from_pretrained(
+                    path_2_model,
+                    torch_dtype=torch.float16,
+                )
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                 path_2_tokenizer,
                 padding_side="left",
@@ -260,7 +266,7 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 model_dict[model_name],
                 torch_dtype=torch.float16,
-                use_flash_attention_2=True,
+                attention_implementation="flash_attention_2"
             )
             causal_lm.bfloat16()
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
@@ -271,9 +277,9 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 model_dict[model_name],
                 torch_dtype=torch.float16,
-                use_flash_attention_2=True
+                attention_implementation="flash_attention_2"
             )
-            causal_lm.bfloat16()
+            causal_lm.bfloat16() # try not using this?
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                 model_dict[model_name], padding_side="left"
             )
