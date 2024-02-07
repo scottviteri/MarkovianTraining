@@ -192,7 +192,7 @@ def train_ei(cfg: Config):
                         ),
                         target=rfbl_input_sequence[:, 1:]
                     )
-                    reinforce_bl_loss = (rfbl_loss_tensor[:,-cfg.tok_p_obs:].mean() / reinforce_loss)
+                    reinforce_bl_loss = torch.exp(reinforce_loss - rfbl_loss_tensor[:,-cfg.tok_p_obs:].mean())
 
             if cfg.training_type.rf_baseline:
                 aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
