@@ -437,7 +437,7 @@ def create_run_name(cfg : Config) -> str:
             if cfg.training_type.prev_observation:
                 run_name += "O"
             if cfg.training_type.action:
-                run_name += "EI_"
+                run_name += "A2"
             if cfg.training_type.reinforce:
                 run_name += "rf_"
                 if cfg.training_type.rf_baseline:
