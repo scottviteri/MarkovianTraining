@@ -21,7 +21,7 @@ def train_ei(cfg: Config):
     def reset_action_obs():
         prev_obs = torch.cat(
             (
-                cfg.action_prefix_tensor,
+                cfg.obs_prefix_tensor,
                 torch.full(
                     (cfg.batch_size, cfg.tok_p_pure_obs),
                     fill_value=cfg.causal_lm_tokenizer.pad_token_id,
@@ -107,6 +107,7 @@ def train_ei(cfg: Config):
     def log_print_oa(batch_index, prev_action, prev_obs, action, obs):
         if batch_index % cfg.interval_print == 0:
             with open(cfg.path_2_log, "a") as f:
+                multi_print(f"Batch Index: {batch_index}", f)
                 multi_print(
                     f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
                     f,
