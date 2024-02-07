@@ -122,6 +122,7 @@ def train_ei(cfg: Config):
 
     def sample(prev_action, prev_obs, observation):
         with torch.no_grad():
+            cfg.causal_lm_tokenizer.padding_side = "left"
             action_candidates = [
                 cfg.causal_lm.generate(
                     inputs=torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1),
@@ -224,7 +225,7 @@ def train_ei(cfg: Config):
                     sum(map(lambda x: x[1] if x[0] else 0.0, zip(
                         [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
                         [prev_action_loss, prev_observation_loss, action_loss])))
-            else:
+            else: # not markovian
                 aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, zip(
                     [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
                     [prev_action_loss, prev_observation_loss, action_loss])))
