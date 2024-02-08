@@ -180,7 +180,7 @@ def train_ei(cfg: Config):
                     ),
                     target=rf_input_sequence[:, 1:]
                 )
-                reinforce_loss = loss_tensor[:,-cfg.tok_p_obs:].mean()
+                reinforce_loss = rf_loss_tensor[:,-cfg.tok_p_obs:].mean()
 
                 if cfg.training_type.rf_baseline:
                     rfbl_input_sequence = torch.cat([prev_action, obs], dim=1)
@@ -238,11 +238,12 @@ def train_ei(cfg: Config):
                             ),
                             target=rf_input_sequence[:, 1:]
                         )
-                    reinforce_loss = loss_tensor[:,-cfg.tok_p_obs:].mean()
+                        reinforce_loss = rf_loss_tensor[:,-cfg.tok_p_obs:].mean()
                     aggregate_loss = (loss_tensor[:,-cfg.tok_p_obs:].mean() + \
                         sum(map(lambda x: x[1] if x[0] else 0.0, zip(
                             [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
                             [prev_action_loss, prev_observation_loss, action_loss])))) * reinforce_loss
+                    print("grad", aggregate_loss.requires_grad)
                 else: # not reinforce
                     aggregate_loss = (loss_tensor[:,-cfg.tok_p_obs:].mean() + \
                             sum(map(lambda x: x[1] if x[0] else 0.0, zip(
