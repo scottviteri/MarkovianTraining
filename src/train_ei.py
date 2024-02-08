@@ -70,7 +70,7 @@ def train_ei(cfg: Config):
         return action
 
     def log_wandb(batch_index, aggregate_loss, losses):
-        prev_action_loss, prev_observation_loss, action_loss, obs_loss = losses
+        prev_action_loss, prev_observation_loss, action_loss, observation_loss = losses
         if cfg.wandb:
             wandb.log(
                 {
@@ -78,7 +78,8 @@ def train_ei(cfg: Config):
                     "Aggregate Loss": aggregate_loss,
                     "Previous Action Loss": prev_action_loss,
                     "Previous Observation Loss": prev_observation_loss,
-                    "Action Loss": action_loss
+                    "Action Loss": action_loss,
+                    "Observation Loss": observation_loss
                 }
             )
 
