@@ -1,7 +1,7 @@
 import torch
 import torchtyping
 from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, TaskType
 import wandb
 from dataclasses import dataclass
 import einops
@@ -341,17 +341,16 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
             ctxt_size = causal_lm.config.n_positions
 
     if do_lora:
-        linear_layers = get_linear_layers(causal_lm)
+        #linear_layers = get_linear_layers(causal_lm)
         peft_config = LoraConfig(
-            # basemodel_name_or_path=MODEL,
-            r=64,
-            lora_alpha=128,
-            lora_dropout=0.1,
-            target_modules=linear_layers
-        )
-        print("Num Linear Layers: ", len(linear_layers))
-
+            task_type=TaskType.CAUSAL_LM, 
+            inference_mode=False, 
+            r=64, lora_alpha=128, lora_dropout=0.1
+            # target_modules=linear_layers
+            )
+        #print("Num Linear Layers: ", len(linear_layers))
         causal_lm = get_peft_model(causal_lm, peft_config)
+        causal_lm.print_trainable_parameters()
 
     causal_lm_tokenizer.padding_side = "left"
     causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.encode(" ")[0]
