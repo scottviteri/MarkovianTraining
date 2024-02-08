@@ -70,7 +70,7 @@ def train_ei(cfg: Config):
         return action
 
     def log_wandb(batch_index, aggregate_loss, losses):
-        prev_action_loss, prev_observation_loss, action_loss = losses
+        prev_action_loss, prev_observation_loss, action_loss, obs_loss = losses
         if cfg.wandb:
             wandb.log(
                 {
@@ -83,12 +83,12 @@ def train_ei(cfg: Config):
             )
 
     def log_print_losses(batch_index, aggregate_loss, losses):
-        prev_action_loss, prev_observation_loss, action_loss = losses
+        prev_action_loss, prev_observation_loss, action_loss, obs_loss = losses
         if batch_index % cfg.interval_print == 0:
             with open(cfg.path_2_log, "a") as f:
                 multi_print(f"Aggregate loss: {aggregate_loss}", f)
                 multi_print(
-                    f"PrevAction/PrevObservation/Action loss: {prev_action_loss}/{prev_observation_loss}/{action_loss}",
+                    f"PrevAction/PrevObservation/Action/Obs loss: {prev_action_loss}/{prev_observation_loss}/{action_loss}/{obs_loss}",
                     f,
                 )
  
@@ -169,6 +169,18 @@ def train_ei(cfg: Config):
         prev_observation_loss = prev_observation_tensor.mean()
         action_loss = action_tensor.mean()
 
+        mkv_input_sequence = torch.cat([action, obs], dim=1)
+        mkv_logits = cfg.causal_lm(mkv_input_sequence).logits[:, :-1, :]
+        mkv_loss_tensor = loss_fn(
+            input=einops.rearrange(
+                mkv_logits,
+                "batch seq_length vocab_size -> batch vocab_size seq_length",
+            ),
+            target=mkv_input_sequence[:, 1:]
+        )
+        obs_tensor = mkv_loss_tensor[:,-cfg.tok_p_obs:]
+        obs_loss = obs_tensor.mean()
+
         if cfg.training_type.reinforce:
             with torch.no_grad():
                 rf_input_sequence = torch.cat([action, obs], dim=1)
@@ -217,16 +229,6 @@ def train_ei(cfg: Config):
 
         else:
             if cfg.training_type.markovian:
-                input_sequence = torch.cat([action, obs], dim=1)
-                logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
-                loss_tensor = loss_fn(
-                    input=einops.rearrange(
-                        logits,
-                        "batch seq_length vocab_size -> batch vocab_size seq_length",
-                    ),
-                    target=input_sequence[:, 1:]
-                )
-
                 if cfg.training_type.reinforce:
                     with torch.no_grad():
                         rf_input_sequence = torch.cat([action, obs], dim=1)
@@ -239,13 +241,13 @@ def train_ei(cfg: Config):
                             target=rf_input_sequence[:, 1:]
                         )
                         reinforce_loss = rf_loss_tensor[:,-cfg.tok_p_obs:].mean()
-                    aggregate_loss = (loss_tensor[:,-cfg.tok_p_obs:].mean() + \
+                    aggregate_loss = (obs_loss + \
                         sum(map(lambda x: x[1] if x[0] else 0.0, zip(
                             [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
                             [prev_action_loss, prev_observation_loss, action_loss])))) * reinforce_loss
                     print("grad", aggregate_loss.requires_grad)
                 else: # not reinforce
-                    aggregate_loss = (loss_tensor[:,-cfg.tok_p_obs:].mean() + \
+                    aggregate_loss = (obs_loss + \
                             sum(map(lambda x: x[1] if x[0] else 0.0, zip(
                                 [cfg.training_type.prev_action, cfg.training_type.prev_observation, cfg.training_type.action], 
                                 [prev_action_loss, prev_observation_loss, action_loss])))) 
@@ -259,8 +261,8 @@ def train_ei(cfg: Config):
             optimizer.step()
         
         if cfg.training_type.autoregressive: return aggregate_loss.item(), None, None
-        loss_tensors = prev_action_tensor, prev_observation_tensor, action_tensor
-        losses = prev_action_loss, prev_observation_loss, action_loss
+        loss_tensors = prev_action_tensor, prev_observation_tensor, action_tensor, obs_tensor
+        losses = prev_action_loss, prev_observation_loss, action_loss, obs_loss
         return aggregate_loss.item(), loss_tensors, losses
 
     def log_and_save(batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first, aggregate_loss, losses):
