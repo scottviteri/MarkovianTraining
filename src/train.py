@@ -1,6 +1,7 @@
 # pip install transformers datasets==2.14.6 torchtyping==0.1.4 && pip install peft einops apache_beam==2.51.0 matplotlib wandb && pip install -U flash-attn --no-build-isolation
 # huggingface-cli login
 import torch
+from torch.cuda.amp import autocast
 import numpy as np
 from tqdm import tqdm
 import einops
@@ -16,7 +17,6 @@ from src.utilities import extend_initial_config, log_and_print_info
 from src.utilities import create_run_name, multi_print
 
 from src.evaluate_via_gpt import evaluate_via_gpt
-
 import src.config_examples
 
 
@@ -103,6 +103,7 @@ def run_training(cfg: Config):
 
     def sample(sampling_cfg, prev_action, prev_obs, observation):
         # currently not using filter_best_action parameters
+        cfg.causal_lm.eval()
         with torch.no_grad():
             action_candidates = cfg.causal_lm.generate(
                     inputs=torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1),
@@ -116,60 +117,61 @@ def run_training(cfg: Config):
             return action_candidates
     
     def update_weights(training_cfg, prev_action, prev_obs, action, obs):
+        cfg.causal_lm.train()
+        with autocast():
+            if training_cfg.train_O_given_prev_O:
+                input_sequence = torch.cat([prev_obs, obs], dim=1)
+                logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
+                loss_tensor = loss_fn(
+                    input=einops.rearrange(
+                        logits,
+                        "batch seq_length vocab_size -> batch vocab_size seq_length",
+                    ),
+                    target=input_sequence[:, 1:]
+                )
+                aggregate_loss = loss_tensor[:,-cfg.tok_p_obs:].mean()
+            else:
+                input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
+                logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
+                loss_tensor = loss_fn(
+                    input=einops.rearrange(
+                        logits,
+                        "batch seq_length vocab_size -> batch vocab_size seq_length",
+                    ),
+                    target=input_sequence[:, 1:]
+                )
 
-        if training_cfg.train_O_given_prev_O:
-            input_sequence = torch.cat([prev_obs, obs], dim=1)
-            logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
-            loss_tensor = loss_fn(
-                input=einops.rearrange(
-                    logits,
-                    "batch seq_length vocab_size -> batch vocab_size seq_length",
-                ),
-                target=input_sequence[:, 1:]
-            )
-            aggregate_loss = loss_tensor[:,-cfg.tok_p_obs:].mean()
-        else:
-            input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
-            logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
-            loss_tensor = loss_fn(
-                input=einops.rearrange(
-                    logits,
-                    "batch seq_length vocab_size -> batch vocab_size seq_length",
-                ),
-                target=input_sequence[:, 1:]
-            )
+                prev_action_tensor = loss_tensor[:, : cfg.tok_p_action]
+                prev_observation_tensor = loss_tensor[:, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
+                action_tensor = loss_tensor[:, cfg.tok_p_action + cfg.tok_p_obs :]
+                prev_action_loss = prev_action_tensor.mean()
+                prev_observation_loss = prev_observation_tensor.mean()
+                action_loss = action_tensor.mean()
 
-            prev_action_tensor = loss_tensor[:, : cfg.tok_p_action]
-            prev_observation_tensor = loss_tensor[:, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
-            action_tensor = loss_tensor[:, cfg.tok_p_action + cfg.tok_p_obs :]
-            prev_action_loss = prev_action_tensor.mean()
-            prev_observation_loss = prev_observation_tensor.mean()
-            action_loss = action_tensor.mean()
+                mkv_input_sequence = torch.cat([action, obs], dim=1)
+                mkv_logits = cfg.causal_lm(mkv_input_sequence).logits[:, :-1, :]
+                mkv_loss_tensor = loss_fn(
+                    input=einops.rearrange(
+                        mkv_logits,
+                        "batch seq_length vocab_size -> batch vocab_size seq_length",
+                    ),
+                    target=mkv_input_sequence[:, 1:]
+                )
+                obs_tensor = mkv_loss_tensor[:,-cfg.tok_p_obs:]
+                obs_loss = obs_tensor.mean()
 
-            mkv_input_sequence = torch.cat([action, obs], dim=1)
-            mkv_logits = cfg.causal_lm(mkv_input_sequence).logits[:, :-1, :]
-            mkv_loss_tensor = loss_fn(
-                input=einops.rearrange(
-                    mkv_logits,
-                    "batch seq_length vocab_size -> batch vocab_size seq_length",
-                ),
-                target=mkv_input_sequence[:, 1:]
-            )
-            obs_tensor = mkv_loss_tensor[:,-cfg.tok_p_obs:]
-            obs_loss = obs_tensor.mean()
+                aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
+                                         zip([training_cfg.train_A_given_AO, training_cfg.train_O_given_A],
+                                                [action_loss, obs_loss])))
 
-            aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
-                                     zip([training_cfg.train_A_given_AO, training_cfg.train_O_given_A],
-                                            [action_loss, obs_loss])))
-
-        if not isinstance(cfg.debug, NoWeightUpdates):
-            aggregate_loss.backward()
-            optimizer.step()
+            if not isinstance(cfg.debug, NoWeightUpdates):
+                aggregate_loss.backward()
+                optimizer.step()
         
-        if training_cfg.train_O_given_prev_O: return aggregate_loss.item(), None, None
-        loss_tensors = prev_action_tensor, prev_observation_tensor, action_tensor, obs_tensor
-        losses = prev_action_loss, prev_observation_loss, action_loss, obs_loss
-        return aggregate_loss.item(), loss_tensors, losses
+            if training_cfg.train_O_given_prev_O: return aggregate_loss.item(), None, None
+            loss_tensors = prev_action_tensor, prev_observation_tensor, action_tensor, obs_tensor
+            losses = prev_action_loss, prev_observation_loss, action_loss, obs_loss
+            return aggregate_loss.item(), loss_tensors, losses
 
     def log_and_save(batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first, aggregate_loss, losses):
         save_weights(batch_index)
