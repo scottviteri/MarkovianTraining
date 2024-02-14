@@ -362,70 +362,29 @@ def get_linear_layers(model):
     )
 
 def create_run_name(cfg : Config) -> str:
+    training_cfg = cfg.training_cfg
+    sampling_cfg = cfg.sampling_cfg
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
     run_name += f"{cfg.dataset.name.split('/')[-1][:2]}_"
     if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
-    if isinstance(cfg.training_type, AR): 
-        run_name += f"AR_obs{cfg.tok_p_obs}_"
+    if training_cfg.train_O_given_prev_O: 
+        run_name += f"AR_"
+    if training_cfg.train_O_given_A:
+        run_name += f"M_"
+    if training_cfg.train_A_given_AO:
+        run_name += f"EI_"
     if cfg.dataset.peek_every is not None:
         run_name += f"pe{cfg.dataset.peek_every}_"
 
-    if isinstance(cfg.training_type, RAO): 
-        run_name += f"RAO_"
-        run_name += f"nr{cfg.training_type.num_rao}_"
-        run_name += f"rao{cfg.training_type.tok_p_loss}/{cfg.tok_p_action}/{cfg.tok_p_obs}_"
-        run_name += f"obwu{cfg.training_type.obs_between_weight_updates}_"
-        if cfg.do_lora: run_name += "lora_"
-        if cfg.training_type.use_loss_difference: run_name += "ld_"
-        if cfg.training_type.use_multirao_for_action_gen:
-            run_name += f"mr{cfg.training_type.use_multirao_for_action_gen}_"
-        if cfg.training_type.use_rewards_to_go: run_name += "rtg_"
-
-    elif isinstance(cfg.training_type, GptEval): 
-        run_name += f"GptEval{cfg.training_type.num_evals}_"
-        run_name += "gptj" if cfg.training_type.use_gptj else "openai"
-
-    elif isinstance(cfg.training_type, AOA):
-        ignore_first = cfg.training_type.ignore_first_action
-        ignore_second = cfg.training_type.ignore_second_action
-        if isinstance(cfg.training_type, EI) and cfg.training_type.ignore_observation:
-            run_name += "A"
-        elif ignore_first and not ignore_second:
-            run_name += "OA"
-        elif not ignore_first and ignore_second:
-            run_name += "AO"
-        elif ignore_first and ignore_second:
-            run_name += "O"
-        elif not ignore_first and not ignore_second:
-            run_name += "AOA"
-        else:
-            raise ValueError("Invalid AOA configuration")
-        run_name += f"{cfg.tok_p_action}/{cfg.tok_p_obs}_"
-
-    if isinstance(cfg.training_type, EI):
-            run_name += f"EI_ns{cfg.training_type.num_samples}_"
-            if cfg.training_type.prev_action:
-                run_name += "A"
-            if cfg.training_type.prev_observation:
-                run_name += "O"
-            if cfg.training_type.action:
-                run_name += "A2"
-            if cfg.training_type.reinforce:
-                run_name += "rf_"
-                if cfg.training_type.rf_baseline:
-                    run_name += "bl_"
-            elif cfg.training_type.autoregressive:
-                run_name += "auto_"
-            if cfg.training_type.markovian:
-                run_name += "M_"
-    else: 
-        assert f"Wrong training type: {cfg.training_type}"
-        
-    if isinstance(cfg.debug, RepeatNPoints): run_name += f"r{cfg.debug.num_points}_"
-    elif isinstance(cfg.debug, RepeatPointNTimes): run_name += f"re{cfg.debug.num_times}_"
-    elif isinstance(cfg.debug, ReplaceWithRandomTokens): run_name += "rd_"
-    elif isinstance(cfg.debug, NoWeightUpdates): run_name += "nwu_"
+    if isinstance(cfg.debug, RepeatNPoints): 
+        run_name += f"r{cfg.debug.num_points}_"
+    elif isinstance(cfg.debug, RepeatPointNTimes): 
+        run_name += f"re{cfg.debug.num_times}_"
+    elif isinstance(cfg.debug, ReplaceWithRandomTokens): 
+        run_name += "rd_"
+    elif isinstance(cfg.debug, NoWeightUpdates): 
+        run_name += "nwu_"
 
     if cfg.batch_size != 1: run_name += f"bs{cfg.batch_size}_"
     run_name += f"nb{cfg.num_batches}_"
