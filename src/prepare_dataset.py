@@ -83,9 +83,6 @@ def prepare_dataset(
     #dict_ds = prepend_prefix_tensors(obs_prefix, action_prefix, dict_ds)
     # Note: is it true that RAO uses the same num_batches to count the number of weight updates?
     #  this would make them not comparable to AO, unless we divide by obs per weight update
-    if isinstance(init_cfg.training_type, RAOInit):
-        trajectory_itr = batch(init_cfg.training_type.obs_per_weight_update, dict_ds)
-        dict_ds = stack_buffer(trajectory_itr)
     if isinstance(init_cfg.debug, RepeatNPoints):
         dict_ds = repeat_every_n_points(init_cfg.debug.num_points, dict_ds)
     elif isinstance(init_cfg.debug, RepeatPointNTimes): #1 time is identity
