@@ -121,7 +121,8 @@ def run_training(cfg: Config):
         with autocast():
             if training_cfg.train_O_given_prev_O:
                 input_sequence = torch.cat([prev_obs, obs], dim=1)
-                logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
+                attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+                logits = cfg.causal_lm(input_sequence, attention_mask=attention_mask).logits[:, :-1, :]
                 loss_tensor = loss_fn(
                     input=einops.rearrange(
                         logits,
@@ -177,7 +178,7 @@ def run_training(cfg: Config):
         save_weights(batch_index)
         log_print_oa(batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first)
         if cfg.training_cfg.train_O_given_prev_O: 
-            if cfg.wandb: wandb.log({"Batch Index": batch_index, "Previous Observation Loss": aggregate_loss})
+            if cfg.wandb: wandb.log({"Batch Index": batch_index, "Observation Loss": aggregate_loss})
         else:
             log_wandb(batch_index, aggregate_loss, losses)
             log_print_losses(batch_index, aggregate_loss, losses)

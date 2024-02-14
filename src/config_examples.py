@@ -115,26 +115,49 @@ gj = InitialConfig(
 
 lma = InitialConfig(
         model_name="llama",
-        lr=1e-4,
-        optimizer="sgd",
-        batch_size=2,
+        lr=1e-5,
+        optimizer="adam",
+        batch_size=1,
         num_batches=1000,
         obs_to_action_ratio=0.5,
         interval_save_weights=3000,
-        interval_print=51,
+        interval_print=11,
         wandb=True,
         load_model=False,
         do_lora=False,
-        training_ctxt_size=200,
+        training_ctxt_size=175,
         dataset=InitDatasetType(
               name="arithmetic_explanations.jsonl", 
               task=None, peek_every=None),
         sampling_cfg=SamplingConfig(filter_best_actions=None),
         training_cfg=TrainingConfig(
-              train_A_given_AO=False, train_O_given_A=False, train_O_given_prev_O=True),
+              train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False),
+        debug=None
+)
+
+mst = InitialConfig(
+        model_name="mistral",
+        lr=1e-5,
+        optimizer="adam",
+        batch_size=1,
+        num_batches=1000,
+        obs_to_action_ratio=0.5,
+        interval_save_weights=3000,
+        interval_print=11,
+        wandb=True,
+        load_model=False,
+        do_lora=False,
+        training_ctxt_size=175,
+        dataset=InitDatasetType(
+              name="arithmetic_explanations.jsonl", 
+              task=None, peek_every=None),
+        sampling_cfg=SamplingConfig(filter_best_actions=None),
+        training_cfg=TrainingConfig(
+              train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False),
         debug=None
 )
 
 
+
 #example_configs = [g2, g2_ar, g2_ei]
-example_configs = [lma]
+example_configs = [mst]

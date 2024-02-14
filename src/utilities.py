@@ -230,27 +230,30 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
         elif model_name == "llama":
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 model_dict[model_name],
-                torch_dtype=torch.float16,
-                use_flash_attention_2=True
-            )
-            causal_lm.bfloat16()
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_side="left"
-            )
-            ctxt_size = causal_lm.config.max_position_embeddings
-        elif model_name == "mistral":
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                model_dict[model_name],
-                torch_dtype=torch.float16,
                 use_flash_attention_2=True
             )
             causal_lm.bfloat16()
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
                 model_dict[model_name], padding_side="right"
             )
-            causal_lm_tokenizer.padding_side = "right"
+            causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
+            causal_lm.resize_token_embeddings(len(causal_lm_tokenizer))
+            causal_lm.config.pad_token_id = causal_lm_tokenizer.pad_token_id
             ctxt_size = causal_lm.config.max_position_embeddings
-
+        elif model_name == "mistral":
+            causal_lm = AutoModelForCausalLM.from_pretrained(
+                model_dict[model_name],
+                use_flash_attention_2=True
+            )
+            causal_lm.bfloat16()
+            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+                model_dict[model_name], padding_side="right"
+            )
+            causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
+            causal_lm.resize_token_embeddings(len(causal_lm_tokenizer))
+            causal_lm.config.pad_token_id = causal_lm_tokenizer.pad_token_id
+            ctxt_size = causal_lm.config.max_position_embeddings
+ 
         elif model_name == "phi2":
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 model_dict[model_name]
@@ -324,8 +327,9 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
         causal_lm = get_peft_model(causal_lm, peft_config)
         causal_lm.print_trainable_parameters()
 
-    causal_lm_tokenizer.padding_side = "left"
-    causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.encode(" ")[0]
+    if model_name not in ["llama", "mistral"]:
+        causal_lm_tokenizer.padding_side = "left"
+        causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.encode(" ")[0]
     return causal_lm, causal_lm_tokenizer, ctxt_size
 
 
@@ -364,10 +368,14 @@ def get_linear_layers(model):
 def create_run_name(cfg : Config) -> str:
     training_cfg = cfg.training_cfg
     sampling_cfg = cfg.sampling_cfg
+    optimizer_name = cfg.optimizer.__name__
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
     run_name += f"{cfg.dataset.name.split('/')[-1][:2]}_"
     if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
+    if optimizer_name == "SGD": run_name += "SGD_"
+    elif optimizer_name == "Adam": run_name += "Adam_"
+    # how to check optimizer?
     if training_cfg.train_O_given_prev_O: 
         run_name += f"AR_"
     if training_cfg.train_O_given_A:
