@@ -371,7 +371,7 @@ def create_run_name(cfg : Config) -> str:
     optimizer_name = cfg.optimizer.__name__
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
-    run_name += f"{cfg.dataset.name.split('/')[-1][:2]}_"
+    run_name += f"{cfg.dataset.name.split('/')[-1][:3]}_"
     if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
     if optimizer_name == "SGD": run_name += "SGD_"
     elif optimizer_name == "Adam": run_name += "Adam_"
