@@ -25,42 +25,19 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 
-    if isinstance(init_cfg.training_type, GptEval) and init_cfg.training_type.use_gptj:
-        causal_lm = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-j-6b")
-        causal_lm_tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-j-6b", padding_side="left")
-        ctxt_size = causal_lm.config.n_positions
-    else:
-        causal_lm, causal_lm_tokenizer, ctxt_size =  get_model(
-            device, init_cfg.load_model, init_cfg.model_name, 
+    causal_lm, causal_lm_tokenizer, ctxt_size =  get_model(
+        device, init_cfg.load_model, init_cfg.model_name, 
         path_2_tokenizer, path_2_model, init_cfg.do_lora
     ) 
-
-    tok_p_loss, tok_p_action, tok_p_obs  = None, None, None
-    if isinstance(init_cfg.training_type,  RAOInit):
-        training_ctxt_size = ctxt_size if init_cfg.training_ctxt_size is None else init_cfg.training_ctxt_size 
-        tok_p_loss = 12
-        tok_p_action = int(
-                training_ctxt_size 
-            / ((init_cfg.obs_to_action_ratio + 1.0) * (init_cfg.training_type.num_rao + 1.0))
-            - tok_p_loss / (init_cfg.obs_to_action_ratio + 1)
-        )
-        tok_p_obs = int(tok_p_action * init_cfg.obs_to_action_ratio)
-        tok_p_doc = tok_p_obs * init_cfg.training_type.obs_between_weight_updates
-        tok_p_rao = tok_p_loss + tok_p_action + tok_p_obs
-        assert tok_p_loss < init_cfg.training_ctxt_size
-        assert (init_cfg.training_type.num_rao + 1) * tok_p_rao <= init_cfg.training_ctxt_size
-
-    elif isinstance(init_cfg.training_type,  AOA) or isinstance(init_cfg.training_type, AR) or isinstance(init_cfg.training_type, EI):
-        training_ctxt_size = ctxt_size if init_cfg.training_ctxt_size is None else init_cfg.training_ctxt_size 
-        tok_p_action = int(training_ctxt_size / (init_cfg.obs_to_action_ratio + 2))
-        tok_p_obs = int(tok_p_action * init_cfg.obs_to_action_ratio)
-        tok_p_loss = None
-
-    elif isinstance(init_cfg.training_type,  GptEval):
-        tok_p_action, tok_p_obs, tok_p_loss = None, None, None
-
+    if init_cfg.optimizer == "adam":
+        optimizer = torch.optim.AdamW
     else:
-        assert "Invalid training type"
+        optimizer = torch.optim.SGD
+
+    training_ctxt_size = ctxt_size if init_cfg.training_ctxt_size is None else init_cfg.training_ctxt_size 
+    tok_p_action = int(training_ctxt_size / (init_cfg.obs_to_action_ratio + 2))
+    tok_p_obs = int(tok_p_action * init_cfg.obs_to_action_ratio)
+    tok_p_loss = None
 
     tok_per_pure, prefix_tensors = get_prefixes(
         causal_lm_tokenizer, init_cfg.batch_size, device, init_cfg.dataset.name,
@@ -74,17 +51,11 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
             action_prefix, obs_prefix,
             tok_p_pure_action, tok_p_pure_obs, action_prefix, obs_prefix 
         )
-
-    if isinstance(init_cfg.training_type,  RAOInit):
-        training_type = RAO(init_cfg.training_type.num_rao, init_cfg.training_type.obs_between_weight_updates, 
-            init_cfg.training_type.use_loss_difference, init_cfg.training_type.use_multirao_for_action_gen, init_cfg.training_type.use_rewards_to_go, 
-            tok_p_loss, tok_p_pure_loss, loss_prefix, tok_p_doc, tok_p_rao)
-    else:
-        training_type = init_cfg.training_type
-
+    
     return Config(
         model_name=init_cfg.model_name,
         lr=init_cfg.lr,
+        optimizer=optimizer,
         batch_size=init_cfg.batch_size,
         num_batches=init_cfg.num_batches,
         obs_to_action_ratio=init_cfg.obs_to_action_ratio,
@@ -113,7 +84,8 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         ctxt_size = ctxt_size,
         causal_lm = causal_lm,
         causal_lm_tokenizer = causal_lm_tokenizer,
-        training_type = training_type,
+        sampling_cfg = init_cfg.sampling_cfg,
+        training_cfg = init_cfg.training_cfg,
         debug = init_cfg.debug
     )
 

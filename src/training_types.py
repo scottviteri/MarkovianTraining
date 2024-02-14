@@ -4,25 +4,10 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, P
 import torch
 from enum import Enum
 
-AR = NamedTuple("AR", [])
 GptEval = NamedTuple("GptEval", [("num_evals", int), ("use_gptj", bool)])
-AOA = NamedTuple("AOA", 
-[("use_gumbel", bool), ("ignore_first_action", bool), ("ignore_second_action", bool)])
-EI = NamedTuple("EI", 
-  [("prev_action", bool), ("prev_observation", bool), ("action", bool),  
-   ("num_samples", int), ("reinforce", bool), ("rf_baseline", bool), ("autoregressive", bool),
-   ("markovian", bool)])
-RAOInit = NamedTuple("RAO",
-    [("num_rao", int),  ("obs_between_weight_updates", int), 
-    ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), 
-    ("use_rewards_to_go", bool)])
-RAO = NamedTuple("RAO",
-    [("num_rao", int),  ("obs_between_weight_updates", int), 
-    ("use_loss_difference", bool), ("use_multirao_for_action_gen", bool), ("use_rewards_to_go", bool),
-    ("tok_p_loss", int), ("tok_p_pure_loss", int), ("loss_prefix_tensor", torch.Tensor), ("tok_p_doc", int), ("tok_p_rao", int)])
-
-InitTrainingType = Union[AR, GptEval, RAOInit, AOA, EI]
-TrainingType = Union[AR, GptEval, RAO, AOA, EI]
+TrainingConfig = NamedTuple("TrainingConfig", 
+   [("train_A_given_AO", bool), ("train_O_given_A", bool), ("train_O_given_prev_O", bool)])
+SamplingConfig = NamedTuple("SamplingConfig", [("filter_best_actions" , Optional[int])])
 
 RepeatNPoints = NamedTuple("RepeatNPoints", [("num_points", int)])
 RepeatPointNTimes = NamedTuple("RepeatPointNTimes", [("num_times", int)])
@@ -40,6 +25,7 @@ DebugType = Union[RepeatNPoints, RepeatPointNTimes, ReplaceWithRandomTokens, NoW
 class InitialConfig:
     model_name: str
     lr: float
+    optimizer: str
     batch_size: int
     num_batches: int
     obs_to_action_ratio: float
@@ -48,9 +34,10 @@ class InitialConfig:
     wandb: bool
     load_model: bool
     do_lora : bool
+    sampling_cfg : SamplingConfig
     training_ctxt_size: Optional[int]
     dataset: InitDatasetType
-    training_type : InitTrainingType
+    training_cfg : TrainingConfig
     debug : Optional[DebugType]
 
 @dataclass
@@ -59,6 +46,7 @@ class Config:
     causal_lm: Optional[PreTrainedModel]
     causal_lm_tokenizer: Optional[PreTrainedTokenizer]
     lr: float
+    optimizer: torch.optim.Optimizer 
     batch_size: int
     num_batches: int
     obs_to_action_ratio: float
@@ -80,5 +68,6 @@ class Config:
     obs_prefix_tensor: Optional[torch.Tensor]
     ctxt_size: Optional[int]
     dataset : DatasetType
-    training_type: TrainingType
+    sampling_cfg : SamplingConfig
+    training_cfg : TrainingConfig
     debug : Optional[DebugType]
