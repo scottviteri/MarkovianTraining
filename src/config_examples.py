@@ -125,7 +125,7 @@ lma = InitialConfig(
         wandb=True,
         load_model=False,
         do_lora=False,
-        training_ctxt_size=175,
+        training_ctxt_size=200,
         dataset=InitDatasetType(
               name="arithmetic_explanations.jsonl", 
               task=None, peek_every=None),
@@ -147,7 +147,7 @@ mst = InitialConfig(
         wandb=True,
         load_model=False,
         do_lora=False,
-        training_ctxt_size=175,
+        training_ctxt_size=200,
         dataset=InitDatasetType(
               name="arithmetic_explanations.jsonl", 
               task=None, peek_every=None),
@@ -159,5 +159,5 @@ mst = InitialConfig(
 
 
 
-#example_configs = [g2, g2_ar, g2_ei]
-example_configs = [mst]
+example_configs = [g2, g2_ar, g2_ei]
+#example_configs = [mst]

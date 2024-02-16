@@ -105,14 +105,17 @@ def run_training(cfg: Config):
         # currently not using filter_best_action parameters
         cfg.causal_lm.eval()
         with torch.no_grad():
+            input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
+            attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
             action_candidates = cfg.causal_lm.generate(
-                    inputs=torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1),
+                    inputs=input_sequence,
+                    attention_mask=attention_mask,
                     output_scores=True,
                     do_sample=True,
                     temperature=1.0,
                     min_new_tokens=cfg.tok_p_pure_action,
                     max_new_tokens=cfg.tok_p_pure_action,
-                    pad_token_id=cfg.causal_lm_tokenizer.eos_token_id,
+                    pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
                 )[:, -cfg.tok_p_action :]
             return action_candidates
     
@@ -133,7 +136,8 @@ def run_training(cfg: Config):
                 aggregate_loss = loss_tensor[:,-cfg.tok_p_obs:].mean()
             else:
                 input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
-                logits = cfg.causal_lm(input_sequence).logits[:, :-1, :]
+                attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+                logits = cfg.causal_lm(input_sequence, attention_mask=attention_mask).logits[:, :-1, :]
                 loss_tensor = loss_fn(
                     input=einops.rearrange(
                         logits,
@@ -150,7 +154,8 @@ def run_training(cfg: Config):
                 action_loss = action_tensor.mean()
 
                 mkv_input_sequence = torch.cat([action, obs], dim=1)
-                mkv_logits = cfg.causal_lm(mkv_input_sequence).logits[:, :-1, :]
+                mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+                mkv_logits = cfg.causal_lm(mkv_input_sequence, attention_mask=mkv_attention_mask).logits[:, :-1, :]
                 mkv_loss_tensor = loss_fn(
                     input=einops.rearrange(
                         mkv_logits,
@@ -165,14 +170,14 @@ def run_training(cfg: Config):
                                          zip([training_cfg.train_A_given_AO, training_cfg.train_O_given_A],
                                                 [action_loss, obs_loss])))
 
-            if not isinstance(cfg.debug, NoWeightUpdates):
-                aggregate_loss.backward()
-                optimizer.step()
+        if not isinstance(cfg.debug, NoWeightUpdates):
+            aggregate_loss.backward()
+            optimizer.step()
         
-            if training_cfg.train_O_given_prev_O: return aggregate_loss.item(), None, None
-            loss_tensors = prev_action_tensor, prev_observation_tensor, action_tensor, obs_tensor
-            losses = prev_action_loss, prev_observation_loss, action_loss, obs_loss
-            return aggregate_loss.item(), loss_tensors, losses
+        if training_cfg.train_O_given_prev_O: return aggregate_loss.item(), None, None
+        loss_tensors = prev_action_tensor, prev_observation_tensor, action_tensor, obs_tensor
+        losses = prev_action_loss, prev_observation_loss, action_loss, obs_loss
+        return aggregate_loss.item(), loss_tensors, losses
 
     def log_and_save(batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first, aggregate_loss, losses):
         save_weights(batch_index)
