@@ -224,7 +224,7 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
             )
         causal_lm.bfloat16()
         causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-            model_dict[model_name], padding_side="left"
+            model_dict[model_name], padding_side=padding_side
         )
         causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
         causal_lm.resize_token_embeddings(len(causal_lm_tokenizer))
