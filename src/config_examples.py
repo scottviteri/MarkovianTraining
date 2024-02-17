@@ -4,7 +4,7 @@ import os
 g2 = InitialConfig(
         model_name="distilgpt2",
         lr=1e-4,
-        optimizer="adam",
+        optimizer="sgd",
         batch_size=2,
         num_batches=10,
         obs_to_action_ratio=0.5,

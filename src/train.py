@@ -22,7 +22,13 @@ import src.config_examples
 
 def run_training(cfg: Config):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    optimizer = cfg.optimizer(cfg.causal_lm.parameters(), lr=cfg.lr)
+    if cfg.optimizer == "sgd":
+        optimizer = torch.optim.SGD(cfg.causal_lm.parameters(), lr=cfg.lr, momentum=0.9)
+    elif cfg.optimizer == "adam":
+        optimizer = torch.optim.Adam(cfg.causal_lm.parameters(), lr=cfg.lr)
+    else:
+        raise ValueError(f"Unsupported optimizer: {cfg.optimizer}. Please choose either 'sgd' or 'adam'.")
+
 
     def save_weights(batch_index):
         if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:

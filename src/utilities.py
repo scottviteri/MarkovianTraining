@@ -27,10 +27,6 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         device, init_cfg.load_model, init_cfg.model_name, 
         path_2_tokenizer, path_2_model, init_cfg.do_lora
     ) 
-    if init_cfg.optimizer == "adam":
-        optimizer = torch.optim.AdamW
-    else:
-        optimizer = torch.optim.SGD
 
     training_ctxt_size = ctxt_size if init_cfg.training_ctxt_size is None else init_cfg.training_ctxt_size 
     tok_p_action = int(training_ctxt_size / (init_cfg.obs_to_action_ratio + 2))
@@ -53,7 +49,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     return Config(
         model_name=init_cfg.model_name,
         lr=init_cfg.lr,
-        optimizer=optimizer,
+        optimizer=init_cfg.optimizer,
         batch_size=init_cfg.batch_size,
         num_batches=init_cfg.num_batches,
         obs_to_action_ratio=init_cfg.obs_to_action_ratio,
@@ -263,7 +259,7 @@ def get_linear_layers(model):
 def create_run_name(cfg : Config) -> str:
     training_cfg = cfg.training_cfg
     sampling_cfg = cfg.sampling_cfg
-    optimizer_name = cfg.optimizer.__name__
+    optimizer_name = cfg.optimizer
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
     if isinstance(cfg.dataset.task, ArithmeticTask):
