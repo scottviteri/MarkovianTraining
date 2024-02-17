@@ -297,6 +297,8 @@ def create_run_name(cfg : Config) -> str:
     if cfg.obs_to_action_ratio != 1:
         run_name += f"o:a={cfg.obs_to_action_ratio}:1_"
     if cfg.load_model: run_name += f"load_"
+    if cfg.do_lora: run_name += "lra_"
+    if cfg.num_beams: run_name += f"nbe{cfg.num_beams}_"
     if cfg.training_ctxt_size: run_name += f"ics{cfg.training_ctxt_size}_"
     return run_name 
 
