@@ -174,6 +174,29 @@ def get_prefixes(
     return ((tokens_per_pure_reward, tokens_per_pure_action, tokens_per_pure_observation), 
     (reward_prefix_tensor, action_prefix_tensor, observation_prefix_tensor))
 
+def get_ctxt_size(model_name, causal_lm):
+    if model_name == "mistral":
+        ctxt_size = causal_lm.config.sliding_window
+    elif model_name == "tinystories":
+        ctxt_size = causal_lm.config.window_size
+    elif model_name == "llama":
+        ctxt_size = causal_lm.config.max_position_embeddings
+    elif model_name == "distilgpt2":
+        ctxt_size = causal_lm.config.n_ctx
+    elif model_name == "gptj":
+        ctxt_size = causal_lm.config.n_positions
+    elif model_name == "gpt2-large":
+        ctxt_size = causal_lm.config.n_positions
+    elif model_name == "phi2":
+        ctxt_size = causal_lm.config.max_position_embeddings
+    else:
+        ctxt_size = causal_lm.config.n_positions
+
+def get_padding_side(model_name):
+    if model_name in ["llama", "mistral"]:
+        return "right"
+    return "left"
+
 def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do_lora=None):
     """Load model"""
     model_dict = {
@@ -200,118 +223,20 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
                 path_2_tokenizer,
                 padding_side="left"
             )
-            if model_name == "mistral":
-                ctxt_size = causal_lm.config.sliding_window
-            elif model_name == "tinystories":
-                ctxt_size = causal_lm.config.window_size
-            elif model_name == "llama":
-                ctxt_size = causal_lm.config.max_position_embeddings
-            elif model_name == "distilgpt2":
-                ctxt_size = causal_lm.config.n_ctx
-            elif model_name == "gptj":
-                ctxt_size = causal_lm.config.n_positions
-            elif model_name == "gpt2-large":
-                ctxt_size = causal_lm.config.n_positions
-            elif model_name == "phi2":
-                ctxt_size = causal_lm.config.max_position_embeddings
-            else:
-                ctxt_size = causal_lm.config.n_positions
-
-        elif model_name == "tinystories":
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_size="left"
-            )
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                model_dict[model_name]
-            )
-            ctxt_size = causal_lm.config.window_size
-        elif model_name == "llama":
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                model_dict[model_name],
-                use_flash_attention_2=True
-            )
-            causal_lm.bfloat16()
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_side="right"
-            )
-            causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
-            causal_lm.resize_token_embeddings(len(causal_lm_tokenizer))
-            causal_lm.config.pad_token_id = causal_lm_tokenizer.pad_token_id
-            ctxt_size = causal_lm.config.max_position_embeddings
-        elif model_name == "mistral":
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                model_dict[model_name],
-                use_flash_attention_2=True
-            )
-            causal_lm.bfloat16()
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_side="right"
-            )
-            causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
-            causal_lm.resize_token_embeddings(len(causal_lm_tokenizer))
-            causal_lm.config.pad_token_id = causal_lm_tokenizer.pad_token_id
-            ctxt_size = causal_lm.config.max_position_embeddings
- 
-        elif model_name == "phi2":
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                model_dict[model_name]
-            )
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_side="left"
-            )
-            ctxt_size = causal_lm.config.max_position_embeddings
-        elif model_name == "distilgpt2":
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                model_dict[model_name]
-            )
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_side="left"
-            )
-            ctxt_size = causal_lm.config.n_ctx
-
-        elif model_name == "gptj":
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                model_dict[model_name]
-            )
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_side="left"
-            )
-            ctxt_size = causal_lm.config.n_positions
-
-        elif model_name == "gpt2-large":
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                model_dict[model_name]
-            )
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_side="left"
-            )
-            ctxt_size = causal_lm.config.n_ctx
-
-        elif model_name == "gpt2-xl":
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                model_dict[model_name]
-            )
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_side="left"
-            )
-            ctxt_size = causal_lm.config.n_ctx
-
-        elif model_name == "gpt2":
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                model_dict[model_name]
-            )
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_side="left"
-            )
-            ctxt_size = causal_lm.config.n_ctx
+            ctxt = get_ctxt_size(model_name, causal_lm)
         else:
             causal_lm = AutoModelForCausalLM.from_pretrained(
-                model_name
+                model_dict[model_name],
+                use_flash_attention_2=model_name in ["llama", "mistral"]
             )
+            causal_lm.bfloat16()
             causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_name, padding_side="left"
+                model_dict[model_name], padding_side=get_padding_side(model_name)
             )
-            ctxt_size = causal_lm.config.n_positions
+            causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
+            causal_lm.resize_token_embeddings(len(causal_lm_tokenizer))
+            causal_lm.config.pad_token_id = causal_lm_tokenizer.pad_token_id
+            ctxt_size = get_ctxt_size(model_name, causal_lm)
 
     if do_lora:
         #linear_layers = get_linear_layers(causal_lm)
@@ -325,9 +250,6 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
         causal_lm = get_peft_model(causal_lm, peft_config)
         causal_lm.print_trainable_parameters()
 
-    if model_name not in ["llama", "mistral"]:
-        causal_lm_tokenizer.padding_side = "left"
-        causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.encode(" ")[0]
     return causal_lm, causal_lm_tokenizer, ctxt_size
 
 
