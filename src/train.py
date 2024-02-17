@@ -111,7 +111,7 @@ def run_training(cfg: Config):
             action_candidates = cfg.causal_lm.generate(
                     inputs=input_sequence,
                     attention_mask=attention_mask,
-                    #num_beams=3,
+                    num_beams=cfg.num_beams,
                     bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
                     output_scores=True,
                     do_sample=True,

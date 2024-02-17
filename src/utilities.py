@@ -62,6 +62,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         wandb = init_cfg.wandb,
         load_model = init_cfg.load_model,
         do_lora = init_cfg.do_lora,
+        num_beams = init_cfg.num_beams,
         training_ctxt_size = init_cfg.training_ctxt_size,
         device = device,
         dataset = DatasetType(

@@ -37,6 +37,7 @@ class InitialConfig:
     wandb: bool
     load_model: bool
     do_lora : bool
+    num_beams : int
     sampling_cfg : SamplingConfig
     training_ctxt_size: Optional[int]
     dataset: InitDatasetType
@@ -58,6 +59,7 @@ class Config:
     wandb: bool
     load_model: bool
     do_lora: bool
+    num_beams : int
     training_ctxt_size: int
     device: str
     path_2_log: str

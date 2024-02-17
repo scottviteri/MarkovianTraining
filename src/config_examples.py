@@ -13,6 +13,7 @@ g2 = InitialConfig(
         wandb=False,
         load_model=False,
         do_lora=False,
+        num_beams = 1,
         training_ctxt_size=150,
         dataset=InitDatasetType(task=ArithmeticTask(num_terms=2, num_digits=3), peek_every=None),
         sampling_cfg=SamplingConfig(filter_best_actions=None),
@@ -33,9 +34,10 @@ g2_ar = InitialConfig(
         wandb=False,
         load_model=False,
         do_lora=False,
+        num_beams = 1,
         training_ctxt_size=150,
         dataset=InitDatasetType(
-              task=None, peek_every=None),
+              task=ArithmeticTask(num_terms=2, num_digits=3), peek_every=None),
         sampling_cfg=SamplingConfig(filter_best_actions=None),
         training_cfg=TrainingConfig(
               train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False),
@@ -54,6 +56,7 @@ g2_ei = InitialConfig(
         wandb=False,
         load_model=False,
         do_lora=False,
+        num_beams=1,
         training_ctxt_size=150,
         dataset=InitDatasetType(
             task=ArithmeticTask(num_terms=2, num_digits=3), 
@@ -78,6 +81,7 @@ g2_p2 = InitialConfig(
         wandb=False,
         load_model=False,
         do_lora=False,
+        num_beams=1,
         training_ctxt_size=150,
         dataset=InitDatasetType(
             task=ArithmeticTask(num_terms=2, num_digits=3), 
@@ -100,6 +104,7 @@ gj = InitialConfig(
         wandb=False,
         load_model=False,
         do_lora=False,
+        num_beams=1,
         training_ctxt_size=150,
         dataset=InitDatasetType(
             task=ArithmeticTask(num_terms=2, num_digits=3), 
@@ -122,6 +127,7 @@ lma = InitialConfig(
         wandb=True,
         load_model=False,
         do_lora=False,
+        num_beams=1,
         training_ctxt_size=200,
         dataset=InitDatasetType(
             task=ArithmeticTask(num_terms=2, num_digits=3), 
@@ -144,6 +150,7 @@ mst = InitialConfig(
         wandb=True,
         load_model=False,
         do_lora=False,
+        num_beams=1,
         training_ctxt_size=200,
         dataset=InitDatasetType(
             task=ArithmeticTask(num_terms=2, num_digits=3),
@@ -154,5 +161,5 @@ mst = InitialConfig(
         debug=None
 )
 
-example_configs = [g2]#, g2_ar, g2_ei]
+example_configs = [g2, g2_ar, g2_ei]
 #example_configs = [mst]
