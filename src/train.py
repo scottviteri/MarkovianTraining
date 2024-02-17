@@ -78,6 +78,7 @@ def run_training(cfg: Config):
                     f"PrevAction/PrevObservation/Action/Obs loss: {prev_action_loss}/{prev_observation_loss}/{action_loss}/{obs_loss}",
                     f,
                 )
+                multi_print("______________________________________________________", f)
  
     def log_print_oa(batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first):
         if batch_index % cfg.interval_print == 0:
@@ -105,7 +106,6 @@ def run_training(cfg: Config):
                 multi_print(
                     f"Observation: {repr(cfg.causal_lm_tokenizer.decode(obs[0]))}", f
                 )
-                multi_print("______________________________________________________", f)
 
     def sample(cfg, prev_action, prev_obs, observation):
         sampling_cfg = cfg.sampling_cfg
