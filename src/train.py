@@ -110,6 +110,8 @@ def run_training(cfg: Config):
             action_candidates = cfg.causal_lm.generate(
                     inputs=input_sequence,
                     attention_mask=attention_mask,
+                    #num_beams=3,
+                    bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
                     output_scores=True,
                     do_sample=True,
                     temperature=1.0,
@@ -133,7 +135,7 @@ def run_training(cfg: Config):
                     ),
                     target=input_sequence[:, 1:]
                 )
-                aggregate_loss = loss_tensor[:,-cfg.tok_p_obs:].mean()
+                aggregate_loss = loss_tensor[:,-cfg.tok_p_pure_obs:].mean()
             else:
                 input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
                 attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
@@ -148,7 +150,7 @@ def run_training(cfg: Config):
 
                 prev_action_tensor = loss_tensor[:, : cfg.tok_p_action]
                 prev_observation_tensor = loss_tensor[:, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
-                action_tensor = loss_tensor[:, cfg.tok_p_action + cfg.tok_p_obs :]
+                action_tensor = loss_tensor[:, -cfg.tok_p_pure_action :]
                 prev_action_loss = prev_action_tensor.mean()
                 prev_observation_loss = prev_observation_tensor.mean()
                 action_loss = action_tensor.mean()
@@ -163,7 +165,7 @@ def run_training(cfg: Config):
                     ),
                     target=mkv_input_sequence[:, 1:]
                 )
-                obs_tensor = mkv_loss_tensor[:,-cfg.tok_p_obs:]
+                obs_tensor = mkv_loss_tensor[:,-cfg.tok_p_pure_obs:]
                 obs_loss = obs_tensor.mean()
 
                 aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
