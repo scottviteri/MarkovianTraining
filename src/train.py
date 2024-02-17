@@ -101,7 +101,8 @@ def run_training(cfg: Config):
                 )
                 multi_print("______________________________________________________", f)
 
-    def sample(sampling_cfg, prev_action, prev_obs, observation):
+    def sample(cfg, prev_action, prev_obs, observation):
+        sampling_cfg = cfg.sampling_cfg
         # currently not using filter_best_action parameters
         cfg.causal_lm.eval()
         with torch.no_grad():
@@ -121,8 +122,10 @@ def run_training(cfg: Config):
                 )[:, -cfg.tok_p_action :]
             return action_candidates
     
-    def update_weights(training_cfg, prev_action, prev_obs, action, obs):
+    def update_weights(cfg, prev_action, prev_obs, action, obs):
+        training_cfg = cfg.training_cfg
         cfg.causal_lm.train()
+        cfg.causal_lm_tokenizer.padding_side="left"
         with autocast():
             if training_cfg.train_O_given_prev_O:
                 input_sequence = torch.cat([prev_obs, obs], dim=1)
@@ -157,6 +160,7 @@ def run_training(cfg: Config):
 
                 mkv_input_sequence = torch.cat([action, obs], dim=1)
                 mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+                cfg.causal_lm_tokenizer.padding_side = "left"
                 mkv_logits = cfg.causal_lm(mkv_input_sequence, attention_mask=mkv_attention_mask).logits[:, :-1, :]
                 mkv_loss_tensor = loss_fn(
                     input=einops.rearrange(
@@ -210,8 +214,8 @@ def run_training(cfg: Config):
             elif cfg.training_cfg.train_O_given_prev_O: 
                 action = prev_action
             else:
-                action = sample(cfg.sampling_cfg, prev_action, prev_obs, obs) 
-            aggregate_loss, loss_tensors, losses = update_weights(cfg.training_cfg, prev_action, prev_obs, action, obs)
+                action = sample(cfg, prev_action, prev_obs, obs) 
+            aggregate_loss, loss_tensors, losses = update_weights(cfg, prev_action, prev_obs, action, obs)
             log_and_save(batch_index, prev_action, prev_obs, action, obs, "Action" in datapt, is_first, aggregate_loss, losses)
             state = [action, batch_index + 1, aggregate_loss]
             return

@@ -10,7 +10,6 @@ import json
 
 from src.training_types import *
 from src.prepare_dataset import prepare_dataset
-
 def load_cfg_from_file(file_location : str) -> InitialConfig:
     with open(file_location) as f:
         cfg_dict = json.load(f)["parameters"]
@@ -193,7 +192,7 @@ def get_ctxt_size(model_name, causal_lm):
         ctxt_size = causal_lm.config.n_positions
 
 def get_padding_side(model_name):
-    if model_name in ["llama", "mistral"]:
+    if model_name in ["llama"]:
         return "right"
     return "left"
 
@@ -212,31 +211,25 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
         # Add other models here
     }
     with device:
+        padding_side = get_padding_side(model_name)
         if load_model:
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 path_2_model,
                 torch_dtype=torch.float16,
             )
-            causal_lm.bfloat16()
-            # maybe change the padding side for certain cases
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                path_2_tokenizer,
-                padding_side="left"
-            )
-            ctxt = get_ctxt_size(model_name, causal_lm)
         else:
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 model_dict[model_name],
                 use_flash_attention_2=model_name in ["llama", "mistral"]
             )
-            causal_lm.bfloat16()
-            causal_lm_tokenizer = AutoTokenizer.from_pretrained(
-                model_dict[model_name], padding_side=get_padding_side(model_name)
-            )
-            causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
-            causal_lm.resize_token_embeddings(len(causal_lm_tokenizer))
-            causal_lm.config.pad_token_id = causal_lm_tokenizer.pad_token_id
-            ctxt_size = get_ctxt_size(model_name, causal_lm)
+        causal_lm.bfloat16()
+        causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+            model_dict[model_name], padding_side="left"
+        )
+        causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
+        causal_lm.resize_token_embeddings(len(causal_lm_tokenizer))
+        causal_lm.config.pad_token_id = causal_lm_tokenizer.pad_token_id
+        ctxt_size = get_ctxt_size(model_name, causal_lm)
 
     if do_lora:
         #linear_layers = get_linear_layers(causal_lm)
