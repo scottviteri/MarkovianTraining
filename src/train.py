@@ -26,6 +26,8 @@ def run_training(cfg: Config):
         optimizer = torch.optim.SGD(cfg.causal_lm.parameters(), lr=cfg.lr, momentum=0.01)
     elif cfg.optimizer == "adam":
         optimizer = torch.optim.Adam(cfg.causal_lm.parameters(), lr=cfg.lr)
+    elif cfg.optimizer == "rmsprop":
+        optimizer = torch.optim.RMSprop(cfg.causal_lm.parameters(), lr=cfg.lr)
     else:
         raise ValueError(f"Unsupported optimizer: {cfg.optimizer}. Please choose either 'sgd' or 'adam'.")
 

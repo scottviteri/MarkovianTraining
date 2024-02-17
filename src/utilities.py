@@ -10,6 +10,7 @@ import json
 
 from src.training_types import *
 from src.prepare_dataset import prepare_dataset
+
 def load_cfg_from_file(file_location : str) -> InitialConfig:
     with open(file_location) as f:
         cfg_dict = json.load(f)["parameters"]
