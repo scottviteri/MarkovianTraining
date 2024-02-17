@@ -234,7 +234,7 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
     if do_lora:
         #linear_layers = get_linear_layers(causal_lm)
         peft_config = LoraConfig(
-            task_type=TaskType.CAUSAL_LM, 
+            task_type="CAUSAL_LM", 
             inference_mode=False, 
             r=64, lora_alpha=128, lora_dropout=0.1
             # target_modules=linear_layers
