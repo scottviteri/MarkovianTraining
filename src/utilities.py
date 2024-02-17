@@ -20,7 +20,6 @@ def load_cfg_from_file(file_location : str) -> InitialConfig:
 
 def extend_initial_config(init_cfg: InitialConfig) -> Config:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    task_name = get_task_name(init_cfg.dataset.task, init_cfg.dataset.name, device)
     path_2_log = f"saved_weights_and_losses/{init_cfg.model_name}_log.txt"
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
@@ -40,14 +39,14 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     tok_p_loss = None
 
     tok_per_pure, prefix_tensors = get_prefixes(
-        causal_lm_tokenizer, init_cfg.batch_size, device, init_cfg.dataset.name,
+        causal_lm_tokenizer, init_cfg.batch_size, device, 
         tok_p_loss, tok_p_action, tok_p_obs
     )
     tok_p_pure_loss, tok_p_pure_action, tok_p_pure_obs = tok_per_pure
     loss_prefix, action_prefix, obs_prefix = prefix_tensors
 
     dataset = prepare_dataset(
-            init_cfg, task_name, causal_lm_tokenizer, device, 
+            init_cfg, causal_lm_tokenizer, device, 
             action_prefix, obs_prefix,
             tok_p_pure_action, tok_p_pure_obs, action_prefix, obs_prefix 
         )
@@ -67,8 +66,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         training_ctxt_size = init_cfg.training_ctxt_size,
         device = device,
         dataset = DatasetType(
-            name=init_cfg.dataset.name, 
-            task=task_name,
+            task=init_cfg.dataset.task,
             peek_every=init_cfg.dataset.peek_every, 
             dataloader=dataset
         ),
@@ -125,7 +123,7 @@ def log_and_print_info(
 
 
 def get_prefixes(
-    tokenizer:PreTrainedTokenizer, batch_size:int, device:torch.device, dataset_name : str, 
+    tokenizer:PreTrainedTokenizer, batch_size:int, device:torch.device, 
     tok_p_loss: Optional[int], tok_p_action: Optional[int], tok_p_obs: Optional[int]):
 
     if tok_p_obs:
@@ -332,25 +330,6 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
         causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.encode(" ")[0]
     return causal_lm, causal_lm_tokenizer, ctxt_size
 
-
-def get_task_name(task_name, dataset_name, device):
-    if task_name: return task_name
-    if dataset_name == "wikipedia":
-        if torch.cuda.is_available():
-            gpu_memory = torch.cuda.get_device_properties(
-                device
-            ).total_memory / (1023**3)
-            if gpu_memory > 49:
-                task_name = "20220301.en"
-            else:
-                task_name = "20220301.simple"
-        else:
-            task_name = "20220301.simple"
-    elif dataset_name == "bigbench":
-        task_name = "arithmetic"
-    else:
-        task_name = None 
-    return task_name
 
 def get_linear_layers(model):
     return list(

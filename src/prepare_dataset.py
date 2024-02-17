@@ -5,17 +5,18 @@ from itertools import islice, tee
 from typing import Iterator, Dict
 from src.prepare_dataset import *
 import json
+import random
 
 from src.training_types import *
 
 def prepare_dataset(
-        init_cfg, task_name, causal_lm_tokenizer, device, 
+        init_cfg, causal_lm_tokenizer, device, 
         action_prefix_tensor, obs_prefix_tensor, tok_p_pure_action, 
         tok_p_pure_obs, action_prefix, obs_prefix):
-    dataset_name = init_cfg.dataset.name
+    task = init_cfg.dataset.task
 
-    if dataset_name[-5:] == "jsonl":
-        itr_ds = jsonl_to_dict_iterator(dataset_name)
+    if isinstance(task, ArithmeticTask):
+        itr_ds = arithmetic_generator(task.num_terms, task.num_digits)
         qa_traj_itr = to_qa_traj_itr(itr_ds)
         qa_batch_lst_itr  = traj_itr_to_batch_lst(init_cfg.batch_size, qa_traj_itr)
         qa_tokenized_itr_ds = map(lambda batch_lst:
@@ -35,8 +36,8 @@ def prepare_dataset(
              for k in batch_list[0]},
                     qa_tokenized_itr_ds)
 
-    elif dataset_name == "wikipedia":
-        itr_ds = iter(load_dataset(dataset_name, task_name, split="train", streaming=True))
+    elif isinstance(task, WikipediaTask):
+        itr_ds = iter(load_dataset("wikipedia", "20220301.en", split="train", streaming=True))
         ds_tokenized = map(
             lambda x: causal_lm_tokenizer(x["text"], return_tensors="pt")["input_ids"].to(device), 
             itr_ds)
@@ -101,6 +102,18 @@ def peek_every_n(n, dict_itr):
             i += 1
         else:
             yield {"Observation" : d["Observation"], "First": d["First"]}
+
+def arithmetic_generator(num_terms, num_digits):
+    while 1:
+        question = "Q: "
+        total = 0
+        for _ in range(num_terms):
+            num = random.randint(10**(num_digits-1), 10**num_digits-1)
+            total += num
+            question += f"{num} + "
+        question = question.rstrip(" +")
+        answer = f"A: {total}"
+        yield {"Question": question, "Answer": answer}
 
 def jsonl_to_dict_iterator(filename: str) -> Iterator[Dict]:
     with open(filename, 'r') as infile:

@@ -13,11 +13,14 @@ RepeatNPoints = NamedTuple("RepeatNPoints", [("num_points", int)])
 RepeatPointNTimes = NamedTuple("RepeatPointNTimes", [("num_times", int)])
 ReplaceWithRandomTokens = NamedTuple("ReplaceWithRandomTokens", [])
 NoWeightUpdates = NamedTuple("NoWeightUpdates", [])
-InitDatasetType = NamedTuple("InitDatasetType", 
-  [("name", str), ("task", Optional[str]), ("peek_every", Optional[int])])
+
+ArithmeticTask = NamedTuple("ArithmeticTask", [("num_digits", int), ("num_terms", int)])
+WikipediaTask = NamedTuple("WikipediaTask", [])
+TaskType = Union[ArithmeticTask, WikipediaTask]
+InitDatasetType = NamedTuple("InitDatasetType", [("task", TaskType), ("peek_every", Optional[int])])
 
 DatasetType = NamedTuple("DatasetType", 
-  [("name", str), ("task", str), ("peek_every", Optional[int]), ("dataloader", Iterable[Dict[str, torch.Tensor]])])
+  [("task", TaskType), ("peek_every", Optional[int]), ("dataloader", Iterable[Dict[str, torch.Tensor]])])
 
 DebugType = Union[RepeatNPoints, RepeatPointNTimes, ReplaceWithRandomTokens, NoWeightUpdates]
 
