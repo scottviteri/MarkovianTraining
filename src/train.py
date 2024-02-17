@@ -125,12 +125,11 @@ def run_training(cfg: Config):
     def update_weights(cfg, prev_action, prev_obs, action, obs):
         training_cfg = cfg.training_cfg
         cfg.causal_lm.train()
-        cfg.causal_lm_tokenizer.padding_side="left"
         with autocast():
             if training_cfg.train_O_given_prev_O:
                 input_sequence = torch.cat([prev_obs, obs], dim=1)
                 attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-                logits = cfg.causal_lm(input_sequence, attention_mask=attention_mask).logits[:, :-1, :]
+                logits = cfg.causal_lm(input_sequence, attention_mask=attention_mask, use_cache=False).logits[:, :-1, :]
                 loss_tensor = loss_fn(
                     input=einops.rearrange(
                         logits,
@@ -142,7 +141,7 @@ def run_training(cfg: Config):
             else:
                 input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
                 attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-                logits = cfg.causal_lm(input_sequence, attention_mask=attention_mask).logits[:, :-1, :]
+                logits = cfg.causal_lm(input_sequence, attention_mask=attention_mask, use_cache=False).logits[:, :-1, :]
                 loss_tensor = loss_fn(
                     input=einops.rearrange(
                         logits,
@@ -160,8 +159,7 @@ def run_training(cfg: Config):
 
                 mkv_input_sequence = torch.cat([action, obs], dim=1)
                 mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-                cfg.causal_lm_tokenizer.padding_side = "left"
-                mkv_logits = cfg.causal_lm(mkv_input_sequence, attention_mask=mkv_attention_mask).logits[:, :-1, :]
+                mkv_logits = cfg.causal_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
                 mkv_loss_tensor = loss_fn(
                     input=einops.rearrange(
                         mkv_logits,
