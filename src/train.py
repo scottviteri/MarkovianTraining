@@ -23,7 +23,7 @@ import src.config_examples
 def run_training(cfg: Config):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     if cfg.optimizer == "sgd":
-        optimizer = torch.optim.SGD(cfg.causal_lm.parameters(), lr=cfg.lr, momentum=0.9)
+        optimizer = torch.optim.SGD(cfg.causal_lm.parameters(), lr=cfg.lr, momentum=0.01)
     elif cfg.optimizer == "adam":
         optimizer = torch.optim.Adam(cfg.causal_lm.parameters(), lr=cfg.lr)
     else:
