@@ -125,7 +125,7 @@ def run_training(cfg: Config):
     def update_weights(cfg, prev_action, prev_obs, action, obs):
         training_cfg = cfg.training_cfg
         cfg.causal_lm.train()
-        with autocast():
+        with autocast(dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
             if training_cfg.train_O_given_prev_O:
                 input_sequence = torch.cat([prev_obs, obs], dim=1)
                 attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
