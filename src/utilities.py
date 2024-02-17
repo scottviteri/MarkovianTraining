@@ -276,7 +276,6 @@ def create_run_name(cfg : Config) -> str:
         run_name += f"ari_nt={cfg.dataset.task.num_terms}_nd={cfg.dataset.task.num_digits}_"
     else:
         run_name += "wiki_"
-    run_name += f"{cfg.dataset.name.split('/')[-1][:3]}_"
     if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
     if optimizer_name == "SGD": run_name += "SGD_"
     elif optimizer_name == "Adam": run_name += "Adam_"
