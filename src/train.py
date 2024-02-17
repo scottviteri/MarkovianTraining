@@ -175,8 +175,8 @@ def run_training(cfg: Config):
                     ),
                     target=mkv_input_sequence[:, 1:]
                 )
-                obs_tensor = mkv_loss_tensor[:,-cfg.tok_p_pure_obs:]
-                obs_loss = obs_tensor.mean()
+                obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
+                obs_loss = obs_tensor.sum() / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
 
                 aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
                                          zip([training_cfg.train_A_given_AO, training_cfg.train_O_given_A],

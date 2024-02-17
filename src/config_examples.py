@@ -4,8 +4,8 @@ import os
 g2 = InitialConfig(
       model_name="distilgpt2",
       lr=1e-4,
-      optimizer="sgd",
-      batch_size=2,
+      optimizer="adam",
+      batch_size=1,
       num_batches=10,
       obs_to_action_ratio=0.5,
       interval_save_weights=3000,
@@ -161,5 +161,5 @@ mst = InitialConfig(
       debug=None
 )
 
-#example_configs = [g2, g2_ar, g2_ei]
-example_configs = [mst]
+example_configs = [g2, g2_ar, g2_ei]
+#example_configs = [mst]
