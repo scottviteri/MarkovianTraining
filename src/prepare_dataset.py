@@ -150,6 +150,8 @@ def group_pairs(itr):
         first = second
 
 def tokenize_and_pad(device, tokenizer, action_prefix_tensor, obs_prefix_tensor, tok_p_pure_action, tok_p_pure_obs, d):
+    action_prefix_tensor = action_prefix_tensor.to(device)
+    obs_prefix_tensor = obs_prefix_tensor.to(device)
     obs_tok = tokenizer(d["Observation"], return_tensors="pt")["input_ids"][0].to(device)
     assert len(obs_tok) < tok_p_pure_obs
     obs_pad_tok = torch.full((tok_p_pure_obs - len(obs_tok),), 

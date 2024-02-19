@@ -8,6 +8,8 @@ import einops
 from datasets import load_dataset
 import json
 
+import torch.nn as nn
+
 from src.training_types import *
 from src.prepare_dataset import prepare_dataset
 
