@@ -13,6 +13,7 @@ from datasets import load_dataset
 from openai import OpenAI
 from matplotlib import pyplot as plt
 import pytorch_lightning as pl
+from pytorch_lightning.strategies import FSDPStrategy
 
 from src.training_types import *
 from src.utilities import extend_initial_config, log_and_print_info
@@ -21,6 +22,7 @@ from src.config_examples import configs
 
 from src.evaluate_via_gpt import evaluate_via_gpt
 import src.config_examples
+import torch.distributed as dist
 
 def save_weights(cfg, batch_index):
     if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:
@@ -235,7 +237,11 @@ def train_via_update(cfg):
 class LitModel(pl.LightningModule):
     def __init__(self, cfg):
         super().__init__()
+        print("Dev", self.device)
         self.cfg = cfg
+        self.cfg.device = self.device
+        self.cfg.action_prefix_tensor = self.cfg.action_prefix_tensor.to(self.device)
+        self.cfg.obs_prefix_tensor = self.cfg.obs_prefix_tensor.to(self.device)
         self.model = self.cfg.causal_lm
         self.state = [default_action(self.cfg), 0, None]
 
@@ -284,9 +290,13 @@ def train_model(init_cfg):
             print("")
     with open(cfg.path_2_log, "a") as f:
         f.write("")
+    if cfg.wandb: wandb.init(name=create_run_name(cfg))
     model = LitModel(cfg)
-    trainer = pl.Trainer(max_epochs=1, limit_train_batches=100, devices=2)
+    trainer = pl.Trainer(
+        max_epochs=1, limit_train_batches=100, accelerator="cuda", 
+        devices=-1, strategy="fsdp")
     trainer.fit(model, cfg.dataset.dataloader)
+    if cfg.wandb: wandb.finish()
 
 if __name__ == "__main__":
    for init_cfg in configs:
