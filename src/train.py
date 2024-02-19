@@ -14,7 +14,8 @@ from openai import OpenAI
 from matplotlib import pyplot as plt
 import pytorch_lightning as pl
 from pytorch_lightning.strategies import FSDPStrategy
-
+from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
+from torch.distributed.fsdp import MixedPrecision
 from src.training_types import *
 from src.utilities import extend_initial_config, log_and_print_info
 from src.utilities import create_run_name, multi_print
@@ -278,7 +279,7 @@ class LitModel(pl.LightningModule):
         if self.cfg.optimizer == "sgd":
             optimizer = torch.optim.SGD(self.cfg.causal_lm.parameters(), lr=self.cfg.lr, momentum=0.01)
         elif self.cfg.optimizer == "adam":
-            optimizer = torch.optim.Adam(self.cfg.causal_lm.parameters(), lr=self.cfg.lr)
+            optimizer = torch.optim.AdamW(self.cfg.causal_lm.parameters(), lr=self.cfg.lr)
         elif self.cfg.optimizer == "rmsprop":
             optimizer = torch.optim.RMSprop(self.cfg.causal_lm.parameters(), lr=self.cfg.lr)
         return optimizer
@@ -290,11 +291,16 @@ def train_model(init_cfg):
             print("")
     with open(cfg.path_2_log, "a") as f:
         f.write("")
-    if cfg.wandb: wandb.init(name=create_run_name(cfg))
+    if cfg.wandb: 
+        wandb.init(
+            project="collaborative-training-many-per-context-window", 
+            name=create_run_name(cfg))
     model = LitModel(cfg)
     trainer = pl.Trainer(
-        max_epochs=1, limit_train_batches=100, accelerator="cuda", 
-        devices=-1, strategy="fsdp")
+        max_epochs=1, limit_train_batches=cfg.num_batches, accelerator="cuda", 
+        devices=2, strategy=FSDPStrategy(
+            auto_wrap_policy=size_based_auto_wrap_policy, 
+            mixed_precision = MixedPrecision(param_dtype=torch.bfloat16)))
     trainer.fit(model, cfg.dataset.dataloader)
     if cfg.wandb: wandb.finish()
 

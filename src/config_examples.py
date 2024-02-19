@@ -140,13 +140,13 @@ lma = InitialConfig(
 
 mst = InitialConfig(
       model_name="mistral",
-      lr=1e-8,
-      optimizer="rmsprop",
+      lr=1e-7,
+      optimizer="adam",
       batch_size=1,
-      num_batches=1000,
+      num_batches=10,
       obs_to_action_ratio=0.5,
-      interval_save_weights=3000,
-      interval_print=11,
+      interval_save_weights=99,
+      interval_print=1,
       wandb=True,
       load_model=False,
       do_lora=False,
@@ -161,5 +161,5 @@ mst = InitialConfig(
       debug=None
 )
 
-example_configs = [g2, g2_ar, g2_ei]
-#example_configs = [mst]
+#configs = [g2, g2_ar, g2_ei]
+configs = [mst]

@@ -200,7 +200,7 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
     """Load model"""
     model_dict = {
         "tinystories": "roneneldan/TinyStories-1M",
-        "llama": "meta-llama/Llama-2-7b-hf",
+        "llama": "meta-llama/Llama-2-13b-hf",
         "distilgpt2": "distilgpt2",
         "gptj": "EleutherAI/gpt-j-6b",
         "mistral": "mistralai/Mistral-7B-v0.1",
