@@ -12,6 +12,7 @@ import os
 from datasets import load_dataset
 from openai import OpenAI
 from matplotlib import pyplot as plt
+import functools
 import pytorch_lightning as pl
 from pytorch_lightning.strategies import FSDPStrategy
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
@@ -172,9 +173,10 @@ def update_weights(cfg, prev_action, prev_obs, action, obs):
             obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
             obs_loss = obs_tensor.sum() / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
 
-            aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
-                                     zip([training_cfg.train_A_given_AO, training_cfg.train_O_given_A],
-                                            [action_loss, obs_loss])))
+            aggregate_loss =  action_loss*obs_loss.detach()
+            #aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
+            #                         zip([training_cfg.train_A_given_AO, training_cfg.train_O_given_A],
+            #                                [action_loss, obs_loss])))
 
     #if not isinstance(cfg.debug, NoWeightUpdates):
     #    aggregate_loss.backward()
@@ -250,6 +252,8 @@ class LitModel(pl.LightningModule):
         return sample(self.cfg, prev_action, prev_obs, obs)
 
     def training_step(self, datapt_pair, batch_idx):
+        if batch_idx == 9:
+            print(self)
         self.cfg.device = self.device
         self.cfg.action_prefix_tensor = self.cfg.action_prefix_tensor.to(self.device)
         self.cfg.obs_prefix_tensor = self.cfg.obs_prefix_tensor.to(self.device)
@@ -262,7 +266,7 @@ class LitModel(pl.LightningModule):
             prev_action = default_action(self.cfg)
             log_print_oa(self.cfg, batch_index, prev_action, prev_obs, None, obs, "Action" in datapt, is_first)
             self.state = [prev_action, batch_index + 1, None]
-            return
+            return torch.tensor(0.0, device=self.device, requires_grad=True) #self.cfg.causal_lm(torch.zeros((1,1), requires_grad=True)).sum() * 0 #None #torch.tensor(5.0)
         # now can assume that prev_datapt contains the question and datapt contains the Answer
         if "Action" in datapt: 
             action = datapt["Action"]
@@ -284,6 +288,17 @@ class LitModel(pl.LightningModule):
             optimizer = torch.optim.RMSprop(self.cfg.causal_lm.parameters(), lr=self.cfg.lr)
         return optimizer
 
+def custom_auto_wrap_policy(
+    module: torch.nn.Module,
+    recurse: bool,
+    nonwrapped_numel: int,
+    # Additional custom arguments
+    min_num_params: int = int(1e8),
+) -> bool:
+    return nonwrapped_numel >= min_num_params
+# Configure a custom `min_num_params`
+my_auto_wrap_policy = functools.partial(custom_auto_wrap_policy, min_num_params=int(1e1))
+
 def train_model(init_cfg):
     cfg = extend_initial_config(init_cfg)
     if not cfg.load_model:
@@ -296,11 +311,15 @@ def train_model(init_cfg):
             project="collaborative-training-many-per-context-window", 
             name=create_run_name(cfg))
     model = LitModel(cfg)
-    trainer = pl.Trainer(
+    trainer = pl.Trainer(num_nodes=1,
         max_epochs=1, limit_train_batches=cfg.num_batches, accelerator="cuda", 
-        devices=2, strategy=FSDPStrategy(
-            auto_wrap_policy=size_based_auto_wrap_policy, 
-            mixed_precision = MixedPrecision(param_dtype=torch.bfloat16)))
+        devices=2, #strategy="ddp"
+        strategy = FSDPStrategy(
+            #auto_wrap_policy=my_auto_wrap_policy, 
+            auto_wrap_policy = size_based_auto_wrap_policy, 
+            #mixed_precision = MixedPrecision(param_dtype=torch.bfloat16)
+            )
+            )
     trainer.fit(model, cfg.dataset.dataloader)
     if cfg.wandb: wandb.finish()
 
