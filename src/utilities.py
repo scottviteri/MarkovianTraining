@@ -264,7 +264,7 @@ def create_run_name(cfg : Config) -> str:
     sampling_cfg = cfg.sampling_cfg
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
-    run_name += f"{optimizer[:3]}_"
+    run_name += f"{cfg.optimizer[:3]}_"
     if isinstance(cfg.dataset.task, ArithmeticTask):
         run_name += f"ari_nt={cfg.dataset.task.num_terms}_nd={cfg.dataset.task.num_digits}_"
     else:

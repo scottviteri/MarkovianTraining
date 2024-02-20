@@ -131,7 +131,7 @@ def sample(cfg, prev_action, prev_obs, observation):
 
 def update_weights(cfg, optimizer, prev_action, prev_obs, action, obs):
     training_cfg = cfg.training_cfg
-    cfg.optimizer.zero_grad()
+    optimizer.zero_grad()
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     cfg.causal_lm.train()
     with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
@@ -188,7 +188,7 @@ def update_weights(cfg, optimizer, prev_action, prev_obs, action, obs):
 
     if not isinstance(cfg.debug, NoWeightUpdates):
         aggregate_loss.backward()
-        cfg.optimizer.step()
+        optimizer.step()
     
     if training_cfg.train_O_given_prev_O: return aggregate_loss, None, None
     loss_tensors = prev_action_tensor, prev_observation_tensor, action_tensor, obs_tensor
@@ -225,7 +225,7 @@ def trainer(cfg, optimizer):
             action = prev_action
         else:
             action = sample(cfg, prev_action, prev_obs, obs) 
-        aggregate_loss, loss_tensors, losses = update_weights(cfg, prev_action, prev_obs, action, obs)
+        aggregate_loss, loss_tensors, losses = update_weights(cfg, optimizer, prev_action, prev_obs, action, obs)
         log_and_save(cfg, batch_index, prev_action, prev_obs, action, obs, "Action" in datapt, is_first, aggregate_loss, losses)
         state = [action, batch_index + 1, aggregate_loss]
         return
@@ -289,7 +289,7 @@ class LitModel(pl.LightningModule):
 
     def configure_optimizers(self):
         if self.cfg.optimizer == "sgd":
-            optimizer = torch.optim.SGD(self.cfg.causal_lm.parameters(), lr=self.cfg.lr, momentum=0.01)
+            optimizer = torch.optim.SGD(self.cfg.causal_lm.parameters(), lr=self.cfg.lr)#, momentum=0.01)
         elif self.cfg.optimizer == "adam":
             optimizer = torch.optim.AdamW(self.cfg.causal_lm.parameters(), lr=self.cfg.lr)
         elif self.cfg.optimizer == "rmsprop":
