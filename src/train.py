@@ -57,7 +57,7 @@ def default_action(cfg):
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
     prev_action_loss, prev_observation_loss, action_loss, observation_loss = losses
-    if cfg.wandb:
+    if cfg.wandb and dist.get_rank() == 0:
         wandb.log(
             {
                 "Batch Index": batch_index,
@@ -71,7 +71,7 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
 
 def log_print_losses(cfg, batch_index, aggregate_loss, losses):
     prev_action_loss, prev_observation_loss, action_loss, obs_loss = losses
-    if batch_index % cfg.interval_print == 0:
+    if batch_index % cfg.interval_print == 0 and dist.get_rank() == 0:
         with open(cfg.path_2_log, "a") as f:
             multi_print(f"Aggregate loss: {aggregate_loss}", f)
             multi_print(
@@ -81,7 +81,7 @@ def log_print_losses(cfg, batch_index, aggregate_loss, losses):
             multi_print("______________________________________________________", f)
 
 def log_print_oa(cfg, batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first):
-    if batch_index % cfg.interval_print == 0:
+    if batch_index % cfg.interval_print == 0 and dist.get_rank() == 0:
         with open(cfg.path_2_log, "a") as f:
             multi_print(f"Batch Index: {batch_index}", f)
             multi_print(f"Is First: {is_first}", f)
@@ -129,7 +129,7 @@ def sample(cfg, prev_action, prev_obs, observation):
                 )[:, -cfg.tok_p_action :]
         return action_candidates
 
-def update_weights(cfg, prev_action, prev_obs, action, obs):
+def update_weights(cfg, optimizer, prev_action, prev_obs, action, obs):
     training_cfg = cfg.training_cfg
     cfg.optimizer.zero_grad()
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
@@ -166,21 +166,22 @@ def update_weights(cfg, prev_action, prev_obs, action, obs):
             prev_observation_loss = prev_observation_tensor.mean()
             action_loss = action_tensor.mean()
 
-            with torch.no_grad():
-                mkv_input_sequence = torch.cat([action, obs], dim=1)
-                mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-                mkv_logits = cfg.causal_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
-                mkv_loss_tensor = loss_fn(
-                    input=einops.rearrange(
-                        mkv_logits,
-                        "batch seq_length vocab_size -> batch vocab_size seq_length",
-                    ),
-                    target=mkv_input_sequence[:, 1:]
-                )
-                obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
-                obs_loss = obs_tensor.sum() / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
+            #with torch.no_grad():
+            mkv_input_sequence = torch.cat([action, obs], dim=1)
+            mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+            mkv_logits = cfg.causal_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
+            mkv_loss_tensor = loss_fn(
+                input=einops.rearrange(
+                    mkv_logits,
+                    "batch seq_length vocab_size -> batch vocab_size seq_length",
+                ),
+                target=mkv_input_sequence[:, 1:]
+            )
+            obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
+            obs_loss = obs_tensor.sum() / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
 
-            aggregate_loss =  action_loss*obs_loss
+            aggregate_loss = obs_loss
+            #aggregate_loss =  action_loss*obs_loss
             #aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
             #                         zip([training_cfg.train_A_given_AO, training_cfg.train_O_given_A],
             #                                [action_loss, obs_loss])))
@@ -198,12 +199,12 @@ def log_and_save(cfg, batch_index, prev_action, prev_obs, action, obs, is_guidan
     save_weights(cfg, batch_index)
     log_print_oa(cfg, batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first)
     if cfg.training_cfg.train_O_given_prev_O: 
-        if cfg.wandb: wandb.log({"Batch Index": batch_index, "Observation Loss": aggregate_loss})
+        if cfg.wandb and dist.get_rank() == 0: wandb.log({"Batch Index": batch_index, "Observation Loss": aggregate_loss})
     else:
         log_wandb(cfg, batch_index, aggregate_loss, losses)
         log_print_losses(cfg, batch_index, aggregate_loss, losses)
 
-def trainer(cfg):
+def trainer(cfg, optimizer):
     state = [default_action(cfg), 0, None]
 
     def update(datapt_pair):
@@ -235,9 +236,9 @@ def trainer(cfg):
     
     return update, pi
 
-def train_via_update(cfg):
+def train_via_update(cfg, optimizer):
     aggregate_losses = []
-    update, pi = trainer(cfg)
+    update, pi = trainer(cfg, optimizer)
     for datapt_pair in tqdm(cfg.dataset.dataloader, total=cfg.num_batches):
         aggregate_loss = pi()
         if aggregate_loss is not None: aggregate_losses.append(aggregate_loss)
@@ -313,24 +314,22 @@ def pl_train_model(init_cfg):
             print("")
     with open(cfg.path_2_log, "a") as f:
         f.write("")
-    if cfg.wandb: 
+    if cfg.wandb and dist.get_rank() == 0: 
         wandb.init(
             project="collaborative-training-many-per-context-window", 
             name=create_run_name(cfg))
     model = LitModel(cfg)
     trainer = pl.Trainer(num_nodes=1,
         max_epochs=1, limit_train_batches=cfg.num_batches, accelerator="cuda", 
-        devices=2, #strategy="ddp"
-        strategy = "fsdp"
-        #FSDPStrategy(
-        #    sharding_strategy="FULL_SHARD",
-        #    #auto_wrap_policy=my_auto_wrap_policy, 
-        #    auto_wrap_policy = size_based_auto_wrap_policy, 
-        #    #mixed_precision = MixedPrecision(param_dtype=torch.bfloat16)
-        #    )
-            )
+        devices=2, 
+        strategy = FSDPStrategy(
+            sharding_strategy="FULL_SHARD",
+            #auto_wrap_policy=my_auto_wrap_policy, 
+            auto_wrap_policy = size_based_auto_wrap_policy, 
+            mixed_precision = MixedPrecision(param_dtype=torch.bfloat16)
+            ))
     trainer.fit(model, cfg.dataset.dataloader)
-    if cfg.wandb: wandb.finish()
+    if cfg.wandb and dist.get_rank() == 0: wandb.finish()
 
 def train_model(init_cfg):
     cfg = extend_initial_config(init_cfg)
@@ -339,14 +338,26 @@ def train_model(init_cfg):
             print("")
     with open(cfg.path_2_log, "a") as f:
         f.write("")
-    if cfg.wandb: 
+    if cfg.wandb and dist.get_rank() == 0: 
         wandb.init(
             project="collaborative-training-many-per-context-window", 
             name=create_run_name(cfg))
-    cfg.causal_lm = FullyShardedDataParallel(cfg.causal_lm)#, device_id=dist.get_rank())
+    #cfg.causal_lm = FullyShardedDataParallel(
+    #    cfg.causal_lm, 
+    #    auto_wrap_policy=size_based_auto_wrap_policy,
+    ##    mixed_precision = MixedPrecision(param_dtype=torch.bfloat16)
+    #)
     print(cfg.causal_lm)
-    train_via_update(cfg)
-    if cfg.wandb: wandb.finish()
+    if cfg.optimizer == "sgd":
+        optimizer = torch.optim.SGD(cfg.causal_lm.parameters(), lr=cfg.lr, momentum=0.01)
+    elif cfg.optimizer == "adam":
+        optimizer = torch.optim.Adam(cfg.causal_lm.parameters(), lr=cfg.lr)
+    elif cfg.optimizer == "rmsprop":
+        optimizer = torch.optim.RMSprop(cfg.causal_lm.parameters(), lr=cfg.lr)
+    else:
+        raise ValueError(f"Unsupported optimizer: {cfg.optimizer}. Please choose either 'sgd' or 'adam'.")
+    train_via_update(cfg, optimizer)
+    if cfg.wandb and dist.get_rank() == 0: wandb.finish()
 
 def setup_distributed(backend='nccl', port='12355'):
     # Set the environment variable for master address and port
