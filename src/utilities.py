@@ -48,11 +48,18 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
             action_prefix, obs_prefix,
             tok_p_pure_action, tok_p_pure_obs, action_prefix, obs_prefix 
         )
-    
+
+    if init_cfg.optimizer == "sgd":
+        optimizer = torch.optim.SGD(causal_lm.parameters(), lr=init_cfg.lr, momentum=0.01)
+    elif init_cfg.optimizer == "adam":
+        optimizer = torch.optim.AdamW(causal_lm.parameters(), lr=init_cfg.lr)
+    elif init_cfg.optimizer == "rmsprop":
+        optimizer = torch.optim.RMSprop(causal_lm.parameters(), lr=init_cfg.lr)
+
     return Config(
         model_name=init_cfg.model_name,
         lr=init_cfg.lr,
-        optimizer=init_cfg.optimizer,
+        optimizer=optimizer,
         batch_size=init_cfg.batch_size,
         num_batches=init_cfg.num_batches,
         obs_to_action_ratio=init_cfg.obs_to_action_ratio,
@@ -262,18 +269,15 @@ def get_linear_layers(model):
 def create_run_name(cfg : Config) -> str:
     training_cfg = cfg.training_cfg
     sampling_cfg = cfg.sampling_cfg
-    optimizer_name = cfg.optimizer
+    optimizer_name = cfg.optimizer.__class__.__name__
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
-    run_name += f"{cfg.optimizer[:3]}_"
+    run_name += f"{optimizer_name[:3]}_"
     if isinstance(cfg.dataset.task, ArithmeticTask):
         run_name += f"ari_nt={cfg.dataset.task.num_terms}_nd={cfg.dataset.task.num_digits}_"
     else:
         run_name += "wiki_"
     if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
-    if optimizer_name == "SGD": run_name += "SGD_"
-    elif optimizer_name == "Adam": run_name += "Adam_"
-    # how to check optimizer?
     if training_cfg.train_O_given_prev_O: 
         run_name += f"AR_"
     if training_cfg.train_O_given_A:

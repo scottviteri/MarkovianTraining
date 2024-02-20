@@ -13,14 +13,18 @@ from datasets import load_dataset
 from openai import OpenAI
 from matplotlib import pyplot as plt
 import functools
+
+import torch.distributed as dist
 import pytorch_lightning as pl
 from pytorch_lightning.strategies import FSDPStrategy
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
-from torch.distributed.fsdp import MixedPrecision
+from torch.distributed.fsdp import MixedPrecision, FullyShardedDataParallel
+
 from src.training_types import *
 from src.utilities import extend_initial_config, log_and_print_info
 from src.utilities import create_run_name, multi_print
 from src.config_examples import configs 
+
 
 from src.evaluate_via_gpt import evaluate_via_gpt
 import src.config_examples
@@ -110,25 +114,27 @@ def sample(cfg, prev_action, prev_obs, observation):
     with torch.no_grad():
         input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
         attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-        action_candidates = cfg.causal_lm.generate(
-                inputs=input_sequence,
-                attention_mask=attention_mask,
-                num_beams=cfg.num_beams,
-                bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
-                output_scores=True,
-                do_sample=True,
-                temperature=1.0,
-                min_new_tokens=cfg.tok_p_pure_action,
-                max_new_tokens=cfg.tok_p_pure_action,
-                pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
-            )[:, -cfg.tok_p_action :]
+        with FullyShardedDataParallel.summon_full_params(cfg.causal_lm, writeback=False, recurse=False):
+            action_candidates = cfg.causal_lm.generate(
+                    inputs=input_sequence,
+                    attention_mask=attention_mask,
+                    num_beams=cfg.num_beams,
+                    bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
+                    output_scores=True,
+                    do_sample=True,
+                    temperature=1.0,
+                    min_new_tokens=cfg.tok_p_pure_action,
+                    max_new_tokens=cfg.tok_p_pure_action,
+                    pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+                )[:, -cfg.tok_p_action :]
         return action_candidates
 
 def update_weights(cfg, prev_action, prev_obs, action, obs):
     training_cfg = cfg.training_cfg
+    cfg.optimizer.zero_grad()
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     cfg.causal_lm.train()
-    with autocast(dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
+    with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
         if training_cfg.train_O_given_prev_O:
             input_sequence = torch.cat([prev_obs, obs], dim=1)
             attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
@@ -160,27 +166,28 @@ def update_weights(cfg, prev_action, prev_obs, action, obs):
             prev_observation_loss = prev_observation_tensor.mean()
             action_loss = action_tensor.mean()
 
-            mkv_input_sequence = torch.cat([action, obs], dim=1)
-            mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-            mkv_logits = cfg.causal_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
-            mkv_loss_tensor = loss_fn(
-                input=einops.rearrange(
-                    mkv_logits,
-                    "batch seq_length vocab_size -> batch vocab_size seq_length",
-                ),
-                target=mkv_input_sequence[:, 1:]
-            )
-            obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
-            obs_loss = obs_tensor.sum() / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
+            with torch.no_grad():
+                mkv_input_sequence = torch.cat([action, obs], dim=1)
+                mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+                mkv_logits = cfg.causal_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
+                mkv_loss_tensor = loss_fn(
+                    input=einops.rearrange(
+                        mkv_logits,
+                        "batch seq_length vocab_size -> batch vocab_size seq_length",
+                    ),
+                    target=mkv_input_sequence[:, 1:]
+                )
+                obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
+                obs_loss = obs_tensor.sum() / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
 
-            aggregate_loss =  action_loss*obs_loss.detach()
+            aggregate_loss =  action_loss*obs_loss
             #aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
             #                         zip([training_cfg.train_A_given_AO, training_cfg.train_O_given_A],
             #                                [action_loss, obs_loss])))
 
-    #if not isinstance(cfg.debug, NoWeightUpdates):
-    #    aggregate_loss.backward()
-    #    optimizer.step()
+    if not isinstance(cfg.debug, NoWeightUpdates):
+        aggregate_loss.backward()
+        cfg.optimizer.step()
     
     if training_cfg.train_O_given_prev_O: return aggregate_loss, None, None
     loss_tensors = prev_action_tensor, prev_observation_tensor, action_tensor, obs_tensor
@@ -207,7 +214,7 @@ def trainer(cfg):
         prev_obs, obs = prev_datapt["Observation"], datapt["Observation"]
         if is_first: 
             prev_action = default_action(cfg)
-            log_print_oa(batch_index, prev_action, prev_obs, None, obs, "Action" in datapt, is_first)
+            log_print_oa(cfg, batch_index, prev_action, prev_obs, None, obs, "Action" in datapt, is_first)
             state = [prev_action, batch_index + 1, None]
             return
         # now can assume that prev_datapt contains the question and datapt contains the Answer
@@ -252,8 +259,8 @@ class LitModel(pl.LightningModule):
         return sample(self.cfg, prev_action, prev_obs, obs)
 
     def training_step(self, datapt_pair, batch_idx):
-        if batch_idx == 9:
-            print(self)
+        #if batch_idx == 0:
+        #    print(self)
         self.cfg.device = self.device
         self.cfg.action_prefix_tensor = self.cfg.action_prefix_tensor.to(self.device)
         self.cfg.obs_prefix_tensor = self.cfg.obs_prefix_tensor.to(self.device)
@@ -299,7 +306,7 @@ def custom_auto_wrap_policy(
 # Configure a custom `min_num_params`
 my_auto_wrap_policy = functools.partial(custom_auto_wrap_policy, min_num_params=int(1e1))
 
-def train_model(init_cfg):
+def pl_train_model(init_cfg):
     cfg = extend_initial_config(init_cfg)
     if not cfg.load_model:
         with open(cfg.path_2_log, "w") as f:
@@ -314,15 +321,48 @@ def train_model(init_cfg):
     trainer = pl.Trainer(num_nodes=1,
         max_epochs=1, limit_train_batches=cfg.num_batches, accelerator="cuda", 
         devices=2, #strategy="ddp"
-        strategy = FSDPStrategy(
-            #auto_wrap_policy=my_auto_wrap_policy, 
-            auto_wrap_policy = size_based_auto_wrap_policy, 
-            #mixed_precision = MixedPrecision(param_dtype=torch.bfloat16)
-            )
+        strategy = "fsdp"
+        #FSDPStrategy(
+        #    sharding_strategy="FULL_SHARD",
+        #    #auto_wrap_policy=my_auto_wrap_policy, 
+        #    auto_wrap_policy = size_based_auto_wrap_policy, 
+        #    #mixed_precision = MixedPrecision(param_dtype=torch.bfloat16)
+        #    )
             )
     trainer.fit(model, cfg.dataset.dataloader)
     if cfg.wandb: wandb.finish()
 
+def train_model(init_cfg):
+    cfg = extend_initial_config(init_cfg)
+    if not cfg.load_model:
+        with open(cfg.path_2_log, "w") as f:
+            print("")
+    with open(cfg.path_2_log, "a") as f:
+        f.write("")
+    if cfg.wandb: 
+        wandb.init(
+            project="collaborative-training-many-per-context-window", 
+            name=create_run_name(cfg))
+    cfg.causal_lm = FullyShardedDataParallel(cfg.causal_lm)#, device_id=dist.get_rank())
+    print(cfg.causal_lm)
+    train_via_update(cfg)
+    if cfg.wandb: wandb.finish()
+
+def setup_distributed(backend='nccl', port='12355'):
+    # Set the environment variable for master address and port
+    #os.environ['MASTER_ADDR'] = 'localhost'
+    #os.environ['MASTER_PORT'] = port
+    ## Determine the rank of the process and total number of processes
+    #rank = int(os.environ.get("RANK", "0"))
+    #world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    # Initialize the process group
+    #dist.init_process_group(backend, rank=rank, world_size=world_size)
+    dist.init_process_group(backend="nccl")
+
 if __name__ == "__main__":
-   for init_cfg in configs:
+    # Setup distributed environment
+    setup_distributed()
+    torch.cuda.set_device(dist.get_rank())
+    print("rank", dist.get_rank())
+    for init_cfg in configs:
         train_model(init_cfg)
