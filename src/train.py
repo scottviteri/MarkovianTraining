@@ -18,11 +18,8 @@ import torch.distributed as dist
 import pytorch_lightning as pl
 from pytorch_lightning.strategies import FSDPStrategy
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, size_based_auto_wrap_policy
-from torch.distributed.fsdp import MixedPrecision, FullyShardedDataParallel
-from torch.distributed.fsdp.wrap import (
-   enable_wrap,
-   wrap,
-)
+from torch.distributed.fsdp import MixedPrecision, FullyShardedDataParallel, BackwardPrefetch
+from torch.distributed.fsdp.wrap import enable_wrap, wrap
 
 from src.training_types import *
 from src.utilities import extend_initial_config, log_and_print_info
@@ -30,10 +27,8 @@ from src.utilities import create_run_name, multi_print
 from src.config_examples import configs 
 
 from transformers.models.gptj.modeling_gptj import GPTJBlock
-<<<<<<< HEAD
 from transformers.models.mistral.modeling_mistral import MistralDecoderLayer 
-=======
->>>>>>> 1f5358663ec38d1f58e8e92cc41ac661ca019bc5
+from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
 
 from src.evaluate_via_gpt import evaluate_via_gpt
@@ -255,14 +250,6 @@ def train_via_update(cfg):
         update(datapt_pair)
     return aggregate_losses
 
-<<<<<<< HEAD
-=======
-transformer_auto_wrapper_policy = functools.partial(
-    transformer_auto_wrap_policy,
-    transformer_layer_cls={ GPTJBlock, },
-)
-
->>>>>>> 1f5358663ec38d1f58e8e92cc41ac661ca019bc5
 #class LitModel(pl.LightningModule):
 #    def __init__(self, cfg):
 #        super().__init__()
@@ -354,11 +341,12 @@ def train_model(init_cfg):
         wandb.init(
             project="collaborative-training-many-per-context-window", 
             name=create_run_name(cfg))
-<<<<<<< HEAD
     if cfg.model_name == "gptj":
         block_name = GPTJBlock
     elif cfg.model_name == "mistral":
         block_name = MistralDecoderLayer
+    elif cfg.model_name == "llama":
+        block_name = LlamaDecoderLayer
     else:
         assert "Unsupported model name for fdsp wrap policy"
     transformer_auto_wrapper_policy = functools.partial(
@@ -368,13 +356,9 @@ def train_model(init_cfg):
     cfg.causal_lm = FullyShardedDataParallel(
         cfg.causal_lm, 
         auto_wrap_policy=transformer_auto_wrapper_policy,
-        mixed_precision = MixedPrecision(param_dtype=torch.bfloat16)
-=======
-    cfg.causal_lm = FullyShardedDataParallel(
-        cfg.causal_lm, 
-        auto_wrap_policy=transformer_auto_wrapper_policy,
-        #mixed_precision = MixedPrecision(param_dtype=torch.bfloat16)
->>>>>>> 1f5358663ec38d1f58e8e92cc41ac661ca019bc5
+        mixed_precision = MixedPrecision(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
+        backward_prefetch=BackwardPrefetch.BACKWARD_PRE
     )
     print(cfg.causal_lm)
     if cfg.optimizer == "sgd":
