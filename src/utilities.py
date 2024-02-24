@@ -267,6 +267,8 @@ def create_run_name(cfg : Config) -> str:
     run_name += f"{cfg.optimizer[:3]}_"
     if isinstance(cfg.dataset.task, ArithmeticTask):
         run_name += f"ari_nt={cfg.dataset.task.num_terms}_nd={cfg.dataset.task.num_digits}_"
+        if cfg.dataset.task.cumulative:
+            run_name += "cm_"
     else:
         run_name += "wiki_"
     if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
