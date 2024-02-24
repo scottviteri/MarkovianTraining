@@ -16,7 +16,7 @@ def prepare_dataset(
     task = init_cfg.dataset.task
 
     if isinstance(task, ArithmeticTask):
-        itr_ds = arithmetic_generator(task.num_terms, task.num_digits)
+        itr_ds = arithmetic_generator(task.num_terms, task.num_digits, task.cumulative)
         qa_traj_itr = to_qa_traj_itr(itr_ds)
         qa_batch_lst_itr  = traj_itr_to_batch_lst(init_cfg.batch_size, qa_traj_itr)
         qa_tokenized_itr_ds = map(lambda batch_lst:
@@ -103,12 +103,15 @@ def peek_every_n(n, dict_itr):
         else:
             yield {"Observation" : d["Observation"], "First": d["First"]}
 
-def arithmetic_generator(num_terms, num_digits):
+def arithmetic_generator(num_terms, num_digits, cumulative):
     while 1:
         question = "Q: "
         total = 0
         for _ in range(num_terms):
-            num = random.randint(10**(num_digits-1), 10**num_digits-1)
+            if cumulative:
+                num = random.randint(0, 10**num_digits-1)
+            else:
+                num = random.randint(10**(num_digits-1), 10**num_digits-1)
             total += num
             question += f"{num} + "
         question = question.rstrip(" +")

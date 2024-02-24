@@ -14,7 +14,7 @@ RepeatPointNTimes = NamedTuple("RepeatPointNTimes", [("num_times", int)])
 ReplaceWithRandomTokens = NamedTuple("ReplaceWithRandomTokens", [])
 NoWeightUpdates = NamedTuple("NoWeightUpdates", [])
 
-ArithmeticTask = NamedTuple("ArithmeticTask", [("num_digits", int), ("num_terms", int)])
+ArithmeticTask = NamedTuple("ArithmeticTask", [("num_digits", int), ("num_terms", int), ("cumulative", bool)])
 WikipediaTask = NamedTuple("WikipediaTask", [])
 TaskType = Union[ArithmeticTask, WikipediaTask]
 InitDatasetType = NamedTuple("InitDatasetType", [("task", TaskType), ("peek_every", Optional[int])])

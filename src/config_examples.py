@@ -2,7 +2,7 @@ from src.training_types import *
 import os
 
 g2 = InitialConfig(
-      model_name="distilgpt2",
+      model_name="gpt2",
       lr=1e-4,
       optimizer="adam",
       batch_size=1,
@@ -15,7 +15,7 @@ g2 = InitialConfig(
       do_lora=False,
       num_beams = 1,
       training_ctxt_size=150,
-      dataset=InitDatasetType(task=ArithmeticTask(num_terms=2, num_digits=3), peek_every=None),
+      dataset=InitDatasetType(task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=True), peek_every=None),
       sampling_cfg=SamplingConfig(filter_best_actions=None),
       training_cfg=TrainingConfig(
             train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False),
@@ -37,7 +37,7 @@ g2_ar = InitialConfig(
         num_beams = 1,
         training_ctxt_size=150,
         dataset=InitDatasetType(
-              task=ArithmeticTask(num_terms=2, num_digits=3), peek_every=None),
+              task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), peek_every=None),
         sampling_cfg=SamplingConfig(filter_best_actions=None),
         training_cfg=TrainingConfig(
               train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False),
@@ -59,7 +59,7 @@ g2_ei = InitialConfig(
         num_beams=1,
         training_ctxt_size=150,
         dataset=InitDatasetType(
-            task=ArithmeticTask(num_terms=2, num_digits=3), 
+            task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), 
             peek_every=None),
         sampling_cfg=SamplingConfig(filter_best_actions=None),
         training_cfg=TrainingConfig(
@@ -84,7 +84,7 @@ g2_p2 = InitialConfig(
       num_beams=1,
       training_ctxt_size=150,
       dataset=InitDatasetType(
-          task=ArithmeticTask(num_terms=2, num_digits=3), 
+          task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), 
           peek_every=2),
       sampling_cfg=SamplingConfig(filter_best_actions=None),
       training_cfg=TrainingConfig(
@@ -107,7 +107,7 @@ gj = InitialConfig(
       num_beams=1,
       training_ctxt_size=150,
       dataset=InitDatasetType(
-          task=ArithmeticTask(num_terms=2, num_digits=3), 
+          task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), 
           peek_every=None),
       sampling_cfg=SamplingConfig(filter_best_actions=None),
       training_cfg=TrainingConfig(
@@ -130,7 +130,7 @@ lma = InitialConfig(
       num_beams=1,
       training_ctxt_size=200,
       dataset=InitDatasetType(
-          task=ArithmeticTask(num_terms=2, num_digits=3), 
+          task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), 
           peek_every=None),
       sampling_cfg=SamplingConfig(filter_best_actions=None),
       training_cfg=TrainingConfig(
@@ -153,7 +153,7 @@ mst = InitialConfig(
       num_beams=1,
       training_ctxt_size=200,
       dataset=InitDatasetType(
-          task=ArithmeticTask(num_terms=2, num_digits=3),
+          task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False),
           peek_every=None),
       sampling_cfg=SamplingConfig(filter_best_actions=None),
       training_cfg=TrainingConfig(
@@ -162,4 +162,4 @@ mst = InitialConfig(
 )
 
 #configs = [g2, g2_ar, g2_ei]
-configs = [mst]
+configs = [g2]
