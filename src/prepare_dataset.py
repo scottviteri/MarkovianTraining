@@ -109,7 +109,8 @@ def arithmetic_generator(num_terms, num_digits, cumulative):
         total = 0
         for _ in range(num_terms):
             if cumulative:
-                num = random.randint(0, 10**num_digits-1)
+                n = random.randint(1, num_digits)
+                num = random.randint(10**(n-1), 10**n-1)
             else:
                 num = random.randint(10**(num_digits-1), 10**num_digits-1)
             total += num
