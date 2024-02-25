@@ -15,6 +15,7 @@ from matplotlib import pyplot as plt
 import functools
 
 import torch.distributed as dist
+import torch.distributed.fsdp as fsdp
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, size_based_auto_wrap_policy
 from torch.distributed.fsdp import MixedPrecision, FullyShardedDataParallel, BackwardPrefetch
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
@@ -38,7 +39,7 @@ def save_weights(cfg, batch_index):
     if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:
         print(f"Saving trained_{cfg.model_name} \n\n")
         cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
-        cfg.causal_lm.save_pretrained(cfg.path_2_model)
+        cfg.predictor_lm.save_pretrained(cfg.path_2_model)
 
 def default_action(cfg):
     initial_helpful_msg = cfg.causal_lm_tokenizer("Use StepByStep spaces to help predict your next observation.",
@@ -114,35 +115,35 @@ def log_print_oa(cfg, batch_index, prev_action, prev_obs, action, obs, is_guidan
 def sample(cfg, prev_action, prev_obs, observation):
     sampling_cfg = cfg.sampling_cfg
     # currently not using filter_best_action parameters
-    cfg.causal_lm.eval()
+    cfg.predictor_lm.eval()
     with torch.no_grad():
         input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
         attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-        with FullyShardedDataParallel.summon_full_params(cfg.causal_lm, writeback=False, recurse=False):
-            action_candidates = cfg.causal_lm.generate(
-                    inputs=input_sequence,
-                    attention_mask=attention_mask,
-                    num_beams=cfg.num_beams,
-                    bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
-                    output_scores=True,
-                    do_sample=True,
-                    temperature=1.0,
-                    min_new_tokens=cfg.tok_p_pure_action,
-                    max_new_tokens=cfg.tok_p_pure_action,
-                    pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
-                )[:, -cfg.tok_p_action :]
+        #with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=False, recurse=False):
+        action_candidates = cfg.predictor_lm.generate(
+                inputs=input_sequence,
+                attention_mask=attention_mask,
+                num_beams=cfg.num_beams,
+                bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
+                output_scores=True,
+                do_sample=True,
+                temperature=1.0,
+                min_new_tokens=cfg.tok_p_pure_action,
+                max_new_tokens=cfg.tok_p_pure_action,
+                pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+            )[:, -cfg.tok_p_action :]
         return action_candidates
 
 def update_weights(cfg, prev_action, prev_obs, action, obs):
     training_cfg = cfg.training_cfg
     cfg.optimizer.zero_grad()
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    cfg.causal_lm.train()
+    cfg.predictor_lm.train()
     with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
         if training_cfg.train_O_given_prev_O:
             input_sequence = torch.cat([prev_obs, obs], dim=1)
             attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-            logits = cfg.causal_lm(input_sequence, attention_mask=attention_mask, use_cache=False).logits[:, :-1, :]
+            logits = cfg.predictor_lm(input_sequence, attention_mask=attention_mask, use_cache=False).logits[:, :-1, :]
             loss_tensor = loss_fn(
                 input=einops.rearrange(
                     logits,
@@ -154,7 +155,7 @@ def update_weights(cfg, prev_action, prev_obs, action, obs):
         else:
             input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
             attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-            logits = cfg.causal_lm(input_sequence, attention_mask=attention_mask, use_cache=False).logits[:, :-1, :]
+            logits = cfg.predictor_lm(input_sequence, attention_mask=attention_mask, use_cache=False).logits[:, :-1, :]
             loss_tensor = loss_fn(
                 input=einops.rearrange(
                     logits,
@@ -173,7 +174,7 @@ def update_weights(cfg, prev_action, prev_obs, action, obs):
             #with torch.no_grad():
             mkv_input_sequence = torch.cat([action, obs], dim=1)
             mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-            mkv_logits = cfg.causal_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
+            mkv_logits = cfg.predictor_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
             mkv_loss_tensor = loss_fn(
                 input=einops.rearrange(
                     mkv_logits,
@@ -184,11 +185,11 @@ def update_weights(cfg, prev_action, prev_obs, action, obs):
             obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
             obs_loss = obs_tensor.sum() / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
 
-            aggregate_loss = obs_loss
+            #aggregate_loss = obs_loss
             #aggregate_loss =  action_loss*obs_loss
-            #aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
-            #                         zip([training_cfg.train_A_given_AO, training_cfg.train_O_given_A],
-            #                                [action_loss, obs_loss])))
+            aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
+                                     zip([training_cfg.train_A_given_AO, training_cfg.train_O_given_A],
+                                            [action_loss, obs_loss])))
 
     if not isinstance(cfg.debug, NoWeightUpdates):
         aggregate_loss.backward()
@@ -275,20 +276,22 @@ def train_model(init_cfg):
         transformer_auto_wrap_policy,
         transformer_layer_cls={ block_name, },
     )
-    cfg.causal_lm = FullyShardedDataParallel(
-        cfg.causal_lm, 
-        auto_wrap_policy=transformer_auto_wrapper_policy,
-        mixed_precision = MixedPrecision(
-            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
-        backward_prefetch=BackwardPrefetch.BACKWARD_PRE
-    )
-    print(cfg.causal_lm)
+    #cfg.predictor_lm = FullyShardedDataParallel(
+    #    cfg.predictor_lm, 
+    #    auto_wrap_policy=transformer_auto_wrapper_policy,
+    #    sharding_strategy=fsdp.ShardingStrategy.NO_SHARD,
+    #    mixed_precision = MixedPrecision(
+    #        param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
+    #    backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+    #    ignored_modules=[cfg.inference_lm]
+    #)
+    print(cfg.predictor_lm)
     if cfg.optimizer == "sgd":
-        cfg.optimizer = torch.optim.SGD(cfg.causal_lm.parameters(), lr=cfg.lr)#, momentum=0.01)
+        cfg.optimizer = torch.optim.SGD(cfg.predictor_lm.parameters(), lr=cfg.lr)#, momentum=0.01)
     elif cfg.optimizer == "adam":
-        cfg.optimizer = torch.optim.Adam(cfg.causal_lm.parameters(), lr=cfg.lr)
+        cfg.optimizer = torch.optim.Adam(cfg.predictor_lm.parameters(), lr=cfg.lr)
     elif cfg.optimizer == "rmsprop":
-        cfg.optimizer = torch.optim.RMSprop(cfg.causal_lm.parameters(), lr=cfg.lr)
+        cfg.optimizer = torch.optim.RMSprop(cfg.predictor_lm.parameters(), lr=cfg.lr)
     else:
         raise ValueError(f"Unsupported optimizer: {cfg.optimizer}. Please choose 'sgd', 'adam', or 'rmsprop'.")
     train_via_update(cfg)

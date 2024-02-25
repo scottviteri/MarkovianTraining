@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import einops
 from datasets import load_dataset
 import json
+import copy
 
 import torch.nn as nn
 
@@ -26,10 +27,12 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 
-    causal_lm, causal_lm_tokenizer, ctxt_size =  get_model(
+    predictor_lm, causal_lm_tokenizer, ctxt_size =  get_model(
         device, init_cfg.load_model, init_cfg.model_name, 
         path_2_tokenizer, path_2_model, init_cfg.do_lora
     ) 
+
+    inference_lm = copy.deepcopy(predictor_lm)
 
     training_ctxt_size = ctxt_size if init_cfg.training_ctxt_size is None else init_cfg.training_ctxt_size 
     tok_p_action = int(training_ctxt_size / (init_cfg.obs_to_action_ratio + 2))
@@ -79,7 +82,8 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         action_prefix_tensor=action_prefix,
         obs_prefix_tensor=obs_prefix,
         ctxt_size = ctxt_size,
-        causal_lm = causal_lm,
+        predictor_lm = predictor_lm,
+        inference_lm=inference_lm,
         causal_lm_tokenizer = causal_lm_tokenizer,
         sampling_cfg = init_cfg.sampling_cfg,
         training_cfg = init_cfg.training_cfg,

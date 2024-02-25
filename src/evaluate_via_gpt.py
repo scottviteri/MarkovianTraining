@@ -90,7 +90,7 @@ f"""
         act, obs = d["Action"], d["Observation"]
         input_ids = cfg.causal_lm_tokenizer.encode(act + obs, return_tensors='pt')
         with torch.no_grad():
-            logits = cfg.causal_lm(input_ids).logits[:,:-1,:]
+            logits = cfg.predictor_lm(input_ids).logits[:,:-1,:]
         loss_fn = torch.nn.CrossEntropyLoss()
         loss = loss_fn(target=input_ids[:,1:], input=einops.rearrange(logits, "b s v -> b v s"))
         return (int(d["Batch"]), float(loss.item()))
