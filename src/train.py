@@ -1,6 +1,7 @@
 # pip install transformers datasets==2.14.6 torchtyping==0.1.4 && pip install peft einops apache_beam==2.51.0 matplotlib wandb && pip install -U flash-attn --no-build-isolation
 # huggingface-cli login
 import torch
+import torch.nn as nn
 from torch.cuda.amp import autocast
 import numpy as np
 from tqdm import tqdm
@@ -140,10 +141,11 @@ def update_weights(cfg, batch_index, prev_action, prev_obs, action, obs):
     # Check if it's time to update cfg.inference_lm weights
     update_every, fraction_to_update = cfg.inference_cfg.update_every, cfg.inference_cfg.fraction_to_update
     if update_every is not None and batch_index % update_every == 0:
-        print("Updating Inference Model")
         with torch.no_grad():
-            for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
-                param_inference.data.copy_((1 - fraction_to_update) * param_inference.data + fraction_to_update * param_prediction.data)
+            with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=False, recurse=False):
+                print("Updating Inference Model")
+                for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
+                    param_inference.data.copy_((1 - fraction_to_update) * param_inference.data + fraction_to_update * param_prediction.data)
 
     cfg.optimizer.zero_grad()
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
@@ -285,15 +287,30 @@ def train_model(init_cfg):
         transformer_auto_wrap_policy,
         transformer_layer_cls={ block_name, },
     )
-    #cfg.predictor_lm = FullyShardedDataParallel(
-    #    cfg.predictor_lm, 
-    #    auto_wrap_policy=transformer_auto_wrapper_policy,
-    #    sharding_strategy=fsdp.ShardingStrategy.NO_SHARD,
-    #    mixed_precision = MixedPrecision(
-    #        param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
-    #    backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-    #    ignored_modules=[cfg.inference_lm]
-    #)
+
+    class CompositeModel(nn.Module):
+        def __init__(self, inference_lm, predictor_lm):
+            super(CompositeModel, self).__init__()
+            self.inference_lm = inference_lm
+            self.predictor_lm = predictor_lm
+
+        def forward(self, *args, **kwargs):
+            # This method might not be used directly, but you can define it based on your needs.
+            pass
+
+    composite = CompositeModel(cfg.inference_lm, cfg.predictor_lm)
+    composite = FullyShardedDataParallel(
+        composite, 
+        auto_wrap_policy=transformer_auto_wrapper_policy,
+        sharding_strategy=fsdp.ShardingStrategy.FULL_SHARD,
+        mixed_precision = MixedPrecision(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
+        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+        ignored_modules=[cfg.inference_lm],
+        use_orig_params=True
+    )
+    cfg.inference_lm = composite.inference_lm
+    cfg.predictor_lm = composite.predictor_lm 
     print(cfg.predictor_lm)
     if cfg.optimizer == "sgd":
         cfg.optimizer = torch.optim.SGD(cfg.predictor_lm.parameters(), lr=cfg.lr)#, momentum=0.01)

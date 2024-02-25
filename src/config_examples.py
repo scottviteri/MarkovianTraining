@@ -2,7 +2,7 @@ from src.training_types import *
 import os
 
 g2 = InitialConfig(
-      model_name="gpt2-medium",
+      model_name="gpt2",
       lr=1e-4,
       optimizer="adam",
       batch_size=1,
@@ -10,7 +10,7 @@ g2 = InitialConfig(
       obs_to_action_ratio=0.5,
       interval_save_weights=3000,
       interval_print=21,
-      wandb=True,
+      wandb=False,
       load_model=False,
       do_lora=False,
       num_beams = 1,
