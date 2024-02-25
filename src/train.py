@@ -115,7 +115,7 @@ def log_print_oa(cfg, batch_index, prev_action, prev_obs, action, obs, is_guidan
 def sample(cfg, prev_action, prev_obs, observation):
     inference_cfg = cfg.inference_cfg
     # currently not using filter_best_action parameters
-    cfg.predictor_lm.eval()
+    cfg.inference_lm.eval()
     with torch.no_grad():
         input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
         attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
@@ -134,8 +134,17 @@ def sample(cfg, prev_action, prev_obs, observation):
             )[:, -cfg.tok_p_action :]
         return action_candidates
 
-def update_weights(cfg, prev_action, prev_obs, action, obs):
+def update_weights(cfg, batch_index, prev_action, prev_obs, action, obs):
     prediction_cfg = cfg.prediction_cfg
+
+    # Check if it's time to update cfg.inference_lm weights
+    update_every, fraction_to_update = cfg.inference_cfg.update_every, cfg.inference_cfg.fraction_to_update
+    if update_every is not None and batch_index % update_every == 0:
+        print("Updating Inference Model")
+        with torch.no_grad():
+            for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
+                param_inference.data.copy_((1 - fraction_to_update) * param_inference.data + fraction_to_update * param_prediction.data)
+
     cfg.optimizer.zero_grad()
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     cfg.predictor_lm.train()
@@ -230,7 +239,7 @@ def trainer(cfg):
             action = prev_action
         else:
             action = sample(cfg, prev_action, prev_obs, obs) 
-        aggregate_loss, loss_tensors, losses = update_weights(cfg, prev_action, prev_obs, action, obs)
+        aggregate_loss, loss_tensors, losses = update_weights(cfg, batch_index, prev_action, prev_obs, action, obs)
         log_and_save(cfg, batch_index, prev_action, prev_obs, action, obs, "Action" in datapt, is_first, aggregate_loss, losses)
         state = [action, batch_index + 1, aggregate_loss]
         return
