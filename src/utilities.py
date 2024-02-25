@@ -208,9 +208,10 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
         "distilgpt2": "distilgpt2",
         "gptj": "EleutherAI/gpt-j-6b",
         "mistral": "mistralai/Mistral-7B-v0.1",
+        "gpt2": "gpt2",
+        "gpt2-medium": "gpt2-medium",
         "gpt2-large": "gpt2-large",
         "gpt2-xl": "gpt2-xl",
-        "gpt2": "gpt2",
         "phi2" : "microsoft/phi-2"
         # Add other models here
     }
