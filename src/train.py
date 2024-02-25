@@ -113,7 +113,7 @@ def log_print_oa(cfg, batch_index, prev_action, prev_obs, action, obs, is_guidan
             )
 
 def sample(cfg, prev_action, prev_obs, observation):
-    sampling_cfg = cfg.sampling_cfg
+    inference_cfg = cfg.inference_cfg
     # currently not using filter_best_action parameters
     cfg.predictor_lm.eval()
     with torch.no_grad():
@@ -135,12 +135,12 @@ def sample(cfg, prev_action, prev_obs, observation):
         return action_candidates
 
 def update_weights(cfg, prev_action, prev_obs, action, obs):
-    training_cfg = cfg.training_cfg
+    prediction_cfg = cfg.prediction_cfg
     cfg.optimizer.zero_grad()
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     cfg.predictor_lm.train()
     with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
-        if training_cfg.train_O_given_prev_O:
+        if prediction_cfg.train_O_given_prev_O:
             input_sequence = torch.cat([prev_obs, obs], dim=1)
             attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
             logits = cfg.predictor_lm(input_sequence, attention_mask=attention_mask, use_cache=False).logits[:, :-1, :]
@@ -188,14 +188,14 @@ def update_weights(cfg, prev_action, prev_obs, action, obs):
             #aggregate_loss = obs_loss
             #aggregate_loss =  action_loss*obs_loss
             aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
-                                     zip([training_cfg.train_A_given_AO, training_cfg.train_O_given_A],
+                                     zip([prediction_cfg.train_A_given_AO, prediction_cfg.train_O_given_A],
                                             [action_loss, obs_loss])))
 
     if not isinstance(cfg.debug, NoWeightUpdates):
         aggregate_loss.backward()
         cfg.optimizer.step()
     
-    if training_cfg.train_O_given_prev_O: return aggregate_loss, None, None
+    if prediction_cfg.train_O_given_prev_O: return aggregate_loss, None, None
     loss_tensors = prev_action_tensor, prev_observation_tensor, action_tensor, obs_tensor
     losses = prev_action_loss, prev_observation_loss, action_loss, obs_loss
     return aggregate_loss, loss_tensors, losses
@@ -203,7 +203,7 @@ def update_weights(cfg, prev_action, prev_obs, action, obs):
 def log_and_save(cfg, batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first, aggregate_loss, losses):
     save_weights(cfg, batch_index)
     log_print_oa(cfg, batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first)
-    if cfg.training_cfg.train_O_given_prev_O: 
+    if cfg.prediction_cfg.train_O_given_prev_O: 
         if cfg.wandb and dist.get_rank() == 0: wandb.log({"Batch Index": batch_index, "Observation Loss": aggregate_loss})
     else:
         log_wandb(cfg, batch_index, aggregate_loss, losses)
@@ -226,7 +226,7 @@ def trainer(cfg):
         # now can assume that prev_datapt contains the question and datapt contains the Answer
         if "Action" in datapt: 
             action = datapt["Action"]
-        elif cfg.training_cfg.train_O_given_prev_O: 
+        elif cfg.prediction_cfg.train_O_given_prev_O: 
             action = prev_action
         else:
             action = sample(cfg, prev_action, prev_obs, obs) 

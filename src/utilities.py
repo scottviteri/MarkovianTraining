@@ -85,8 +85,8 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         predictor_lm = predictor_lm,
         inference_lm=inference_lm,
         causal_lm_tokenizer = causal_lm_tokenizer,
-        sampling_cfg = init_cfg.sampling_cfg,
-        training_cfg = init_cfg.training_cfg,
+        inference_cfg = init_cfg.inference_cfg,
+        prediction_cfg = init_cfg.prediction_cfg,
         debug = init_cfg.debug
     )
 
@@ -265,8 +265,8 @@ def get_linear_layers(model):
     )
 
 def create_run_name(cfg : Config) -> str:
-    training_cfg = cfg.training_cfg
-    sampling_cfg = cfg.sampling_cfg
+    prediction_cfg = cfg.prediction_cfg
+    inference_cfg = cfg.inference_cfg
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
     run_name += f"{cfg.optimizer[:3]}_"
@@ -277,11 +277,11 @@ def create_run_name(cfg : Config) -> str:
     else:
         run_name += "wiki_"
     if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
-    if training_cfg.train_O_given_prev_O: 
+    if prediction_cfg.train_O_given_prev_O: 
         run_name += f"AR_"
-    if training_cfg.train_O_given_A:
+    if prediction_cfg.train_O_given_A:
         run_name += f"M_"
-    if training_cfg.train_A_given_AO:
+    if prediction_cfg.train_A_given_AO:
         run_name += f"EI_"
     if cfg.dataset.peek_every is not None:
         run_name += f"pe{cfg.dataset.peek_every}_"

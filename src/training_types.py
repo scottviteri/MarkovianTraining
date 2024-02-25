@@ -5,9 +5,12 @@ import torch
 from enum import Enum
 
 GptEval = NamedTuple("GptEval", [("num_evals", int), ("use_gptj", bool)])
-TrainingConfig = NamedTuple("TrainingConfig", 
+PredictionConfig = NamedTuple("PredictionConfig", 
    [("train_A_given_AO", bool), ("train_O_given_A", bool), ("train_O_given_prev_O", bool)])
-SamplingConfig = NamedTuple("SamplingConfig", [("filter_best_actions" , Optional[int])])
+InferenceConfig = NamedTuple("InferenceConfig", 
+                            [("filter_best_actions" , Optional[int]), 
+                             ("update_every", Optional[int]),
+                             ("fraction_to_update", Optional[float])])
 
 RepeatNPoints = NamedTuple("RepeatNPoints", [("num_points", int)])
 RepeatPointNTimes = NamedTuple("RepeatPointNTimes", [("num_times", int)])
@@ -38,10 +41,10 @@ class InitialConfig:
     load_model: bool
     do_lora : bool
     num_beams : int
-    sampling_cfg : SamplingConfig
+    inference_cfg : InferenceConfig 
     training_ctxt_size: Optional[int]
     dataset: InitDatasetType
-    training_cfg : TrainingConfig
+    prediction_cfg : PredictionConfig
     debug : Optional[DebugType]
 
 @dataclass
@@ -74,6 +77,6 @@ class Config:
     obs_prefix_tensor: Optional[torch.Tensor]
     ctxt_size: Optional[int]
     dataset : DatasetType
-    sampling_cfg : SamplingConfig
-    training_cfg : TrainingConfig
+    inference_cfg : InferenceConfig
+    prediction_cfg : PredictionConfig 
     debug : Optional[DebugType]

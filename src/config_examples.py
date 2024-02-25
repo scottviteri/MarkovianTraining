@@ -2,22 +2,24 @@ from src.training_types import *
 import os
 
 g2 = InitialConfig(
-      model_name="gpt2",
+      model_name="gpt2-large",
       lr=1e-4,
       optimizer="adam",
       batch_size=1,
-      num_batches=10,
+      num_batches=10000,
       obs_to_action_ratio=0.5,
       interval_save_weights=3000,
       interval_print=21,
-      wandb=False,
+      wandb=True,
       load_model=False,
       do_lora=False,
       num_beams = 1,
-      training_ctxt_size=150,
-      dataset=InitDatasetType(task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=True), peek_every=None),
-      sampling_cfg=SamplingConfig(filter_best_actions=None),
-      training_cfg=TrainingConfig(
+      training_ctxt_size=200,
+      dataset=InitDatasetType(
+          task=ArithmeticTask(num_terms=3, num_digits=3, cumulative=True), 
+            peek_every=None),
+      inference_cfg=InferenceConfig(filter_best_actions=None, update_every=None, fraction_to_update=None),
+      prediction_cfg=PredictionConfig(
             train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False),
       debug=None
 )
@@ -38,8 +40,8 @@ g2_ar = InitialConfig(
         training_ctxt_size=150,
         dataset=InitDatasetType(
               task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), peek_every=None),
-        sampling_cfg=SamplingConfig(filter_best_actions=None),
-        training_cfg=TrainingConfig(
+        inference_cfg=InferenceConfig(filter_best_actions=None, update_every=None, fraction_to_update=None),
+        prediction_cfg=PredictionConfig(
               train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False),
         debug=None
 )
@@ -61,8 +63,8 @@ g2_ei = InitialConfig(
         dataset=InitDatasetType(
             task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), 
             peek_every=None),
-        sampling_cfg=SamplingConfig(filter_best_actions=None),
-        training_cfg=TrainingConfig(
+        inference_cfg=InferenceConfig(filter_best_actions=None, update_every=None, fraction_to_update=None),
+        prediction_cfg=PredictionConfig(
               train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False),
         debug=None
 )
@@ -86,8 +88,8 @@ g2_p2 = InitialConfig(
       dataset=InitDatasetType(
           task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), 
           peek_every=2),
-      sampling_cfg=SamplingConfig(filter_best_actions=None),
-      training_cfg=TrainingConfig(
+      inference_cfg=InferenceConfig(filter_best_actions=None, update_every=None, fraction_to_update=None),
+      prediction_cfg=PredictionConfig(
             train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False),
       debug=None
 )
@@ -109,8 +111,8 @@ gj = InitialConfig(
       dataset=InitDatasetType(
           task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), 
           peek_every=None),
-      sampling_cfg=SamplingConfig(filter_best_actions=None),
-      training_cfg=TrainingConfig(
+      inference_cfg=InferenceConfig(filter_best_actions=None, update_every=None, fraction_to_update=None),
+      prediction_cfg=PredictionConfig(
             train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False),
       debug=None
 )
@@ -132,8 +134,8 @@ lma = InitialConfig(
       dataset=InitDatasetType(
           task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), 
           peek_every=None),
-      sampling_cfg=SamplingConfig(filter_best_actions=None),
-      training_cfg=TrainingConfig(
+      inference_cfg=InferenceConfig(filter_best_actions=None, update_every=None, fraction_to_update=None),
+      prediction_cfg=PredictionConfig(
             train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False),
       debug=None
 )
@@ -155,8 +157,8 @@ mst = InitialConfig(
       dataset=InitDatasetType(
           task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False),
           peek_every=None),
-      sampling_cfg=SamplingConfig(filter_best_actions=None),
-      training_cfg=TrainingConfig(
+      inference_cfg=InferenceConfig(filter_best_actions=None, update_every=None, fraction_to_update=None),
+      prediction_cfg=PredictionConfig(
             train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False),
       debug=None
 )
