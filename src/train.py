@@ -120,19 +120,19 @@ def sample(cfg, prev_action, prev_obs, observation):
     with torch.no_grad():
         input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
         attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-        #with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=False, recurse=False):
-        action_candidates = cfg.predictor_lm.generate(
-                inputs=input_sequence,
-                attention_mask=attention_mask,
-                num_beams=cfg.num_beams,
-                bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
-                output_scores=True,
-                do_sample=True,
-                temperature=1.0,
-                min_new_tokens=cfg.tok_p_pure_action,
-                max_new_tokens=cfg.tok_p_pure_action,
-                pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
-            )[:, -cfg.tok_p_action :]
+        with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=False, recurse=False):
+            action_candidates = cfg.predictor_lm.generate(
+                    inputs=input_sequence,
+                    attention_mask=attention_mask,
+                    num_beams=cfg.num_beams,
+                    bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
+                    output_scores=True,
+                    do_sample=True,
+                    temperature=1.0,
+                    min_new_tokens=cfg.tok_p_pure_action,
+                    max_new_tokens=cfg.tok_p_pure_action,
+                    pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+                )[:, -cfg.tok_p_action :]
         return action_candidates
 
 def update_weights(cfg, batch_index, prev_action, prev_obs, action, obs):
