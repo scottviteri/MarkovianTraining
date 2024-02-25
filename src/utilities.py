@@ -276,6 +276,8 @@ def create_run_name(cfg : Config) -> str:
             run_name += "cm_"
     else:
         run_name += "wiki_"
+    if cfg.inference_cfg.update_every is not None:
+        run_name += f"ue{cfg.inference_cfg.update_every}_upd{cfg.inference_cfg.fraction_to_update:.3f}_"
     if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
     if prediction_cfg.train_O_given_prev_O: 
         run_name += f"AR_"
