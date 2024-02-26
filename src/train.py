@@ -143,8 +143,7 @@ def update_weights(cfg, batch_index, prev_action, prev_obs, action, obs):
     if update_every is not None and batch_index % update_every == 0:
         with torch.no_grad():
             with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=True, recurse=True):
-            #    with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=False, recurse=False):
-                print("Updating Inference Model")
+                if dist.get_rank() == 0: print("Updating Inference Model\n")
                 for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
                     a = (1 - fraction_to_update) * param_inference.data
                     b =  fraction_to_update * param_prediction.data.reshape(a.shape)
