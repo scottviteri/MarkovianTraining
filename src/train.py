@@ -337,8 +337,8 @@ def train_model(init_cfg):
     if cfg.wandb and dist.get_rank() == 0: wandb.finish()
 
 if __name__ == "__main__":
-    dist.init_process_group(backend="nccl")
-    torch.cuda.set_device(dist.get_rank())
-    print("rank", dist.get_rank())
+    #dist.init_process_group(backend="nccl")
+    #torch.cuda.set_device(dist.get_rank())
+    #print("rank", dist.get_rank())
     for init_cfg in configs:
         train_model(init_cfg)
