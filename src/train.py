@@ -55,7 +55,7 @@ def default_action(cfg):
                 fill_value=cfg.causal_lm_tokenizer.pad_token_id,
                 dtype=torch.int64,
                 device=cfg.device,
-            ),
+            )
         ),
         dim=1,
     )
@@ -120,19 +120,19 @@ def sample(cfg, prev_action, prev_obs, observation):
     with torch.no_grad():
         input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
         attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-        with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=False, recurse=False):
-            action_candidates = cfg.predictor_lm.generate(
-                    inputs=input_sequence,
-                    attention_mask=attention_mask,
-                    num_beams=cfg.num_beams,
-                    bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
-                    output_scores=True,
-                    do_sample=True,
-                    temperature=1.0,
-                    min_new_tokens=cfg.tok_p_pure_action,
-                    max_new_tokens=cfg.tok_p_pure_action,
-                    pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
-                )[:, -cfg.tok_p_action :]
+        #with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=False, recurse=False):
+        action_candidates = cfg.inference_lm.generate(
+                inputs=input_sequence,
+                attention_mask=attention_mask,
+                num_beams=cfg.num_beams,
+                bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
+                output_scores=True,
+                do_sample=True,
+                temperature=1.0,
+                min_new_tokens=cfg.tok_p_pure_action,
+                max_new_tokens=cfg.tok_p_pure_action,
+                pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+            )[:, -cfg.tok_p_action :]
         return action_candidates
 
 def update_weights(cfg, batch_index, prev_action, prev_obs, action, obs):
@@ -142,10 +142,13 @@ def update_weights(cfg, batch_index, prev_action, prev_obs, action, obs):
     update_every, fraction_to_update = cfg.inference_cfg.update_every, cfg.inference_cfg.fraction_to_update
     if update_every is not None and batch_index % update_every == 0:
         with torch.no_grad():
-            with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=False, recurse=False):
-                print("Updating Inference Model")
-                for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
-                    param_inference.data.copy_((1 - fraction_to_update) * param_inference.data + fraction_to_update * param_prediction.data)
+            #with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=False, recurse=False):
+            #    with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=False, recurse=False):
+            print("Updating Inference Model")
+            for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
+                a = (1 - fraction_to_update) * param_inference.data
+                b =  fraction_to_update * param_prediction.data.reshape(a.shape)
+                param_inference.data.copy_(a + b)
 
     cfg.optimizer.zero_grad()
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
@@ -288,29 +291,39 @@ def train_model(init_cfg):
         transformer_layer_cls={ block_name, },
     )
 
-    class CompositeModel(nn.Module):
-        def __init__(self, inference_lm, predictor_lm):
-            super(CompositeModel, self).__init__()
-            self.inference_lm = inference_lm
-            self.predictor_lm = predictor_lm
+    #class CompositeModel(nn.Module):
+    #    def __init__(self, inference_lm, predictor_lm):
+    #        super(CompositeModel, self).__init__()
+    #        self.inference_lm = inference_lm
+    #        self.predictor_lm = predictor_lm
 
-        def forward(self, *args, **kwargs):
-            # This method might not be used directly, but you can define it based on your needs.
-            pass
+    #    def forward(self, *args, **kwargs):
+    #        # This method might not be used directly, but you can define it based on your needs.
+    #        pass
 
-    composite = CompositeModel(cfg.inference_lm, cfg.predictor_lm)
-    composite = FullyShardedDataParallel(
-        composite, 
-        auto_wrap_policy=transformer_auto_wrapper_policy,
-        sharding_strategy=fsdp.ShardingStrategy.FULL_SHARD,
-        mixed_precision = MixedPrecision(
-            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
-        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-        ignored_modules=[cfg.inference_lm],
-        use_orig_params=True
-    )
-    cfg.inference_lm = composite.inference_lm
-    cfg.predictor_lm = composite.predictor_lm 
+    ##composite = CompositeModel(cfg.inference_lm, cfg.predictor_lm)
+    #cfg.inference_lm = FullyShardedDataParallel(
+    #    cfg.inference_lm, 
+    #    #auto_wrap_policy=transformer_auto_wrapper_policy,
+    #    sharding_strategy=fsdp.ShardingStrategy.NO_SHARD,
+    #    mixed_precision = MixedPrecision(
+    #        param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
+    #    backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+    #    #ignored_modules=[cfg.inference_lm],
+    #    use_orig_params=True
+    #)
+    #cfg.predictor_lm = FullyShardedDataParallel(
+    #    cfg.predictor_lm, 
+    #    auto_wrap_policy=transformer_auto_wrapper_policy,
+    #    sharding_strategy=fsdp.ShardingStrategy.FULL_SHARD,
+    #    mixed_precision = MixedPrecision(
+    #        param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
+    #    #backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+    #    #ignored_modules=[cfg.inference_lm],
+    #    use_orig_params=True
+    #)
+    #cfg.inference_lm = composite.inference_lm
+    #cfg.predictor_lm = composite.predictor_lm 
     print(cfg.predictor_lm)
     if cfg.optimizer == "sgd":
         cfg.optimizer = torch.optim.SGD(cfg.predictor_lm.parameters(), lr=cfg.lr)#, momentum=0.01)
