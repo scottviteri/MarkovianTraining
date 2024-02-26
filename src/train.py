@@ -142,13 +142,13 @@ def update_weights(cfg, batch_index, prev_action, prev_obs, action, obs):
     update_every, fraction_to_update = cfg.inference_cfg.update_every, cfg.inference_cfg.fraction_to_update
     if update_every is not None and batch_index % update_every == 0:
         with torch.no_grad():
-            #with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=False, recurse=False):
+            with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=True, recurse=True):
             #    with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=False, recurse=False):
-            print("Updating Inference Model")
-            for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
-                a = (1 - fraction_to_update) * param_inference.data
-                b =  fraction_to_update * param_prediction.data.reshape(a.shape)
-                param_inference.data.copy_(a + b)
+                print("Updating Inference Model")
+                for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
+                    a = (1 - fraction_to_update) * param_inference.data
+                    b =  fraction_to_update * param_prediction.data.reshape(a.shape)
+                    param_inference.data.copy_(a + b)
 
     cfg.optimizer.zero_grad()
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
@@ -312,16 +312,16 @@ def train_model(init_cfg):
     #    #ignored_modules=[cfg.inference_lm],
     #    use_orig_params=True
     #)
-    #cfg.predictor_lm = FullyShardedDataParallel(
-    #    cfg.predictor_lm, 
-    #    auto_wrap_policy=transformer_auto_wrapper_policy,
-    #    sharding_strategy=fsdp.ShardingStrategy.FULL_SHARD,
-    #    mixed_precision = MixedPrecision(
-    #        param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
-    #    #backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-    #    #ignored_modules=[cfg.inference_lm],
-    #    use_orig_params=True
-    #)
+    cfg.predictor_lm = FullyShardedDataParallel(
+        cfg.predictor_lm, 
+        auto_wrap_policy=transformer_auto_wrapper_policy,
+        sharding_strategy=fsdp.ShardingStrategy.FULL_SHARD,
+        mixed_precision = MixedPrecision(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
+        #backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
+        #ignored_modules=[cfg.inference_lm],
+        use_orig_params=True
+    )
     #cfg.inference_lm = composite.inference_lm
     #cfg.predictor_lm = composite.predictor_lm 
     print(cfg.predictor_lm)
