@@ -14,12 +14,15 @@ import torch.nn as nn
 from src.training_types import *
 from src.prepare_dataset import prepare_dataset
 
-def load_cfg_from_file(file_location : str) -> InitialConfig:
+def load_cfg_from_file(file_location: str) -> InitialConfig:
     with open(file_location) as f:
         cfg_dict = json.load(f)["parameters"]
-    cfg_dict["training_type"] = eval(cfg_dict["training_type"][0])(**cfg_dict["training_type"][1])
+    cfg_dict["training_type"] = eval(cfg_dict["training_type"][0])(
+        **cfg_dict["training_type"][1]
+    )
     cfg_dict["dataset"] = eval(cfg_dict["dataset"][0])(**cfg_dict["dataset"][1])
     return InitialConfig(**cfg_dict)
+
 
 def extend_initial_config(init_cfg: InitialConfig) -> Config:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -27,32 +30,50 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 
-    predictor_lm, causal_lm_tokenizer, ctxt_size =  get_model(
-        device, init_cfg.load_model, init_cfg.model_name, 
-        path_2_tokenizer, path_2_model, init_cfg.do_lora
-    ) 
+    predictor_lm, causal_lm_tokenizer, ctxt_size = get_model(
+        device,
+        init_cfg.load_model,
+        init_cfg.model_name,
+        path_2_tokenizer,
+        path_2_model,
+        init_cfg.do_lora,
+    )
 
     inference_lm = copy.deepcopy(predictor_lm)
     for param in inference_lm.parameters():
         param.requires_grad = False
 
-    training_ctxt_size = ctxt_size if init_cfg.training_ctxt_size is None else init_cfg.training_ctxt_size 
+    training_ctxt_size = (
+        ctxt_size
+        if init_cfg.training_ctxt_size is None
+        else init_cfg.training_ctxt_size
+    )
     tok_p_action = int(training_ctxt_size / (init_cfg.obs_to_action_ratio + 2))
     tok_p_obs = int(tok_p_action * init_cfg.obs_to_action_ratio)
     tok_p_loss = None
 
     tok_per_pure, prefix_tensors = get_prefixes(
-        causal_lm_tokenizer, init_cfg.batch_size, device, 
-        tok_p_loss, tok_p_action, tok_p_obs
+        causal_lm_tokenizer,
+        init_cfg.batch_size,
+        device,
+        tok_p_loss,
+        tok_p_action,
+        tok_p_obs,
     )
     tok_p_pure_loss, tok_p_pure_action, tok_p_pure_obs = tok_per_pure
     loss_prefix, action_prefix, obs_prefix = prefix_tensors
 
     dataset = prepare_dataset(
-            init_cfg, causal_lm_tokenizer, device, 
-            action_prefix, obs_prefix,
-            tok_p_pure_action, tok_p_pure_obs, action_prefix, obs_prefix 
-        )
+        init_cfg,
+        causal_lm_tokenizer,
+        device,
+        action_prefix,
+        obs_prefix,
+        tok_p_pure_action,
+        tok_p_pure_obs,
+        action_prefix,
+        obs_prefix,
+    )
 
     return Config(
         model_name=init_cfg.model_name,
@@ -61,40 +82,43 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         batch_size=init_cfg.batch_size,
         num_batches=init_cfg.num_batches,
         obs_to_action_ratio=init_cfg.obs_to_action_ratio,
-        interval_save_weights = init_cfg.interval_save_weights,
-        interval_print = init_cfg.interval_print, 
-        wandb = init_cfg.wandb,
-        load_model = init_cfg.load_model,
-        do_lora = init_cfg.do_lora,
-        num_beams = init_cfg.num_beams,
-        training_ctxt_size = init_cfg.training_ctxt_size,
-        device = device,
-        dataset = DatasetType(
+        interval_save_weights=init_cfg.interval_save_weights,
+        interval_print=init_cfg.interval_print,
+        wandb=init_cfg.wandb,
+        load_model=init_cfg.load_model,
+        do_lora=init_cfg.do_lora,
+        num_beams=init_cfg.num_beams,
+        training_ctxt_size=init_cfg.training_ctxt_size,
+        device=device,
+        dataset=DatasetType(
             task=init_cfg.dataset.task,
-            peek_every=init_cfg.dataset.peek_every, 
-            dataloader=dataset
+            peek_every=init_cfg.dataset.peek_every,
+            dataloader=dataset,
         ),
-        path_2_log = path_2_log,
-        path_2_model = path_2_model,
-        path_2_tokenizer = path_2_tokenizer,
-        tok_p_action = tok_p_action,
-        tok_p_obs = tok_p_obs,
-        tok_p_pure_action = tok_p_pure_action,
-        tok_p_pure_obs = tok_p_pure_obs,
+        path_2_log=path_2_log,
+        path_2_model=path_2_model,
+        path_2_tokenizer=path_2_tokenizer,
+        tok_p_action=tok_p_action,
+        tok_p_obs=tok_p_obs,
+        tok_p_pure_action=tok_p_pure_action,
+        tok_p_pure_obs=tok_p_pure_obs,
         action_prefix_tensor=action_prefix,
         obs_prefix_tensor=obs_prefix,
-        ctxt_size = ctxt_size,
-        predictor_lm = predictor_lm,
+        ctxt_size=ctxt_size,
+        predictor_lm=predictor_lm,
         inference_lm=inference_lm,
-        causal_lm_tokenizer = causal_lm_tokenizer,
-        inference_cfg = init_cfg.inference_cfg,
-        prediction_cfg = init_cfg.prediction_cfg,
-        debug = init_cfg.debug
+        causal_lm_tokenizer=causal_lm_tokenizer,
+        inference_cfg=init_cfg.inference_cfg,
+        prediction_cfg=init_cfg.prediction_cfg,
+        perturbation_cfg=init_cfg.perturbation_cfg,
+        debug=init_cfg.debug,
     )
 
 
 def multi_print(string, f):
-    print(string); print(string, file=f)
+    print(string)
+    print(string, file=f)
+
 
 def log_and_print_info(
     cfg,
@@ -113,10 +137,22 @@ def log_and_print_info(
             multi_print(f"Loss: {batch_loss[0][0]:.3f}", f)
             if aggregate_losses:
                 multi_print(f"Aggregate Loss: {aggregate_losses[-1]}", f)
-            multi_print(f"Previous Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(prev_obs)[0])}", f)
-            multi_print(f"StepByStep: {repr(cfg.causal_lm_tokenizer.batch_decode(action)[0])}", f)
-            multi_print(f"Predicted Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(predicted_obs)[0])}", f)
-            multi_print(f"True Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(true_obs)[0])}", f)
+            multi_print(
+                f"Previous Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(prev_obs)[0])}",
+                f,
+            )
+            multi_print(
+                f"StepByStep: {repr(cfg.causal_lm_tokenizer.batch_decode(action)[0])}",
+                f,
+            )
+            multi_print(
+                f"Predicted Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(predicted_obs)[0])}",
+                f,
+            )
+            multi_print(
+                f"True Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(true_obs)[0])}",
+                f,
+            )
             multi_print("___________________________________________", f)
         if cfg.wandb:
             wandb.log(
@@ -128,9 +164,13 @@ def log_and_print_info(
 
 
 def get_prefixes(
-    tokenizer:PreTrainedTokenizer, batch_size:int, device:torch.device, 
-    tok_p_loss: Optional[int], tok_p_action: Optional[int], tok_p_obs: Optional[int]):
-
+    tokenizer: PreTrainedTokenizer,
+    batch_size: int,
+    device: torch.device,
+    tok_p_loss: Optional[int],
+    tok_p_action: Optional[int],
+    tok_p_obs: Optional[int],
+):
     if tok_p_obs:
         observation_prefix = "\nObservation: "
         observation_prefix_tokens = tokenizer.encode(
@@ -148,9 +188,7 @@ def get_prefixes(
 
     if tok_p_action:
         action_prefix = "\nStepByStep: "
-        action_prefix_tokens = tokenizer.encode(
-            action_prefix, add_special_tokens=False
-        )
+        action_prefix_tokens = tokenizer.encode(action_prefix, add_special_tokens=False)
         action_prefix_tensor = einops.repeat(
             torch.tensor(action_prefix_tokens),
             "tokens -> batch tokens",
@@ -163,9 +201,7 @@ def get_prefixes(
 
     if tok_p_loss:
         reward_prefix = "\nLoss: "
-        reward_prefix_tokens = tokenizer.encode(
-            reward_prefix, add_special_tokens=False
-        )
+        reward_prefix_tokens = tokenizer.encode(reward_prefix, add_special_tokens=False)
         reward_prefix_tensor = einops.repeat(
             torch.tensor(reward_prefix_tokens),
             "tokens -> batch tokens",
@@ -176,8 +212,11 @@ def get_prefixes(
         reward_prefix_tensor = None
         tokens_per_pure_reward = None
 
-    return ((tokens_per_pure_reward, tokens_per_pure_action, tokens_per_pure_observation), 
-    (reward_prefix_tensor, action_prefix_tensor, observation_prefix_tensor))
+    return (
+        (tokens_per_pure_reward, tokens_per_pure_action, tokens_per_pure_observation),
+        (reward_prefix_tensor, action_prefix_tensor, observation_prefix_tensor),
+    )
+
 
 def get_ctxt_size(model_name, causal_lm):
     if model_name == "mistral":
@@ -197,12 +236,16 @@ def get_ctxt_size(model_name, causal_lm):
     else:
         ctxt_size = causal_lm.config.n_positions
 
+
 def get_padding_side(model_name):
     if model_name in ["llama"]:
         return "right"
     return "left"
 
-def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do_lora=None):
+
+def get_model(
+    device, load_model, model_name, path_2_tokenizer, path_2_model, do_lora=None
+):
     """Load model"""
     model_dict = {
         "tinystories": "roneneldan/TinyStories-1M",
@@ -214,7 +257,7 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
         "gpt2-medium": "gpt2-medium",
         "gpt2-large": "gpt2-large",
         "gpt2-xl": "gpt2-xl",
-        "phi2" : "microsoft/phi-2"
+        "phi2": "microsoft/phi-2"
         # Add other models here
     }
     with device:
@@ -227,7 +270,7 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
         else:
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 model_dict[model_name],
-                use_flash_attention_2=model_name in ["llama", "mistral"]
+                use_flash_attention_2=model_name in ["llama", "mistral"],
             )
         causal_lm.bfloat16()
         causal_lm_tokenizer = AutoTokenizer.from_pretrained(
@@ -239,14 +282,16 @@ def get_model(device, load_model, model_name, path_2_tokenizer, path_2_model, do
         ctxt_size = get_ctxt_size(model_name, causal_lm)
 
     if do_lora:
-        #linear_layers = get_linear_layers(causal_lm)
+        # linear_layers = get_linear_layers(causal_lm)
         peft_config = LoraConfig(
-            task_type="CAUSAL_LM", 
-            inference_mode=False, 
-            r=64, lora_alpha=128, lora_dropout=0.1
+            task_type="CAUSAL_LM",
+            inference_mode=False,
+            r=64,
+            lora_alpha=128,
+            lora_dropout=0.1
             # target_modules=linear_layers
-            )
-        #print("Num Linear Layers: ", len(linear_layers))
+        )
+        # print("Num Linear Layers: ", len(linear_layers))
         causal_lm = get_peft_model(causal_lm, peft_config)
         causal_lm.print_trainable_parameters()
 
@@ -266,14 +311,17 @@ def get_linear_layers(model):
         )
     )
 
-def create_run_name(cfg : Config) -> str:
+
+def create_run_name(cfg: Config) -> str:
     prediction_cfg = cfg.prediction_cfg
     inference_cfg = cfg.inference_cfg
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
     run_name += f"{cfg.optimizer[:3]}_"
     if isinstance(cfg.dataset.task, ArithmeticTask):
-        run_name += f"ari_nt={cfg.dataset.task.num_terms}_nd={cfg.dataset.task.num_digits}_"
+        run_name += (
+            f"ari_nt={cfg.dataset.task.num_terms}_nd={cfg.dataset.task.num_digits}_"
+        )
         if cfg.dataset.task.cumulative:
             run_name += "cm_"
     else:
@@ -281,8 +329,9 @@ def create_run_name(cfg : Config) -> str:
     if cfg.inference_cfg.update_every is not None:
         assert cfg.inference_cfg.fraction_to_update is not None
         run_name += f"ue{cfg.inference_cfg.update_every}_upd{cfg.inference_cfg.fraction_to_update:.3f}_"
-    if cfg.lr != 1e-4: run_name += f"lr{cfg.lr}_"
-    if prediction_cfg.train_O_given_prev_O: 
+    if cfg.lr != 1e-4:
+        run_name += f"lr{cfg.lr}_"
+    if prediction_cfg.train_O_given_prev_O:
         run_name += f"AR_"
     if prediction_cfg.train_O_given_A:
         run_name += f"M_"
@@ -291,22 +340,26 @@ def create_run_name(cfg : Config) -> str:
     if cfg.dataset.peek_every is not None:
         run_name += f"pe{cfg.dataset.peek_every}_"
 
-    if isinstance(cfg.debug, RepeatNPoints): 
+    if isinstance(cfg.debug, RepeatNPoints):
         run_name += f"r{cfg.debug.num_points}_"
-    elif isinstance(cfg.debug, RepeatPointNTimes): 
+    elif isinstance(cfg.debug, RepeatPointNTimes):
         run_name += f"re{cfg.debug.num_times}_"
-    elif isinstance(cfg.debug, ReplaceWithRandomTokens): 
+    elif isinstance(cfg.debug, ReplaceWithRandomTokens):
         run_name += "rd_"
-    elif isinstance(cfg.debug, NoWeightUpdates): 
+    elif isinstance(cfg.debug, NoWeightUpdates):
         run_name += "nwu_"
 
-    if cfg.batch_size != 1: run_name += f"bs{cfg.batch_size}_"
+    if cfg.batch_size != 1:
+        run_name += f"bs{cfg.batch_size}_"
     run_name += f"nb{cfg.num_batches}_"
     if cfg.obs_to_action_ratio != 1:
         run_name += f"o:a={cfg.obs_to_action_ratio}:1_"
-    if cfg.load_model: run_name += f"load_"
-    if cfg.do_lora: run_name += "lra_"
-    if cfg.num_beams: run_name += f"nbe{cfg.num_beams}_"
-    if cfg.training_ctxt_size: run_name += f"ics{cfg.training_ctxt_size}_"
-    return run_name 
-
+    if cfg.load_model:
+        run_name += f"load_"
+    if cfg.do_lora:
+        run_name += "lra_"
+    if cfg.num_beams:
+        run_name += f"nbe{cfg.num_beams}_"
+    if cfg.training_ctxt_size:
+        run_name += f"ics{cfg.training_ctxt_size}_"
+    return run_name

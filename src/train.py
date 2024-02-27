@@ -43,56 +43,81 @@ def save_weights(cfg, batch_index):
         cfg.predictor_lm.save_pretrained(cfg.path_2_model)
 
 def default_action(cfg):
-    initial_helpful_msg = cfg.causal_lm_tokenizer("Use StepByStep spaces to help predict your next observation.",
-                                          return_tensors="pt")["input_ids"].repeat(cfg.batch_size, 1).to(cfg.device)
+    initial_helpful_msg = (
+        cfg.causal_lm_tokenizer(
+            "Use StepByStep spaces to help predict your next observation.",
+            return_tensors="pt",
+        )["input_ids"]
+        .repeat(cfg.batch_size, 1)
+        .to(cfg.device)
+    )
     assert initial_helpful_msg.shape[-1] < cfg.tok_p_pure_obs
     prev_action = torch.cat(
         (
             cfg.action_prefix_tensor,
-            initial_helpful_msg, 
+            initial_helpful_msg,
             torch.full(
                 (cfg.batch_size, cfg.tok_p_pure_action - initial_helpful_msg.shape[-1]),
                 fill_value=cfg.causal_lm_tokenizer.pad_token_id,
                 dtype=torch.int64,
                 device=cfg.device,
-            )
+            ),
         ),
         dim=1,
     )
     return prev_action
 
+
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
-    prev_action_loss, prev_observation_loss, action_loss, observation_loss = losses
+    (
+        prev_action_loss,
+        prev_observation_loss,
+        action_loss,
+        observation_loss,
+        perturbed_loss,
+    ) = losses
     if cfg.wandb and dist.get_rank() == 0:
         wandb.log(
             {
                 "Batch Index": batch_index,
                 "Aggregate Loss": aggregate_loss,
+                "Perturbed Loss": perturbed_loss,
                 "Previous Action Loss": prev_action_loss,
                 "Previous Observation Loss": prev_observation_loss,
                 "Action Loss": action_loss,
-                "Observation Loss": observation_loss
+                "Observation Loss": observation_loss,
             }
         )
 
+
 def log_print_losses(cfg, batch_index, aggregate_loss, losses):
-    prev_action_loss, prev_observation_loss, action_loss, obs_loss = losses
+    (
+        prev_action_loss,
+        prev_observation_loss,
+        action_loss,
+        observation_loss,
+        perturbed_loss,
+    ) = losses
     if batch_index % cfg.interval_print == 0 and dist.get_rank() == 0:
         with open(cfg.path_2_log, "a") as f:
             multi_print(f"Aggregate loss: {aggregate_loss}", f)
             multi_print(
-                f"PrevAction/PrevObservation/Action/Obs loss: {prev_action_loss}/{prev_observation_loss}/{action_loss}/{obs_loss}",
+                f"PrevAction/PrevObservation/Action/Obs/Pert loss: {prev_action_loss:0.4f}/{prev_observation_loss:0.4f}/{action_loss:0.4f}/{observation_loss:0.4f}/{perturbed_loss}",
                 f,
             )
             multi_print("______________________________________________________", f)
 
-def log_print_oa(cfg, batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first):
+
+def log_print_oa(
+    cfg, batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first
+):
     if batch_index % cfg.interval_print == 0 and dist.get_rank() == 0:
         with open(cfg.path_2_log, "a") as f:
             multi_print(f"Batch Index: {batch_index}", f)
             multi_print(f"Is First: {is_first}", f)
             multi_print(
-                f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0]))}", f
+                f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0]))}",
+                f,
             )
             multi_print(
                 f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
@@ -113,12 +138,11 @@ def log_print_oa(cfg, batch_index, prev_action, prev_obs, action, obs, is_guidan
                 f"Observation: {repr(cfg.causal_lm_tokenizer.decode(obs[0]))}", f
             )
 
+
 def sample(cfg, prev_action, prev_obs, observation):
     inference_cfg = cfg.inference_cfg
     # currently not using filter_best_action parameters
     cfg.inference_lm.eval()
-    ctxt_manager = torch.inference_mode()
-    #ctxt_manager = torch.no_grad()
     with torch.inference_mode():
         with autocast(cache_enabled=True, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
             input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
@@ -160,11 +184,17 @@ def compute_loss_tensor(cfg, input_sequence):
     )
     return loss_tensor  
 
-def update_weights(cfg, batch_index, prev_action, prev_obs, action, obs):
+
+def update_weights(
+    cfg, batch_index, prev_action, prev_obs, action, obs, do_weight_update=True
+):
     prediction_cfg = cfg.prediction_cfg
 
     # Check if it's time to update cfg.inference_lm weights
-    update_every, fraction_to_update = cfg.inference_cfg.update_every, cfg.inference_cfg.fraction_to_update
+    update_every, fraction_to_update = (
+        cfg.inference_cfg.update_every,
+        cfg.inference_cfg.fraction_to_update,
+    )
     if update_every is not None and batch_index % update_every == 0:
         with torch.no_grad():
             if dist.get_rank() == 0: print("Updating Inference Model\n")
@@ -215,23 +245,83 @@ def update_weights(cfg, batch_index, prev_action, prev_obs, action, obs):
                                  zip([prediction_cfg.train_A_given_AO, prediction_cfg.train_O_given_A],
                                         [action_loss, obs_loss])))
 
-    if not isinstance(cfg.debug, NoWeightUpdates):
+    if do_weight_update:
         aggregate_loss.backward()
         cfg.optimizer.step()
-    
-    if prediction_cfg.train_O_given_prev_O: return aggregate_loss, None, None
-    loss_tensors = prev_action_tensor, prev_observation_tensor, action_tensor, obs_tensor
-    losses = prev_action_loss, prev_observation_loss, action_loss, obs_loss
+
+    if prediction_cfg.train_O_given_prev_O:
+        return aggregate_loss, None, None
+    loss_tensors = (
+        prev_action_tensor,
+        prev_observation_tensor,
+        action_tensor,
+        obs_tensor,
+    )
+    losses = [prev_action_loss, prev_observation_loss, action_loss, obs_loss]
     return aggregate_loss, loss_tensors, losses
 
-def log_and_save(cfg, batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first, aggregate_loss, losses):
+
+def log_and_save(
+    cfg,
+    batch_index,
+    prev_action,
+    prev_obs,
+    action,
+    obs,
+    is_guidance_action,
+    is_first,
+    aggregate_loss,
+    losses,
+):
     save_weights(cfg, batch_index)
-    log_print_oa(cfg, batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first)
-    if cfg.prediction_cfg.train_O_given_prev_O: 
-        if cfg.wandb and dist.get_rank() == 0: wandb.log({"Batch Index": batch_index, "Observation Loss": aggregate_loss})
+    log_print_oa(
+        cfg,
+        batch_index,
+        prev_action,
+        prev_obs,
+        action,
+        obs,
+        is_guidance_action,
+        is_first,
+    )
+    if cfg.prediction_cfg.train_O_given_prev_O:
+        if cfg.wandb and dist.get_rank() == 0:
+            wandb.log({"Batch Index": batch_index, "Observation Loss": aggregate_loss})
     else:
         log_wandb(cfg, batch_index, aggregate_loss, losses)
         log_print_losses(cfg, batch_index, aggregate_loss, losses)
+
+
+def perturb_action(action, cfg):
+    """"""
+
+    offset = cfg.action_prefix_tensor.shape[-1]
+    # PERTURBATION 1
+    # Given n <= cfg.tok_p_pure_action, change token through randomization
+    frac_randomize = cfg.perturbation_cfg.frac_of_tokens_to_randomize
+    assert 1.0 >= frac_randomize >= 0.0, f"frac_randomize is {frac_randomize}"
+    perturb_target_inds = torch.randint(
+        low=offset,
+        high=action.shape[-1],
+        size=[int(frac_randomize * (action.shape[-1] - offset))],
+    )
+    action[:, perturb_target_inds] = torch.randint(
+        low=0,
+        high=cfg.causal_lm_tokenizer.vocab_size,
+        size=[int(frac_randomize * (action.shape[-1] - offset))],
+    )
+
+    # PERTURBATION 2
+    # Given a fraction of cfg.tok_p_pure_action, replace with spaces/padding
+    frac_spaces = cfg.perturbation_cfg.frac_of_tokens_to_pad
+    assert 1.0 >= frac_spaces >= 0.0, f"frac_randomize is {frac_spaces}"
+    token_id_space = cfg.causal_lm_tokenizer.encode(" ")[-1]
+    action[
+        :, offset + int((1.0 - frac_spaces) * (action.shape[-1] - offset)) :
+    ] = token_id_space
+
+    return action
+
 
 def trainer(cfg):
     state = [default_action(cfg), 0, None]
@@ -242,35 +332,86 @@ def trainer(cfg):
         is_first = "First" in datapt and datapt["First"]
         prev_action, batch_index, _ = state
         prev_obs, obs = prev_datapt["Observation"], datapt["Observation"]
-        if is_first: 
+        if is_first:
             prev_action = default_action(cfg)
-            log_print_oa(cfg, batch_index, prev_action, prev_obs, None, obs, "Action" in datapt, is_first)
+            log_print_oa(
+                cfg,
+                batch_index,
+                prev_action,
+                prev_obs,
+                None,
+                obs,
+                "Action" in datapt,
+                is_first,
+            )
             state = [prev_action, batch_index + 1, None]
             return
         # now can assume that prev_datapt contains the question and datapt contains the Answer
-        if "Action" in datapt: 
+        if "Action" in datapt:
             action = datapt["Action"]
-        elif cfg.prediction_cfg.train_O_given_prev_O: 
+        elif cfg.prediction_cfg.train_O_given_prev_O:
             action = prev_action
         else:
-            action = sample(cfg, prev_action, prev_obs, obs) 
-        aggregate_loss, loss_tensors, losses = update_weights(cfg, batch_index, prev_action, prev_obs, action, obs)
-        log_and_save(cfg, batch_index, prev_action, prev_obs, action, obs, "Action" in datapt, is_first, aggregate_loss, losses)
+            action = sample(cfg, prev_action, prev_obs, obs)
+
+        aggregate_loss, loss_tensors, losses = update_weights(
+            cfg,
+            batch_index,
+            prev_action,
+            prev_obs,
+            action,
+            obs,
+            do_weight_update=isinstance(cfg.debug, NoWeightUpdates),
+        )
+
+        if (
+            cfg.perturbation_cfg is not None
+            and batch_index % cfg.perturbation_cfg.eval_every == 0
+        ):
+            perturbed_action = perturb_action(action, cfg)
+            aggregate_loss0, loss_tensors0, losses0 = update_weights(
+                cfg,
+                batch_index,
+                prev_action,
+                prev_obs,
+                perturbed_action,
+                obs,
+                do_weight_update=False,
+            )
+            perturbed_loss = losses0[-1]
+        else:
+            perturbed_loss = None
+        losses.append(perturbed_loss)
+
+        log_and_save(
+            cfg,
+            batch_index,
+            prev_action,
+            prev_obs,
+            action,
+            obs,
+            "Action" in datapt,
+            is_first,
+            aggregate_loss,
+            losses,
+        )
         state = [action, batch_index + 1, aggregate_loss]
         return
 
-    def pi(): 
+    def pi():
         nonlocal state
         return state[-1]
-    
+
     return update, pi
+
 
 def train_via_update(cfg):
     aggregate_losses = []
     update, pi = trainer(cfg)
     for datapt_pair in tqdm(cfg.dataset.dataloader, total=cfg.num_batches):
         aggregate_loss = pi()
-        if aggregate_loss is not None: aggregate_losses.append(aggregate_loss)
+        if aggregate_loss is not None:
+            aggregate_losses.append(aggregate_loss)
         update(datapt_pair)
     return aggregate_losses
 
@@ -282,10 +423,11 @@ def train_model(init_cfg):
             print("")
     with open(cfg.path_2_log, "a") as f:
         f.write("")
-    if cfg.wandb and dist.get_rank() == 0: 
+    if cfg.wandb and dist.get_rank() == 0:
         wandb.init(
-            project="collaborative-training-many-per-context-window", 
-            name=create_run_name(cfg))
+            project="collaborative-training-many-per-context-window",
+            name=create_run_name(cfg),
+        )
     if cfg.model_name == "gptj":
         block_name = GPTJBlock
     elif cfg.model_name == "mistral":
@@ -298,7 +440,9 @@ def train_model(init_cfg):
         assert "Unsupported model name for fdsp wrap policy"
     transformer_auto_wrapper_policy = functools.partial(
         transformer_auto_wrap_policy,
-        transformer_layer_cls={ block_name, },
+        transformer_layer_cls={
+            block_name,
+        },
     )
     cfg.predictor_lm = FullyShardedDataParallel(
         cfg.predictor_lm, 
@@ -312,15 +456,21 @@ def train_model(init_cfg):
 
     print(cfg.predictor_lm)
     if cfg.optimizer == "sgd":
-        cfg.optimizer = torch.optim.SGD(cfg.predictor_lm.parameters(), lr=cfg.lr)#, momentum=0.01)
+        cfg.optimizer = torch.optim.SGD(
+            cfg.predictor_lm.parameters(), lr=cfg.lr
+        )  # , momentum=0.01)
     elif cfg.optimizer == "adam":
         cfg.optimizer = torch.optim.Adam(cfg.predictor_lm.parameters(), lr=cfg.lr)
     elif cfg.optimizer == "rmsprop":
         cfg.optimizer = torch.optim.RMSprop(cfg.predictor_lm.parameters(), lr=cfg.lr)
     else:
-        raise ValueError(f"Unsupported optimizer: {cfg.optimizer}. Please choose 'sgd', 'adam', or 'rmsprop'.")
+        raise ValueError(
+            f"Unsupported optimizer: {cfg.optimizer}. Please choose 'sgd', 'adam', or 'rmsprop'."
+        )
     train_via_update(cfg)
-    if cfg.wandb and dist.get_rank() == 0: wandb.finish()
+    if cfg.wandb and dist.get_rank() == 0:
+        wandb.finish()
+
 
 if __name__ == "__main__":
     dist.init_process_group(backend="nccl")
