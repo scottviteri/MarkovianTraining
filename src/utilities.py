@@ -33,6 +33,8 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     ) 
 
     inference_lm = copy.deepcopy(predictor_lm)
+    for param in inference_lm.parameters():
+        param.requires_grad = False
 
     training_ctxt_size = ctxt_size if init_cfg.training_ctxt_size is None else init_cfg.training_ctxt_size 
     tok_p_action = int(training_ctxt_size / (init_cfg.obs_to_action_ratio + 2))

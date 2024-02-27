@@ -117,23 +117,48 @@ def sample(cfg, prev_action, prev_obs, observation):
     inference_cfg = cfg.inference_cfg
     # currently not using filter_best_action parameters
     cfg.inference_lm.eval()
-    with torch.no_grad():
-        input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
-        attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-        #with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=False, recurse=False):
-        action_candidates = cfg.inference_lm.generate(
-                inputs=input_sequence,
-                attention_mask=attention_mask,
-                num_beams=cfg.num_beams,
-                bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
-                output_scores=True,
-                do_sample=True,
-                temperature=1.0,
-                min_new_tokens=cfg.tok_p_pure_action,
-                max_new_tokens=cfg.tok_p_pure_action,
-                pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
-            )[:, -cfg.tok_p_action :]
-        return action_candidates
+    ctxt_manager = torch.inference_mode()
+    #ctxt_manager = torch.no_grad()
+    with torch.inference_mode():
+        with autocast(cache_enabled=True, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
+            input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
+            attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+            action_candidates = cfg.inference_lm.generate(
+                    inputs=input_sequence,
+                    attention_mask=attention_mask,
+                    num_beams=cfg.num_beams,
+                    bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
+                    output_scores=True,
+                    do_sample=True,
+                    temperature=1.0,
+                    min_new_tokens=cfg.tok_p_pure_action,
+                    max_new_tokens=cfg.tok_p_pure_action,
+                    pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+                )[:, -cfg.tok_p_action :]
+            return action_candidates
+
+def compute_loss_tensor(cfg, input_sequence):
+    """
+    Computes the loss tensor for a given input sequence.
+    
+    Args:
+        cfg: Configuration object containing model and tokenizer information.
+        input_sequence: The input sequence tensor for which the loss is to be computed.
+    
+    Returns:
+        The computed loss tensor.
+    """
+    attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+    logits = cfg.predictor_lm(input_sequence, attention_mask=attention_mask, use_cache=False).logits[:, :-1, :]
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    loss_tensor = loss_fn(
+        input=einops.rearrange(
+            logits,
+            "batch seq_length vocab_size -> batch vocab_size seq_length",
+        ),
+        target=input_sequence[:, 1:]
+    )
+    return loss_tensor  
 
 def update_weights(cfg, batch_index, prev_action, prev_obs, action, obs):
     prediction_cfg = cfg.prediction_cfg
@@ -142,8 +167,8 @@ def update_weights(cfg, batch_index, prev_action, prev_obs, action, obs):
     update_every, fraction_to_update = cfg.inference_cfg.update_every, cfg.inference_cfg.fraction_to_update
     if update_every is not None and batch_index % update_every == 0:
         with torch.no_grad():
+            if dist.get_rank() == 0: print("Updating Inference Model\n")
             with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=True, recurse=True):
-                if dist.get_rank() == 0: print("Updating Inference Model\n")
                 for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
                     a = (1 - fraction_to_update) * param_inference.data
                     b =  fraction_to_update * param_prediction.data.reshape(a.shape)
@@ -152,57 +177,43 @@ def update_weights(cfg, batch_index, prev_action, prev_obs, action, obs):
     cfg.optimizer.zero_grad()
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     cfg.predictor_lm.train()
-    with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
-        if prediction_cfg.train_O_given_prev_O:
-            input_sequence = torch.cat([prev_obs, obs], dim=1)
-            attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-            logits = cfg.predictor_lm(input_sequence, attention_mask=attention_mask, use_cache=False).logits[:, :-1, :]
-            loss_tensor = loss_fn(
-                input=einops.rearrange(
-                    logits,
-                    "batch seq_length vocab_size -> batch vocab_size seq_length",
-                ),
-                target=input_sequence[:, 1:]
-            )
-            aggregate_loss = loss_tensor[:,-cfg.tok_p_pure_obs:].mean()
+    #with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
+    if prediction_cfg.train_O_given_prev_O:
+        loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_obs, obs], dim=1))
+        aggregate_loss = loss_tensor[:,-cfg.tok_p_pure_obs:].mean()
+    else:
+        if prediction_cfg.train_A_given_AO:
+            with torch.no_grad():
+                loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
         else:
-            input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
-            attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-            logits = cfg.predictor_lm(input_sequence, attention_mask=attention_mask, use_cache=False).logits[:, :-1, :]
-            loss_tensor = loss_fn(
-                input=einops.rearrange(
-                    logits,
-                    "batch seq_length vocab_size -> batch vocab_size seq_length",
-                ),
-                target=input_sequence[:, 1:]
-            )
+            loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
 
-            prev_action_tensor = loss_tensor[:, : cfg.tok_p_action]
-            prev_observation_tensor = loss_tensor[:, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
-            action_tensor = loss_tensor[:, -cfg.tok_p_pure_action :]
-            prev_action_loss = prev_action_tensor.mean()
-            prev_observation_loss = prev_observation_tensor.mean()
-            action_loss = action_tensor.mean()
+        prev_action_tensor = loss_tensor[:, : cfg.tok_p_action]
+        prev_observation_tensor = loss_tensor[:, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
+        action_tensor = loss_tensor[:, -cfg.tok_p_pure_action :]
+        prev_action_loss = prev_action_tensor.mean()
+        prev_observation_loss = prev_observation_tensor.mean()
+        action_loss = action_tensor.mean()
 
-            #with torch.no_grad():
-            mkv_input_sequence = torch.cat([action, obs], dim=1)
-            mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-            mkv_logits = cfg.predictor_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
-            mkv_loss_tensor = loss_fn(
-                input=einops.rearrange(
-                    mkv_logits,
-                    "batch seq_length vocab_size -> batch vocab_size seq_length",
-                ),
-                target=mkv_input_sequence[:, 1:]
-            )
-            obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
-            obs_loss = obs_tensor.sum() / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
+        #with torch.no_grad():
+        mkv_input_sequence = torch.cat([action, obs], dim=1)
+        mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+        mkv_logits = cfg.predictor_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
+        mkv_loss_tensor = loss_fn(
+            input=einops.rearrange(
+                mkv_logits,
+                "batch seq_length vocab_size -> batch vocab_size seq_length",
+            ),
+            target=mkv_input_sequence[:, 1:]
+        )
+        obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
+        obs_loss = obs_tensor.sum() / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
 
-            #aggregate_loss = obs_loss
-            #aggregate_loss =  action_loss*obs_loss
-            aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
-                                     zip([prediction_cfg.train_A_given_AO, prediction_cfg.train_O_given_A],
-                                            [action_loss, obs_loss])))
+        #aggregate_loss = obs_loss
+        #aggregate_loss =  action_loss*obs_loss
+        aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
+                                 zip([prediction_cfg.train_A_given_AO, prediction_cfg.train_O_given_A],
+                                        [action_loss, obs_loss])))
 
     if not isinstance(cfg.debug, NoWeightUpdates):
         aggregate_loss.backward()
@@ -289,40 +300,16 @@ def train_model(init_cfg):
         transformer_auto_wrap_policy,
         transformer_layer_cls={ block_name, },
     )
-
-    #class CompositeModel(nn.Module):
-    #    def __init__(self, inference_lm, predictor_lm):
-    #        super(CompositeModel, self).__init__()
-    #        self.inference_lm = inference_lm
-    #        self.predictor_lm = predictor_lm
-
-    #    def forward(self, *args, **kwargs):
-    #        # This method might not be used directly, but you can define it based on your needs.
-    #        pass
-
-    ##composite = CompositeModel(cfg.inference_lm, cfg.predictor_lm)
-    #cfg.inference_lm = FullyShardedDataParallel(
-    #    cfg.inference_lm, 
-    #    #auto_wrap_policy=transformer_auto_wrapper_policy,
-    #    sharding_strategy=fsdp.ShardingStrategy.NO_SHARD,
-    #    mixed_precision = MixedPrecision(
-    #        param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
-    #    backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-    #    #ignored_modules=[cfg.inference_lm],
-    #    use_orig_params=True
-    #)
     cfg.predictor_lm = FullyShardedDataParallel(
         cfg.predictor_lm, 
         auto_wrap_policy=transformer_auto_wrapper_policy,
         sharding_strategy=fsdp.ShardingStrategy.FULL_SHARD,
         mixed_precision = MixedPrecision(
             param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
-        #backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-        #ignored_modules=[cfg.inference_lm],
+        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
         use_orig_params=True
     )
-    #cfg.inference_lm = composite.inference_lm
-    #cfg.predictor_lm = composite.predictor_lm 
+
     print(cfg.predictor_lm)
     if cfg.optimizer == "sgd":
         cfg.optimizer = torch.optim.SGD(cfg.predictor_lm.parameters(), lr=cfg.lr)#, momentum=0.01)
