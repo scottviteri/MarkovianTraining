@@ -200,11 +200,8 @@ def update_weights(
             if dist.get_rank() == 0: print("Updating Inference Model\n")
             with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=True, recurse=True):
                 for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
-                    a = (1 - fraction_to_update) * param_inference.data
-                    b =  fraction_to_update * param_prediction.data.reshape(a.shape)
-                    param_inference.data.copy_(a + b)
+                    param_inference.data.mul_(1 - fraction_to_update).add_(param_prediction.data.reshape(param_inference.data.shape) * fraction_to_update)
 
-    cfg.optimizer.zero_grad()
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     cfg.predictor_lm.train()
     #with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
@@ -213,10 +210,10 @@ def update_weights(
         aggregate_loss = loss_tensor[:,-cfg.tok_p_pure_obs:].mean()
     else:
         if prediction_cfg.train_A_given_AO:
+            loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
+        else:
             with torch.no_grad():
                 loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
-        else:
-            loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
 
         prev_action_tensor = loss_tensor[:, : cfg.tok_p_action]
         prev_observation_tensor = loss_tensor[:, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
@@ -240,14 +237,16 @@ def update_weights(
         obs_loss = obs_tensor.sum() / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
 
         #aggregate_loss = obs_loss
-        #aggregate_loss =  action_loss*obs_loss
-        aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
-                                 zip([prediction_cfg.train_A_given_AO, prediction_cfg.train_O_given_A],
-                                        [action_loss, obs_loss])))
+        aggregate_loss =  action_loss*obs_loss#.detach()
+        #aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
+        #                         zip([prediction_cfg.train_A_given_AO, prediction_cfg.train_O_given_A],
+        #                                [action_loss, obs_loss])))
 
     if do_weight_update:
+        cfg.optimizer.zero_grad()
         aggregate_loss.backward()
         cfg.optimizer.step()
+        cfg.optimizer.zero_grad()
 
     if prediction_cfg.train_O_given_prev_O:
         return aggregate_loss, None, None
@@ -293,8 +292,6 @@ def log_and_save(
 
 
 def perturb_action(action, cfg):
-    """"""
-
     offset = cfg.action_prefix_tensor.shape[-1]
     # PERTURBATION 1
     # Given n <= cfg.tok_p_pure_action, change token through randomization
@@ -361,7 +358,7 @@ def trainer(cfg):
             prev_obs,
             action,
             obs,
-            do_weight_update=isinstance(cfg.debug, NoWeightUpdates),
+            do_weight_update=not isinstance(cfg.debug, NoWeightUpdates),
         )
 
         if (

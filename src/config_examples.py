@@ -2,34 +2,34 @@ from src.training_types import *
 import os
 
 g2 = InitialConfig(
-    model_name="gpt2",
-    lr=1e-4,
+    model_name="gpt2-medium",
+    lr=1e-7,
     optimizer="adam",
     batch_size=1,
     num_batches=1000,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
     interval_print=21,
-    wandb=False,
+    wandb=True,
     load_model=False,
     do_lora=False,
     num_beams=1,
     training_ctxt_size=200,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=3, num_digits=3, cumulative=True), peek_every=None
+        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), peek_every=None
     ),
     inference_cfg=InferenceConfig(
-        filter_best_actions=None, update_every=11, fraction_to_update=0.01
+        filter_best_actions=None, update_every=100, fraction_to_update=1.0
     ),
     prediction_cfg=PredictionConfig(
         train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
     ),
-    # perturbation_cfg=None,
-    perturbation_cfg=PerturbationConfig(
-        eval_every=10,
-        frac_of_tokens_to_randomize=0.5,
-        frac_of_tokens_to_pad=0.5,
-    ),
+     perturbation_cfg=None,
+    #perturbation_cfg=PerturbationConfig(
+    #    eval_every=10,
+    #    frac_of_tokens_to_randomize=0.5,
+    #    frac_of_tokens_to_pad=0.5,
+    #),
     debug=None,
 )
 
