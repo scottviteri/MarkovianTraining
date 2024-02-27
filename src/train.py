@@ -216,13 +216,6 @@ def update_weights(
             with torch.no_grad():
                 loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
 
-        prev_action_tensor = loss_tensor[:, : cfg.tok_p_action]
-        prev_observation_tensor = loss_tensor[:, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
-        action_tensor = loss_tensor[:, -cfg.tok_p_pure_action :]
-        prev_action_loss = prev_action_tensor.mean()
-        prev_observation_loss = prev_observation_tensor.mean()
-        action_loss = action_tensor.mean()
-
         #with torch.no_grad():
         mkv_input_sequence = torch.cat([action, obs], dim=1)
         mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
@@ -235,8 +228,20 @@ def update_weights(
             target=mkv_input_sequence[:, 1:]
         )
         obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
-        obs_loss = obs_tensor.sum() / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
+        obs_losses = obs_tensor / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
 
+        if cfg.prediction_cfg.filter_best_actions:
+            best_loss_indices = torch.topk(obs_losses, k=cfg.prediction_cfg.filter_best_actions, largest=False).indices
+        else:
+            best_loss_indices = torch.arange(obs_losses.size(0))
+
+        prev_action_tensor = loss_tensor[best_loss_indices, : cfg.tok_p_action]
+        prev_observation_tensor = loss_tensor[best_loss_indices, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
+        action_tensor = loss_tensor[best_loss_indices, -cfg.tok_p_pure_action :]
+        prev_action_loss = prev_action_tensor.mean()
+        prev_observation_loss = prev_observation_tensor.mean()
+        action_loss = action_tensor.mean()
+        obs_loss = obs_losses[best_loss_indices].sum()
         #aggregate_loss = obs_loss
         aggregate_loss =  action_loss*obs_loss#.detach()
         #aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 

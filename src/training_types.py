@@ -13,6 +13,7 @@ GptEval = NamedTuple("GptEval", [("num_evals", int), ("use_gptj", bool)])
 PredictionConfig = NamedTuple(
     "PredictionConfig",
     [
+        ("filter_best_actions", Optional[int]),
         ("train_A_given_AO", bool),
         ("train_O_given_A", bool),
         ("train_O_given_prev_O", bool),
@@ -21,7 +22,6 @@ PredictionConfig = NamedTuple(
 InferenceConfig = NamedTuple(
     "InferenceConfig",
     [
-        ("filter_best_actions", Optional[int]),
         ("update_every", Optional[int]),
         ("fraction_to_update", Optional[float]),
     ],

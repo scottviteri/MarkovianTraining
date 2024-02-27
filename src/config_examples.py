@@ -2,7 +2,7 @@ from src.training_types import *
 import os
 
 g2 = InitialConfig(
-    model_name="gpt2-medium",
+    model_name="gpt2",
     lr=1e-7,
     optimizer="adam",
     batch_size=1,
@@ -19,10 +19,10 @@ g2 = InitialConfig(
         task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), peek_every=None
     ),
     inference_cfg=InferenceConfig(
-        filter_best_actions=None, update_every=100, fraction_to_update=1.0
+        update_every=100, fraction_to_update=1.0
     ),
     prediction_cfg=PredictionConfig(
-        train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions = 2, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
     ),
      perturbation_cfg=None,
     #perturbation_cfg=PerturbationConfig(
@@ -52,10 +52,10 @@ g2_ar = InitialConfig(
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(
-        filter_best_actions=None, update_every=None, fraction_to_update=None
+        update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
-        train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
     ),
     perturbation_cfg=None,
     debug=None,
@@ -80,10 +80,10 @@ g2_ei = InitialConfig(
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(
-        filter_best_actions=None, update_every=None, fraction_to_update=None
+        update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
-        train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
     ),
     perturbation_cfg=None,
     debug=None,
@@ -108,10 +108,10 @@ g2_p2 = InitialConfig(
         task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), peek_every=2
     ),
     inference_cfg=InferenceConfig(
-        filter_best_actions=None, update_every=None, fraction_to_update=None
+        update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
-        train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
     ),
     perturbation_cfg=None,
     debug=None,
@@ -136,10 +136,10 @@ gj = InitialConfig(
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(
-        filter_best_actions=None, update_every=None, fraction_to_update=None
+        update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
-        train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
     ),
     perturbation_cfg=None,
     debug=None,
@@ -164,10 +164,10 @@ lma = InitialConfig(
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(
-        filter_best_actions=None, update_every=None, fraction_to_update=None
+        update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
-        train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+         filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
     ),
     perturbation_cfg=None,
     debug=None,
@@ -192,10 +192,10 @@ mst = InitialConfig(
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(
-        filter_best_actions=None, update_every=None, fraction_to_update=None
+        update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
-        train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=None, filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
     ),
     perturbation_cfg=None,
     debug=None,
