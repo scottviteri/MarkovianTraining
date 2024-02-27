@@ -86,7 +86,8 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                 "Previous Observation Loss": prev_observation_loss,
                 "Action Loss": action_loss,
                 "Observation Loss": observation_loss,
-            }
+            },
+            step = batch_index
         )
 
 
@@ -285,7 +286,7 @@ def log_and_save(
     )
     if cfg.prediction_cfg.train_O_given_prev_O:
         if cfg.wandb and dist.get_rank() == 0:
-            wandb.log({"Batch Index": batch_index, "Observation Loss": aggregate_loss})
+            wandb.log({"Batch Index": batch_index, "Observation Loss": aggregate_loss}, step=batch_index)
     else:
         log_wandb(cfg, batch_index, aggregate_loss, losses)
         log_print_losses(cfg, batch_index, aggregate_loss, losses)

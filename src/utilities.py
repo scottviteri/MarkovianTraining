@@ -154,13 +154,6 @@ def log_and_print_info(
                 f,
             )
             multi_print("___________________________________________", f)
-        if cfg.wandb:
-            wandb.log(
-                {
-                    "Batch Index": batch_index,
-                    "Batch Loss": batch_loss[0],
-                }
-            )
 
 
 def get_prefixes(
