@@ -214,13 +214,8 @@ def update_weights(
         loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_obs, obs], dim=1))
         aggregate_loss = loss_tensor[:,-cfg.tok_p_pure_obs:].mean()
     else:
-        if prediction_cfg.train_A_given_AO:
-            loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
-        else:
-            with torch.no_grad():
-                loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
+        loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
 
-        #with torch.no_grad():
         mkv_input_sequence = torch.cat([action, obs], dim=1)
         mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
         mkv_logits = cfg.predictor_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
