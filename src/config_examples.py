@@ -5,7 +5,7 @@ g2 = InitialConfig(
     model_name="gpt2",
     lr=1e-7,
     optimizer="adam",
-    batch_size=1,
+    batch_size=2,
     num_batches=1000,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
@@ -19,7 +19,7 @@ g2 = InitialConfig(
         task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), peek_every=None
     ),
     inference_cfg=InferenceConfig(
-        update_every=100, fraction_to_update=1.0
+        num_return_sequences=1, update_every=100, fraction_to_update=1.0
     ),
     prediction_cfg=PredictionConfig(
         filter_best_actions = 2, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
@@ -52,7 +52,7 @@ g2_ar = InitialConfig(
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(
-        update_every=None, fraction_to_update=None
+        num_return_sequences=1, update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
@@ -80,7 +80,7 @@ g2_ei = InitialConfig(
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(
-        update_every=None, fraction_to_update=None
+        num_return_sequences=1, update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
@@ -108,7 +108,7 @@ g2_p2 = InitialConfig(
         task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), peek_every=2
     ),
     inference_cfg=InferenceConfig(
-        update_every=None, fraction_to_update=None
+        num_return_sequences=1, update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
@@ -136,7 +136,7 @@ gj = InitialConfig(
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(
-        update_every=None, fraction_to_update=None
+        num_return_sequences=1, update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
@@ -164,7 +164,7 @@ lma = InitialConfig(
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(
-        update_every=None, fraction_to_update=None
+        num_return_sequences=1, update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
          filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
@@ -192,10 +192,10 @@ mst = InitialConfig(
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(
-        update_every=None, fraction_to_update=None
+        num_return_sequences=1, update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
-        filter_best_actions=None, filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
     ),
     perturbation_cfg=None,
     debug=None,

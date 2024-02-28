@@ -22,6 +22,7 @@ PredictionConfig = NamedTuple(
 InferenceConfig = NamedTuple(
     "InferenceConfig",
     [
+        ("num_return_sequences", int),
         ("update_every", Optional[int]),
         ("fraction_to_update", Optional[float]),
     ],

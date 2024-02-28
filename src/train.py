@@ -1,4 +1,4 @@
-# pip install transformers datasets==2.14.6 torchtyping==0.1.4 && pip install peft einops apache_beam==2.51.0 matplotlib wandb && pip install -U flash-attn --no-build-isolation
+#, pip install transformers datasets==2.14.6 torchtyping==0.1.4 && pip install peft einops apache_beam==2.51.0 matplotlib wandb && pip install -U flash-attn --no-build-isolation
 # huggingface-cli login
 import torch
 import torch.nn as nn
@@ -142,7 +142,6 @@ def log_print_oa(
 
 def sample(cfg, prev_action, prev_obs, observation):
     inference_cfg = cfg.inference_cfg
-    # currently not using filter_best_action parameters
     cfg.inference_lm.eval()
     with torch.inference_mode():
         with autocast(cache_enabled=True, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
@@ -159,6 +158,7 @@ def sample(cfg, prev_action, prev_obs, observation):
                     min_new_tokens=cfg.tok_p_pure_action,
                     max_new_tokens=cfg.tok_p_pure_action,
                     pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+                    num_return_sequences=cfg.inference_cfg.num_return_sequences
                 )[:, -cfg.tok_p_action :]
             return action_candidates
 
@@ -191,7 +191,11 @@ def update_weights(
 ):
     prediction_cfg = cfg.prediction_cfg
 
-    # Check if it's time to update cfg.inference_lm weights
+    prev_action = prev_action.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
+    prev_obs = prev_obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
+    obs = obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
+
+    # this can be pulled out into a synchronize_weights function before sample
     update_every, fraction_to_update = (
         cfg.inference_cfg.update_every,
         cfg.inference_cfg.fraction_to_update,
@@ -228,7 +232,7 @@ def update_weights(
             target=mkv_input_sequence[:, 1:]
         )
         obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
-        obs_losses = obs_tensor / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum()
+        obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum(dim=-1)
 
         if cfg.prediction_cfg.filter_best_actions:
             best_loss_indices = torch.topk(obs_losses, k=cfg.prediction_cfg.filter_best_actions, largest=False).indices
@@ -241,9 +245,9 @@ def update_weights(
         prev_action_loss = prev_action_tensor.mean()
         prev_observation_loss = prev_observation_tensor.mean()
         action_loss = action_tensor.mean()
-        obs_loss = obs_losses[best_loss_indices].sum()
+        obs_loss = obs_losses[best_loss_indices].mean()
         #aggregate_loss = obs_loss
-        aggregate_loss =  action_loss*obs_loss#.detach()
+        aggregate_loss =  action_loss + obs_loss#.detach()
         #aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
         #                         zip([prediction_cfg.train_A_given_AO, prediction_cfg.train_O_given_A],
         #                                [action_loss, obs_loss])))
