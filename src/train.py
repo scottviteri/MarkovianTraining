@@ -254,7 +254,7 @@ def update_weights(
         cfg.optimizer.zero_grad()
 
     if prediction_cfg.train_O_given_prev_O:
-        return aggregate_loss, None, None
+        return aggregate_loss, None, [] 
     loss_tensors = (
         prev_action_tensor,
         prev_observation_tensor,
