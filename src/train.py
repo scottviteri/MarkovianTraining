@@ -37,10 +37,11 @@ import src.config_examples
 import torch.distributed as dist
 
 def save_weights(cfg, batch_index):
-    if batch_index > 0 and batch_index % cfg.interval_save_weights == 0:
-        print(f"Saving trained_{cfg.model_name} \n\n")
-        cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
-        cfg.predictor_lm.save_pretrained(cfg.path_2_model)
+    if batch_index > 0 and batch_index % cfg.interval_save_weights == 0 and dist.get_rank()==0:
+        with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=True, recurse=True):
+            print(f"Saving trained_{cfg.model_name} \n\n")
+            cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
+            cfg.predictor_lm.save_pretrained(cfg.path_2_model)
 
 def default_action(cfg):
     initial_helpful_msg = (
@@ -154,6 +155,8 @@ def sample(cfg, prev_action, prev_obs, observation):
                     bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
                     output_scores=True,
                     do_sample=True,
+                    top_p=0.1,
+                    top_k=0,
                     temperature=1.0,
                     min_new_tokens=cfg.tok_p_pure_action,
                     max_new_tokens=cfg.tok_p_pure_action,
