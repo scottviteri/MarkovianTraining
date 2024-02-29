@@ -3,14 +3,14 @@ import os
 
 g2 = InitialConfig(
     model_name="gpt2",
-    lr=1e-7,
+    lr=1e-6,
     optimizer="adam",
-    batch_size=2,
-    num_batches=1000,
+    batch_size=1,
+    num_batches=10,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
-    interval_print=21,
-    wandb=True,
+    interval_print=1,
+    wandb=False,
     load_model=False,
     do_lora=False,
     num_beams=1,
@@ -19,10 +19,10 @@ g2 = InitialConfig(
         task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), peek_every=None
     ),
     inference_cfg=InferenceConfig(
-        num_return_sequences=1, update_every=100, fraction_to_update=1.0
+        num_return_sequences=1, update_every=None, fraction_to_update=None
     ),
     prediction_cfg=PredictionConfig(
-        filter_best_actions = 2, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions = 1, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
     ),
      perturbation_cfg=None,
     #perturbation_cfg=PerturbationConfig(
@@ -175,31 +175,31 @@ lma = InitialConfig(
 
 mst = InitialConfig(
     model_name="mistral",
-    lr=1e-7,
+    lr=1e-6,
     optimizer="adam",
     batch_size=1,
-    num_batches=10,
+    num_batches=1000,
     obs_to_action_ratio=0.5,
-    interval_save_weights=99,
-    interval_print=1,
+    interval_save_weights=1001,
+    interval_print=5,
     wandb=True,
     load_model=False,
     do_lora=False,
-    num_beams=1,
+    num_beams=64,
     training_ctxt_size=200,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False),
+        task=ArithmeticTask(num_terms=6, num_digits=2, cumulative=False),
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(
-        num_return_sequences=1, update_every=None, fraction_to_update=None
+        num_return_sequences=6, update_every=10, fraction_to_update=1e-3
     ),
     prediction_cfg=PredictionConfig(
-        filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=1, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
     ),
     perturbation_cfg=None,
     debug=None,
 )
 
 # configs = [g2, g2_ar, g2_ei]
-configs = [g2]
+configs = [mst]
