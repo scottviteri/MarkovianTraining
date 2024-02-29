@@ -155,8 +155,6 @@ def sample(cfg, prev_action, prev_obs, observation):
                     bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
                     output_scores=True,
                     do_sample=True,
-                    top_p=0.1,
-                    top_k=0,
                     temperature=1.0,
                     min_new_tokens=cfg.tok_p_pure_action,
                     max_new_tokens=cfg.tok_p_pure_action,
