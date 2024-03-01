@@ -470,7 +470,6 @@ def train_model(init_cfg):
         device_id=torch.cuda.current_device()
     )
 
-    print("init", cfg.inference_lm._fsdp_wrapped_module.transformer.h[0]._is_root)
     print("Inference: ", cfg.inference_lm)
     print("Predictor: ", cfg.predictor_lm)
     if cfg.optimizer == "sgd":
