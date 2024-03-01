@@ -212,12 +212,12 @@ def update_weights(
         cfg.inference_cfg.update_every,
         cfg.inference_cfg.fraction_to_update,
     )
-    if update_every is not None and batch_index % update_every == 0:
-        with torch.no_grad():
-            if dist.get_rank() == 0: print("Updating Inference Model\n")
-            with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=True, recurse=True):
-                for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
-                    param_inference.data.mul_(1 - fraction_to_update).add_(param_prediction.data.reshape(param_inference.data.shape) * fraction_to_update)
+    #if update_every is not None and batch_index % update_every == 0:
+    #    with torch.no_grad():
+    #        if dist.get_rank() == 0: print("Updating Prediction Model\n")
+    #        with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=True, recurse=True):
+    #            for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
+    #                param_prediction.data.mul_(1 - fraction_to_update).add_(param_inference.data.reshape(param_prediction.data.shape) * fraction_to_update)
 
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     cfg.predictor_lm.eval()
