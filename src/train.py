@@ -18,8 +18,8 @@ import functools
 import torch.distributed as dist
 import torch.distributed.fsdp as fsdp
 from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, size_based_auto_wrap_policy
-from torch.distributed.fsdp import MixedPrecision, FullyShardedDataParallel, BackwardPrefetch
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
+from torch.distributed.fsdp import MixedPrecision, FullyShardedDataParallel, BackwardPrefetch, FullStateDictConfig, StateDictType
 
 from src.training_types import *
 from src.utilities import extend_initial_config, log_and_print_info
@@ -38,10 +38,20 @@ import torch.distributed as dist
 
 def save_weights(cfg, batch_index):
     if batch_index > 0 and batch_index % cfg.interval_save_weights == 0 and dist.get_rank()==0:
-        with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=True, recurse=True):
-            print(f"Saving trained_{cfg.model_name} \n\n")
-            cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
-            cfg.predictor_lm.save_pretrained(cfg.path_2_model)
+        save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+        with FullyShardedDataParallel.state_dict_type(
+                    cfg.inference_lm, StateDictType.FULL_STATE_DICT, save_policy
+                ):
+                    model_state = cfg.inference_lm.state_dict()
+                    os.makedirs(cfg.path_2_model, exist_ok=True)
+                    save_name = cfg.path_2_model + "/pytorch_model.bin"
+                    torch.save(model_state, save_name)
+                    #config_save_path = os.path.join(cfg.path_2_model, "config.json")
+                    cfg.inference_lm.config.save_pretrained(cfg.path_2_model)
+    #    with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=True, recurse=True):
+    #        print(f"Saving trained_{cfg.model_name} \n\n")
+    #        cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
+    #        cfg.predictor_lm.save_pretrained(cfg.path_2_model)
 
 def default_action(cfg):
     initial_helpful_msg = (
@@ -145,7 +155,8 @@ def sample(cfg, prev_action, prev_obs, observation):
     inference_cfg = cfg.inference_cfg
     cfg.inference_lm.eval()
     with torch.inference_mode():
-        with autocast(cache_enabled=True, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
+        #with autocast(cache_enabled=True, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
+        with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, recurse=False):
             input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
             attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
             action_candidates = cfg.inference_lm.generate(
@@ -161,7 +172,7 @@ def sample(cfg, prev_action, prev_obs, observation):
                     pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
                     num_return_sequences=cfg.inference_cfg.num_return_sequences
                 )[:, -cfg.tok_p_action :]
-            return action_candidates
+        return action_candidates
 
 def compute_loss_tensor(cfg, input_sequence):
     """
@@ -175,7 +186,7 @@ def compute_loss_tensor(cfg, input_sequence):
         The computed loss tensor.
     """
     attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-    logits = cfg.predictor_lm(input_sequence, attention_mask=attention_mask, use_cache=False).logits[:, :-1, :]
+    logits = cfg.inference_lm(input_sequence, attention_mask=attention_mask, use_cache=False).logits[:, :-1, :]
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     loss_tensor = loss_fn(
         input=einops.rearrange(
@@ -204,18 +215,19 @@ def update_weights(
     if update_every is not None and batch_index % update_every == 0:
         with torch.no_grad():
             if dist.get_rank() == 0: print("Updating Inference Model\n")
-            with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=True, recurse=True):
+            with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=True, recurse=True):
                 for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
                     param_inference.data.mul_(1 - fraction_to_update).add_(param_prediction.data.reshape(param_inference.data.shape) * fraction_to_update)
 
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    cfg.predictor_lm.train()
-    #with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
-    if prediction_cfg.train_O_given_prev_O:
-        loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_obs, obs], dim=1))
-        aggregate_loss = loss_tensor[:,-cfg.tok_p_pure_obs:].mean()
-    else:
-        loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
+    cfg.predictor_lm.eval()
+    cfg.inference_lm.train()
+    with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
+        if prediction_cfg.train_O_given_prev_O:
+            loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_obs, obs], dim=1))
+            aggregate_loss = loss_tensor[:,-cfg.tok_p_pure_obs:].mean()
+        else:
+            loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
 
         mkv_input_sequence = torch.cat([action, obs], dim=1)
         mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
@@ -447,17 +459,20 @@ def train_model(init_cfg):
             block_name,
         },
     )
-    cfg.predictor_lm = FullyShardedDataParallel(
-        cfg.predictor_lm, 
+    cfg.inference_lm = FullyShardedDataParallel(
+        cfg.inference_lm, 
         auto_wrap_policy=transformer_auto_wrapper_policy,
         sharding_strategy=fsdp.ShardingStrategy.FULL_SHARD,
         mixed_precision = MixedPrecision(
             param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
         backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-        use_orig_params=True
+        use_orig_params=True,
+        device_id=torch.cuda.current_device()
     )
 
-    print(cfg.predictor_lm)
+    print("init", cfg.inference_lm._fsdp_wrapped_module.transformer.h[0]._is_root)
+    print("Inference: ", cfg.inference_lm)
+    print("Predictor: ", cfg.predictor_lm)
     if cfg.optimizer == "sgd":
         cfg.optimizer = torch.optim.SGD(
             cfg.predictor_lm.parameters(), lr=cfg.lr

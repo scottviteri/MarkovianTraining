@@ -30,7 +30,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 
-    predictor_lm, causal_lm_tokenizer, ctxt_size = get_model(
+    inference_lm, causal_lm_tokenizer, ctxt_size = get_model(
         device,
         init_cfg.load_model,
         init_cfg.model_name,
@@ -39,8 +39,8 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         init_cfg.do_lora,
     )
 
-    inference_lm = copy.deepcopy(predictor_lm)
-    for param in inference_lm.parameters():
+    predictor_lm = copy.deepcopy(inference_lm)
+    for param in predictor_lm.parameters():
         param.requires_grad = False
 
     training_ctxt_size = (
