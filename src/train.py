@@ -154,24 +154,24 @@ def log_print_oa(
 def sample(cfg, prev_action, prev_obs, observation):
     inference_cfg = cfg.inference_cfg
     cfg.inference_lm.eval()
-    with torch.inference_mode():
+    #with torch.inference_mode():
         #with autocast(cache_enabled=True, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
-        with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, recurse=False):
-            input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
-            attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-            action_candidates = cfg.inference_lm.generate(
-                    inputs=input_sequence,
-                    attention_mask=attention_mask,
-                    num_beams=cfg.num_beams,
-                    bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
-                    output_scores=True,
-                    do_sample=True,
-                    temperature=1.0,
-                    min_new_tokens=cfg.tok_p_pure_action,
-                    max_new_tokens=cfg.tok_p_pure_action,
-                    pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
-                    num_return_sequences=cfg.inference_cfg.num_return_sequences
-                )[:, -cfg.tok_p_action :]
+    with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, recurse=False):
+        input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
+        attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+        action_candidates = cfg.inference_lm.generate(
+                inputs=input_sequence,
+                attention_mask=attention_mask,
+                num_beams=cfg.num_beams,
+                bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
+                output_scores=True,
+                do_sample=True,
+                temperature=1.0,
+                min_new_tokens=cfg.tok_p_pure_action,
+                max_new_tokens=cfg.tok_p_pure_action,
+                pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+                num_return_sequences=cfg.inference_cfg.num_return_sequences
+            )[:, -cfg.tok_p_action :]
         return action_candidates
 
 def compute_loss_tensor(cfg, input_sequence):
