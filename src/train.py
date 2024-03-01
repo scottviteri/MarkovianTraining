@@ -16,10 +16,6 @@ from matplotlib import pyplot as plt
 import functools
 
 import torch.distributed as dist
-import torch.distributed.fsdp as fsdp
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy, size_based_auto_wrap_policy
-from torch.distributed.fsdp.wrap import enable_wrap, wrap
-from torch.distributed.fsdp import MixedPrecision, FullyShardedDataParallel, BackwardPrefetch, FullStateDictConfig, StateDictType
 
 from src.training_types import *
 from src.utilities import extend_initial_config, log_and_print_info
@@ -38,20 +34,9 @@ import torch.distributed as dist
 
 def save_weights(cfg, batch_index):
     if batch_index > 0 and batch_index % cfg.interval_save_weights == 0 and dist.get_rank()==0:
-        save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        with FullyShardedDataParallel.state_dict_type(
-                    cfg.inference_lm, StateDictType.FULL_STATE_DICT, save_policy
-                ):
-                    model_state = cfg.inference_lm.state_dict()
-                    os.makedirs(cfg.path_2_model, exist_ok=True)
-                    save_name = cfg.path_2_model + "/pytorch_model.bin"
-                    torch.save(model_state, save_name)
-                    #config_save_path = os.path.join(cfg.path_2_model, "config.json")
-                    cfg.inference_lm.config.save_pretrained(cfg.path_2_model)
-    #    with FullyShardedDataParallel.summon_full_params(cfg.predictor_lm, writeback=True, recurse=True):
-    #        print(f"Saving trained_{cfg.model_name} \n\n")
-    #        cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
-    #        cfg.predictor_lm.save_pretrained(cfg.path_2_model)
+        print(f"Saving trained_{cfg.model_name} \n\n")
+        cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
+        cfg.predictor_lm.save_pretrained(cfg.path_2_model)
 
 def default_action(cfg):
     initial_helpful_msg = (
@@ -101,7 +86,6 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
             step = batch_index
         )
 
-
 def log_print_losses(cfg, batch_index, aggregate_loss, losses):
     (
         prev_action_loss,
@@ -118,7 +102,6 @@ def log_print_losses(cfg, batch_index, aggregate_loss, losses):
                 f,
             )
             multi_print("______________________________________________________", f)
-
 
 def log_print_oa(
     cfg, batch_index, prev_action, prev_obs, action, obs, is_guidance_action, is_first
@@ -154,25 +137,24 @@ def log_print_oa(
 def sample(cfg, prev_action, prev_obs, observation):
     inference_cfg = cfg.inference_cfg
     cfg.inference_lm.eval()
-    #with torch.inference_mode():
-        #with autocast(cache_enabled=True, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
-    with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, recurse=False):
-        input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
-        attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-        action_candidates = cfg.inference_lm.generate(
-                inputs=input_sequence,
-                attention_mask=attention_mask,
-                num_beams=cfg.num_beams,
-                bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
-                output_scores=True,
-                do_sample=True,
-                temperature=1.0,
-                min_new_tokens=cfg.tok_p_pure_action,
-                max_new_tokens=cfg.tok_p_pure_action,
-                pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
-                num_return_sequences=cfg.inference_cfg.num_return_sequences
-            )[:, -cfg.tok_p_action :]
-        return action_candidates
+    with torch.inference_mode():
+        with autocast(cache_enabled=True, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
+            input_sequence = torch.cat([prev_action, prev_obs, cfg.action_prefix_tensor], dim=1)
+            attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+            action_candidates = cfg.inference_lm.generate(
+                    inputs=input_sequence,
+                    attention_mask=attention_mask,
+                    num_beams=cfg.num_beams,
+                    bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
+                    output_scores=True,
+                    do_sample=True,
+                    temperature=1.0,
+                    min_new_tokens=cfg.tok_p_pure_action,
+                    max_new_tokens=cfg.tok_p_pure_action,
+                    pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+                    num_return_sequences=cfg.inference_cfg.num_return_sequences
+                )[:, -cfg.tok_p_action :]
+            return action_candidates
 
 def compute_loss_tensor(cfg, input_sequence):
     """
@@ -203,81 +185,80 @@ def update_weights(
 ):
     prediction_cfg = cfg.prediction_cfg
 
-    prev_action = prev_action.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
-    prev_obs = prev_obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
-    obs = obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
+    with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
+        prev_action = prev_action.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
+        prev_obs = prev_obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
+        obs = obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
 
-    # this can be pulled out into a synchronize_weights function before sample
-    update_every, fraction_to_update = (
-        cfg.inference_cfg.update_every,
-        cfg.inference_cfg.fraction_to_update,
-    )
-    #if update_every is not None and batch_index % update_every == 0:
-    #    with torch.no_grad():
-    #        if dist.get_rank() == 0: print("Updating Prediction Model\n")
-    #        with FullyShardedDataParallel.summon_full_params(cfg.inference_lm, writeback=True, recurse=True):
-    #            for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
-    #                param_prediction.data.mul_(1 - fraction_to_update).add_(param_inference.data.reshape(param_prediction.data.shape) * fraction_to_update)
+        # this can be pulled out into a synchronize_weights function before sample
+        update_every, fraction_to_update = (
+            cfg.inference_cfg.update_every,
+            cfg.inference_cfg.fraction_to_update,
+        )
+        if update_every is not None and batch_index % update_every == 0:
+            with torch.no_grad():
+                if dist.get_rank() == 0: print("Updating Prediction Model\n")
+                for param_inference, param_prediction in zip(cfg.inference_lm.parameters(), cfg.predictor_lm.parameters()):
+                    param_prediction.data.mul_(1 - fraction_to_update).add_(param_inference.data.reshape(param_prediction.data.shape) * fraction_to_update)
 
-    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    cfg.predictor_lm.eval()
-    cfg.inference_lm.train()
-    #with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
-    if prediction_cfg.train_O_given_prev_O:
-        loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_obs, obs], dim=1))
-        aggregate_loss = loss_tensor[:,-cfg.tok_p_pure_obs:].mean()
-    else:
-        loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
+        loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+        cfg.predictor_lm.eval()
+        cfg.inference_lm.train()
+        #with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
+        if prediction_cfg.train_O_given_prev_O:
+            loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_obs, obs], dim=1))
+            aggregate_loss = loss_tensor[:,-cfg.tok_p_pure_obs:].mean()
+        else:
+            loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
 
-    with torch.no_grad():
-        with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
-            mkv_input_sequence = torch.cat([action, obs], dim=1)
-            mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-            mkv_logits = cfg.predictor_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
-            mkv_loss_tensor = loss_fn(
-                input=einops.rearrange(
-                    mkv_logits,
-                    "batch seq_length vocab_size -> batch vocab_size seq_length",
-                ),
-                target=mkv_input_sequence[:, 1:]
-            )
-            obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
-            obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum(dim=-1)
+        with torch.no_grad():
+                mkv_input_sequence = torch.cat([action, obs], dim=1)
+                mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+                mkv_logits = cfg.predictor_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
+                mkv_loss_tensor = loss_fn(
+                    input=einops.rearrange(
+                        mkv_logits,
+                        "batch seq_length vocab_size -> batch vocab_size seq_length",
+                    ),
+                    target=mkv_input_sequence[:, 1:]
+                )
+                obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
+                obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum(dim=-1)
 
-            if cfg.prediction_cfg.filter_best_actions:
-                best_loss_indices = torch.topk(obs_losses, k=cfg.prediction_cfg.filter_best_actions, largest=False).indices
-            else:
-                best_loss_indices = torch.arange(obs_losses.size(0))
+                if cfg.prediction_cfg.filter_best_actions:
+                    best_loss_indices = torch.topk(obs_losses, k=cfg.prediction_cfg.filter_best_actions, largest=False).indices
+                else:
+                    best_loss_indices = torch.arange(obs_losses.size(0))
 
-    prev_action_tensor = loss_tensor[best_loss_indices, : cfg.tok_p_action]
-    prev_observation_tensor = loss_tensor[best_loss_indices, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
-    action_tensor = loss_tensor[best_loss_indices, -cfg.tok_p_pure_action :]
-    prev_action_loss = prev_action_tensor.mean()
-    prev_observation_loss = prev_observation_tensor.mean()
-    action_loss = action_tensor.mean()
-    obs_loss = obs_losses[best_loss_indices].mean()
-    #aggregate_loss = obs_loss
-    aggregate_loss =  action_loss + obs_loss.detach()
-        #aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
-        #                         zip([prediction_cfg.train_A_given_AO, prediction_cfg.train_O_given_A],
-        #                                [action_loss, obs_loss])))
+        prev_action_tensor = loss_tensor[best_loss_indices, : cfg.tok_p_action]
+        prev_observation_tensor = loss_tensor[best_loss_indices, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
+        action_tensor = loss_tensor[best_loss_indices, -cfg.tok_p_pure_action :]
+        prev_action_loss = prev_action_tensor.mean()
+        prev_observation_loss = prev_observation_tensor.mean()
+        action_loss = action_tensor.mean()
+        obs_loss = obs_losses[best_loss_indices].mean()
+        #aggregate_loss = obs_loss
+        aggregate_loss =  action_loss + obs_loss.detach()
+            #aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
+            #                         zip([prediction_cfg.train_A_given_AO, prediction_cfg.train_O_given_A],
+            #                                [action_loss, obs_loss])))
 
-    if do_weight_update:
-        cfg.optimizer.zero_grad()
-        aggregate_loss.backward()
-        cfg.optimizer.step()
-        cfg.optimizer.zero_grad()
+        if do_weight_update:
+            cfg.optimizer.zero_grad()
+            aggregate_loss.backward()
+            cfg.optimizer.step()
+            cfg.optimizer.zero_grad()
 
-    if prediction_cfg.train_O_given_prev_O:
-        return aggregate_loss, None, [] 
-    loss_tensors = (
-        prev_action_tensor,
-        prev_observation_tensor,
-        action_tensor,
-        obs_tensor,
-    )
-    losses = [prev_action_loss, prev_observation_loss, action_loss, obs_loss]
-    return aggregate_loss, loss_tensors, losses
+        if prediction_cfg.train_O_given_prev_O:
+            return aggregate_loss, None, [] 
+        loss_tensors = (
+            prev_action_tensor,
+            prev_observation_tensor,
+            action_tensor,
+            obs_tensor,
+        )
+        losses = [prev_action_loss, prev_observation_loss, action_loss, obs_loss]
+        return aggregate_loss, loss_tensors, losses
 
 
 def log_and_save(
@@ -445,32 +426,6 @@ def train_model(init_cfg):
             project="collaborative-training-many-per-context-window",
             name=create_run_name(cfg),
         )
-    if cfg.model_name == "gptj":
-        block_name = GPTJBlock
-    elif cfg.model_name == "mistral":
-        block_name = MistralDecoderLayer
-    elif cfg.model_name == "llama":
-        block_name = LlamaDecoderLayer
-    elif "gpt2" in cfg.model_name:
-        block_name = GPT2Block
-    else:
-        assert "Unsupported model name for fdsp wrap policy"
-    transformer_auto_wrapper_policy = functools.partial(
-        transformer_auto_wrap_policy,
-        transformer_layer_cls={
-            block_name,
-        },
-    )
-    cfg.inference_lm = FullyShardedDataParallel(
-        cfg.inference_lm, 
-        auto_wrap_policy=transformer_auto_wrapper_policy,
-        sharding_strategy=fsdp.ShardingStrategy.FULL_SHARD,
-        mixed_precision = MixedPrecision(
-            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16, buffer_dtype=torch.bfloat16),
-        backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
-        use_orig_params=True,
-        device_id=torch.cuda.current_device()
-    )
 
     print("Inference: ", cfg.inference_lm)
     print("Predictor: ", cfg.predictor_lm)
