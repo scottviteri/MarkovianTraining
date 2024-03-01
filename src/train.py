@@ -222,40 +222,42 @@ def update_weights(
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     cfg.predictor_lm.eval()
     cfg.inference_lm.train()
-    with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
-        if prediction_cfg.train_O_given_prev_O:
-            loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_obs, obs], dim=1))
-            aggregate_loss = loss_tensor[:,-cfg.tok_p_pure_obs:].mean()
-        else:
-            loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
+    #with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
+    if prediction_cfg.train_O_given_prev_O:
+        loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_obs, obs], dim=1))
+        aggregate_loss = loss_tensor[:,-cfg.tok_p_pure_obs:].mean()
+    else:
+        loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_action, prev_obs, action], dim=1))
 
-        mkv_input_sequence = torch.cat([action, obs], dim=1)
-        mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-        mkv_logits = cfg.predictor_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
-        mkv_loss_tensor = loss_fn(
-            input=einops.rearrange(
-                mkv_logits,
-                "batch seq_length vocab_size -> batch vocab_size seq_length",
-            ),
-            target=mkv_input_sequence[:, 1:]
-        )
-        obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
-        obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum(dim=-1)
+    with torch.no_grad():
+        with autocast(cache_enabled=False, dtype=torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16):
+            mkv_input_sequence = torch.cat([action, obs], dim=1)
+            mkv_attention_mask = (mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+            mkv_logits = cfg.predictor_lm(mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False).logits[:, :-1, :]
+            mkv_loss_tensor = loss_fn(
+                input=einops.rearrange(
+                    mkv_logits,
+                    "batch seq_length vocab_size -> batch vocab_size seq_length",
+                ),
+                target=mkv_input_sequence[:, 1:]
+            )
+            obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs:]
+            obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][:,-cfg.tok_p_pure_obs:].sum(dim=-1)
 
-        if cfg.prediction_cfg.filter_best_actions:
-            best_loss_indices = torch.topk(obs_losses, k=cfg.prediction_cfg.filter_best_actions, largest=False).indices
-        else:
-            best_loss_indices = torch.arange(obs_losses.size(0))
+            if cfg.prediction_cfg.filter_best_actions:
+                best_loss_indices = torch.topk(obs_losses, k=cfg.prediction_cfg.filter_best_actions, largest=False).indices
+            else:
+                best_loss_indices = torch.arange(obs_losses.size(0))
 
-        prev_action_tensor = loss_tensor[best_loss_indices, : cfg.tok_p_action]
-        prev_observation_tensor = loss_tensor[best_loss_indices, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
-        action_tensor = loss_tensor[best_loss_indices, -cfg.tok_p_pure_action :]
-        prev_action_loss = prev_action_tensor.mean()
-        prev_observation_loss = prev_observation_tensor.mean()
-        action_loss = action_tensor.mean()
-        obs_loss = obs_losses[best_loss_indices].mean()
-        #aggregate_loss = obs_loss
-        aggregate_loss =  action_loss + obs_loss#.detach()
+    prev_action_tensor = loss_tensor[best_loss_indices, : cfg.tok_p_action]
+    prev_observation_tensor = loss_tensor[best_loss_indices, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs]
+    action_tensor = loss_tensor[best_loss_indices, -cfg.tok_p_pure_action :]
+    prev_action_loss = prev_action_tensor.mean()
+    prev_observation_loss = prev_observation_tensor.mean()
+    action_loss = action_tensor.mean()
+    obs_loss = obs_losses[best_loss_indices].mean()
+    #aggregate_loss = obs_loss
+    aggregate_loss =  action_loss + obs_loss.detach()
         #aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0, 
         #                         zip([prediction_cfg.train_A_given_AO, prediction_cfg.train_O_given_A],
         #                                [action_loss, obs_loss])))
