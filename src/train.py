@@ -493,7 +493,8 @@ def train_model(init_cfg):
         )  # , momentum=0.01)
     elif cfg.optimizer == "adam":
         cfg.optimizer = bitsandbytes.optim.AdamW(
-            cfg.predictor_lm.parameters(), lr=cfg.lr
+            list(cfg.predictor_lm.parameters()) + list(cfg.inference_lm.parameters()),
+            lr=cfg.lr,
         )
     elif cfg.optimizer == "rmsprop":
         cfg.optimizer = torch.optim.RMSprop(cfg.predictor_lm.parameters(), lr=cfg.lr)
