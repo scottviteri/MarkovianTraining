@@ -15,6 +15,7 @@ from openai import OpenAI
 from matplotlib import pyplot as plt
 import functools
 from contextlib import nullcontext
+import bitsandbytes
 
 import torch.distributed as dist
 
@@ -207,11 +208,21 @@ def update_weights(
     cfg, batch_index, prev_action, prev_obs, action, obs, do_weight_update=True
 ):
     prediction_cfg = cfg.prediction_cfg
-    pred_len, inf_len = (
-        cfg.trainer_cfg.prediction_training_length,
-        cfg.trainer_cfg.inference_training_length,
-    )
-    cfg.training_predictor_mode = batch_index % (pred_len + inf_len) < pred_len
+
+    if batch_index > 0:
+        pred_len, inf_len = (
+            cfg.trainer_cfg.prediction_training_length,
+            cfg.trainer_cfg.inference_training_length,
+        )
+        mode_index = batch_index % (pred_len + inf_len)
+        if mode_index == 0:  # switch from inf mode to pred mode
+            assert not cfg.training_predictor_mode
+            cfg.predictor_lm.load_state_dict(cfg.inference_lm.state_dict())
+            cfg.training_predictor_mode = True
+        elif mode_index == pred_len:
+            assert cfg.training_predictor_mode
+            cfg.inference_lm.load_state_dict(cfg.predictor_lm.state_dict())
+            cfg.training_predictor_mode = False
 
     with autocast(
         cache_enabled=False,
@@ -481,7 +492,9 @@ def train_model(init_cfg):
             cfg.predictor_lm.parameters(), lr=cfg.lr
         )  # , momentum=0.01)
     elif cfg.optimizer == "adam":
-        cfg.optimizer = torch.optim.Adam(cfg.predictor_lm.parameters(), lr=cfg.lr)
+        cfg.optimizer = bitsandbytes.optim.AdamW(
+            cfg.predictor_lm.parameters(), lr=cfg.lr
+        )
     elif cfg.optimizer == "rmsprop":
         cfg.optimizer = torch.optim.RMSprop(cfg.predictor_lm.parameters(), lr=cfg.lr)
     else:
