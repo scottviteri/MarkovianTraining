@@ -201,7 +201,7 @@ lma = InitialConfig(
 mst = InitialConfig(
     model_name="mistral",
     lr=1e-6,
-    optimizer="sgd",
+    optimizer="adam",
     batch_size=1,
     num_batches=1000,
     obs_to_action_ratio=0.5,
@@ -230,4 +230,4 @@ mst = InitialConfig(
     debug=None,
 )
 
-configs = [g2]
+configs = [mst]
