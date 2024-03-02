@@ -224,10 +224,10 @@ mst = InitialConfig(
         train_O_given_prev_O=False,
     ),
     trainer_cfg=TrainerConfig(
-        prediction_training_length=100, inference_training_length=1
+        prediction_training_length=30, inference_training_length=30
     ),
     perturbation_cfg=None,
     debug=None,
 )
 
-configs = [mst]
+configs = [g2]
