@@ -492,7 +492,7 @@ def train_model(init_cfg):
             cfg.predictor_lm.parameters(), lr=cfg.lr
         )  # , momentum=0.01)
     elif cfg.optimizer == "adam":
-        cfg.optimizer = bitsandbytes.optim.AdamW(
+        cfg.optimizer = bitsandbytes.optim.AdamW8bit(
             list(cfg.predictor_lm.parameters()) + list(cfg.inference_lm.parameters()),
             lr=cfg.lr,
         )
