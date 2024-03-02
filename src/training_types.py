@@ -23,9 +23,16 @@ InferenceConfig = NamedTuple(
     "InferenceConfig",
     [
         ("num_return_sequences", int),
-        ("update_every", Optional[int]),
-        ("fraction_to_update", Optional[float]),
+        #("update_every", Optional[int]),
+        #("fraction_to_update", Optional[float]),
     ],
+)
+TrainerConfig = NamedTuple(
+    "TrainerConfig",
+    [
+        ("prediction_training_length", Optional[int]),
+        ("inference_training_length", Optional[int])
+    ]
 )
 PerturbationConfig = NamedTuple(
     "PerturbationConfig",
@@ -79,9 +86,10 @@ class InitialConfig:
     do_lora: bool
     num_beams: int
     inference_cfg: InferenceConfig
+    prediction_cfg: PredictionConfig
+    trainer_cfg: TrainerConfig
     training_ctxt_size: Optional[int]
     dataset: InitDatasetType
-    prediction_cfg: PredictionConfig
     perturbation_cfg: Optional[PerturbationConfig]
     debug: Optional[DebugType]
 
@@ -118,5 +126,7 @@ class Config:
     dataset: DatasetType
     inference_cfg: InferenceConfig
     prediction_cfg: PredictionConfig
+    trainer_cfg: TrainerConfig
+    training_predictor_mode: bool
     perturbation_cfg: Optional[PerturbationConfig]
     debug: Optional[DebugType]

@@ -1,6 +1,11 @@
 import torch
 import torchtyping
-from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    PreTrainedModel,
+    PreTrainedTokenizer,
+)
 from peft import LoraConfig, get_peft_model, TaskType
 import wandb
 from dataclasses import dataclass
@@ -13,6 +18,7 @@ import torch.nn as nn
 
 from src.training_types import *
 from src.prepare_dataset import prepare_dataset
+
 
 def load_cfg_from_file(file_location: str) -> InitialConfig:
     with open(file_location) as f:
@@ -40,8 +46,8 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     )
 
     predictor_lm = copy.deepcopy(inference_lm)
-    for param in predictor_lm.parameters():
-        param.requires_grad = False
+    # for param in predictor_lm.parameters():
+    #    param.requires_grad = False
 
     training_ctxt_size = (
         ctxt_size
@@ -110,6 +116,8 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         causal_lm_tokenizer=causal_lm_tokenizer,
         inference_cfg=init_cfg.inference_cfg,
         prediction_cfg=init_cfg.prediction_cfg,
+        trainer_cfg=init_cfg.trainer_cfg,
+        training_predictor_mode=True,
         perturbation_cfg=init_cfg.perturbation_cfg,
         debug=init_cfg.debug,
     )
@@ -250,7 +258,7 @@ def get_model(
         "gpt2-medium": "gpt2-medium",
         "gpt2-large": "gpt2-large",
         "gpt2-xl": "gpt2-xl",
-        "phi2": "microsoft/phi-2"
+        "phi2": "microsoft/phi-2",
         # Add other models here
     }
     with device:
@@ -281,7 +289,7 @@ def get_model(
             inference_mode=False,
             r=64,
             lora_alpha=128,
-            lora_dropout=0.1
+            lora_dropout=0.1,
             # target_modules=linear_layers
         )
         # print("Num Linear Layers: ", len(linear_layers))
@@ -311,6 +319,7 @@ def create_run_name(cfg: Config) -> str:
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
     run_name += f"{cfg.optimizer[:3]}_"
+    run_name += f"pu{cfg.trainer_cfg.prediction_training_length}_gu{cfg.trainer_cfg.inference_training_length}_"
     if isinstance(cfg.dataset.task, ArithmeticTask):
         run_name += (
             f"ari_nt={cfg.dataset.task.num_terms}_nd={cfg.dataset.task.num_digits}_"
@@ -319,9 +328,6 @@ def create_run_name(cfg: Config) -> str:
             run_name += "cm_"
     else:
         run_name += "wiki_"
-    if cfg.inference_cfg.update_every is not None:
-        assert cfg.inference_cfg.fraction_to_update is not None
-        run_name += f"ue{cfg.inference_cfg.update_every}_upd{cfg.inference_cfg.fraction_to_update:.3f}_"
     if cfg.lr != 1e-4:
         run_name += f"lr{cfg.lr}_"
     if prediction_cfg.train_O_given_prev_O:
