@@ -204,6 +204,29 @@ def compute_loss_tensor(cfg, input_sequence):
     return loss_tensor
 
 
+def get_obs_losses(cfg, action, obs):
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    mkv_input_sequence = torch.cat([action, obs], dim=1)
+    mkv_attention_mask = (
+        mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
+    ).long()
+    mkv_logits = cfg.predictor_lm(
+        mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False
+    ).logits[:, :-1, :]
+    mkv_loss_tensor = loss_fn(
+        input=einops.rearrange(
+            mkv_logits,
+            "batch seq_length vocab_size -> batch vocab_size seq_length",
+        ),
+        target=mkv_input_sequence[:, 1:],
+    )
+    obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs :]
+    obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][
+        :, -cfg.tok_p_pure_obs :
+    ].sum(dim=-1)
+    return obs_losses, obs_tensor
+
+
 def update_weights(
     cfg, batch_index, prev_action, prev_obs, action, obs, do_weight_update=True
 ):
@@ -255,28 +278,8 @@ def update_weights(
                 cfg, torch.cat([prev_action, prev_obs, action], dim=1)
             )
 
-        with torch.no_grad() if not cfg.training_predictor_mode else nullcontext():
-            mkv_input_sequence = torch.cat([action, obs], dim=1)
-            mkv_attention_mask = (
-                mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
-            ).long()
-            mkv_logits = cfg.predictor_lm(
-                mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False
-            ).logits[:, :-1, :]
-            mkv_loss_tensor = loss_fn(
-                input=einops.rearrange(
-                    mkv_logits,
-                    "batch seq_length vocab_size -> batch vocab_size seq_length",
-                ),
-                target=mkv_input_sequence[:, 1:],
-            )
-            obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[
-                :, -cfg.tok_p_pure_obs :
-            ]
-            obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][
-                :, -cfg.tok_p_pure_obs :
-            ].sum(dim=-1)
-
+        with torch.no_grad():
+            obs_losses, obs_tensor = get_obs_losses(cfg, action, obs)
             if cfg.prediction_cfg.filter_best_actions:
                 best_loss_indices = torch.topk(
                     obs_losses, k=cfg.prediction_cfg.filter_best_actions, largest=False
@@ -284,15 +287,20 @@ def update_weights(
             else:
                 best_loss_indices = torch.arange(obs_losses.size(0))
 
+        with torch.nograd() if not cfg.training_predictor_mode else nullcontext():
+            obs_losses, obs_tensor = get_obs_losses(
+                cfg, action[best_loss_indices, :], obs[best_loss_indices, :]
+            )
+
         prev_action_tensor = loss_tensor[best_loss_indices, : cfg.tok_p_action]
         prev_observation_tensor = loss_tensor[
             best_loss_indices, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs
         ]
-        action_tensor = loss_tensor[best_loss_indices, -cfg.tok_p_pure_action :]
+        action_tensor = loss_tensor[:, -cfg.tok_p_pure_action :]
         prev_action_loss = prev_action_tensor.mean()
         prev_observation_loss = prev_observation_tensor.mean()
         action_loss = action_tensor.mean()
-        obs_loss = obs_losses[best_loss_indices].mean()
+        obs_loss = obs_losses.mean()
         # aggregate_loss = obs_loss
         aggregate_loss = action_loss + obs_loss
         # aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0,
@@ -492,7 +500,7 @@ def train_model(init_cfg):
             cfg.predictor_lm.parameters(), lr=cfg.lr
         )  # , momentum=0.01)
     elif cfg.optimizer == "adam":
-        cfg.optimizer = bitsandbytes.optim.AdamW8bit(
+        cfg.optimizer = bitsandbytes.optim.AdamW8bit(  # torch.optim.Adam(  #
             list(cfg.predictor_lm.parameters()) + list(cfg.inference_lm.parameters()),
             lr=cfg.lr,
         )
