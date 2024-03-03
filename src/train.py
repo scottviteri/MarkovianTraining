@@ -273,11 +273,6 @@ def update_weights(
             loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_obs, obs], dim=1))
             aggregate_loss = loss_tensor[:, -cfg.tok_p_pure_obs :].mean()
 
-        with torch.no_grad() if cfg.training_predictor_mode else nullcontext():
-            loss_tensor = compute_loss_tensor(
-                cfg, torch.cat([prev_action, prev_obs, action], dim=1)
-            )
-
         with torch.no_grad():
             obs_losses, obs_tensor = get_obs_losses(cfg, action, obs)
             if cfg.prediction_cfg.filter_best_actions:
@@ -292,9 +287,22 @@ def update_weights(
                 cfg, action[best_loss_indices, :], obs[best_loss_indices, :]
             )
 
-        prev_action_tensor = loss_tensor[best_loss_indices, : cfg.tok_p_action]
+        with torch.no_grad() if cfg.training_predictor_mode else nullcontext():
+            loss_tensor = compute_loss_tensor(
+                cfg,
+                torch.cat(
+                    [
+                        prev_action[best_loss_indices, :],
+                        prev_obs[best_loss_indices, :],
+                        action[best_loss_indices, :],
+                    ],
+                    dim=1,
+                ),
+            )
+
+        prev_action_tensor = loss_tensor[:, : cfg.tok_p_action]
         prev_observation_tensor = loss_tensor[
-            best_loss_indices, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs
+            :, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs
         ]
         action_tensor = loss_tensor[:, -cfg.tok_p_pure_action :]
         prev_action_loss = prev_action_tensor.mean()
