@@ -254,8 +254,8 @@ mst = InitialConfig(
             num_terms=6,
             num_digits=2,
             cumulative=False,
-            operations=None,
-            probs=None,
+            operations=["+", "-", "*"],
+            probs=[1.0, 0.0, 0.0],
         ),
         peek_every=None,
     ),
@@ -273,4 +273,4 @@ mst = InitialConfig(
     debug=None,
 )
 
-configs = [mst]
+configs = [g2]
