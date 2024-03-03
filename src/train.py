@@ -287,7 +287,7 @@ def update_weights(
             else:
                 best_loss_indices = torch.arange(obs_losses.size(0))
 
-        with torch.nograd() if not cfg.training_predictor_mode else nullcontext():
+        with torch.no_grad() if not cfg.training_predictor_mode else nullcontext():
             obs_losses, obs_tensor = get_obs_losses(
                 cfg, action[best_loss_indices, :], obs[best_loss_indices, :]
             )

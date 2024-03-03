@@ -247,7 +247,7 @@ mst = InitialConfig(
     wandb=True,
     load_model=False,
     do_lora=False,
-    num_beams=64,
+    num_beams=16,
     training_ctxt_size=200,
     dataset=InitDatasetType(
         task=ArithmeticTask(
@@ -259,7 +259,7 @@ mst = InitialConfig(
         ),
         peek_every=None,
     ),
-    inference_cfg=InferenceConfig(num_return_sequences=6),
+    inference_cfg=InferenceConfig(num_return_sequences=16),
     prediction_cfg=PredictionConfig(
         filter_best_actions=1,
         train_A_given_AO=False,
@@ -273,4 +273,4 @@ mst = InitialConfig(
     debug=None,
 )
 
-configs = [g2]
+configs = [mst]
