@@ -49,7 +49,14 @@ ReplaceWithRandomTokens = NamedTuple("ReplaceWithRandomTokens", [])
 NoWeightUpdates = NamedTuple("NoWeightUpdates", [])
 
 ArithmeticTask = NamedTuple(
-    "ArithmeticTask", [("num_digits", int), ("num_terms", int), ("cumulative", bool)]
+    "ArithmeticTask",
+    [
+        ("num_digits", int),
+        ("num_terms", int),
+        ("cumulative", bool),
+        ("operations", Optional[list]),
+        ("probs", Optional[list]),
+    ],
 )
 WikipediaTask = NamedTuple("WikipediaTask", [])
 TaskType = Union[ArithmeticTask, WikipediaTask]
