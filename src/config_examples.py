@@ -247,7 +247,7 @@ mst = InitialConfig(
     wandb=True,
     load_model=False,
     do_lora=False,
-    num_beams=16,
+    num_beams=12,
     training_ctxt_size=200,
     dataset=InitDatasetType(
         task=ArithmeticTask(
@@ -259,7 +259,7 @@ mst = InitialConfig(
         ),
         peek_every=None,
     ),
-    inference_cfg=InferenceConfig(num_return_sequences=16),
+    inference_cfg=InferenceConfig(num_return_sequences=12),
     prediction_cfg=PredictionConfig(
         filter_best_actions=1,
         train_A_given_AO=False,
@@ -267,7 +267,7 @@ mst = InitialConfig(
         train_O_given_prev_O=False,
     ),
     trainer_cfg=TrainerConfig(
-        prediction_training_length=30, inference_training_length=30
+        prediction_training_length=90, inference_training_length=10
     ),
     perturbation_cfg=None,
     debug=None,
