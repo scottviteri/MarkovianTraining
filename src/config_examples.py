@@ -16,7 +16,13 @@ g2 = InitialConfig(
     num_beams=1,
     training_ctxt_size=200,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False),
+        task=ArithmeticTask(
+            num_terms=3,
+            num_digits=2,
+            cumulative=False,
+            operations=["+", "-", "*"],
+            probs=[0.6, 0.2, 0.2],
+        ),
         peek_every=None,
     ),
     prediction_cfg=PredictionConfig(
@@ -53,7 +59,13 @@ g2_ar = InitialConfig(
     num_beams=1,
     training_ctxt_size=150,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False),
+        task=ArithmeticTask(
+            num_terms=2,
+            num_digits=3,
+            cumulative=False,
+            operations=None,
+            probs=None,
+        ),
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(num_return_sequences=1),
@@ -85,7 +97,13 @@ g2_ei = InitialConfig(
     num_beams=1,
     training_ctxt_size=150,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False),
+        task=ArithmeticTask(
+            num_terms=2,
+            num_digits=3,
+            cumulative=False,
+            operations=None,
+            probs=None,
+        ),
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(num_return_sequences=1),
@@ -118,7 +136,14 @@ g2_p2 = InitialConfig(
     num_beams=1,
     training_ctxt_size=150,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), peek_every=2
+        task=ArithmeticTask(
+            num_terms=2,
+            num_digits=3,
+            cumulative=False,
+            operations=None,
+            probs=None,
+        ),
+        peek_every=2,
     ),
     inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
@@ -149,7 +174,13 @@ gj = InitialConfig(
     num_beams=1,
     training_ctxt_size=150,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False),
+        task=ArithmeticTask(
+            num_terms=2,
+            num_digits=3,
+            cumulative=False,
+            operations=None,
+            probs=None,
+        ),
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(num_return_sequences=1),
@@ -181,7 +212,13 @@ lma = InitialConfig(
     num_beams=1,
     training_ctxt_size=200,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False),
+        task=ArithmeticTask(
+            num_terms=2,
+            num_digits=3,
+            cumulative=False,
+            operations=None,
+            probs=None,
+        ),
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(num_return_sequences=1),
@@ -213,7 +250,13 @@ mst = InitialConfig(
     num_beams=64,
     training_ctxt_size=200,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=6, num_digits=2, cumulative=False),
+        task=ArithmeticTask(
+            num_terms=6,
+            num_digits=2,
+            cumulative=False,
+            operations=None,
+            probs=None,
+        ),
         peek_every=None,
     ),
     inference_cfg=InferenceConfig(num_return_sequences=6),

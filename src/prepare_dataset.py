@@ -5,7 +5,8 @@ from itertools import islice, tee
 from typing import Iterator, Dict
 from src.prepare_dataset import *
 import json
-import random
+import operator
+import numpy as np
 
 from src.training_types import *
 
@@ -16,7 +17,13 @@ def prepare_dataset(
     task = init_cfg.dataset.task
 
     if isinstance(task, ArithmeticTask):
-        itr_ds = arithmetic_generator(task.num_terms, task.num_digits, task.cumulative)
+        itr_ds = arithmetic_generator(
+            task.num_terms,
+            task.num_digits,
+            task.cumulative,
+            task.operations,
+            task.probs,
+        )
         qa_traj_itr = to_qa_traj_itr(itr_ds)
         qa_batch_lst_itr  = traj_itr_to_batch_lst(init_cfg.batch_size, qa_traj_itr)
         qa_tokenized_itr_ds = map(lambda batch_lst:
@@ -103,21 +110,53 @@ def peek_every_n(n, dict_itr):
         else:
             yield {"Observation" : d["Observation"], "First": d["First"]}
 
-def arithmetic_generator(num_terms, num_digits, cumulative):
+
+def arithmetic_generator(num_terms, num_digits, cumulative, operations, probs):
+    # If not specified, use simple addition
+    if operations is None:
+        operations = ["+"]
+    # Use uniform distribution for operators if not set
+    if probs is None:
+        probs = [(1.0 / len(operations)) for _ in range(len(operations))]
+
+    # Check for valid operations
+    valid_ops = {"+": operator.add, "-": operator.sub, "*": operator.mul}
+    for op in operations:
+        assert (
+            op in valid_ops.keys()
+        ), f"Invalid operation {op} not in {valid_ops.keys()}"
+    assert len(probs) == len(operations), "len(Operations) != len(probs)"
+
+    assert not cumulative, NotImplementedError("Cumulative not implemented")
+    # I am not sure why we need the cumulative option. Keeping this snipet for @Scott
+    # if cumulative:
+    #     n = random.randint(1, num_digits)
+    #     num = random.randint(10 ** (n - 1), 10 ** n - 1)
+    # else:
+    #     num = random.randint(10 ** (num_digits - 1), 10 ** num_digits - 1)
+
     while 1:
         question = "Q: "
-        total = 0
-        for _ in range(num_terms):
-            if cumulative:
-                n = random.randint(1, num_digits)
-                num = random.randint(10**(n-1), 10**n-1)
+        total = 0.0
+
+        # Generate random numbers
+        nums = torch.randint(0, 10**num_digits - 1, (num_terms,))
+        # Generate random operations
+        ops_rand = np.random.choice(operations, num_terms - 1, p=probs)
+
+        for i in range(num_terms):
+            num = nums[i]
+            if i == 0:
+                total = nums[0].item()
+                question += f"{num} "
             else:
-                num = random.randint(10**(num_digits-1), 10**num_digits-1)
-            total += num
-            question += f"{num} + "
-        question = question.rstrip(" +")
+                op_rand = ops_rand[i - 1]
+                total = valid_ops[op_rand](total, num)
+                question += f"{op_rand} {num} "
+
         answer = f"A: {total}"
         yield {"Question": question, "Answer": answer}
+
 
 def jsonl_to_dict_iterator(filename: str) -> Iterator[Dict]:
     with open(filename, 'r') as infile:
