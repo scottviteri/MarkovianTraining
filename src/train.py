@@ -24,6 +24,7 @@ from src.utilities import extend_initial_config, log_and_print_info
 from src.utilities import create_run_name, multi_print
 from src.config_examples import configs
 
+import transformers
 from transformers.models.gptj.modeling_gptj import GPTJBlock
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 from transformers.models.mistral.modeling_mistral import MistralDecoderLayer
@@ -146,6 +147,12 @@ def log_print_oa(
 
 def sample(cfg, prev_action, prev_obs, observation):
     inference_cfg = cfg.inference_cfg
+    beam_scorer = transformers.BeamSearchScorer(
+        batch_size=cfg.batch_size,
+        max_length=cfg.tok_p_pure_action,
+        num_beams=cfg.num_beams,
+        device=cfg.device,
+    )
     cfg.inference_lm.eval()
     with torch.inference_mode():
         with autocast(
@@ -156,25 +163,80 @@ def sample(cfg, prev_action, prev_obs, observation):
                 else torch.float16
             ),
         ):
-            input_sequence = torch.cat(
+            input_ids = torch.cat(
                 [prev_action, prev_obs, cfg.action_prefix_tensor], dim=1
             )
-            attention_mask = (
-                input_sequence != cfg.causal_lm_tokenizer.pad_token_id
-            ).long()
-            action_candidates = cfg.inference_lm.generate(
-                inputs=input_sequence,
-                attention_mask=attention_mask,
+            attention_mask = (input_ids != cfg.causal_lm_tokenizer.pad_token_id).long()
+            generation_config = transformers.GenerationConfig(
+                max_new_tokens=cfg.tok_p_pure_action,
+                min_new_tokens=cfg.tok_p_pure_action,
+                do_sample=False,
+                # temperature=1.0,
                 num_beams=cfg.num_beams,
                 bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
-                output_scores=True,
-                # do_sample=True,
-                # temperature=1.0,
-                min_new_tokens=cfg.tok_p_pure_action,
-                max_new_tokens=cfg.tok_p_pure_action,
-                pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+                renormalize_logits=True,
+                remove_invalid_values=True,
                 num_return_sequences=cfg.inference_cfg.num_return_sequences,
+                output_scores=True,
+                pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+                eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
+                return_dict_in_generate=False,
+            )
+            generation_config.max_tokens = (
+                generation_config.max_new_tokens + input_ids.shape[-1]
+            )
+            generation_config.min_tokens = (
+                generation_config.min_new_tokens + input_ids.shape[-1]
+            )
+
+            logits_processor = transformers.generation.LogitsProcessorList(
+                [
+                    transformers.generation.NoBadWordsLogitsProcessor(
+                        generation_config.bad_words_ids, generation_config.eos_token_id
+                    ),
+                    transformers.generation.MinNewTokensLengthLogitsProcessor(
+                        input_ids.shape[-1],
+                        generation_config.min_new_tokens,
+                        generation_config.eos_token_id,
+                    ),
+                    transformers.generation.InfNanRemoveLogitsProcessor(),
+                    transformers.LogitNormalization(),
+                ]
+            )
+            stopping_criteria = transformers.generation.StoppingCriteriaList(
+                [
+                    transformers.generation.MaxLengthCriteria(
+                        max_length=generation_config.max_tokens
+                    )
+                ]
+            )
+
+            # replace this with my own
+            beam_scorer = transformers.generation.beam_search.BeamSearchScorer(
+                batch_size=cfg.batch_size,
+                num_beams=generation_config.num_beams,
+                device=cfg.device,
+                length_penalty=generation_config.length_penalty,
+                do_early_stopping=generation_config.early_stopping,
+                num_beam_hyps_to_keep=generation_config.num_return_sequences,
+                max_length=generation_config.max_length,
+            )
+
+            input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
+            attention_mask = attention_mask.repeat_interleave(cfg.num_beams, dim=0)
+
+            action_candidates = cfg.inference_lm.beam_search(
+                input_ids,
+                beam_scorer,
+                logits_processor=logits_processor,
+                stopping_criteria=stopping_criteria,
+                pad_token_id=generation_config.pad_token_id,
+                eos_token_id=generation_config.eos_token_id,
+                output_scores=generation_config.output_scores,
+                return_dict_in_generate=generation_config.return_dict_in_generate,
+                synced_gpus=False,
             )[:, -cfg.tok_p_action :]
+
             return action_candidates
 
 

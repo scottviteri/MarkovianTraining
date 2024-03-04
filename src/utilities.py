@@ -296,6 +296,7 @@ def get_model(
         causal_lm = get_peft_model(causal_lm, peft_config)
         causal_lm.print_trainable_parameters()
 
+    causal_lm.tokenizer = causal_lm_tokenizer
     return causal_lm, causal_lm_tokenizer, ctxt_size
 
 
