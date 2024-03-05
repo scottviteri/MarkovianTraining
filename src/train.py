@@ -193,6 +193,8 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
                 "trainer": repr(cfg.trainer_cfg),
                 "inference": repr(cfg.inference_cfg),
                 "prediction": repr(cfg.prediction_cfg),
+                "wandb_run_id": wandb.run.id if cfg.wandb else False,
+                "wandb_run_name": wandb.run.name if cfg.wandb else False,
             },
         )
 
