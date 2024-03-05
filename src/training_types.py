@@ -121,6 +121,7 @@ class Config:
     training_ctxt_size: int
     device: str
     path_2_log: str
+    traj_path: str
     path_2_model: str
     path_2_tokenizer: str
     tok_p_action: Optional[int]

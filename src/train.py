@@ -11,6 +11,8 @@ import json
 import random
 import os
 from datasets import load_dataset
+from datetime import datetime, timezone
+
 from openai import OpenAI
 from matplotlib import pyplot as plt
 import functools
@@ -143,6 +145,78 @@ def log_print_oa(
             multi_print(
                 f"Observation: {repr(cfg.causal_lm_tokenizer.decode(obs[0]))}", f
             )
+
+
+def init_traj_storage(traj_path, initial_config):
+    """Initialize the JSON file with general config values if it doesn't exist."""
+    if not os.path.exists(traj_path):
+        with open(traj_path, "w") as file:
+            json.dump(initial_config, file, indent=4)
+
+
+def append_traj_to_storage(traj_path, traj_data):
+    """Append data for a training step to the JSON file."""
+    # Load existing data
+    with open(traj_path, "r") as file:
+        data = json.load(file)
+
+    # Append new trajectory
+    if "trajectory" not in data:
+        data["trajectory"] = []
+    data["trajectory"].append(traj_data)
+
+    # Write updated data back to the file
+    with open(traj_path, "w") as file:
+        json.dump(data, file, indent=4)
+
+
+def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses):
+    """"""
+
+    if dist.get_rank() == 0:
+        if batch_index == 0:
+            # Adding a UID to the file name to avoid overwriting
+            cfg.traj_path += f"_{datetime.now(timezone.utc).timestamp():0.0f}.json"
+
+        # Does nothing if file already exists
+        init_traj_storage(
+            cfg.traj_path,
+            {
+                "model": cfg.model_name,
+                "lr": cfg.lr,
+                "batch_size": cfg.batch_size,
+                "num_batches": cfg.num_batches,
+                "num_beams": cfg.num_beams,
+                "optimizer": repr(cfg.optimizer),
+                "dataset": repr(cfg.dataset),
+                "perturbation": repr(cfg.perturbation_cfg),
+                "trainer": repr(cfg.trainer_cfg),
+                "inference": repr(cfg.inference_cfg),
+                "prediction": repr(cfg.prediction_cfg),
+            },
+        )
+
+        (
+            prev_action_loss,
+            prev_observation_loss,
+            action_loss,
+            observation_loss,
+            perturbed_loss,
+        ) = losses
+
+        traj_data = {
+            "batch_index": batch_index,
+            # "prev_action": repr(cfg.causal_lm_tokenizer.decode(prev_action[0])),
+            "prev_obs": repr(cfg.causal_lm_tokenizer.decode(prev_obs[0])),
+            "action": repr(cfg.causal_lm_tokenizer.decode(action[0])),
+            "obs": repr(cfg.causal_lm_tokenizer.decode(obs[0])),
+            # "action_loss": action_loss.item(),
+            "observation_loss": observation_loss.item(),
+            "perturbed_loss": perturbed_loss.item()
+            if perturbed_loss is not None
+            else 0.0,
+        }
+        append_traj_to_storage(cfg.traj_path, traj_data)
 
 
 def sample(cfg, prev_action, prev_obs, observation):
@@ -407,6 +481,9 @@ def log_and_save(
     aggregate_loss,
     losses,
 ):
+    # Save trajectories for post-training eval to .json
+    save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses)
+
     save_weights(cfg, batch_index)
     log_print_oa(
         cfg,
@@ -451,9 +528,9 @@ def perturb_action(action, cfg):
     frac_spaces = cfg.perturbation_cfg.frac_of_tokens_to_pad
     assert 1.0 >= frac_spaces >= 0.0, f"frac_randomize is {frac_spaces}"
     token_id_space = cfg.causal_lm_tokenizer.encode(" ")[-1]
-    action[:, offset + int((1.0 - frac_spaces) * (action.shape[-1] - offset)) :] = (
-        token_id_space
-    )
+    action[
+        :, offset + int((1.0 - frac_spaces) * (action.shape[-1] - offset)) :
+    ] = token_id_space
 
     return action
 

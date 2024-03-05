@@ -33,6 +33,7 @@ def load_cfg_from_file(file_location: str) -> InitialConfig:
 def extend_initial_config(init_cfg: InitialConfig) -> Config:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     path_2_log = f"saved_weights_and_losses/{init_cfg.model_name}_log.txt"
+    traj_path = f"saved_weights_and_losses/{init_cfg.model_name}_traj"
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 
@@ -102,6 +103,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
             dataloader=dataset,
         ),
         path_2_log=path_2_log,
+        traj_path=traj_path,
         path_2_model=path_2_model,
         path_2_tokenizer=path_2_tokenizer,
         tok_p_action=tok_p_action,
