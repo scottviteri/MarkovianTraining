@@ -363,3 +363,26 @@ def create_run_name(cfg: Config) -> str:
     if cfg.training_ctxt_size:
         run_name += f"ics{cfg.training_ctxt_size}_"
     return run_name
+
+
+def get_obs_losses(cfg, action, obs):
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    mkv_input_sequence = torch.cat([action, obs], dim=1)
+    mkv_attention_mask = (
+        mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
+    ).long()
+    mkv_logits = cfg.predictor_lm(
+        mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False
+    ).logits[:, :-1, :]
+    mkv_loss_tensor = loss_fn(
+        input=einops.rearrange(
+            mkv_logits,
+            "batch seq_length vocab_size -> batch vocab_size seq_length",
+        ),
+        target=mkv_input_sequence[:, 1:],
+    )
+    obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs :]
+    obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][
+        :, -cfg.tok_p_pure_obs :
+    ].sum(dim=-1)
+    return obs_losses, obs_tensor

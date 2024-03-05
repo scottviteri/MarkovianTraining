@@ -16,13 +16,15 @@ from matplotlib import pyplot as plt
 import functools
 from contextlib import nullcontext
 import bitsandbytes
-
+from transformers.generation import beam_search
+from collections import UserDict
 import torch.distributed as dist
 
 from src.training_types import *
 from src.utilities import extend_initial_config, log_and_print_info
-from src.utilities import create_run_name, multi_print
+from src.utilities import create_run_name, multi_print, get_obs_losses
 from src.config_examples import configs
+from src.beam import BeamSearchScorer
 
 import transformers
 from transformers.models.gptj.modeling_gptj import GPTJBlock
@@ -147,20 +149,14 @@ def log_print_oa(
 
 def sample(cfg, prev_action, prev_obs, observation):
     inference_cfg = cfg.inference_cfg
-    beam_scorer = transformers.BeamSearchScorer(
-        batch_size=cfg.batch_size,
-        max_length=cfg.tok_p_pure_action,
-        num_beams=cfg.num_beams,
-        device=cfg.device,
-    )
     cfg.inference_lm.eval()
     with torch.inference_mode():
         with autocast(
-            cache_enabled=True,
+            # cache_enabled=False,
             dtype=(
                 torch.bfloat16
-                if cfg.model_name in ["llama", "mistral"]
-                else torch.float16
+                # if cfg.model_name in ["llama", "mistral"]
+                # else torch.float16
             ),
         ):
             input_ids = torch.cat(
@@ -211,8 +207,10 @@ def sample(cfg, prev_action, prev_obs, observation):
                 ]
             )
 
-            # replace this with my own
-            beam_scorer = transformers.generation.beam_search.BeamSearchScorer(
+            # transformers.BeamSearchScorer
+            beam_scorer = BeamSearchScorer(
+                cfg=cfg,
+                obs=observation,
                 batch_size=cfg.batch_size,
                 num_beams=generation_config.num_beams,
                 device=cfg.device,
@@ -235,9 +233,8 @@ def sample(cfg, prev_action, prev_obs, observation):
                 output_scores=generation_config.output_scores,
                 return_dict_in_generate=generation_config.return_dict_in_generate,
                 synced_gpus=False,
-            )[:, -cfg.tok_p_action :]
-
-            return action_candidates
+            )
+            return action_candidates[:, -cfg.tok_p_action :]
 
 
 def compute_loss_tensor(cfg, input_sequence):
@@ -266,29 +263,6 @@ def compute_loss_tensor(cfg, input_sequence):
     return loss_tensor
 
 
-def get_obs_losses(cfg, action, obs):
-    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    mkv_input_sequence = torch.cat([action, obs], dim=1)
-    mkv_attention_mask = (
-        mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
-    ).long()
-    mkv_logits = cfg.predictor_lm(
-        mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False
-    ).logits[:, :-1, :]
-    mkv_loss_tensor = loss_fn(
-        input=einops.rearrange(
-            mkv_logits,
-            "batch seq_length vocab_size -> batch vocab_size seq_length",
-        ),
-        target=mkv_input_sequence[:, 1:],
-    )
-    obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs :]
-    obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][
-        :, -cfg.tok_p_pure_obs :
-    ].sum(dim=-1)
-    return obs_losses, obs_tensor
-
-
 def update_weights(
     cfg, batch_index, prev_action, prev_obs, action, obs, do_weight_update=True
 ):
@@ -310,9 +284,9 @@ def update_weights(
             cfg.training_predictor_mode = False
 
     with autocast(
-        cache_enabled=False,
+        # cache_enabled=True,
         dtype=(
-            torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16
+            torch.bfloat16  # if cfg.model_name in ["llama", "mistral"] else torch.float16
         ),
     ):
         prev_action = prev_action.repeat_interleave(
