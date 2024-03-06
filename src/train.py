@@ -216,9 +216,9 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
             "obs": repr(cfg.causal_lm_tokenizer.decode(obs[0])),
             # "action_loss": action_loss.item(),
             "observation_loss": observation_loss.item(),
-            "perturbed_loss": perturbed_loss.item()
-            if perturbed_loss is not None
-            else 0.0,
+            "perturbed_loss": (
+                perturbed_loss.item() if perturbed_loss is not None else 0.0
+            ),
         }
         append_traj_to_storage(cfg.traj_path, traj_data)
 
@@ -235,10 +235,6 @@ def sample(cfg, prev_action, prev_obs, observation):
                 # else torch.float16
             ),
         ):
-            input_ids = torch.cat(
-                [prev_action, prev_obs, cfg.action_prefix_tensor], dim=1
-            )
-            attention_mask = (input_ids != cfg.causal_lm_tokenizer.pad_token_id).long()
             generation_config = transformers.GenerationConfig(
                 max_new_tokens=cfg.tok_p_pure_action,
                 min_new_tokens=cfg.tok_p_pure_action,
@@ -254,6 +250,16 @@ def sample(cfg, prev_action, prev_obs, observation):
                 eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
                 return_dict_in_generate=False,
             )
+
+            input_ids = torch.cat(
+                [prev_action, prev_obs, cfg.action_prefix_tensor], dim=1
+            )
+            attention_mask = (input_ids != cfg.causal_lm_tokenizer.pad_token_id).long()
+
+            input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
+            attention_mask = attention_mask.repeat_interleave(cfg.num_beams, dim=0)
+            repeated_obs = observation.repeat_interleave(cfg.num_beams, dim=0)
+
             generation_config.max_tokens = (
                 generation_config.max_new_tokens + input_ids.shape[-1]
             )
@@ -284,24 +290,32 @@ def sample(cfg, prev_action, prev_obs, observation):
             )
 
             # transformers.BeamSearchScorer
-            beam_scorer = BeamSearchScorer(
-                cfg=cfg,
-                obs=observation,
+            beam_scorer_old = transformers.BeamSearchScorer(
+                # cfg=cfg,
+                # obs=observation,
                 batch_size=cfg.batch_size,
                 num_beams=generation_config.num_beams,
                 device=cfg.device,
                 length_penalty=generation_config.length_penalty,
                 do_early_stopping=generation_config.early_stopping,
                 num_beam_hyps_to_keep=generation_config.num_return_sequences,
-                max_length=generation_config.max_length,
+                max_length=generation_config.max_tokens,
             )
 
-            input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
-            attention_mask = attention_mask.repeat_interleave(cfg.num_beams, dim=0)
-
-            action_candidates = cfg.inference_lm.beam_search(
+            beam_scorer_new = BeamSearchScorer(
+                cfg=cfg,
+                obs=repeated_obs,
+                batch_size=cfg.batch_size,
+                num_beams=generation_config.num_beams,
+                device=cfg.device,
+                length_penalty=generation_config.length_penalty,
+                do_early_stopping=generation_config.early_stopping,
+                num_beam_hyps_to_keep=generation_config.num_return_sequences,
+                max_length=generation_config.max_tokens,
+            )
+            action_candidates_old = cfg.inference_lm.beam_search(
                 input_ids,
-                beam_scorer,
+                beam_scorer_old,
                 logits_processor=logits_processor,
                 stopping_criteria=stopping_criteria,
                 pad_token_id=generation_config.pad_token_id,
@@ -310,7 +324,34 @@ def sample(cfg, prev_action, prev_obs, observation):
                 return_dict_in_generate=generation_config.return_dict_in_generate,
                 synced_gpus=False,
             )
-            return action_candidates[:, -cfg.tok_p_action :]
+            action_candidates_new = cfg.inference_lm.beam_search(
+                input_ids,
+                beam_scorer_new,
+                logits_processor=logits_processor,
+                stopping_criteria=stopping_criteria,
+                pad_token_id=generation_config.pad_token_id,
+                eos_token_id=generation_config.eos_token_id,
+                output_scores=generation_config.output_scores,
+                return_dict_in_generate=generation_config.return_dict_in_generate,
+                synced_gpus=False,
+            )
+            print(
+                "Old",
+                repr(
+                    cfg.causal_lm_tokenizer.decode(
+                        action_candidates_old[:, -cfg.tok_p_action :][0]
+                    )
+                ),
+            )
+            print(
+                "New",
+                repr(
+                    cfg.causal_lm_tokenizer.decode(
+                        action_candidates_new[:, -cfg.tok_p_action :][0]
+                    )
+                ),
+            )
+            return action_candidates_new
 
 
 def compute_loss_tensor(cfg, input_sequence):
@@ -504,9 +545,9 @@ def perturb_action(action, cfg):
     frac_spaces = cfg.perturbation_cfg.frac_of_tokens_to_pad
     assert 1.0 >= frac_spaces >= 0.0, f"frac_randomize is {frac_spaces}"
     token_id_space = cfg.causal_lm_tokenizer.encode(" ")[-1]
-    action[
-        :, offset + int((1.0 - frac_spaces) * (action.shape[-1] - offset)) :
-    ] = token_id_space
+    action[:, offset + int((1.0 - frac_spaces) * (action.shape[-1] - offset)) :] = (
+        token_id_space
+    )
 
     return action
 

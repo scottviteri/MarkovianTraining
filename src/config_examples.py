@@ -2,26 +2,26 @@ from src.training_types import *
 import os
 
 g2 = InitialConfig(
-    model_name="gpt2",
+    model_name="distilgpt2",
     lr=1e-6,
     optimizer="adam",
     batch_size=1,
-    num_batches=10,
+    num_batches=100,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
     interval_print=1,
     wandb=False,
     load_model=False,
     do_lora=False,
-    num_beams=1,
+    num_beams=32,
     training_ctxt_size=200,
     dataset=InitDatasetType(
         task=ArithmeticTask(
-            num_terms=3,
+            num_terms=6,
             num_digits=2,
             cumulative=False,
             operations=["+", "-", "*"],
-            probs=[0.6, 0.2, 0.2],
+            probs=[1.0, 0.0, 0.0],
         ),
         peek_every=None,
     ),
@@ -31,9 +31,9 @@ g2 = InitialConfig(
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
-    inference_cfg=InferenceConfig(num_return_sequences=1),
+    inference_cfg=InferenceConfig(num_return_sequences=32),
     trainer_cfg=TrainerConfig(
-        prediction_training_length=5, inference_training_length=5
+        prediction_training_length=50, inference_training_length=10
     ),
     perturbation_cfg=None,
     # perturbation_cfg=PerturbationConfig(
@@ -273,4 +273,4 @@ mst = InitialConfig(
     debug=None,
 )
 
-configs = [mst]
+configs = [g2]
