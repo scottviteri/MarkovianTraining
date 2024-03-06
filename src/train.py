@@ -340,7 +340,7 @@ def compute_loss_tensor(cfg, input_sequence):
     """
     attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
     logits = cfg.inference_lm(
-        input_sequence, attention_mask=attention_mask, use_cache=False
+        input_sequence, attention_mask=attention_mask, use_cache=True
     ).logits[:, :-1, :]
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     loss_tensor = loss_fn(
