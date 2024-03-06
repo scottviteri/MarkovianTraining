@@ -289,33 +289,33 @@ def sample(cfg, prev_action, prev_obs, observation):
                 ]
             )
 
-            # transformers.BeamSearchScorer
-            beam_scorer_old = transformers.BeamSearchScorer(
-                # cfg=cfg,
-                # obs=observation,
-                batch_size=cfg.batch_size,
-                num_beams=generation_config.num_beams,
-                device=cfg.device,
-                length_penalty=generation_config.length_penalty,
-                do_early_stopping=generation_config.early_stopping,
-                num_beam_hyps_to_keep=generation_config.num_return_sequences,
-                max_length=generation_config.max_tokens,
-            )
-
-            beam_scorer_new = BeamSearchScorer(
-                cfg=cfg,
-                obs=repeated_obs,
-                batch_size=cfg.batch_size,
-                num_beams=generation_config.num_beams,
-                device=cfg.device,
-                length_penalty=generation_config.length_penalty,
-                do_early_stopping=generation_config.early_stopping,
-                num_beam_hyps_to_keep=generation_config.num_return_sequences,
-                max_length=generation_config.max_tokens,
-            )
-            action_candidates_old = cfg.inference_lm.beam_search(
+            if cfg.training_predictor_mode:
+                beam_scorer = transformers.BeamSearchScorer(
+                    # cfg=cfg,
+                    # obs=observation,
+                    batch_size=cfg.batch_size,
+                    num_beams=generation_config.num_beams,
+                    device=cfg.device,
+                    length_penalty=generation_config.length_penalty,
+                    do_early_stopping=generation_config.early_stopping,
+                    num_beam_hyps_to_keep=generation_config.num_return_sequences,
+                    max_length=generation_config.max_tokens,
+                )
+            else:
+                beam_scorer = BeamSearchScorer(
+                    cfg=cfg,
+                    obs=repeated_obs,
+                    batch_size=cfg.batch_size,
+                    num_beams=generation_config.num_beams,
+                    device=cfg.device,
+                    length_penalty=generation_config.length_penalty,
+                    do_early_stopping=generation_config.early_stopping,
+                    num_beam_hyps_to_keep=generation_config.num_return_sequences,
+                    max_length=generation_config.max_tokens,
+                )
+            action_candidates = cfg.inference_lm.beam_search(
                 input_ids,
-                beam_scorer_old,
+                beam_scorer,
                 logits_processor=logits_processor,
                 stopping_criteria=stopping_criteria,
                 pad_token_id=generation_config.pad_token_id,
@@ -324,26 +324,7 @@ def sample(cfg, prev_action, prev_obs, observation):
                 return_dict_in_generate=generation_config.return_dict_in_generate,
                 synced_gpus=False,
             )[:, -cfg.tok_p_action :]
-            action_candidates_new = cfg.inference_lm.beam_search(
-                input_ids,
-                beam_scorer_new,
-                logits_processor=logits_processor,
-                stopping_criteria=stopping_criteria,
-                pad_token_id=generation_config.pad_token_id,
-                eos_token_id=generation_config.eos_token_id,
-                output_scores=generation_config.output_scores,
-                return_dict_in_generate=generation_config.return_dict_in_generate,
-                synced_gpus=False,
-            )[:, -cfg.tok_p_action :]
-            print()
-            print(
-                f"Old: {repr(cfg.causal_lm_tokenizer.decode(action_candidates_old[0]))}"
-            )
-            print(
-                f"New: {repr(cfg.causal_lm_tokenizer.decode(action_candidates_new[0]))}"
-            )
-            print()
-            return action_candidates_new
+            return action_candidates
 
 
 def compute_loss_tensor(cfg, input_sequence):
