@@ -323,7 +323,7 @@ def sample(cfg, prev_action, prev_obs, observation):
                 output_scores=generation_config.output_scores,
                 return_dict_in_generate=generation_config.return_dict_in_generate,
                 synced_gpus=False,
-            )
+            )[:, -cfg.tok_p_action :]
             action_candidates_new = cfg.inference_lm.beam_search(
                 input_ids,
                 beam_scorer_new,
@@ -334,23 +334,15 @@ def sample(cfg, prev_action, prev_obs, observation):
                 output_scores=generation_config.output_scores,
                 return_dict_in_generate=generation_config.return_dict_in_generate,
                 synced_gpus=False,
+            )[:, -cfg.tok_p_action :]
+            print()
+            print(
+                f"Old: {repr(cfg.causal_lm_tokenizer.decode(action_candidates_old[0]))}"
             )
             print(
-                "Old",
-                repr(
-                    cfg.causal_lm_tokenizer.decode(
-                        action_candidates_old[:, -cfg.tok_p_action :][0]
-                    )
-                ),
+                f"New: {repr(cfg.causal_lm_tokenizer.decode(action_candidates_new[0]))}"
             )
-            print(
-                "New",
-                repr(
-                    cfg.causal_lm_tokenizer.decode(
-                        action_candidates_new[:, -cfg.tok_p_action :][0]
-                    )
-                ),
-            )
+            print()
             return action_candidates_new
 
 
