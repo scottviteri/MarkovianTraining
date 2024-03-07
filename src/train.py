@@ -124,6 +124,7 @@ def log_print_oa(
     if batch_index % cfg.interval_print == 0 and dist.get_rank() == 0:
         with open(cfg.path_2_log, "a") as f:
             multi_print(f"Batch Index: {batch_index}", f)
+            multi_print(f"Training predictor mode: {cfg.training_predictor_mode}", f)
             multi_print(f"Is First: {is_first}", f)
             multi_print(
                 f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0]))}",
@@ -256,8 +257,8 @@ def sample(cfg, prev_action, prev_obs, observation):
             )
             attention_mask = (input_ids != cfg.causal_lm_tokenizer.pad_token_id).long()
 
-            input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
-            attention_mask = attention_mask.repeat_interleave(cfg.num_beams, dim=0)
+            # input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
+            # attention_mask = attention_mask.repeat_interleave(cfg.num_beams, dim=0)
             repeated_obs = observation.repeat_interleave(cfg.num_beams, dim=0)
 
             generation_config.max_tokens = (
@@ -273,9 +274,9 @@ def sample(cfg, prev_action, prev_obs, observation):
                         generation_config.bad_words_ids, generation_config.eos_token_id
                     ),
                     transformers.generation.MinNewTokensLengthLogitsProcessor(
-                        input_ids.shape[-1],
-                        generation_config.min_new_tokens,
-                        generation_config.eos_token_id,
+                        prompt_length_to_skip=input_ids.shape[-1],
+                        min_new_tokens=generation_config.min_new_tokens,
+                        eos_token_id=generation_config.eos_token_id,
                     ),
                     transformers.generation.InfNanRemoveLogitsProcessor(),
                     transformers.LogitNormalization(),
@@ -290,31 +291,46 @@ def sample(cfg, prev_action, prev_obs, observation):
             )
 
             if cfg.training_predictor_mode:
-                beam_scorer = transformers.BeamSearchScorer(
-                    # cfg=cfg,
-                    # obs=observation,
-                    batch_size=cfg.batch_size,
-                    num_beams=generation_config.num_beams,
-                    device=cfg.device,
-                    length_penalty=generation_config.length_penalty,
-                    do_early_stopping=generation_config.early_stopping,
-                    num_beam_hyps_to_keep=generation_config.num_return_sequences,
-                    max_length=generation_config.max_tokens,
-                )
-            else:
-                beam_scorer = BeamSearchScorer(
-                    cfg=cfg,
-                    obs=repeated_obs,
-                    batch_size=cfg.batch_size,
-                    num_beams=generation_config.num_beams,
-                    device=cfg.device,
-                    length_penalty=generation_config.length_penalty,
-                    do_early_stopping=generation_config.early_stopping,
-                    num_beam_hyps_to_keep=generation_config.num_return_sequences,
-                    max_length=generation_config.max_tokens,
-                )
+                # beam_scorer = transformers.BeamSearchScorer(
+                #    # cfg=cfg,
+                #    # obs=observation,
+                #    batch_size=cfg.batch_size,
+                #    num_beams=generation_config.num_beams,
+                #    device=cfg.device,
+                #    length_penalty=generation_config.length_penalty,
+                #    do_early_stopping=generation_config.early_stopping,
+                #    num_beam_hyps_to_keep=generation_config.num_return_sequences,
+                #    max_length=generation_config.max_tokens,
+                # )
+                action_candidates = cfg.inference_lm.generate(
+                    inputs=input_ids,
+                    attention_mask=attention_mask,
+                    num_beams=cfg.num_beams,
+                    bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
+                    output_scores=True,
+                    do_sample=False,
+                    # temperature=1.0,
+                    min_new_tokens=cfg.tok_p_pure_action,
+                    max_new_tokens=cfg.tok_p_pure_action,
+                    pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+                    num_return_sequences=cfg.inference_cfg.num_return_sequences,
+                )[:, -cfg.tok_p_action :]
+                return action_candidates
+            beam_observations = observation.repeat_interleave(cfg.num_beams, dim=0)
+            beam_scorer = BeamSearchScorer(
+                cfg=cfg,
+                obs=beam_observations,
+                batch_size=cfg.batch_size,
+                num_beams=generation_config.num_beams,
+                device=cfg.device,
+                length_penalty=generation_config.length_penalty,
+                do_early_stopping=generation_config.early_stopping,
+                num_beam_hyps_to_keep=generation_config.num_return_sequences,
+                max_length=generation_config.max_tokens,
+            )
+            beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
             action_candidates = cfg.inference_lm.beam_search(
-                input_ids,
+                beam_input_ids,
                 beam_scorer,
                 logits_processor=logits_processor,
                 stopping_criteria=stopping_criteria,
@@ -357,21 +373,6 @@ def update_weights(
     cfg, batch_index, prev_action, prev_obs, action, obs, do_weight_update=True
 ):
     prediction_cfg = cfg.prediction_cfg
-
-    if batch_index > 0:
-        pred_len, inf_len = (
-            cfg.trainer_cfg.prediction_training_length,
-            cfg.trainer_cfg.inference_training_length,
-        )
-        mode_index = batch_index % (pred_len + inf_len)
-        if mode_index == 0:  # switch from inf mode to pred mode
-            assert not cfg.training_predictor_mode
-            cfg.predictor_lm.load_state_dict(cfg.inference_lm.state_dict())
-            cfg.training_predictor_mode = True
-        elif mode_index == pred_len:
-            assert cfg.training_predictor_mode
-            cfg.inference_lm.load_state_dict(cfg.predictor_lm.state_dict())
-            cfg.training_predictor_mode = False
 
     with autocast(
         # cache_enabled=True,
@@ -534,6 +535,22 @@ def trainer(cfg):
         is_first = "First" in datapt and datapt["First"]
         prev_action, batch_index, _ = state
         prev_obs, obs = prev_datapt["Observation"], datapt["Observation"]
+
+        if batch_index > 0:
+            pred_len, inf_len = (
+                cfg.trainer_cfg.prediction_training_length,
+                cfg.trainer_cfg.inference_training_length,
+            )
+            mode_index = batch_index % (pred_len + inf_len)
+            if mode_index == 0:  # switch from inf mode to pred mode
+                assert not cfg.training_predictor_mode
+                cfg.predictor_lm.load_state_dict(cfg.inference_lm.state_dict())
+                cfg.training_predictor_mode = True
+            elif mode_index == pred_len:
+                assert cfg.training_predictor_mode
+                cfg.inference_lm.load_state_dict(cfg.predictor_lm.state_dict())
+                cfg.training_predictor_mode = False
+
         if is_first:
             prev_action = default_action(cfg)
             log_print_oa(
@@ -555,6 +572,7 @@ def trainer(cfg):
             action = prev_action
         else:
             action = sample(cfg, prev_action, prev_obs, obs)
+        # action : [batch * beam, tok_p_action]
 
         aggregate_loss, loss_tensors, losses = update_weights(
             cfg,

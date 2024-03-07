@@ -374,7 +374,7 @@ def get_obs_losses(cfg, action, obs):
         mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
     ).long()
     mkv_logits = cfg.predictor_lm(
-        mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=False
+        mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=True
     ).logits[:, :-1, :]
     mkv_loss_tensor = loss_fn(
         input=einops.rearrange(

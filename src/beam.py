@@ -61,8 +61,10 @@ class BeamSearchScorer(transformers.BeamScorer):
         for i in range(next_inds.shape[0]):
             next_inds[i] += self.cfg.num_beams * i
         next_inds = einops.rearrange(next_inds, "batch beam -> (batch beam)")
+        next_tokens = einops.rearrange(next_tokens, "batch beam -> (batch beam)")
+        new_actions = torch.cat((actions[next_inds], next_tokens.unsqueeze(1)), dim=-1)
         obs_losses, obs_tensor = get_obs_losses(
-            self.cfg, actions[next_inds], self.obs[next_inds]
+            self.cfg, new_actions, self.obs[next_inds]
         )
         for i in range(self.cfg.batch_size):
             num_hypotheses = 2 * self.cfg.num_beams
@@ -70,8 +72,8 @@ class BeamSearchScorer(transformers.BeamScorer):
             obs_scores = (-obs_losses)[begin:end]  # + next_scores[i]
             top_scores, top_indices = obs_scores.topk(k=self.cfg.num_beams)
             next_beam_scores.append(top_scores)
-            next_beam_tokens.append(next_tokens[i][top_indices])
-            next_beam_indices.append(next_indices[i][top_indices])
+            next_beam_tokens.append(next_tokens[begin:end][top_indices])
+            next_beam_indices.append(next_inds[begin:end][top_indices])
             if input_ids.shape[-1] == 2 * self.cfg.tok_p_action + self.cfg.tok_p_obs:
                 self._is_done = True
             # print(f"Current generation index: {action.shape[-1]}")
@@ -117,13 +119,14 @@ class BeamSearchScorer(transformers.BeamScorer):
         beam_indices: Optional[torch.LongTensor] = None,
         decoder_prompt_len: Optional[int] = 0,
     ) -> Tuple[torch.LongTensor]:
+        batched_scores = einops.rearrange(
+            final_beam_scores, "(batch beam) -> batch beam", batch=self.cfg.batch_size
+        )
+        top_scores, top_inds = batched_scores.topk(k=self.num_beam_hyps_to_keep, dim=1)
         all_inds = []
         for batch_index in range(self.cfg.batch_size):
-            begin = batch_index * self.cfg.num_beams
-            end = begin + self.cfg.num_beams
-            _, inds = final_beam_scores[begin:end].topk(k=self.num_beam_hyps_to_keep)
-            all_inds.append(inds)
-        return UserDict({"sequences": input_ids[torch.cat(all_inds), :]})
+            all_inds.append(top_inds[batch_index] + self.cfg.num_beams * batch_index)
+        return UserDict({"sequences": input_ids[torch.cat(all_inds)]})
         # return 1
         # return UserDict(
         #    {

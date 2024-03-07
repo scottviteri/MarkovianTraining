@@ -5,7 +5,7 @@ g2 = InitialConfig(
     model_name="distilgpt2",
     lr=1e-6,
     optimizer="adam",
-    batch_size=1,
+    batch_size=2,
     num_batches=100,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
@@ -13,7 +13,7 @@ g2 = InitialConfig(
     wandb=False,
     load_model=False,
     do_lora=False,
-    num_beams=32,
+    num_beams=5,
     training_ctxt_size=200,
     dataset=InitDatasetType(
         task=ArithmeticTask(
@@ -26,14 +26,14 @@ g2 = InitialConfig(
         peek_every=None,
     ),
     prediction_cfg=PredictionConfig(
-        filter_best_actions=1,
+        filter_best_actions=3,
         train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
-    inference_cfg=InferenceConfig(num_return_sequences=32),
+    inference_cfg=InferenceConfig(num_return_sequences=4),
     trainer_cfg=TrainerConfig(
-        prediction_training_length=50, inference_training_length=10
+        prediction_training_length=10, inference_training_length=10
     ),
     perturbation_cfg=None,
     # perturbation_cfg=PerturbationConfig(
