@@ -1,6 +1,11 @@
 import torch
 import torchtyping
-from transformers import AutoTokenizer, AutoModelForCausalLM, PreTrainedModel, PreTrainedTokenizer
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    PreTrainedModel,
+    PreTrainedTokenizer,
+)
 from peft import LoraConfig, get_peft_model, TaskType
 import wandb
 from dataclasses import dataclass
@@ -13,6 +18,7 @@ import torch.nn as nn
 
 from src.training_types import *
 from src.prepare_dataset import prepare_dataset
+
 
 def load_cfg_from_file(file_location: str) -> InitialConfig:
     with open(file_location) as f:
@@ -27,10 +33,11 @@ def load_cfg_from_file(file_location: str) -> InitialConfig:
 def extend_initial_config(init_cfg: InitialConfig) -> Config:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     path_2_log = f"saved_weights_and_losses/{init_cfg.model_name}_log.txt"
+    traj_path = f"saved_weights_and_losses/{init_cfg.model_name}_traj"
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 
-    predictor_lm, causal_lm_tokenizer, ctxt_size = get_model(
+    inference_lm, causal_lm_tokenizer, ctxt_size = get_model(
         device,
         init_cfg.load_model,
         init_cfg.model_name,
@@ -39,9 +46,9 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         init_cfg.do_lora,
     )
 
-    inference_lm = copy.deepcopy(predictor_lm)
-    for param in inference_lm.parameters():
-        param.requires_grad = False
+    predictor_lm = copy.deepcopy(inference_lm)
+    # for param in predictor_lm.parameters():
+    #    param.requires_grad = False
 
     training_ctxt_size = (
         ctxt_size
@@ -96,6 +103,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
             dataloader=dataset,
         ),
         path_2_log=path_2_log,
+        traj_path=traj_path,
         path_2_model=path_2_model,
         path_2_tokenizer=path_2_tokenizer,
         tok_p_action=tok_p_action,
@@ -110,6 +118,8 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         causal_lm_tokenizer=causal_lm_tokenizer,
         inference_cfg=init_cfg.inference_cfg,
         prediction_cfg=init_cfg.prediction_cfg,
+        trainer_cfg=init_cfg.trainer_cfg,
+        training_predictor_mode=True,
         perturbation_cfg=init_cfg.perturbation_cfg,
         debug=init_cfg.debug,
     )
@@ -250,7 +260,7 @@ def get_model(
         "gpt2-medium": "gpt2-medium",
         "gpt2-large": "gpt2-large",
         "gpt2-xl": "gpt2-xl",
-        "phi2": "microsoft/phi-2"
+        "phi2": "microsoft/phi-2",
         # Add other models here
     }
     with device:
@@ -281,13 +291,14 @@ def get_model(
             inference_mode=False,
             r=64,
             lora_alpha=128,
-            lora_dropout=0.1
+            lora_dropout=0.1,
             # target_modules=linear_layers
         )
         # print("Num Linear Layers: ", len(linear_layers))
         causal_lm = get_peft_model(causal_lm, peft_config)
         causal_lm.print_trainable_parameters()
 
+    causal_lm.tokenizer = causal_lm_tokenizer
     return causal_lm, causal_lm_tokenizer, ctxt_size
 
 
@@ -311,6 +322,7 @@ def create_run_name(cfg: Config) -> str:
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
     run_name += f"{cfg.optimizer[:3]}_"
+    run_name += f"pu{cfg.trainer_cfg.prediction_training_length}_gu{cfg.trainer_cfg.inference_training_length}_"
     if isinstance(cfg.dataset.task, ArithmeticTask):
         run_name += (
             f"ari_nt={cfg.dataset.task.num_terms}_nd={cfg.dataset.task.num_digits}_"
@@ -319,9 +331,6 @@ def create_run_name(cfg: Config) -> str:
             run_name += "cm_"
     else:
         run_name += "wiki_"
-    if cfg.inference_cfg.update_every is not None:
-        assert cfg.inference_cfg.fraction_to_update is not None
-        run_name += f"ue{cfg.inference_cfg.update_every}_upd{cfg.inference_cfg.fraction_to_update:.3f}_"
     if cfg.lr != 1e-4:
         run_name += f"lr{cfg.lr}_"
     if prediction_cfg.train_O_given_prev_O:
@@ -356,3 +365,26 @@ def create_run_name(cfg: Config) -> str:
     if cfg.training_ctxt_size:
         run_name += f"ics{cfg.training_ctxt_size}_"
     return run_name
+
+
+def get_obs_losses(cfg, action, obs):
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    mkv_input_sequence = torch.cat([action, obs], dim=1)
+    mkv_attention_mask = (
+        mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
+    ).long()
+    mkv_logits = cfg.predictor_lm(
+        mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=True
+    ).logits[:, :-1, :]
+    mkv_loss_tensor = loss_fn(
+        input=einops.rearrange(
+            mkv_logits,
+            "batch seq_length vocab_size -> batch vocab_size seq_length",
+        ),
+        target=mkv_input_sequence[:, 1:],
+    )
+    obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs :]
+    obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][
+        :, -cfg.tok_p_pure_obs :
+    ].sum(dim=-1)
+    return obs_losses, obs_tensor

@@ -2,34 +2,45 @@ from src.training_types import *
 import os
 
 g2 = InitialConfig(
-    model_name="gpt2",
+    model_name="distilgpt2",
     lr=1e-6,
     optimizer="adam",
-    batch_size=1,
-    num_batches=10,
+    batch_size=2,
+    num_batches=100,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
     interval_print=1,
     wandb=False,
     load_model=False,
     do_lora=False,
-    num_beams=1,
+    num_beams=4,
     training_ctxt_size=200,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), peek_every=None
-    ),
-    inference_cfg=InferenceConfig(
-        num_return_sequences=1, update_every=None, fraction_to_update=None
+        task=ArithmeticTask(
+            num_terms=6,
+            num_digits=2,
+            cumulative=False,
+            operations=["+", "-", "*"],
+            probs=[1.0, 0.0, 0.0],
+        ),
+        peek_every=None,
     ),
     prediction_cfg=PredictionConfig(
-        filter_best_actions = 1, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=1,
+        train_A_given_AO=False,
+        train_O_given_A=True,
+        train_O_given_prev_O=False,
     ),
-     perturbation_cfg=None,
-    #perturbation_cfg=PerturbationConfig(
+    inference_cfg=InferenceConfig(num_return_sequences=4),
+    trainer_cfg=TrainerConfig(
+        prediction_training_length=70, inference_training_length=30
+    ),
+    perturbation_cfg=None,
+    # perturbation_cfg=PerturbationConfig(
     #    eval_every=10,
     #    frac_of_tokens_to_randomize=0.5,
     #    frac_of_tokens_to_pad=0.5,
-    #),
+    # ),
     debug=None,
 )
 
@@ -48,14 +59,24 @@ g2_ar = InitialConfig(
     num_beams=1,
     training_ctxt_size=150,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False),
+        task=ArithmeticTask(
+            num_terms=2,
+            num_digits=3,
+            cumulative=False,
+            operations=None,
+            probs=None,
+        ),
         peek_every=None,
     ),
-    inference_cfg=InferenceConfig(
-        num_return_sequences=1, update_every=None, fraction_to_update=None
-    ),
+    inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
-        filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=None,
+        train_A_given_AO=False,
+        train_O_given_A=True,
+        train_O_given_prev_O=False,
+    ),
+    trainer_cfg=TrainerConfig(
+        prediction_training_length=5, inference_training_length=5
     ),
     perturbation_cfg=None,
     debug=None,
@@ -76,14 +97,24 @@ g2_ei = InitialConfig(
     num_beams=1,
     training_ctxt_size=150,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False),
+        task=ArithmeticTask(
+            num_terms=2,
+            num_digits=3,
+            cumulative=False,
+            operations=None,
+            probs=None,
+        ),
         peek_every=None,
     ),
-    inference_cfg=InferenceConfig(
-        num_return_sequences=1, update_every=None, fraction_to_update=None
-    ),
+    inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
-        filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=None,
+        train_A_given_AO=False,
+        train_O_given_A=True,
+        train_O_given_prev_O=False,
+    ),
+    trainer_cfg=TrainerConfig(
+        prediction_training_length=5, inference_training_length=5
     ),
     perturbation_cfg=None,
     debug=None,
@@ -105,13 +136,24 @@ g2_p2 = InitialConfig(
     num_beams=1,
     training_ctxt_size=150,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False), peek_every=2
+        task=ArithmeticTask(
+            num_terms=2,
+            num_digits=3,
+            cumulative=False,
+            operations=None,
+            probs=None,
+        ),
+        peek_every=2,
     ),
-    inference_cfg=InferenceConfig(
-        num_return_sequences=1, update_every=None, fraction_to_update=None
-    ),
+    inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
-        filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=None,
+        train_A_given_AO=False,
+        train_O_given_A=True,
+        train_O_given_prev_O=False,
+    ),
+    trainer_cfg=TrainerConfig(
+        prediction_training_length=5, inference_training_length=5
     ),
     perturbation_cfg=None,
     debug=None,
@@ -132,14 +174,24 @@ gj = InitialConfig(
     num_beams=1,
     training_ctxt_size=150,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False),
+        task=ArithmeticTask(
+            num_terms=2,
+            num_digits=3,
+            cumulative=False,
+            operations=None,
+            probs=None,
+        ),
         peek_every=None,
     ),
-    inference_cfg=InferenceConfig(
-        num_return_sequences=1, update_every=None, fraction_to_update=None
-    ),
+    inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
-        filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=None,
+        train_A_given_AO=False,
+        train_O_given_A=True,
+        train_O_given_prev_O=False,
+    ),
+    trainer_cfg=TrainerConfig(
+        prediction_training_length=5, inference_training_length=5
     ),
     perturbation_cfg=None,
     debug=None,
@@ -160,14 +212,24 @@ lma = InitialConfig(
     num_beams=1,
     training_ctxt_size=200,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=2, num_digits=3, cumulative=False),
+        task=ArithmeticTask(
+            num_terms=2,
+            num_digits=3,
+            cumulative=False,
+            operations=None,
+            probs=None,
+        ),
         peek_every=None,
     ),
-    inference_cfg=InferenceConfig(
-        num_return_sequences=1, update_every=None, fraction_to_update=None
-    ),
+    inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
-         filter_best_actions=None, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=None,
+        train_A_given_AO=False,
+        train_O_given_A=True,
+        train_O_given_prev_O=False,
+    ),
+    trainer_cfg=TrainerConfig(
+        prediction_training_length=5, inference_training_length=5
     ),
     perturbation_cfg=None,
     debug=None,
@@ -181,25 +243,34 @@ mst = InitialConfig(
     num_batches=1000,
     obs_to_action_ratio=0.5,
     interval_save_weights=1001,
-    interval_print=5,
+    interval_print=3,
     wandb=True,
     load_model=False,
     do_lora=False,
-    num_beams=64,
+    num_beams=12,
     training_ctxt_size=200,
     dataset=InitDatasetType(
-        task=ArithmeticTask(num_terms=6, num_digits=2, cumulative=False),
+        task=ArithmeticTask(
+            num_terms=6,
+            num_digits=2,
+            cumulative=False,
+            operations=["+", "-", "*"],
+            probs=[1.0, 0.0, 0.0],
+        ),
         peek_every=None,
     ),
-    inference_cfg=InferenceConfig(
-        num_return_sequences=6, update_every=10, fraction_to_update=1e-3
-    ),
+    inference_cfg=InferenceConfig(num_return_sequences=12),
     prediction_cfg=PredictionConfig(
-        filter_best_actions=1, train_A_given_AO=False, train_O_given_A=True, train_O_given_prev_O=False
+        filter_best_actions=1,
+        train_A_given_AO=False,
+        train_O_given_A=True,
+        train_O_given_prev_O=False,
+    ),
+    trainer_cfg=TrainerConfig(
+        prediction_training_length=90, inference_training_length=10
     ),
     perturbation_cfg=None,
     debug=None,
 )
 
-# configs = [g2, g2_ar, g2_ei]
-configs = [mst]
+configs = [g2]

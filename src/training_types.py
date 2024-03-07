@@ -23,9 +23,16 @@ InferenceConfig = NamedTuple(
     "InferenceConfig",
     [
         ("num_return_sequences", int),
-        ("update_every", Optional[int]),
-        ("fraction_to_update", Optional[float]),
+        #("update_every", Optional[int]),
+        #("fraction_to_update", Optional[float]),
     ],
+)
+TrainerConfig = NamedTuple(
+    "TrainerConfig",
+    [
+        ("prediction_training_length", Optional[int]),
+        ("inference_training_length", Optional[int])
+    ]
 )
 PerturbationConfig = NamedTuple(
     "PerturbationConfig",
@@ -42,7 +49,14 @@ ReplaceWithRandomTokens = NamedTuple("ReplaceWithRandomTokens", [])
 NoWeightUpdates = NamedTuple("NoWeightUpdates", [])
 
 ArithmeticTask = NamedTuple(
-    "ArithmeticTask", [("num_digits", int), ("num_terms", int), ("cumulative", bool)]
+    "ArithmeticTask",
+    [
+        ("num_digits", int),
+        ("num_terms", int),
+        ("cumulative", bool),
+        ("operations", Optional[list]),
+        ("probs", Optional[list]),
+    ],
 )
 WikipediaTask = NamedTuple("WikipediaTask", [])
 TaskType = Union[ArithmeticTask, WikipediaTask]
@@ -79,9 +93,10 @@ class InitialConfig:
     do_lora: bool
     num_beams: int
     inference_cfg: InferenceConfig
+    prediction_cfg: PredictionConfig
+    trainer_cfg: TrainerConfig
     training_ctxt_size: Optional[int]
     dataset: InitDatasetType
-    prediction_cfg: PredictionConfig
     perturbation_cfg: Optional[PerturbationConfig]
     debug: Optional[DebugType]
 
@@ -106,6 +121,7 @@ class Config:
     training_ctxt_size: int
     device: str
     path_2_log: str
+    traj_path: str
     path_2_model: str
     path_2_tokenizer: str
     tok_p_action: Optional[int]
@@ -118,5 +134,7 @@ class Config:
     dataset: DatasetType
     inference_cfg: InferenceConfig
     prediction_cfg: PredictionConfig
+    trainer_cfg: TrainerConfig
+    training_predictor_mode: bool
     perturbation_cfg: Optional[PerturbationConfig]
     debug: Optional[DebugType]
