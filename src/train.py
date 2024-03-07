@@ -61,19 +61,20 @@ def default_action(cfg):
         .to(cfg.device)
     )
     assert initial_helpful_msg.shape[-1] < cfg.tok_p_pure_obs
-    prev_action = torch.cat(
-        (
-            cfg.action_prefix_tensor,
-            initial_helpful_msg,
-            torch.full(
-                (cfg.batch_size, cfg.tok_p_pure_action - initial_helpful_msg.shape[-1]),
-                fill_value=cfg.causal_lm_tokenizer.pad_token_id,
-                dtype=torch.int64,
-                device=cfg.device,
-            ),
-        ),
-        dim=1,
-    )
+    # prev_action = torch.cat(
+    #    (
+    #        cfg.action_prefix_tensor,
+    #        initial_helpful_msg,
+    #        torch.full(
+    #            (cfg.batch_size, cfg.tok_p_pure_action - initial_helpful_msg.shape[-1]),
+    #            fill_value=cfg.causal_lm_tokenizer.pad_token_id,
+    #            dtype=torch.int64,
+    #            device=cfg.device,
+    #        ),
+    #    ),
+    #    dim=1,
+    # )
+    prev_action = initial_helpful_msg
     return prev_action
 
 
@@ -282,24 +283,24 @@ def sample(cfg, prev_action, prev_obs, observation):
 
             if cfg.training_predictor_mode:
                 # beam_scorer = transformers.BeamSearchScorer(
-                #    batch_size=cfg.batch_size,
-                #    num_beams=generation_config.num_beams,
-                #    device=cfg.device,
-                #    length_penalty=generation_config.length_penalty,
-                #    do_early_stopping=generation_config.early_stopping,
-                #    num_beam_hyps_to_keep=generation_config.num_return_sequences,
-                #    max_length=input_ids.shape[-1] + generation_config.max_new_tokens,
+                #   batch_size=cfg.batch_size,
+                #   num_beams=generation_config.num_beams,
+                #   device=cfg.device,
+                #   length_penalty=generation_config.length_penalty,
+                #   do_early_stopping=generation_config.early_stopping,
+                #   num_beam_hyps_to_keep=generation_config.num_return_sequences,
+                #   max_length=input_ids.shape[-1] + generation_config.max_new_tokens,
                 # )
                 # beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
                 # action_candidates = cfg.inference_lm.beam_search(
-                #    beam_input_ids,
-                #    beam_scorer,
-                #    logits_processor=logits_processor,
-                #    stopping_criteria=stopping_criteria,
-                #    pad_token_id=generation_config.pad_token_id,
-                #    eos_token_id=generation_config.eos_token_id,
-                #    output_scores=generation_config.output_scores,
-                #    return_dict_in_generate=generation_config.return_dict_in_generate,
+                #   beam_input_ids,
+                #   beam_scorer,
+                #   logits_processor=logits_processor,
+                #   stopping_criteria=stopping_criteria,
+                #   pad_token_id=generation_config.pad_token_id,
+                #   eos_token_id=generation_config.eos_token_id,
+                #   output_scores=generation_config.output_scores,
+                #   return_dict_in_generate=generation_config.return_dict_in_generate,
                 # )[:, -cfg.tok_p_action :]
                 action_candidates = cfg.inference_lm.generate(
                     inputs=input_ids,
