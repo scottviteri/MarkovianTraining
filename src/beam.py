@@ -69,7 +69,7 @@ class BeamSearchScorer(transformers.BeamScorer):
         for i in range(self.cfg.batch_size):
             num_hypotheses = 2 * self.cfg.num_beams
             begin, end = i * num_hypotheses, (i + 1) * num_hypotheses
-            obs_scores = (-obs_losses)[begin:end]  # + next_scores[i]
+            obs_scores = (-obs_losses)[begin:end] + next_scores[i]
             top_scores, top_indices = obs_scores.topk(k=self.cfg.num_beams)
             next_beam_scores.append(top_scores)
             next_beam_tokens.append(next_tokens[begin:end][top_indices])

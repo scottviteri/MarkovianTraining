@@ -13,7 +13,7 @@ g2 = InitialConfig(
     wandb=False,
     load_model=False,
     do_lora=False,
-    num_beams=5,
+    num_beams=4,
     training_ctxt_size=200,
     dataset=InitDatasetType(
         task=ArithmeticTask(
@@ -26,14 +26,14 @@ g2 = InitialConfig(
         peek_every=None,
     ),
     prediction_cfg=PredictionConfig(
-        filter_best_actions=3,
+        filter_best_actions=1,
         train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
     inference_cfg=InferenceConfig(num_return_sequences=4),
     trainer_cfg=TrainerConfig(
-        prediction_training_length=10, inference_training_length=10
+        prediction_training_length=70, inference_training_length=30
     ),
     perturbation_cfg=None,
     # perturbation_cfg=PerturbationConfig(
