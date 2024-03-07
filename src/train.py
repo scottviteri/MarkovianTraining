@@ -232,15 +232,14 @@ def sample(cfg, prev_action, prev_obs, observation):
             # cache_enabled=False,
             dtype=(
                 torch.bfloat16
-                # if cfg.model_name in ["llama", "mistral"]
-                # else torch.float16
+                if cfg.model_name in ["llama", "mistral"]
+                else torch.float16
             ),
         ):
             generation_config = transformers.GenerationConfig(
                 max_new_tokens=cfg.tok_p_pure_action,
                 min_new_tokens=cfg.tok_p_pure_action,
                 do_sample=False,
-                # temperature=1.0,
                 num_beams=cfg.num_beams,
                 bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
                 renormalize_logits=True,
@@ -257,21 +256,11 @@ def sample(cfg, prev_action, prev_obs, observation):
             )
             attention_mask = (input_ids != cfg.causal_lm_tokenizer.pad_token_id).long()
 
-            # input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
-            # attention_mask = attention_mask.repeat_interleave(cfg.num_beams, dim=0)
-            repeated_obs = observation.repeat_interleave(cfg.num_beams, dim=0)
-
-            generation_config.max_tokens = (
-                generation_config.max_new_tokens + input_ids.shape[-1]
-            )
-            generation_config.min_tokens = (
-                generation_config.min_new_tokens + input_ids.shape[-1]
-            )
-
             logits_processor = transformers.generation.LogitsProcessorList(
                 [
                     transformers.generation.NoBadWordsLogitsProcessor(
-                        generation_config.bad_words_ids, generation_config.eos_token_id
+                        generation_config.bad_words_ids,
+                        eos_token_id=generation_config.eos_token_id,
                     ),
                     transformers.generation.MinNewTokensLengthLogitsProcessor(
                         prompt_length_to_skip=input_ids.shape[-1],
@@ -285,37 +274,39 @@ def sample(cfg, prev_action, prev_obs, observation):
             stopping_criteria = transformers.generation.StoppingCriteriaList(
                 [
                     transformers.generation.MaxLengthCriteria(
-                        max_length=generation_config.max_tokens
+                        max_length=input_ids.shape[-1]
+                        + generation_config.max_new_tokens
                     )
                 ]
             )
 
             if cfg.training_predictor_mode:
                 # beam_scorer = transformers.BeamSearchScorer(
-                #    # cfg=cfg,
-                #    # obs=observation,
                 #    batch_size=cfg.batch_size,
                 #    num_beams=generation_config.num_beams,
                 #    device=cfg.device,
                 #    length_penalty=generation_config.length_penalty,
                 #    do_early_stopping=generation_config.early_stopping,
                 #    num_beam_hyps_to_keep=generation_config.num_return_sequences,
-                #    max_length=generation_config.max_tokens,
+                #    max_length=input_ids.shape[-1] + generation_config.max_new_tokens,
                 # )
+                # beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
+                # action_candidates = cfg.inference_lm.beam_search(
+                #    beam_input_ids,
+                #    beam_scorer,
+                #    logits_processor=logits_processor,
+                #    stopping_criteria=stopping_criteria,
+                #    pad_token_id=generation_config.pad_token_id,
+                #    eos_token_id=generation_config.eos_token_id,
+                #    output_scores=generation_config.output_scores,
+                #    return_dict_in_generate=generation_config.return_dict_in_generate,
+                # )[:, -cfg.tok_p_action :]
                 action_candidates = cfg.inference_lm.generate(
                     inputs=input_ids,
-                    attention_mask=attention_mask,
-                    num_beams=cfg.num_beams,
-                    bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
-                    output_scores=True,
-                    do_sample=False,
-                    # temperature=1.0,
-                    min_new_tokens=cfg.tok_p_pure_action,
-                    max_new_tokens=cfg.tok_p_pure_action,
-                    pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
-                    num_return_sequences=cfg.inference_cfg.num_return_sequences,
+                    generation_config=generation_config,
                 )[:, -cfg.tok_p_action :]
                 return action_candidates
+            beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
             beam_observations = observation.repeat_interleave(cfg.num_beams, dim=0)
             beam_scorer = BeamSearchScorer(
                 cfg=cfg,
@@ -326,9 +317,8 @@ def sample(cfg, prev_action, prev_obs, observation):
                 length_penalty=generation_config.length_penalty,
                 do_early_stopping=generation_config.early_stopping,
                 num_beam_hyps_to_keep=generation_config.num_return_sequences,
-                max_length=generation_config.max_tokens,
+                max_length=input_ids.shape[-1] + generation_config.max_new_tokens,
             )
-            beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
             action_candidates = cfg.inference_lm.beam_search(
                 beam_input_ids,
                 beam_scorer,
@@ -355,9 +345,9 @@ def compute_loss_tensor(cfg, input_sequence):
         The computed loss tensor.
     """
     attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-    logits = cfg.inference_lm(
-        input_sequence, attention_mask=attention_mask, use_cache=True
-    ).logits[:, :-1, :]
+    logits = cfg.inference_lm(input_sequence, attention_mask=attention_mask).logits[
+        :, :-1, :
+    ]
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     loss_tensor = loss_fn(
         input=einops.rearrange(
@@ -375,9 +365,8 @@ def update_weights(
     prediction_cfg = cfg.prediction_cfg
 
     with autocast(
-        # cache_enabled=True,
         dtype=(
-            torch.bfloat16  # if cfg.model_name in ["llama", "mistral"] else torch.float16
+            torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16
         ),
     ):
         prev_action = prev_action.repeat_interleave(
@@ -400,31 +389,12 @@ def update_weights(
             loss_tensor = compute_loss_tensor(cfg, torch.cat([prev_obs, obs], dim=1))
             aggregate_loss = loss_tensor[:, -cfg.tok_p_pure_obs :].mean()
 
-        with torch.no_grad():
-            obs_losses, obs_tensor = get_obs_losses(cfg, action, obs)
-            if cfg.prediction_cfg.filter_best_actions:
-                best_loss_indices = torch.topk(
-                    obs_losses, k=cfg.prediction_cfg.filter_best_actions, largest=False
-                ).indices
-            else:
-                best_loss_indices = torch.arange(obs_losses.size(0))
-
         with torch.no_grad() if not cfg.training_predictor_mode else nullcontext():
-            obs_losses, obs_tensor = get_obs_losses(
-                cfg, action[best_loss_indices, :], obs[best_loss_indices, :]
-            )
+            obs_losses, obs_tensor = get_obs_losses(cfg, action, obs)
 
         with torch.no_grad() if cfg.training_predictor_mode else nullcontext():
             loss_tensor = compute_loss_tensor(
-                cfg,
-                torch.cat(
-                    [
-                        prev_action[best_loss_indices, :],
-                        prev_obs[best_loss_indices, :],
-                        action[best_loss_indices, :],
-                    ],
-                    dim=1,
-                ),
+                cfg, torch.cat([prev_action, prev_obs, action], dim=1)
             )
 
         prev_action_tensor = loss_tensor[:, : cfg.tok_p_action]
