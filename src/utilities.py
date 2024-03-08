@@ -280,13 +280,13 @@ def get_model(
         else:
             causal_lm = AutoModelForCausalLM.from_pretrained(
                 model_dict[model_name],
-                use_flash_attention_2=model_name in ["llama", "mistral"],
+                use_flash_attention_2=model_name in ["llama"],
             )
         causal_lm.bfloat16()
         causal_lm_tokenizer = AutoTokenizer.from_pretrained(
             model_dict[model_name], padding_side=padding_side
         )
-        causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
+        #  causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
         ## causal_lm.config.pad_token_id = causal_lm_tokenizer.pad_token_id
         # causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.vocab_size
         causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
