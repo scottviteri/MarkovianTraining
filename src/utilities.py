@@ -13,6 +13,7 @@ import einops
 from datasets import load_dataset
 import json
 import copy
+from contextlib import nullcontext
 
 import torch.nn as nn
 
@@ -37,7 +38,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 
-    inference_lm, causal_lm_tokenizer, ctxt_size = get_model(
+    predictor_lm, causal_lm_tokenizer, ctxt_size = get_model(
         device,
         init_cfg.load_model,
         init_cfg.model_name,
@@ -46,7 +47,12 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         init_cfg.do_lora,
     )
 
-    predictor_lm = copy.deepcopy(inference_lm)
+    inference_lm = torch.nn.Linear(
+        predictor_lm.lm_head.weight.shape[-1], 1, bias=False, device=device
+    )
+    torch.nn.init.xavier_uniform_(inference_lm.weight)
+
+    # predictor_lm = copy.deepcopy(inference_lm)
     # for param in predictor_lm.parameters():
     #    param.requires_grad = False
 
@@ -86,6 +92,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         model_name=init_cfg.model_name,
         lr=init_cfg.lr,
         optimizer=init_cfg.optimizer,
+        vhead_optimizer=None,
         batch_size=init_cfg.batch_size,
         num_batches=init_cfg.num_batches,
         obs_to_action_ratio=init_cfg.obs_to_action_ratio,
@@ -114,7 +121,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         obs_prefix_tensor=obs_prefix,
         ctxt_size=ctxt_size,
         predictor_lm=predictor_lm,
-        inference_lm=inference_lm,
+        inference_lm=inference_lm,  # predictor_lm,
         causal_lm_tokenizer=causal_lm_tokenizer,
         inference_cfg=init_cfg.inference_cfg,
         prediction_cfg=init_cfg.prediction_cfg,
@@ -280,9 +287,19 @@ def get_model(
             model_dict[model_name], padding_side=padding_side
         )
         causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
-        causal_lm.resize_token_embeddings(len(causal_lm_tokenizer))
-        causal_lm.config.pad_token_id = causal_lm_tokenizer.pad_token_id
+        ## causal_lm.config.pad_token_id = causal_lm_tokenizer.pad_token_id
+        # causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.vocab_size
+        causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
+        # causal_lm.resize_token_embeddings(len(causal_lm_tokenizer))
+        # causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
         ctxt_size = get_ctxt_size(model_name, causal_lm)
+
+        # causal_lm.v_head = torch.nn.Linear(
+        #    causal_lm.lm_head.weight.shape[-1], 1, bias=False
+        # )
+        ## Initialize weights of v_head
+        # torch.nn.init.xavier_uniform_(causal_lm.v_head.weight)
+        # causal_lm.q_head = causal_lm.lm_head
 
     if do_lora:
         # linear_layers = get_linear_layers(causal_lm)
@@ -367,24 +384,43 @@ def create_run_name(cfg: Config) -> str:
     return run_name
 
 
-def get_obs_losses(cfg, action, obs):
-    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    mkv_input_sequence = torch.cat([action, obs], dim=1)
-    mkv_attention_mask = (
-        mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
-    ).long()
-    mkv_logits = cfg.predictor_lm(
-        mkv_input_sequence, attention_mask=mkv_attention_mask, use_cache=True
-    ).logits[:, :-1, :]
-    mkv_loss_tensor = loss_fn(
-        input=einops.rearrange(
-            mkv_logits,
-            "batch seq_length vocab_size -> batch vocab_size seq_length",
-        ),
-        target=mkv_input_sequence[:, 1:],
-    )
-    obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs :]
-    obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][
-        :, -cfg.tok_p_pure_obs :
-    ].sum(dim=-1)
-    return obs_losses, obs_tensor
+def predict_observation(cfg, action, obs, return_values=False, per_batch=False):
+    with nullcontext() if cfg.training_predictor_mode else torch.no_grad():
+        loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+        mkv_input_sequence = torch.cat([action, obs], dim=1)
+        mkv_attention_mask = (
+            mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
+        ).long()
+        prediction = cfg.predictor_lm(
+            mkv_input_sequence,
+            attention_mask=mkv_attention_mask,
+            output_hidden_states=return_values,
+        )
+        mkv_logits = prediction.logits[:, :-1, :]
+        mkv_loss_tensor = loss_fn(
+            input=einops.rearrange(
+                mkv_logits,
+                "batch seq_length vocab_size -> batch vocab_size seq_length",
+            ),
+            target=mkv_input_sequence[:, 1:],
+        )
+        if per_batch:
+            obs_loss = (mkv_loss_tensor * mkv_attention_mask[:, 1:]).sum(
+                dim=1
+            ) / mkv_attention_mask[:, 1:].sum(dim=1)
+        else:
+            obs_loss = (
+                mkv_loss_tensor * mkv_attention_mask[:, 1:]
+            ).sum() / mkv_attention_mask[:, 1:].sum()
+    with torch.no_grad() if cfg.training_predictor_mode else nullcontext():
+        estimated_values = (
+            cfg.inference_lm(prediction.hidden_states[-1])[:, : cfg.tok_p_action, 0]
+            if return_values
+            else None
+        )
+    return obs_loss, estimated_values
+    # obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs :]
+    # obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][
+    #    :, -cfg.tok_p_pure_obs :
+    # ].sum(dim=-1)
+    # return obs_losses, obs_tensor

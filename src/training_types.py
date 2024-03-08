@@ -23,16 +23,16 @@ InferenceConfig = NamedTuple(
     "InferenceConfig",
     [
         ("num_return_sequences", int),
-        #("update_every", Optional[int]),
-        #("fraction_to_update", Optional[float]),
+        # ("update_every", Optional[int]),
+        # ("fraction_to_update", Optional[float]),
     ],
 )
 TrainerConfig = NamedTuple(
     "TrainerConfig",
     [
         ("prediction_training_length", Optional[int]),
-        ("inference_training_length", Optional[int])
-    ]
+        ("inference_training_length", Optional[int]),
+    ],
 )
 PerturbationConfig = NamedTuple(
     "PerturbationConfig",
@@ -109,6 +109,7 @@ class Config:
     causal_lm_tokenizer: Optional[PreTrainedTokenizer]
     lr: float
     optimizer: torch.optim.Optimizer
+    vhead_optimizer: Optional[torch.optim.Optimizer]
     batch_size: int
     num_batches: int
     obs_to_action_ratio: float
