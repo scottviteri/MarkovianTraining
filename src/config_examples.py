@@ -5,12 +5,12 @@ g2 = InitialConfig(
     model_name="distilgpt2",
     lr=1e-6,
     optimizer="adam",
-    batch_size=2,
-    num_batches=100,
+    batch_size=1,
+    num_batches=300,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
     interval_print=1,
-    wandb=False,
+    wandb=True,
     load_model=False,
     do_lora=False,
     num_beams=4,
@@ -26,14 +26,14 @@ g2 = InitialConfig(
         peek_every=None,
     ),
     prediction_cfg=PredictionConfig(
-        filter_best_actions=1,
+        filter_best_actions=None,
         train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
     inference_cfg=InferenceConfig(num_return_sequences=4),
     trainer_cfg=TrainerConfig(
-        prediction_training_length=70, inference_training_length=30
+        prediction_training_length=30, inference_training_length=10
     ),
     perturbation_cfg=None,
     # perturbation_cfg=PerturbationConfig(

@@ -6,7 +6,7 @@ from collections import UserDict
 import copy
 
 from src.training_types import *
-from src.utilities import get_obs_losses
+from src.utilities import predict_observation
 
 
 class BeamSearchScorer(transformers.BeamScorer):
@@ -63,13 +63,17 @@ class BeamSearchScorer(transformers.BeamScorer):
         next_inds = einops.rearrange(next_inds, "batch beam -> (batch beam)")
         next_tokens = einops.rearrange(next_tokens, "batch beam -> (batch beam)")
         new_actions = torch.cat((actions[next_inds], next_tokens.unsqueeze(1)), dim=-1)
-        obs_losses, obs_tensor = get_obs_losses(
-            self.cfg, new_actions, self.obs[next_inds]
-        )
+        out = self.cfg.predictor_lm(new_actions, output_hidden_states=True)
+        final_layer = out.hidden_states[-1]
+        v_scores = self.cfg.inference_lm(final_layer)[:, -1, 0]
+        # obs_losses, obs_tensor = predict_observation(
+        #    self.cfg, new_actions, self.obs[next_inds]
+        # )
         for i in range(self.cfg.batch_size):
             num_hypotheses = 2 * self.cfg.num_beams
             begin, end = i * num_hypotheses, (i + 1) * num_hypotheses
-            obs_scores = (-obs_losses)[begin:end] + next_scores[i]
+            # (-obs_losses)[begin:end] + next_scores[i]
+            obs_scores = v_scores[begin:end]
             top_scores, top_indices = obs_scores.topk(k=self.cfg.num_beams)
             next_beam_scores.append(top_scores)
             next_beam_tokens.append(next_tokens[begin:end][top_indices])
@@ -94,7 +98,7 @@ class BeamSearchScorer(transformers.BeamScorer):
         #    ],
         #    dim=-1,
         # )
-        # obs_losses, obs_tensor = get_obs_losses(self.cfg, augmented_beams, self.obs)
+        # obs_losses, obs_tensor = predict_observation(self.cfg, augmented_beams, self.obs)
         # self.beam_scores, indices = torch.topk(
         #    obs_losses, k=self.cfg.batch_size * self.cfg.num_beams
         # )
