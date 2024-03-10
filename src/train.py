@@ -393,7 +393,7 @@ def update_weights(
         obs_loss = predict_observation(cfg, action, obs)
         if do_weight_update:
             if cfg.training_predictor_mode:
-                aggregate_loss = action_loss * obs_loss.detach() - obs_loss
+                aggregate_loss = action_loss * obs_loss.detach()  # - obs_loss
                 cfg.optimizer.zero_grad()
                 aggregate_loss.backward()
                 cfg.optimizer.step()
@@ -624,7 +624,7 @@ def train_model(init_cfg):
         )
         cfg.qhead_optimizer = bitsandbytes.optim.AdamW8bit(  # torch.optim.Adam(  #
             qhead_params,
-            lr=cfg.lr,
+            lr=1e-5,  # cfg.lr,
         )
         # for name, param in cfg.causal_lm.named_parameters():
         #    param.requires_grad = "v_head" in name
