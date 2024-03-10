@@ -81,7 +81,7 @@ def default_action(cfg):
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
     if cfg.wandb and dist.get_rank() == 0:
-        if cfg.prediction_cfg.train_O_gsven_prev_O:
+        if cfg.prediction_cfg.train_O_given_prev_O:
             observation_loss = losses[0]
             wandb.log(
                 {"Batch Index": batch_index, "Observation Loss": aggregate_loss},
