@@ -95,7 +95,7 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                     "Aggregate Loss": aggregate_loss,
                     "Perturbed Loss": perturbed_loss,
                     "Action Loss": action_loss,
-                    "Observation Loss": observation_loss,
+                    "Observation Loss": observation_loss.mean(),
                 },
                 step=batch_index,
             )
