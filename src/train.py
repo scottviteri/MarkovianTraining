@@ -117,7 +117,7 @@ def log_print_losses(cfg, batch_index, aggregate_loss, losses):
             with open(cfg.path_2_log, "a") as f:
                 multi_print(f"Aggregate loss: {aggregate_loss}", f)
                 multi_print(
-                    f"Action/Obs/Pert loss: {action_loss:0.4f}/{observation_loss:0.4f}/{perturbed_loss}",
+                    f"Action/Obs/Pert loss: {action_loss:0.4f}/{observation_loss.mean():0.4f}/{perturbed_loss}",
                     f,
                 )
 
@@ -389,8 +389,10 @@ def update_weights(
         )
         obs = obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
 
-        action_loss = predict_action(cfg, prev_action, prev_obs, action)
-        obs_loss = predict_observation(cfg, action, obs)
+        action_loss, q_values = predict_action(cfg, prev_action, prev_obs, action)
+        obs_loss = predict_observation(
+            cfg, action, obs, per_batch=not cfg.training_predictor_mode
+        )
         if do_weight_update:
             if cfg.training_predictor_mode:
                 # action_loss * obs_loss.detach()  # - obs_loss
@@ -400,7 +402,9 @@ def update_weights(
                 cfg.optimizer.step()
                 cfg.optimizer.zero_grad()
             else:
-                aggregate_loss = action_loss * obs_loss.detach()
+                # aggregate_loss = action_loss * obs_loss.detach()
+                repeated_obs_loss = obs_loss.unsqueeze(1).repeat(1, q_values.shape[1])
+                aggregate_loss = torch.mean(torch.abs(q_values - repeated_obs_loss))
                 cfg.qhead_optimizer.zero_grad()
                 aggregate_loss.backward()
                 cfg.qhead_optimizer.step()
