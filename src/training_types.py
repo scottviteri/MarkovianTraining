@@ -104,12 +104,11 @@ class InitialConfig:
 @dataclass
 class Config:
     model_name: str
-    predictor_lm: Optional[PreTrainedModel]
-    inference_lm: PreTrainedModel
+    causal_lm: PreTrainedModel
     causal_lm_tokenizer: Optional[PreTrainedTokenizer]
     lr: float
     optimizer: torch.optim.Optimizer
-    vhead_optimizer: Optional[torch.optim.Optimizer]
+    qhead_optimizer: torch.optim.Optimizer
     batch_size: int
     num_batches: int
     obs_to_action_ratio: float
