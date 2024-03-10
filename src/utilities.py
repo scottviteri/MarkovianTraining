@@ -37,7 +37,12 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         self.transformer = AutoModelForCausalLM.from_pretrained(
             model_name_or_path, config=config
         )
-        self.q_head = nn.Linear(config.n_embd, config.vocab_size, bias=True)
+        # self.q_head = nn.Linear(config.n_embd, config.vocab_size, bias=True)
+        self.q_head = nn.Linear(
+            self.transformer.lm_head.weight.shape[1],
+            self.transformer.lm_head.weight.shape[0],
+            bias=True,
+        )
         torch.nn.init.zeros_(self.q_head.weight)
         self.transformer.bfloat16()
         self.q_head.bfloat16()
