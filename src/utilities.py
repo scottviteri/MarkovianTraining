@@ -316,7 +316,7 @@ def get_model(
     }
     with device:
         padding_side = get_padding_side(model_name)
-        config = AutoConfig.from_pretrained(model_name)
+        config = AutoConfig.from_pretrained(model_dict[model_name])
         if load_model:
             causal_lm = ModelWithQHead(model_name, config)
             # AutoModelForCausalLM.from_pretrained(
@@ -324,7 +324,7 @@ def get_model(
             #    torch_dtype=torch.float16,
             # )
         else:
-            causal_lm = ModelWithQHead(model_name, config)
+            causal_lm = ModelWithQHead(model_dict[model_name], config)
             # AutoModelForCausalLM.from_pretrained(
             #    model_dict[model_name],
             #    use_flash_attention_2=model_name in ["llama"],
