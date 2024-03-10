@@ -48,7 +48,7 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         self.q_head.bfloat16()
         # self.post_init()
 
-    def forward(self, input_ids=None, attention_mask=None, add_q_head=False, **kwargs):
+    def forward(self, input_ids=None, attention_mask=None, add_q_head=True, **kwargs):
         outputs = self.transformer(
             input_ids=input_ids,
             attention_mask=attention_mask,
