@@ -460,7 +460,7 @@ def predict_action(cfg, prev_action, prev_obs, action, per_batch=False):
     # q_values = action_logits[batch_indices, sequence_indices, input_sequence[:, 1:]]
     q_values = torch.gather(
         action_logits, 2, input_sequence[:, 1:].unsqueeze(-1)
-    ).squeeze(-1)[: -cfg.tok_p_pure_action]
+    ).squeeze(-1)[:, : -cfg.tok_p_pure_action]
     action_loss_tensor = loss_fn(
         input=einops.rearrange(
             action_logits,
