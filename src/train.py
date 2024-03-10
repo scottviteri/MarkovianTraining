@@ -393,7 +393,8 @@ def update_weights(
         obs_loss = predict_observation(cfg, action, obs)
         if do_weight_update:
             if cfg.training_predictor_mode:
-                aggregate_loss = action_loss * obs_loss.detach()  # - obs_loss
+                # action_loss * obs_loss.detach()  # - obs_loss
+                aggregate_loss = obs_loss
                 cfg.optimizer.zero_grad()
                 aggregate_loss.backward()
                 cfg.optimizer.step()
