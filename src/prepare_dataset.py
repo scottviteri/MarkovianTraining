@@ -197,7 +197,7 @@ def arithmetic_generator(num_terms, num_digits, cumulative, operations, probs):
                 question += f"{op_rand} {num} "
 
         # answer = f"A: {total}"
-        answer = "f{total}"
+        answer = f"{total}"
         yield {"Question": question, "Answer": answer}
 
 

@@ -500,23 +500,21 @@ def predict_action(cfg, prev_action, prev_obs, action, per_batch=False):
     # q_values = action_logits[batch_indices, sequence_indices, input_sequence[:, 1:]]
     q_values = torch.gather(
         action_logits, 2, input_sequence[:, 1:].unsqueeze(-1)
-    ).squeeze(-1)[:, : -cfg.tok_p_pure_action]
+    ).squeeze(-1)[:, -cfg.tok_p_pure_action :]
     action_loss_tensor = loss_fn(
         input=einops.rearrange(
             action_logits,
             "batch seq_length vocab_size -> batch vocab_size seq_length",
         ),
         target=input_sequence[:, 1:],
-    )[:, : -cfg.tok_p_pure_action]
-    attention_mask = attention_mask[:, : -cfg.tok_p_pure_action]
+    )[:, -cfg.tok_p_pure_action :]
+    attention_mask = attention_mask[:, -cfg.tok_p_pure_action - 1 : -1]
     if per_batch:
-        action_loss = (action_loss_tensor * attention_mask[:, 1:]).sum(
+        action_loss = (action_loss_tensor * attention_mask).sum(
             dim=1
-        ) / attention_mask[:, 1:].sum(dim=1)
+        ) / attention_mask.sum(dim=1)
     else:
-        action_loss = (
-            action_loss_tensor * attention_mask[:, 1:]
-        ).sum() / attention_mask[:, 1:].sum()
+        action_loss = (action_loss_tensor * attention_mask).sum() / attention_mask.sum()
     return action_loss, q_values
 
 
@@ -530,7 +528,7 @@ def predict_observation(cfg, action, obs, per_batch=False):
     prediction = cfg.causal_lm(
         mkv_input_sequence, attention_mask=mkv_attention_mask, add_q_head=False
     )
-    mkv_logits = prediction.logits[:, :-1, :]
+    mkv_logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
     mkv_loss_tensor = loss_fn(
         input=einops.rearrange(
             mkv_logits,
@@ -538,15 +536,15 @@ def predict_observation(cfg, action, obs, per_batch=False):
         ),
         target=mkv_input_sequence[:, 1:],
     )[:, -cfg.tok_p_pure_obs :]
-    mkv_attention_mask = mkv_attention_mask[:, -cfg.tok_p_pure_obs :]
+    mkv_attention_mask = mkv_attention_mask[:, -cfg.tok_p_pure_obs - 1 : -1]
     if per_batch:
-        obs_loss = (mkv_loss_tensor * mkv_attention_mask[:, 1:]).sum(
+        obs_loss = (mkv_loss_tensor * mkv_attention_mask).sum(
             dim=1
-        ) / mkv_attention_mask[:, 1:].sum(dim=1)
+        ) / mkv_attention_mask.sum(dim=1)
     else:
         obs_loss = (
-            mkv_loss_tensor * mkv_attention_mask[:, 1:]
-        ).sum() / mkv_attention_mask[:, 1:].sum()
+            mkv_loss_tensor * mkv_attention_mask
+        ).sum() / mkv_attention_mask.sum()
     return obs_loss
 
     # obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs :]
