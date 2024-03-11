@@ -88,17 +88,30 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                 step=batch_index,
             )
         else:
-            (action_loss, observation_loss, perturbed_loss) = losses
-            wandb.log(
-                {
-                    "Batch Index": batch_index,
-                    "Aggregate Loss": aggregate_loss,
-                    "Perturbed Loss": perturbed_loss,
-                    "Action Loss": action_loss,
-                    "Observation Loss": observation_loss.mean(),
-                },
-                step=batch_index,
-            )
+            (action_loss, observation_loss, q_loss, perturbed_loss) = losses
+            if q_loss:
+                wandb.log(
+                    {
+                        "Batch Index": batch_index,
+                        "Aggregate Loss": aggregate_loss,
+                        "Perturbed Loss": perturbed_loss,
+                        "Action Loss": action_loss,
+                        "Observation Loss": observation_loss.mean(),
+                        "Q Loss": q_loss,
+                    },
+                    step=batch_index,
+                )
+            else:
+                wandb.log(
+                    {
+                        "Batch Index": batch_index,
+                        "Aggregate Loss": aggregate_loss,
+                        "Perturbed Loss": perturbed_loss,
+                        "Action Loss": action_loss,
+                        "Observation Loss": observation_loss.mean(),
+                    },
+                    step=batch_index,
+                )
 
 
 def log_print_losses(cfg, batch_index, aggregate_loss, losses):
@@ -112,14 +125,21 @@ def log_print_losses(cfg, batch_index, aggregate_loss, losses):
             (
                 action_loss,
                 observation_loss,
+                q_loss,
                 perturbed_loss,
             ) = losses
             with open(cfg.path_2_log, "a") as f:
                 multi_print(f"Aggregate loss: {aggregate_loss}", f)
-                multi_print(
-                    f"Action/Obs/Pert loss: {action_loss:0.4f}/{observation_loss.mean():0.4f}/{perturbed_loss}",
-                    f,
-                )
+                if q_loss:
+                    multi_print(
+                        f"Action/Obs/Q/Pert loss: {action_loss:0.4f}/{observation_loss.mean():0.4f}/{q_loss:0.4f}/{perturbed_loss}",
+                        f,
+                    )
+                else:
+                    multi_print(
+                        f"Action/Obs/Pert loss: {action_loss:0.4f}/{observation_loss.mean():0.4f}/{perturbed_loss}",
+                        f,
+                    )
 
 
 def log_print_oa(
@@ -401,15 +421,16 @@ def update_weights(
                 aggregate_loss.backward()
                 cfg.optimizer.step()
                 cfg.optimizer.zero_grad()
+                q_loss = None
             else:
                 # aggregate_loss = action_loss * obs_loss.detach()
                 repeated_obs_loss = obs_loss.unsqueeze(1).repeat(1, q_values.shape[1])
-                aggregate_loss = torch.mean(torch.abs(q_values - repeated_obs_loss))
-                cfg.qhead_optimizer.zero_grad()
+                q_loss = torch.mean(torch.abs(q_values - repeated_obs_loss))
+                cfg.optimizer.zero_grad()
+                aggregate_loss = q_loss * obs_loss.mean()
                 aggregate_loss.backward()
-                cfg.qhead_optimizer.step()
-                cfg.qhead_optimizer.zero_grad()
-        losses = [action_loss, obs_loss]
+                cfg.optimizer.zero_grad()
+        losses = [action_loss, obs_loss, q_loss]
         return aggregate_loss, losses
 
 
@@ -613,26 +634,10 @@ def train_model(init_cfg):
             cfg.causal_lm.parameters(), lr=cfg.lr
         )  # , momentum=0.01)
     elif cfg.optimizer == "adam":
-        qhead_params = [
-            param
-            for name, param in cfg.causal_lm.named_parameters()
-            if "q_head" in name
-        ]
-        non_qhead_params = [
-            param
-            for name, param in cfg.causal_lm.named_parameters()
-            if "q_head" not in name
-        ]
         cfg.optimizer = bitsandbytes.optim.AdamW8bit(  # torch.optim.Adam(  #
-            non_qhead_params,
+            list(cfg.causal_lm.parameters()),
             lr=cfg.lr,
         )
-        cfg.qhead_optimizer = bitsandbytes.optim.AdamW8bit(  # torch.optim.Adam(  #
-            qhead_params,
-            lr=1e-5,  # cfg.lr,
-        )
-        # for name, param in cfg.causal_lm.named_parameters():
-        #    param.requires_grad = "v_head" in name
 
     elif cfg.optimizer == "rmsprop":
         cfg.optimizer = torch.optim.RMSprop(cfg.causal_lm.parameters(), lr=cfg.lr)
