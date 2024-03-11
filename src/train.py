@@ -528,8 +528,8 @@ def trainer(cfg):
             elif mode_index == pred_len:
                 assert cfg.training_predictor_mode
                 # cfg.causal_lm.load_state_dict(cfg.causal_lm.state_dict())
-                for name, param in cfg.causal_lm.named_parameters():
-                    param.requires_grad = "q_head" in name
+                # for name, param in cfg.causal_lm.named_parameters():
+                #    param.requires_grad = "q_head" in name
                 cfg.training_predictor_mode = False
 
         if is_first:
