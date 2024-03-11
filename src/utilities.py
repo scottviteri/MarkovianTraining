@@ -336,7 +336,7 @@ def get_model(
             #    use_flash_attention_2=model_name in ["llama"],
             # )
         for name, param in causal_lm.named_parameters():
-            param.requires_grad = "q_head" not in name
+            param.requires_grad = "q_head" in name
 
         causal_lm.bfloat16()
         causal_lm_tokenizer = AutoTokenizer.from_pretrained(
