@@ -641,7 +641,7 @@ def train_model(init_cfg):
         )  # , momentum=0.01)
     elif cfg.optimizer == "adam":
         cfg.optimizer = bitsandbytes.optim.AdamW8bit(  # torch.optim.Adam(  #
-            list(cfg.causal_lm.parameters()),
+            list(cfg.causal_lm.qhead.parameters()),
             lr=cfg.lr,
         )
 

@@ -37,8 +37,9 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         self.transformer = AutoModelForCausalLM.from_pretrained(
             model_name_or_path, config=config
         )
+        self.qhead = copy.deepcopy(self.transformer)
 
-        mlp_modules = get_mlp_modules(self.transformer)
+        mlp_modules = get_mlp_modules(self.qhead)
         peft_config = LoraConfig(
             task_type="CAUSAL_LM",
             inference_mode=False,
@@ -48,8 +49,8 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             target_modules=mlp_modules,
         )
         ## print("Num Linear Layers: ", len(linear_layers))
-        self.transformer = get_peft_model(self.transformer, peft_config)
-        self.transformer.print_trainable_parameters()
+        self.qhead = get_peft_model(self.qhead, peft_config)
+        self.qhead.print_trainable_parameters()
         ## Grouping q_head and q_head_block together for easier parameter management
         # self.q_head_group = nn.ModuleDict(
         #    {
@@ -73,11 +74,11 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         #     param.requires_grad = True
 
     def forward(self, input_ids=None, attention_mask=None, add_q_head=True, **kwargs):
-        if add_q_head:
-            self.transformer.enable_adapter_layers()
-        else:
-            self.transformer.disable_adapter_layers()
-        outputs = self.transformer(
+        # if add_q_head:
+        #    self.transformer.enable_adapter_layers()
+        # else:
+        #    self.transformer.disable_adapter_layers()
+        outputs = (self.qhead if add_q_head else self.transformer)(
             input_ids=input_ids,
             attention_mask=attention_mask,
             **kwargs,
@@ -404,11 +405,10 @@ def get_model(
     #    #    if "q_head" in name:
     #    #        param.requires_grad = True
 
-    for name, param in causal_lm.named_parameters():
+    for name, param in causal_lm.transformer.named_parameters():
         param.requires_grad = False
-    for name, param in causal_lm.named_parameters():
-        if "lora" in name:
-            param.requires_grad = True
+    for name, param in causal_lm.qhead.named_parameters():
+        param.requires_grad = True
         # param.requires_grad = "q_head" in name
 
     causal_lm.tokenizer = causal_lm_tokenizer
