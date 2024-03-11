@@ -428,7 +428,8 @@ def update_weights(
             cfg.optimizer.zero_grad()
             aggregate_loss = q_loss * obs_loss.mean()
             aggregate_loss.backward()
-            # cfg.optimizer.zero_grad()
+            cfg.optimizer.step()
+            cfg.optimizer.zero_grad()
         losses = [action_loss, obs_loss, q_loss]
         return aggregate_loss, losses
 
