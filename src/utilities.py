@@ -38,40 +38,57 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             model_name_or_path, config=config
         )
 
-        # Grouping q_head and q_head_block together for easier parameter management
-        self.q_head_group = nn.ModuleDict(
-            {
-                "q_head_block": copy.deepcopy(self.transformer.transformer.h[-1]),
-                "q_head": nn.Linear(
-                    self.transformer.lm_head.weight.shape[1],
-                    self.transformer.lm_head.weight.shape[0],
-                    bias=True,
-                ),
-            }
+        mlp_modules = get_mlp_modules(self.transformer)
+        peft_config = LoraConfig(
+            task_type="CAUSAL_LM",
+            inference_mode=False,
+            r=32,
+            lora_alpha=64,
+            lora_dropout=0.1,
+            target_modules=mlp_modules,
         )
+        ## print("Num Linear Layers: ", len(linear_layers))
+        self.transformer = get_peft_model(self.transformer, peft_config)
+        self.transformer.print_trainable_parameters()
+        ## Grouping q_head and q_head_block together for easier parameter management
+        # self.q_head_group = nn.ModuleDict(
+        #    {
+        #        "q_head_block": copy.deepcopy(self.transformer.transformer.h[-1]),
+        #        "q_head": nn.Linear(
+        #            self.transformer.lm_head.weight.shape[1],
+        #            self.transformer.lm_head.weight.shape[0],
+        #            bias=True,
+        #        ),
+        #    }
+        # )
 
-        # Zero-initialize weights in q_head_block and q_head
-        for name, param in self.q_head_group["q_head_block"].named_parameters():
-            if "weight" in name:
-                torch.nn.init.zeros_(param)
-        torch.nn.init.zeros_(self.q_head_group["q_head"].weight)
+        ## Zero-initialize weights in q_head_block and q_head
+        # for name, param in self.q_head_group["q_head_block"].named_parameters():
+        #    if "weight" in name:
+        #        torch.nn.init.zeros_(param)
+        # torch.nn.init.zeros_(self.q_head_group["q_head"].weight)
 
         # To set q_head and q_head_block parameters to require_grad=True, use:
         # for param in self.q_head_group.parameters():
         #     param.requires_grad = True
 
     def forward(self, input_ids=None, attention_mask=None, add_q_head=True, **kwargs):
+        if add_q_head:
+            self.transformer.enable_adapter_layers()
+        else:
+            self.transformer.disable_adapter_layers()
         outputs = self.transformer(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            output_hidden_states=add_q_head,
-            **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
+            **kwargs,
+            # output_hidden_states=add_q_head,
+            # **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
         )
-        if add_q_head:
-            hidden_states = outputs.hidden_states[-1]
-            pre_q_values = self.q_head_group["q_head_block"](hidden_states)[0]
-            q_values = self.q_head_group["q_head"](pre_q_values)
-            outputs.logits += q_values
+        # if add_q_head:
+        #    hidden_states = outputs.hidden_states[-1]
+        #    pre_q_values = self.q_head_group["q_head_block"](hidden_states)[0]
+        #    q_values = self.q_head_group["q_head"](pre_q_values)
+        #    outputs.logits += q_values
         return outputs
 
     def prepare_inputs_for_generation(self, input_ids, **kwargs):
@@ -370,28 +387,28 @@ def get_model(
         # torch.nn.init.xavier_uniform_(causal_lm.v_head.weight)
         # causal_lm.q_head = causal_lm.lm_head
 
-    if do_lora:
-        mlp_modules = get_mlp_modules(causal_lm.transformer)
-        peft_config = LoraConfig(
-            task_type="CAUSAL_LM",
-            inference_mode=False,
-            r=32,
-            lora_alpha=64,
-            lora_dropout=0.1,
-            target_modules=mlp_modules,
-        )
-        # print("Num Linear Layers: ", len(linear_layers))
-        causal_lm.transformer = get_peft_model(causal_lm.transformer, peft_config)
-        causal_lm.transformer.print_trainable_parameters()
-        # for name, param in causal_lm.named_parameters():
-        #    if "q_head" in name:
-        #        param.requires_grad = True
+    # if do_lora:
+    #    mlp_modules = get_mlp_modules(causal_lm.transformer)
+    #    peft_config = LoraConfig(
+    #        task_type="CAUSAL_LM",
+    #        inference_mode=False,
+    #        r=32,
+    #        lora_alpha=64,
+    #        lora_dropout=0.1,
+    #        target_modules=mlp_modules,
+    #    )
+    #    # print("Num Linear Layers: ", len(linear_layers))
+    #    causal_lm.transformer = get_peft_model(causal_lm.transformer, peft_config)
+    #    causal_lm.transformer.print_trainable_parameters()
+    #    # for name, param in causal_lm.named_parameters():
+    #    #    if "q_head" in name:
+    #    #        param.requires_grad = True
 
-    for name, param in causal_lm.named_parameters():
-        param.requires_grad = False
-    for param in causal_lm.q_head_group.parameters():
-        param.requires_grad = True
-    #    param.requires_grad = "q_head" in name
+    # for name, param in causal_lm.named_parameters():
+    #    param.requires_grad = False
+    # for param in causal_lm.q_head_group.parameters():
+    #    param.requires_grad = True
+    ##    param.requires_grad = "q_head" in name
 
     causal_lm.tokenizer = causal_lm_tokenizer
     return causal_lm, causal_lm_tokenizer, ctxt_size
