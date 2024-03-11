@@ -338,7 +338,7 @@ def sample(cfg, prev_action, prev_obs, observation):
                 num_beam_hyps_to_keep=generation_config.num_return_sequences,
                 max_length=input_ids.shape[-1] + generation_config.max_new_tokens,
             )
-            action_candidates = cfg.causal_lm.beam_search(
+            action_candidates = cfg.causal_lm.module.beam_search(
                 beam_input_ids,
                 beam_scorer,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
@@ -618,9 +618,9 @@ def train_via_update(cfg):
 
 def train_model(init_cfg):
     cfg = extend_initial_config(init_cfg)
-    # cfg.causal_lm = DDP(
-    #    cfg.causal_lm, device_ids=[dist.get_rank()]  # , find_unused_parameters=True
-    # )
+    cfg.causal_lm = DDP(
+        cfg.causal_lm, device_ids=[dist.get_rank()]  # , find_unused_parameters=True
+    )
     if not cfg.load_model:
         with open(cfg.path_2_log, "w") as f:
             print("")
