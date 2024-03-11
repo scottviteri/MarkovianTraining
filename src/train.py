@@ -304,6 +304,7 @@ def sample(cfg, prev_action, prev_obs, observation):
                         min_new_tokens=generation_config.min_new_tokens,
                         eos_token_id=generation_config.eos_token_id,
                     ),
+                    transformers.generation.TemperatureLogitsWarper(1.0),
                     transformers.generation.InfNanRemoveLogitsProcessor(),
                     transformers.LogitNormalization(),
                 ]
