@@ -338,11 +338,11 @@ def sample(cfg, prev_action, prev_obs, observation):
                 num_beam_hyps_to_keep=generation_config.num_return_sequences,
                 max_length=input_ids.shape[-1] + generation_config.max_new_tokens,
             )
-            action_candidates = cfg.causal_lm.module.beam_search(
+            action_candidates = cfg.causal_lm.module.beam_sample(
                 beam_input_ids,
                 beam_scorer,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
-                logits_processor=logits_processor,
+                logits_warper=logits_processor,
                 stopping_criteria=stopping_criteria,
                 pad_token_id=generation_config.pad_token_id,
                 eos_token_id=generation_config.eos_token_id,
