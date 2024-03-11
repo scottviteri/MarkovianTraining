@@ -427,7 +427,7 @@ def update_weights(
             repeated_obs_loss = obs_loss.unsqueeze(1).repeat(1, q_values.shape[1])
             q_loss = torch.mean(torch.abs(q_values - repeated_obs_loss))
             cfg.optimizer.zero_grad()
-            aggregate_loss = q_loss * obs_loss.mean()
+            aggregate_loss = q_loss  # * obs_loss.mean()
             aggregate_loss.backward()
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
