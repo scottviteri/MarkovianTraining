@@ -178,7 +178,7 @@ def arithmetic_generator(num_terms, num_digits, cumulative, operations, probs):
     #     num = random.randint(10 ** (num_digits - 1), 10 ** num_digits - 1)
 
     while 1:
-        question = "Q: "
+        question = "Q: <Simplify> "
         total = 0.0
 
         # Generate random numbers
@@ -195,6 +195,7 @@ def arithmetic_generator(num_terms, num_digits, cumulative, operations, probs):
                 op_rand = ops_rand[i - 1]
                 total = valid_ops[op_rand](total, num)
                 question += f"{op_rand} {num} "
+        question += "</Simplify>"
 
         # answer = f"A: {total}"
         answer = f"{total}"
