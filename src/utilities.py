@@ -404,11 +404,12 @@ def get_model(
     #    #    if "q_head" in name:
     #    #        param.requires_grad = True
 
-    # for name, param in causal_lm.named_parameters():
-    #    param.requires_grad = False
-    # for param in causal_lm.q_head_group.parameters():
-    #    param.requires_grad = True
-    ##    param.requires_grad = "q_head" in name
+    for name, param in causal_lm.named_parameters():
+        param.requires_grad = False
+    for name, param in causal_lm.named_parameters():
+        if "lora" in name:
+            param.requires_grad = True
+        # param.requires_grad = "q_head" in name
 
     causal_lm.tokenizer = causal_lm_tokenizer
     return causal_lm, causal_lm_tokenizer, ctxt_size
