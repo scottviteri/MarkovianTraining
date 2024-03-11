@@ -338,7 +338,7 @@ def sample(cfg, prev_action, prev_obs, observation):
                 num_beam_hyps_to_keep=generation_config.num_return_sequences,
                 max_length=input_ids.shape[-1] + generation_config.max_new_tokens,
             )
-            action_candidates = cfg.causal_lm.module.beam_search(
+            action_candidates = cfg.causal_lm.beam_search(
                 beam_input_ids,
                 beam_scorer,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
@@ -400,8 +400,7 @@ def update_weights(
             )
             loss_tensor = get_neg_log_probs(cfg, torch.cat([prev_obs, obs], dim=1))
             aggregate_loss = loss_tensor[:, -cfg.tok_p_pure_obs :].mean()
-            if prediction_cfg.train_O_given_prev_O or not cfg.training_predictor_mode:
-                return aggregate_loss, None, []
+            return aggregate_loss, None, []
 
         prev_action = prev_action.repeat_interleave(
             cfg.inference_cfg.num_return_sequences, dim=0
@@ -447,15 +446,17 @@ def log_and_save(
     losses,
 ):
 
-    if cfg.training_predictor_mode:
-        # Save trajectories for post-training eval to .json
-        save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses)
-        save_weights(cfg, batch_index)
-        log_wandb(cfg, batch_index, aggregate_loss, losses)
-        log_print_losses(cfg, batch_index, aggregate_loss, losses)
-    else:
-        log_wandb(cfg, batch_index, aggregate_loss, losses)
-        log_print_losses(cfg, batch_index, aggregate_loss, losses)
+    # if cfg.training_predictor_mode:
+    #    # Save trajectories for post-training eval to .json
+    #    save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses)
+    #    save_weights(cfg, batch_index)
+    #    log_wandb(cfg, batch_index, aggregate_loss, losses)
+    #    log_print_losses(cfg, batch_index, aggregate_loss, losses)
+    # else:
+    save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses)
+    save_weights(cfg, batch_index)
+    log_wandb(cfg, batch_index, aggregate_loss, losses)
+    log_print_losses(cfg, batch_index, aggregate_loss, losses)
 
     log_print_oa(
         cfg,
@@ -466,7 +467,7 @@ def log_and_save(
         obs,
         is_guidance_action,
         is_first,
-        aggregate_loss=aggregate_loss if not cfg.training_predictor_mode else None,
+        aggregate_loss=aggregate_loss,  # if not cfg.training_predictor_mode else None,
     )
 
     with open(cfg.path_2_log, "a") as f:
@@ -518,17 +519,17 @@ def trainer(cfg):
                 cfg.trainer_cfg.inference_training_length,
             )
             mode_index = batch_index % (pred_len + inf_len)
-            if mode_index == 0:  # switch from inf mode to pred mode
-                assert not cfg.training_predictor_mode
-                # for name, param in cfg.causal_lm.named_parameters():
-                #    param.requires_grad = "q_head" not in name
-                cfg.training_predictor_mode = True
-            elif mode_index == pred_len:
-                assert cfg.training_predictor_mode
-                # cfg.causal_lm.load_state_dict(cfg.causal_lm.state_dict())
-                # for name, param in cfg.causal_lm.named_parameters():
-                #    param.requires_grad = "q_head" in name
-                cfg.training_predictor_mode = False
+            # if mode_index == 0:  # switch from inf mode to pred mode
+            #    assert not cfg.training_predictor_mode
+            #    # for name, param in cfg.causal_lm.named_parameters():
+            #    #    param.requires_grad = "q_head" not in name
+            #    cfg.training_predictor_mode = True
+            # elif mode_index == pred_len:
+            #    assert cfg.training_predictor_mode
+            #    # cfg.causal_lm.load_state_dict(cfg.causal_lm.state_dict())
+            #    # for name, param in cfg.causal_lm.named_parameters():
+            #    #    param.requires_grad = "q_head" in name
+            #    cfg.training_predictor_mode = False
 
         if is_first:
             prev_action = default_action(cfg)
@@ -618,9 +619,9 @@ def train_via_update(cfg):
 
 def train_model(init_cfg):
     cfg = extend_initial_config(init_cfg)
-    cfg.causal_lm = DDP(
-        cfg.causal_lm, device_ids=[dist.get_rank()]  # , find_unused_parameters=True
-    )
+    # cfg.causal_lm = DDP(
+    #    cfg.causal_lm, device_ids=[dist.get_rank()]  # , find_unused_parameters=True
+    # )
     if not cfg.load_model:
         with open(cfg.path_2_log, "w") as f:
             print("")
