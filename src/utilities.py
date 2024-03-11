@@ -333,9 +333,9 @@ def get_model(
             #    model_dict[model_name],
             #    use_flash_attention_2=model_name in ["llama"],
             # )
-        if not do_lora:
-            for name, param in causal_lm.named_parameters():
-                param.requires_grad = "q_head" in name
+        # if not do_lora:
+        #    for name, param in causal_lm.named_parameters():
+        #        param.requires_grad = "q_head" in name
 
         causal_lm.bfloat16()
         causal_lm_tokenizer = AutoTokenizer.from_pretrained(
@@ -369,9 +369,12 @@ def get_model(
         # print("Num Linear Layers: ", len(linear_layers))
         causal_lm.transformer = get_peft_model(causal_lm.transformer, peft_config)
         causal_lm.transformer.print_trainable_parameters()
-        for name, param in causal_lm.named_parameters():
-            if "q_head" in name:
-                param.requires_grad = True
+        # for name, param in causal_lm.named_parameters():
+        #    if "q_head" in name:
+        #        param.requires_grad = True
+
+    for name, param in causal_lm.named_parameters():
+        param.requires_grad = True
 
     causal_lm.tokenizer = causal_lm_tokenizer
     return causal_lm, causal_lm_tokenizer, ctxt_size
