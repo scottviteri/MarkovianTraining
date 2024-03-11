@@ -480,24 +480,12 @@ def predict_action(cfg, prev_action, prev_obs, action, per_batch=False):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
     attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-    # with torch.no_grad() if cfg.training_predictor_mode else nullcontext():
     prediction = cfg.causal_lm(
         input_sequence,
         attention_mask=attention_mask,
         add_q_head=True,
     )
-    # action_bias = cfg.causal_lm.q_head(prediction.hidden_states[-1])[
-    #    :, -cfg.tok_p_action :, 0
-    # ]
-    # assert action_bias.shape == prediction.logits.shape
-    # action_logits = (prediction.logits + action_bias)[:, :-1, :]
     action_logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
-    # batch_indices, sequence_indices = torch.meshgrid(
-    #    torch.arange(action_logits.size(0), device=action_logits.device),
-    #    torch.arange(action_logits.size(1), device=action_logits.device),
-    #    indexing="ij",
-    # )
-    # q_values = action_logits[batch_indices, sequence_indices, input_sequence[:, 1:]]
     q_values = torch.gather(
         action_logits, 2, input_sequence[:, 1:].unsqueeze(-1)
     ).squeeze(-1)[:, -cfg.tok_p_pure_action :]
@@ -508,13 +496,15 @@ def predict_action(cfg, prev_action, prev_obs, action, per_batch=False):
         ),
         target=input_sequence[:, 1:],
     )[:, -cfg.tok_p_pure_action :]
-    attention_mask = attention_mask[:, -cfg.tok_p_pure_action - 1 : -1]
+    pure_action_attention_mask = attention_mask[:, -cfg.tok_p_pure_action :]
     if per_batch:
-        action_loss = (action_loss_tensor * attention_mask).sum(
+        action_loss = (action_loss_tensor * pure_action_attention_mask).sum(
             dim=1
-        ) / attention_mask.sum(dim=1)
+        ) / pure_action_attention_mask.sum(dim=1)
     else:
-        action_loss = (action_loss_tensor * attention_mask).sum() / attention_mask.sum()
+        action_loss = (
+            action_loss_tensor * pure_action_attention_mask
+        ).sum() / pure_action_attention_mask.sum()
     return action_loss, q_values
 
 
@@ -524,7 +514,6 @@ def predict_observation(cfg, action, obs, per_batch=False):
     mkv_attention_mask = (
         mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
     ).long()
-    # with nullcontext() if cfg.training_predictor_mode else torch.no_grad():
     prediction = cfg.causal_lm(
         mkv_input_sequence, attention_mask=mkv_attention_mask, add_q_head=False
     )
@@ -536,15 +525,15 @@ def predict_observation(cfg, action, obs, per_batch=False):
         ),
         target=mkv_input_sequence[:, 1:],
     )[:, -cfg.tok_p_pure_obs :]
-    mkv_attention_mask = mkv_attention_mask[:, -cfg.tok_p_pure_obs - 1 : -1]
+    pure_obs_attention_mask = mkv_attention_mask[:, -cfg.tok_p_pure_obs :]
     if per_batch:
-        obs_loss = (mkv_loss_tensor * mkv_attention_mask).sum(
+        obs_loss = (mkv_loss_tensor * pure_obs_attention_mask).sum(
             dim=1
-        ) / mkv_attention_mask.sum(dim=1)
+        ) / pure_obs_attention_mask.sum(dim=1)
     else:
         obs_loss = (
-            mkv_loss_tensor * mkv_attention_mask
-        ).sum() / mkv_attention_mask.sum()
+            mkv_loss_tensor * pure_obs_attention_mask
+        ).sum() / pure_obs_attention_mask.sum()
     return obs_loss
 
     # obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs :]
