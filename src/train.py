@@ -238,6 +238,7 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
         (
             action_loss,
             observation_loss,
+            q_loss,
             perturbed_loss,
         ) = losses
 
@@ -252,6 +253,7 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
             "perturbed_loss": (
                 perturbed_loss.item() if perturbed_loss is not None else 0.0
             ),
+            "q_loss": q_loss.item() if q_loss is not None else 0.0,
         }
         append_traj_to_storage(cfg.traj_path, traj_data)
 
