@@ -44,9 +44,8 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             bias=True,
         )
         torch.nn.init.zeros_(self.q_head.weight)
-        self.transformer.bfloat16()
-        self.q_head.bfloat16()
-        # self.post_init()
+        # self.transformer.bfloat16()
+        # self.q_head.bfloat16()
 
     def forward(self, input_ids=None, attention_mask=None, add_q_head=True, **kwargs):
         outputs = self.transformer(
