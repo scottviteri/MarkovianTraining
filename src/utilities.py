@@ -43,8 +43,8 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         peft_config = LoraConfig(
             task_type="CAUSAL_LM",
             inference_mode=False,
-            r=32,
-            lora_alpha=64,
+            r=4,
+            lora_alpha=8,
             lora_dropout=0.1,
             target_modules=mlp_modules,
         )
