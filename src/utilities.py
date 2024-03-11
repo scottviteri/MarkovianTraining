@@ -507,7 +507,8 @@ def predict_action(cfg, prev_action, prev_obs, action, per_batch=False):
             "batch seq_length vocab_size -> batch vocab_size seq_length",
         ),
         target=input_sequence[:, 1:],
-    )
+    )[:, : -cfg.tok_p_pure_action]
+    attention_mask = attention_mask[:, : -cfg.tok_p_pure_action]
     if per_batch:
         action_loss = (action_loss_tensor * attention_mask[:, 1:]).sum(
             dim=1
@@ -536,7 +537,8 @@ def predict_observation(cfg, action, obs, per_batch=False):
             "batch seq_length vocab_size -> batch vocab_size seq_length",
         ),
         target=mkv_input_sequence[:, 1:],
-    )
+    )[:, -cfg.tok_p_pure_obs :]
+    mkv_attention_mask = mkv_attention_mask[:, -cfg.tok_p_pure_obs :]
     if per_batch:
         obs_loss = (mkv_loss_tensor * mkv_attention_mask[:, 1:]).sum(
             dim=1
