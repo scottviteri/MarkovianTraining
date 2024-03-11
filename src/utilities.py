@@ -374,7 +374,7 @@ def get_model(
         #        param.requires_grad = True
 
     for name, param in causal_lm.named_parameters():
-        param.requires_grad = True
+        param.requires_grad = "q_head" in name
 
     causal_lm.tokenizer = causal_lm_tokenizer
     return causal_lm, causal_lm_tokenizer, ctxt_size
