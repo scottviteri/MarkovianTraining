@@ -10,9 +10,9 @@ g2 = InitialConfig(
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
     interval_print=1,
-    wandb=True,
+    wandb=False,
     load_model=False,
-    do_lora=False,
+    do_lora=True,
     num_beams=6,
     training_ctxt_size=200,
     dataset=InitDatasetType(
@@ -247,7 +247,7 @@ mst = InitialConfig(
     wandb=True,
     load_model=False,
     do_lora=False,
-    num_beams=12,
+    num_beams=16,
     training_ctxt_size=200,
     dataset=InitDatasetType(
         task=ArithmeticTask(
@@ -259,15 +259,15 @@ mst = InitialConfig(
         ),
         peek_every=None,
     ),
-    inference_cfg=InferenceConfig(num_return_sequences=12),
+    inference_cfg=InferenceConfig(num_return_sequences=16),
     prediction_cfg=PredictionConfig(
-        filter_best_actions=1,
+        filter_best_actions=None,
         train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
     trainer_cfg=TrainerConfig(
-        prediction_training_length=90, inference_training_length=10
+        prediction_training_length=1, inference_training_length=1000
     ),
     perturbation_cfg=None,
     debug=None,
