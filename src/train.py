@@ -3,6 +3,9 @@
 import torch
 import torch.nn as nn
 from torch.cuda.amp import autocast
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 import numpy as np
 from tqdm import tqdm
 import einops
@@ -18,9 +21,9 @@ from matplotlib import pyplot as plt
 import functools
 from contextlib import nullcontext
 import bitsandbytes
+import transformers
 from transformers.generation import beam_search
 from collections import UserDict
-import torch.distributed as dist
 
 from src.training_types import *
 from src.utilities import extend_initial_config, log_and_print_info
@@ -29,16 +32,13 @@ from src.utilities import predict_action, predict_observation
 from src.config_examples import configs
 from src.beam import BeamSearchScorer
 
-import transformers
 from transformers.models.gptj.modeling_gptj import GPTJBlock
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 from transformers.models.mistral.modeling_mistral import MistralDecoderLayer
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
-
 from src.evaluate_via_gpt import evaluate_via_gpt
 import src.config_examples
-import torch.distributed as dist
 
 
 def save_weights(cfg, batch_index):
@@ -249,7 +249,7 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
             "action": repr(cfg.causal_lm_tokenizer.decode(action[0])),
             "obs": repr(cfg.causal_lm_tokenizer.decode(obs[0])),
             # "action_loss": action_loss.item(),
-            "observation_loss": observation_loss.item(),
+            "observation_loss": observation_loss.mean().item(),
             "perturbed_loss": (
                 perturbed_loss.item() if perturbed_loss is not None else 0.0
             ),
@@ -412,26 +412,24 @@ def update_weights(
         obs = obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
 
         action_loss, q_values = predict_action(cfg, prev_action, prev_obs, action)
-        obs_loss = predict_observation(
-            cfg, action, obs, per_batch=not cfg.training_predictor_mode
-        )
+        obs_loss = predict_observation(cfg, action, obs, per_batch=True)
         if do_weight_update:
-            if cfg.training_predictor_mode:
-                # action_loss * obs_loss.detach()  # - obs_loss
-                aggregate_loss = obs_loss
-                cfg.optimizer.zero_grad()
-                aggregate_loss.backward()
-                cfg.optimizer.step()
-                cfg.optimizer.zero_grad()
-                q_loss = None
-            else:
-                # aggregate_loss = action_loss * obs_loss.detach()
-                repeated_obs_loss = obs_loss.unsqueeze(1).repeat(1, q_values.shape[1])
-                q_loss = torch.mean(torch.abs(q_values - repeated_obs_loss))
-                cfg.optimizer.zero_grad()
-                aggregate_loss = q_loss * obs_loss.mean()
-                aggregate_loss.backward()
-                cfg.optimizer.zero_grad()
+            # if cfg.training_predictor_mode:
+            #    # action_loss * obs_loss.detach()  # - obs_loss
+            #    aggregate_loss = obs_loss
+            #    cfg.optimizer.zero_grad()
+            #    aggregate_loss.backward()
+            #    cfg.optimizer.step()
+            #    cfg.optimizer.zero_grad()
+            #    q_loss = None
+            # else:
+            # aggregate_loss = action_loss * obs_loss.detach()
+            repeated_obs_loss = obs_loss.unsqueeze(1).repeat(1, q_values.shape[1])
+            q_loss = torch.mean(torch.abs(q_values - repeated_obs_loss))
+            cfg.optimizer.zero_grad()
+            aggregate_loss = q_loss * obs_loss.mean()
+            aggregate_loss.backward()
+            # cfg.optimizer.zero_grad()
         losses = [action_loss, obs_loss, q_loss]
         return aggregate_loss, losses
 
@@ -522,8 +520,8 @@ def trainer(cfg):
             mode_index = batch_index % (pred_len + inf_len)
             if mode_index == 0:  # switch from inf mode to pred mode
                 assert not cfg.training_predictor_mode
-                for name, param in cfg.causal_lm.named_parameters():
-                    param.requires_grad = "q_head" not in name
+                # for name, param in cfg.causal_lm.named_parameters():
+                #    param.requires_grad = "q_head" not in name
                 cfg.training_predictor_mode = True
             elif mode_index == pred_len:
                 assert cfg.training_predictor_mode
@@ -620,6 +618,9 @@ def train_via_update(cfg):
 
 def train_model(init_cfg):
     cfg = extend_initial_config(init_cfg)
+    # cfg.causal_lm = DDP(
+    #    cfg.causal_lm, device_ids=[dist.get_rank()]  # , find_unused_parameters=True
+    # )
     if not cfg.load_model:
         with open(cfg.path_2_log, "w") as f:
             print("")

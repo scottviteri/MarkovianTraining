@@ -33,7 +33,7 @@ g2 = InitialConfig(
     ),
     inference_cfg=InferenceConfig(num_return_sequences=6),
     trainer_cfg=TrainerConfig(
-        prediction_training_length=30, inference_training_length=30
+        prediction_training_length=1, inference_training_length=30
     ),
     perturbation_cfg=None,
     # perturbation_cfg=PerturbationConfig(

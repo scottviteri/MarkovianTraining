@@ -322,6 +322,7 @@ def get_model(
     with device:
         padding_side = get_padding_side(model_name)
         config = AutoConfig.from_pretrained(model_dict[model_name])
+        torch.autograd.set_detect_anomaly(True)
         if load_model:
             causal_lm = ModelWithQHead(model_name, config)
             # AutoModelForCausalLM.from_pretrained(
@@ -334,6 +335,9 @@ def get_model(
             #    model_dict[model_name],
             #    use_flash_attention_2=model_name in ["llama"],
             # )
+        for name, param in causal_lm.named_parameters():
+            param.requires_grad = "q_head" not in name
+
         causal_lm.bfloat16()
         causal_lm_tokenizer = AutoTokenizer.from_pretrained(
             model_dict[model_name], padding_side=padding_side
@@ -451,7 +455,7 @@ def predict_action(cfg, prev_action, prev_obs, action, per_batch=False):
     # ]
     # assert action_bias.shape == prediction.logits.shape
     # action_logits = (prediction.logits + action_bias)[:, :-1, :]
-    action_logits = prediction.logits[:, :-1, :]
+    action_logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
     # batch_indices, sequence_indices = torch.meshgrid(
     #    torch.arange(action_logits.size(0), device=action_logits.device),
     #    torch.arange(action_logits.size(1), device=action_logits.device),
