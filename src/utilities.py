@@ -371,14 +371,14 @@ def get_model(
         # causal_lm.q_head = causal_lm.lm_head
 
     if do_lora:
-        # linear_layers = get_linear_layers(causal_lm)
+        mlp_modules = get_mlp_modules(causal_lm.transformer)
         peft_config = LoraConfig(
             task_type="CAUSAL_LM",
             inference_mode=False,
-            r=64,
-            lora_alpha=128,
+            r=32,
+            lora_alpha=64,
             lora_dropout=0.1,
-            # target_modules=linear_layers
+            target_modules=mlp_modules,
         )
         # print("Num Linear Layers: ", len(linear_layers))
         causal_lm.transformer = get_peft_model(causal_lm.transformer, peft_config)
@@ -397,18 +397,14 @@ def get_model(
     return causal_lm, causal_lm_tokenizer, ctxt_size
 
 
-def get_linear_layers(model):
-    return list(
-        set(
-            map(
-                lambda x: x[0].split(".")[-1],
-                filter(
-                    lambda x: isinstance(x[1], torch.nn.Linear),
-                    model.named_modules(),
-                ),
-            )
-        )
-    )
+def get_mlp_modules(model):
+    modules = []
+    for x in model.named_parameters():
+        parts = x[0].split(".")
+        if "mlp" in parts:
+            modules.append(".".join(parts[: parts.index("mlp") + 2]))
+    # return [x[0].split(".") for x in model.named_parameters() if "mlp" in x[0]]
+    return list(set(modules))
 
 
 def create_run_name(cfg: Config) -> str:
