@@ -37,15 +37,28 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         self.transformer = AutoModelForCausalLM.from_pretrained(
             model_name_or_path, config=config
         )
-        # self.q_head = nn.Linear(config.n_embd, config.vocab_size, bias=True)
-        self.q_head = nn.Linear(
-            self.transformer.lm_head.weight.shape[1],
-            self.transformer.lm_head.weight.shape[0],
-            bias=True,
+
+        # Grouping q_head and q_head_block together for easier parameter management
+        self.q_head_group = nn.ModuleDict(
+            {
+                "q_head_block": copy.deepcopy(self.transformer.transformer.h[-1]),
+                "q_head": nn.Linear(
+                    self.transformer.lm_head.weight.shape[1],
+                    self.transformer.lm_head.weight.shape[0],
+                    bias=True,
+                ),
+            }
         )
-        torch.nn.init.zeros_(self.q_head.weight)
-        # self.transformer.bfloat16()
-        # self.q_head.bfloat16()
+
+        # Zero-initialize weights in q_head_block and q_head
+        for name, param in self.q_head_group["q_head_block"].named_parameters():
+            if "weight" in name:
+                torch.nn.init.zeros_(param)
+        torch.nn.init.zeros_(self.q_head_group["q_head"].weight)
+
+        # To set q_head and q_head_block parameters to require_grad=True, use:
+        # for param in self.q_head_group.parameters():
+        #     param.requires_grad = True
 
     def forward(self, input_ids=None, attention_mask=None, add_q_head=True, **kwargs):
         outputs = self.transformer(
@@ -56,7 +69,8 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         )
         if add_q_head:
             hidden_states = outputs.hidden_states[-1]
-            q_values = self.q_head(hidden_states)
+            pre_q_values = self.q_head_group["q_head_block"](hidden_states)[0]
+            q_values = self.q_head_group["q_head"](pre_q_values)
             outputs.logits += q_values
         return outputs
 
@@ -374,7 +388,10 @@ def get_model(
         #        param.requires_grad = True
 
     for name, param in causal_lm.named_parameters():
-        param.requires_grad = "q_head" in name
+        param.requires_grad = False
+    for param in causal_lm.q_head_group.parameters():
+        param.requires_grad = True
+    #    param.requires_grad = "q_head" in name
 
     causal_lm.tokenizer = causal_lm_tokenizer
     return causal_lm, causal_lm_tokenizer, ctxt_size
