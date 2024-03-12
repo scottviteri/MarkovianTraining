@@ -5,15 +5,15 @@ g2 = InitialConfig(
     model_name="distilgpt2",
     lr=1e-6,
     optimizer="adam",
-    batch_size=1,
+    batch_size=2,
     num_batches=300,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
     interval_print=1,
     wandb=False,
     load_model=False,
-    do_lora=False,
-    num_beams=6,
+    do_lora=True,
+    num_beams=3,
     training_ctxt_size=200,
     dataset=InitDatasetType(
         task=ArithmeticTask(
@@ -31,7 +31,7 @@ g2 = InitialConfig(
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
-    inference_cfg=InferenceConfig(num_return_sequences=6),
+    inference_cfg=InferenceConfig(num_return_sequences=3),
     trainer_cfg=TrainerConfig(
         prediction_training_length=1, inference_training_length=30
     ),
@@ -241,13 +241,13 @@ mst = InitialConfig(
     optimizer="adam",
     batch_size=1,
     num_batches=1000,
-    obs_to_action_ratio=0.5,
+    obs_to_action_ratio=0.75,
     interval_save_weights=1001,
     interval_print=3,
-    wandb=False,
+    wandb=True,
     load_model=False,
     do_lora=False,
-    num_beams=16,
+    num_beams=2,
     training_ctxt_size=200,
     dataset=InitDatasetType(
         task=ArithmeticTask(
@@ -259,7 +259,7 @@ mst = InitialConfig(
         ),
         peek_every=None,
     ),
-    inference_cfg=InferenceConfig(num_return_sequences=16),
+    inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None,
         train_A_given_AO=False,
