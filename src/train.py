@@ -422,7 +422,7 @@ def update_weights(
 
         action_loss, values = predict_action(cfg, prev_action, prev_obs, action)
         obs_loss = predict_observation(cfg, action, obs, per_batch=True)
-        # default_obs_loss = predict_observation(cfg, default_action, obs, per_batch=True)
+        default_obs_loss = predict_observation(cfg, default_action, obs, per_batch=True)
         if do_weight_update:
             # if cfg.training_predictor_mode:
             #    # action_loss * obs_loss.detach()  # - obs_loss
@@ -434,13 +434,17 @@ def update_weights(
             #    q_loss = None
             # else:
             # aggregate_loss = action_loss * obs_loss.detach()
-            repeated_obs_losses = obs_loss.unsqueeze(1).repeat(1, values.shape[1])
+            normalized_obs_loss = obs_loss - default_obs_loss
+            repeated_obs_losses = normalized_obs_loss.unsqueeze(1).repeat(
+                1, values.shape[1]
+            )
             value_loss = torch.mean(torch.abs(values - repeated_obs_losses))
             cfg.optimizer.zero_grad()
             action_log_prob = -action_loss
             value_loss = torch.abs(values - repeated_obs_losses).mean()
             aggregate_loss = (
-                action_log_prob * (repeated_obs_losses - values).mean() + value_loss
+                action_log_prob * (repeated_obs_losses - values.detach()).mean()
+                + value_loss
             )
             aggregate_loss.backward()
             cfg.optimizer.step()
