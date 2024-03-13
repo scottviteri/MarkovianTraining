@@ -52,7 +52,7 @@ def save_weights(cfg, batch_index):
         cfg.causal_lm.save_pretrained(cfg.path_2_model)
 
 
-def default_action(cfg):
+def get_default_action(cfg):
     initial_helpful_msg = (
         cfg.causal_lm_tokenizer(
             "Use StepByStep spaces to help predict your next observation.",
@@ -258,7 +258,7 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
         append_traj_to_storage(cfg.traj_path, traj_data)
 
 
-def sample(cfg, prev_action, prev_obs, observation):
+def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
     inference_cfg = cfg.inference_cfg
     # cfg.causal_lm.eval()
     with torch.inference_mode():
@@ -342,6 +342,7 @@ def sample(cfg, prev_action, prev_obs, observation):
             action_candidates = cfg.causal_lm.beam_sample(
                 beam_input_ids,
                 beam_scorer,
+                use_q_head=use_q_head,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
                 logits_warper=logits_processor,
                 # logits_processor=logits_processor,
@@ -386,7 +387,14 @@ def get_masked_mean(arr, mask):
 
 
 def update_weights(
-    cfg, batch_index, prev_action, prev_obs, action, obs, do_weight_update=True
+    cfg,
+    batch_index,
+    prev_action,
+    prev_obs,
+    action,
+    default_action,
+    obs,
+    do_weight_update=True,
 ):
     prediction_cfg = cfg.prediction_cfg
 
@@ -414,6 +422,7 @@ def update_weights(
 
         action_loss, q_values = predict_action(cfg, prev_action, prev_obs, action)
         obs_loss = predict_observation(cfg, action, obs, per_batch=True)
+        default_obs_loss = predict_observation(cfg, default_action, obs, per_batch=True)
         if do_weight_update:
             # if cfg.training_predictor_mode:
             #    # action_loss * obs_loss.detach()  # - obs_loss
@@ -428,7 +437,7 @@ def update_weights(
             repeated_obs_log_prob = -obs_loss.unsqueeze(1).repeat(1, q_values.shape[1])
             q_loss = torch.mean(torch.abs(q_values - repeated_obs_log_prob))
             cfg.optimizer.zero_grad()
-            aggregate_loss = action_loss * obs_loss.mean()
+            aggregate_loss = action_loss * (obs_loss.mean() / default_obs_loss.mean())
             aggregate_loss.backward()
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
@@ -507,7 +516,7 @@ def perturb_action(action, cfg):
 
 
 def trainer(cfg):
-    state = [default_action(cfg), 0, None]
+    state = [get_default_action(cfg), 0, None]
 
     def update(datapt_pair):
         nonlocal state
@@ -535,7 +544,7 @@ def trainer(cfg):
             #    cfg.training_predictor_mode = False
 
         if is_first:
-            prev_action = default_action(cfg)
+            prev_action = get_default_action(cfg)
             log_print_oa(
                 cfg,
                 batch_index,
@@ -555,7 +564,8 @@ def trainer(cfg):
         elif cfg.prediction_cfg.train_O_given_prev_O:
             action = prev_action
         else:
-            action = sample(cfg, prev_action, prev_obs, obs)
+            action = sample(cfg, prev_action, prev_obs, obs, use_q_head=True)
+            default_action = sample(cfg, prev_action, prev_obs, obs, use_q_head=False)
         # action : [batch * beam, tok_p_action]
 
         aggregate_loss, losses = update_weights(
@@ -564,6 +574,7 @@ def trainer(cfg):
             prev_action,
             prev_obs,
             action,
+            default_action,
             obs,
             do_weight_update=not isinstance(cfg.debug, NoWeightUpdates),
         )
