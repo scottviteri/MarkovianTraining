@@ -52,16 +52,14 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         self.qhead = get_peft_model(self.qhead, peft_config)
         self.qhead.print_trainable_parameters()
         ## Grouping q_head and q_head_block together for easier parameter management
-        # self.q_head_group = nn.ModuleDict(
-        #    {
-        #        "q_head_block": copy.deepcopy(self.transformer.transformer.h[-1]),
-        #        "q_head": nn.Linear(
-        #            self.transformer.lm_head.weight.shape[1],
-        #            self.transformer.lm_head.weight.shape[0],
-        #            bias=True,
-        #        ),
-        #    }
-        # )
+        self.v_head_group = nn.ModuleDict(
+            {
+                "v_head_block": copy.deepcopy(self.transformer.model.layers[-1]),
+                "v_head": nn.Linear(
+                    self.transformer.lm_head.weight.shape[1], 1, bias=True
+                ),
+            }
+        )
 
         ## Zero-initialize weights in q_head_block and q_head
         # for name, param in self.q_head_group["q_head_block"].named_parameters():
@@ -73,7 +71,14 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         # for param in self.q_head_group.parameters():
         #     param.requires_grad = True
 
-    def forward(self, input_ids=None, attention_mask=None, add_q_head=True, **kwargs):
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        add_q_head=True,
+        get_v_head=False,
+        **kwargs,
+    ):
         # if add_q_head:
         #    self.transformer.enable_adapter_layers()
         # else:
@@ -81,10 +86,14 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         outputs = (self.qhead if add_q_head else self.transformer)(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            **kwargs,
-            # output_hidden_states=add_q_head,
-            # **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
+            output_hidden_states=get_v_head,
+            # **kwargs,
+            **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
         )
+        if get_v_head:
+            pre_values = self.v_head_group["v_head_block"](outputs.hidden_states[-1])[0]
+            values = self.v_head_group["v_head"](pre_values).squeeze(-1)
+            return outputs, values
         # if add_q_head:
         #    hidden_states = outputs.hidden_states[-1]
         #    pre_q_values = self.q_head_group["q_head_block"](hidden_states)[0]
@@ -480,15 +489,13 @@ def predict_action(cfg, prev_action, prev_obs, action, per_batch=False):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
     attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-    prediction = cfg.causal_lm(
-        input_sequence,
-        attention_mask=attention_mask,
-        add_q_head=True,
+    prediction, values = cfg.causal_lm(
+        input_sequence, attention_mask=attention_mask, get_v_head=True
     )
     action_logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
-    q_values = torch.gather(
-        action_logits, 2, input_sequence[:, 1:].unsqueeze(-1)
-    ).squeeze(-1)[:, -cfg.tok_p_pure_action :]
+    # q_values = torch.gather(
+    #    action_logits, 2, input_sequence[:, 1:].unsqueeze(-1)
+    # ).squeeze(-1)[:, -cfg.tok_p_pure_action :]
     action_loss_tensor = loss_fn(
         input=einops.rearrange(
             action_logits,
@@ -505,7 +512,7 @@ def predict_action(cfg, prev_action, prev_obs, action, per_batch=False):
         action_loss = (
             action_loss_tensor * pure_action_attention_mask
         ).sum() / pure_action_attention_mask.sum()
-    return action_loss, q_values
+    return action_loss, values
 
 
 def predict_observation(cfg, action, obs, per_batch=False):

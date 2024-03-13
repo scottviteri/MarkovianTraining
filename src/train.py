@@ -88,8 +88,8 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                 step=batch_index,
             )
         else:
-            (action_loss, observation_loss, q_loss, perturbed_loss) = losses
-            if q_loss:
+            (action_loss, observation_loss, value_loss, perturbed_loss) = losses
+            if value_loss:
                 wandb.log(
                     {
                         "Batch Index": batch_index,
@@ -97,7 +97,7 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                         "Perturbed Loss": perturbed_loss,
                         "Action Loss": action_loss,
                         "Observation Loss": observation_loss.mean(),
-                        "Q Loss": q_loss,
+                        "Value Loss": value_loss,
                     },
                     step=batch_index,
                 )
@@ -125,14 +125,14 @@ def log_print_losses(cfg, batch_index, aggregate_loss, losses):
             (
                 action_loss,
                 observation_loss,
-                q_loss,
+                value_loss,
                 perturbed_loss,
             ) = losses
             with open(cfg.path_2_log, "a") as f:
                 multi_print(f"Aggregate loss: {aggregate_loss}", f)
-                if q_loss:
+                if value_loss:
                     multi_print(
-                        f"Action/Obs/Q/Pert loss: {action_loss:0.4f}/{observation_loss.mean():0.4f}/{q_loss:0.4f}/{perturbed_loss}",
+                        f"Action/Obs/Q/Pert loss: {action_loss:0.4f}/{observation_loss.mean():0.4f}/{value_loss:0.4f}/{perturbed_loss}",
                         f,
                     )
                 else:
@@ -238,7 +238,7 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
         (
             action_loss,
             observation_loss,
-            q_loss,
+            value_loss,
             perturbed_loss,
         ) = losses
 
@@ -253,7 +253,7 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
             "perturbed_loss": (
                 perturbed_loss.item() if perturbed_loss is not None else 0.0
             ),
-            "q_loss": q_loss.item() if q_loss is not None else 0.0,
+            "value_loss": value_loss.item() if value_loss is not None else 0.0,
         }
         append_traj_to_storage(cfg.traj_path, traj_data)
 
@@ -420,7 +420,7 @@ def update_weights(
         )
         obs = obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
 
-        action_loss, q_values = predict_action(cfg, prev_action, prev_obs, action)
+        action_loss, values = predict_action(cfg, prev_action, prev_obs, action)
         obs_loss = predict_observation(cfg, action, obs, per_batch=True)
         default_obs_loss = predict_observation(cfg, default_action, obs, per_batch=True)
         if do_weight_update:
@@ -434,14 +434,19 @@ def update_weights(
             #    q_loss = None
             # else:
             # aggregate_loss = action_loss * obs_loss.detach()
-            repeated_obs_log_prob = -obs_loss.unsqueeze(1).repeat(1, q_values.shape[1])
-            q_loss = torch.mean(torch.abs(q_values - repeated_obs_log_prob))
+            repeated_obs_log_prob = -obs_loss.unsqueeze(1).repeat(1, values.shape[1])
+            value_loss = torch.mean(torch.abs(values - repeated_obs_log_prob))
             cfg.optimizer.zero_grad()
-            aggregate_loss = action_loss * (obs_loss.mean() / default_obs_loss.mean())
+            action_log_prob = -action_loss
+            value_loss = torch.abs(values - repeated_obs_log_prob).mean()
+            aggregate_loss = (
+                action_log_prob * (obs_loss.mean() - default_obs_loss.mean())
+                + value_loss
+            )
             aggregate_loss.backward()
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
-        losses = [action_loss, obs_loss, q_loss]
+        losses = [action_loss, obs_loss, value_loss]
         return aggregate_loss, losses
 
 
@@ -653,7 +658,8 @@ def train_model(init_cfg):
         )  # , momentum=0.01)
     elif cfg.optimizer == "adam":
         cfg.optimizer = bitsandbytes.optim.AdamW8bit(  # torch.optim.Adam(  #
-            list(cfg.causal_lm.qhead.parameters()),
+            list(cfg.causal_lm.qhead.parameters())
+            + list(cfg.causal_lm.v_head_group.parameters()),
             lr=cfg.lr,
         )
 
