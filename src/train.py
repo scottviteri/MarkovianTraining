@@ -430,8 +430,8 @@ def update_weights(
         action_loss, values, negentropy = predict_action(
             cfg, prev_action, prev_obs, action, add_q_head=True
         )
-        default_action_loss, default_values, default_negentropy = predict_action(
-            cfg, prev_action, prev_obs, action, add_q_head=False
+        old_critic_action_loss, old_critic_values, old_critic_negentropy = (
+            predict_action(cfg, prev_action, prev_obs, action, add_q_head=False)
         )
         obs_loss = predict_observation(
             cfg, action, obs, add_q_head=False, per_batch=True
@@ -451,7 +451,7 @@ def update_weights(
             # else:
             # aggregate_loss = action_loss * obs_loss.detach()
             normalized_obs_loss = (
-                negentropy - default_negentropy + obs_loss - default_obs_loss
+                negentropy - old_critic_negentropy + obs_loss - default_obs_loss
             )
             repeated_obs_losses = normalized_obs_loss.unsqueeze(1).repeat(
                 1, values.shape[1]
@@ -459,9 +459,15 @@ def update_weights(
             value_loss = torch.mean(torch.abs(values - repeated_obs_losses))
             cfg.optimizer.zero_grad()
             action_log_prob = -action_loss
+            old_critic_action_log_prob = -old_critic_action_loss
+            action_prob_ratio = torch.exp(action_log_prob - old_critic_action_log_prob)
+            clipped_ratio = torch.clamp(action_prob_ratio, 0.8, 1.2)
             value_loss = torch.abs(values - repeated_obs_losses).mean()
+            neg_advantage = (repeated_obs_losses - values.detach()).mean()
             aggregate_loss = (
-                action_log_prob * (repeated_obs_losses - values.detach()).mean()
+                torch.max(
+                    action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage
+                )
                 + value_loss
             )
             aggregate_loss.backward()
