@@ -439,20 +439,9 @@ def update_weights(
         default_obs_loss = predict_observation(
             cfg, default_action, obs, add_q_head=False, per_batch=True
         )
+        # (negentropy - old_critic_negentropy) * 0.1 +
         if do_weight_update:
-            # if cfg.training_predictor_mode:
-            #    # action_loss * obs_loss.detach()  # - obs_loss
-            #    aggregate_loss = obs_loss
-            #    cfg.optimizer.zero_grad()
-            #    aggregate_loss.backward()
-            #    cfg.optimizer.step()
-            #    cfg.optimizer.zero_grad()
-            #    q_loss = None
-            # else:
-            # aggregate_loss = action_loss * obs_loss.detach()
-            normalized_obs_loss = (
-                negentropy - old_critic_negentropy + obs_loss - default_obs_loss
-            )
+            normalized_obs_loss = obs_loss - default_obs_loss
             repeated_obs_losses = normalized_obs_loss.unsqueeze(1).repeat(
                 1, values.shape[1]
             )
