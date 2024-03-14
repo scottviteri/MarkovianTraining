@@ -361,14 +361,16 @@ def get_model(
     }
     with device:
         padding_side = get_padding_side(model_name)
-        config = AutoConfig.from_pretrained(model_dict[model_name])
         if load_model:
-            causal_lm = ModelWithQHead(model_name, config)
+            model_location = "./saved_weights_and_losses/"+model_name+"_weights"
+            config = AutoConfig.from_pretrained(model_location)
+            causal_lm = ModelWithQHead(model_location, config)
             # AutoModelForCausalLM.from_pretrained(
             #    path_2_model,
             #    torch_dtype=torch.float16,
             # )
         else:
+            config = AutoConfig.from_pretrained(model_dict[model_name])
             causal_lm = ModelWithQHead(model_dict[model_name], config)
             # AutoModelForCausalLM.from_pretrained(
             #    model_dict[model_name],
