@@ -52,9 +52,14 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         self.qhead = get_peft_model(self.qhead, peft_config)
         self.qhead.print_trainable_parameters()
         ## Grouping q_head and q_head_block together for easier parameter management
+        last_layer = (
+            self.transformer.model.layers[-1]
+            if "mistral" in model_name_or_path
+            else self.transformer.transformer.h[-1]
+        )
         self.v_head_group = nn.ModuleDict(
             {
-                "v_head_block": copy.deepcopy(self.transformer.model.layers[-1]),
+                "v_head_block": copy.deepcopy(last_layer),
                 "v_head": nn.Linear(
                     self.transformer.lm_head.weight.shape[1], 1, bias=True
                 ),
@@ -362,65 +367,25 @@ def get_model(
     with device:
         padding_side = get_padding_side(model_name)
         if load_model:
-            model_location = "./saved_weights_and_losses/"+model_name+"_weights"
+            model_location = "./saved_weights_and_losses/" + model_name + "_weights"
             config = AutoConfig.from_pretrained(model_location)
             causal_lm = ModelWithQHead(model_location, config)
-            # AutoModelForCausalLM.from_pretrained(
-            #    path_2_model,
-            #    torch_dtype=torch.float16,
-            # )
         else:
             config = AutoConfig.from_pretrained(model_dict[model_name])
             causal_lm = ModelWithQHead(model_dict[model_name], config)
-            # AutoModelForCausalLM.from_pretrained(
-            #    model_dict[model_name],
-            #    use_flash_attention_2=model_name in ["llama"],
-            # )
-        # if not do_lora:
-        #    for name, param in causal_lm.named_parameters():
-        #        param.requires_grad = "q_head" in name
 
         causal_lm.bfloat16()
         causal_lm_tokenizer = AutoTokenizer.from_pretrained(
             model_dict[model_name], padding_side=padding_side
         )
-        #  causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
-        ## causal_lm.config.pad_token_id = causal_lm_tokenizer.pad_token_id
-        # causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.vocab_size
         causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
-        # causal_lm.resize_token_embeddings(len(causal_lm_tokenizer))
-        # causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
         ctxt_size = get_ctxt_size(model_name, causal_lm)
-
-        # causal_lm.v_head = torch.nn.Linear(
-        #    causal_lm.lm_head.weight.shape[-1], 1, bias=False
-        # )
-        ## Initialize weights of v_head
-        # torch.nn.init.xavier_uniform_(causal_lm.v_head.weight)
-        # causal_lm.q_head = causal_lm.lm_head
-
-    # if do_lora:
-    #    mlp_modules = get_mlp_modules(causal_lm.transformer)
-    #    peft_config = LoraConfig(
-    #        task_type="CAUSAL_LM",
-    #        inference_mode=False,
-    #        r=32,
-    #        lora_alpha=64,
-    #        lora_dropout=0.1,
-    #        target_modules=mlp_modules,
-    #    )
-    #    # print("Num Linear Layers: ", len(linear_layers))
-    #    causal_lm.transformer = get_peft_model(causal_lm.transformer, peft_config)
-    #    causal_lm.transformer.print_trainable_parameters()
-    #    # for name, param in causal_lm.named_parameters():
-    #    #    if "q_head" in name:
-    #    #        param.requires_grad = True
-
-    for name, param in causal_lm.transformer.named_parameters():
-        param.requires_grad = False
-    for name, param in causal_lm.qhead.named_parameters():
-        param.requires_grad = True
-        # param.requires_grad = "q_head" in name
+        for name, param in causal_lm.transformer.named_parameters():
+            param.requires_grad = False
+        for name, param in causal_lm.qhead.named_parameters():
+            param.requires_grad = True
+        for name, param in causal_lm.v_head_group.named_parameters():
+            param.requires_grad = True
 
     causal_lm.tokenizer = causal_lm_tokenizer
     return causal_lm, causal_lm_tokenizer, ctxt_size
@@ -502,12 +467,12 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=Fal
     input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
     attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
     prediction, values = cfg.causal_lm(
-        input_sequence, attention_mask=attention_mask, add_q_head=add_q_head, get_v_head=True
+        input_sequence,
+        attention_mask=attention_mask,
+        add_q_head=add_q_head,
+        get_v_head=True,
     )
     action_logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
-    # q_values = torch.gather(
-    #    action_logits, 2, input_sequence[:, 1:].unsqueeze(-1)
-    # ).squeeze(-1)[:, -cfg.tok_p_pure_action :]
     action_loss_tensor = loss_fn(
         input=einops.rearrange(
             action_logits,
