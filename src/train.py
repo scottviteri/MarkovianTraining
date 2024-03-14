@@ -88,7 +88,9 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                 step=batch_index,
             )
         else:
-            (action_loss, observation_loss, value_loss, perturbed_loss) = losses
+            (action_loss, observation_loss, value_loss, negentropy, perturbed_loss) = (
+                losses
+            )
             if value_loss:
                 wandb.log(
                     {
@@ -98,6 +100,7 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                         "Action Loss": action_loss,
                         "Observation Loss": observation_loss.mean(),
                         "Value Loss": value_loss,
+                        "Negentropy": negentropy,
                     },
                     step=batch_index,
                 )
@@ -109,6 +112,7 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                         "Perturbed Loss": perturbed_loss,
                         "Action Loss": action_loss,
                         "Observation Loss": observation_loss.mean(),
+                        "Negentropy": negentropy,
                     },
                     step=batch_index,
                 )
@@ -126,13 +130,14 @@ def log_print_losses(cfg, batch_index, aggregate_loss, losses):
                 action_loss,
                 observation_loss,
                 value_loss,
+                negentropy,
                 perturbed_loss,
             ) = losses
             with open(cfg.path_2_log, "a") as f:
                 multi_print(f"Aggregate loss: {aggregate_loss}", f)
                 if value_loss:
                     multi_print(
-                        f"Action/Obs/Q/Pert loss: {action_loss:0.4f}/{observation_loss.mean():0.4f}/{value_loss:0.4f}/{perturbed_loss}",
+                        f"Action/Obs/Q/NegEnt/Pert loss: {action_loss:0.4f}/{observation_loss.mean():0.4f}/{value_loss:0.4f}/{negentropy:0.4f}/{perturbed_loss}",
                         f,
                     )
                 else:
@@ -239,6 +244,7 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
             action_loss,
             observation_loss,
             value_loss,
+            negentropy,
             perturbed_loss,
         ) = losses
 
@@ -250,10 +256,11 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
             "obs": repr(cfg.causal_lm_tokenizer.decode(obs[0])),
             # "action_loss": action_loss.item(),
             "observation_loss": observation_loss.mean().item(),
+            "value_loss": value_loss.item() if value_loss is not None else 0.0,
+            "negentropy": negentropy.item() if negentropy is not None else 0.0,
             "perturbed_loss": (
                 perturbed_loss.item() if perturbed_loss is not None else 0.0
             ),
-            "value_loss": value_loss.item() if value_loss is not None else 0.0,
         }
         append_traj_to_storage(cfg.traj_path, traj_data)
 
@@ -420,9 +427,18 @@ def update_weights(
         )
         obs = obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
 
-        action_loss, values = predict_action(cfg, prev_action, prev_obs, action)
-        obs_loss = predict_observation(cfg, action, obs, per_batch=True)
-        default_obs_loss = predict_observation(cfg, default_action, obs, per_batch=True)
+        action_loss, values, negentropy = predict_action(
+            cfg, prev_action, prev_obs, action, add_q_head=True
+        )
+        default_action_loss, default_values, default_negentropy = predict_action(
+            cfg, prev_action, prev_obs, action, add_q_head=False
+        )
+        obs_loss = predict_observation(
+            cfg, action, obs, add_q_head=False, per_batch=True
+        )
+        default_obs_loss = predict_observation(
+            cfg, default_action, obs, add_q_head=False, per_batch=True
+        )
         if do_weight_update:
             # if cfg.training_predictor_mode:
             #    # action_loss * obs_loss.detach()  # - obs_loss
@@ -434,7 +450,9 @@ def update_weights(
             #    q_loss = None
             # else:
             # aggregate_loss = action_loss * obs_loss.detach()
-            normalized_obs_loss = obs_loss - default_obs_loss
+            normalized_obs_loss = (
+                negentropy - default_negentropy + obs_loss - default_obs_loss
+            )
             repeated_obs_losses = normalized_obs_loss.unsqueeze(1).repeat(
                 1, values.shape[1]
             )
@@ -449,7 +467,7 @@ def update_weights(
             aggregate_loss.backward()
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
-        losses = [action_loss, obs_loss, value_loss]
+        losses = [action_loss, obs_loss, value_loss, negentropy]
         return aggregate_loss, losses
 
 

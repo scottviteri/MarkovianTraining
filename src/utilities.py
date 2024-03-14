@@ -485,12 +485,22 @@ def create_run_name(cfg: Config) -> str:
     return run_name
 
 
-def predict_action(cfg, prev_action, prev_obs, action, per_batch=False):
+def entropy_from_logits(logits):
+    # Apply softmax to get the probabilities
+    probs = torch.nn.functional.softmax(logits, dim=-1)
+    # Compute log probabilities
+    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+    # Compute the entropy
+    entropy = -torch.sum(probs * log_probs, dim=-1)
+    return entropy
+
+
+def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=False):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
     attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
     prediction, values = cfg.causal_lm(
-        input_sequence, attention_mask=attention_mask, get_v_head=True
+        input_sequence, attention_mask=attention_mask, add_q_head=add_q_head, get_v_head=True
     )
     action_logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
     # q_values = torch.gather(
@@ -503,6 +513,7 @@ def predict_action(cfg, prev_action, prev_obs, action, per_batch=False):
         ),
         target=input_sequence[:, 1:],
     )[:, -cfg.tok_p_pure_action :]
+    negentropy = -entropy_from_logits(action_logits).mean()
     pure_action_attention_mask = attention_mask[:, -cfg.tok_p_pure_action :]
     if per_batch:
         action_loss = (action_loss_tensor * pure_action_attention_mask).sum(
@@ -512,17 +523,20 @@ def predict_action(cfg, prev_action, prev_obs, action, per_batch=False):
         action_loss = (
             action_loss_tensor * pure_action_attention_mask
         ).sum() / pure_action_attention_mask.sum()
-    return action_loss, values
+    return action_loss, values, negentropy
 
 
-def predict_observation(cfg, action, obs, per_batch=False):
+def predict_observation(cfg, action, obs, add_q_head, per_batch=False):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     mkv_input_sequence = torch.cat([action, obs], dim=1)
     mkv_attention_mask = (
         mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
     ).long()
     prediction = cfg.causal_lm(
-        mkv_input_sequence, attention_mask=mkv_attention_mask, add_q_head=False
+        mkv_input_sequence,
+        attention_mask=mkv_attention_mask,
+        add_q_head=add_q_head,
+        get_v_head=False,
     )
     mkv_logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
     mkv_loss_tensor = loss_fn(
