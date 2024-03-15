@@ -441,6 +441,7 @@ def update_weights(
         )
         # (negentropy - old_critic_negentropy) * 0.1 +
         if do_weight_update:
+            normalized_negentropy = negentropy - old_critic_negentropy
             normalized_obs_loss = obs_loss - default_obs_loss
             repeated_obs_losses = normalized_obs_loss.unsqueeze(1).repeat(
                 1, values.shape[1]
@@ -453,7 +454,7 @@ def update_weights(
             action_prob_ratio = torch.exp(action_log_prob - old_critic_action_log_prob)
             clipped_ratio = torch.clamp(action_prob_ratio, 0.9, 1.1)
             value_loss = torch.abs(values - repeated_obs_losses).mean()
-            # neg_advantage = (repeated_obs_losses - values.detach()).mean()
+            neg_advantage = (repeated_obs_losses - values.detach()).mean()
             # neg_advantage = obs_loss.mean()
             wandb.log(
                 {
@@ -465,17 +466,17 @@ def update_weights(
                 },
                 step=batch_index,
             )
-            aggregate_loss = action_loss * (obs_loss.mean() + negentropy * 0.1)
+            #aggregate_loss = action_loss * (normalized_obs_loss.mean() + negentropy * .1)
             # aggregate_loss = -torch.min(
             #    action_prob_ratio * obs_log_prob.mean(),
             #    clipped_ratio * obs_log_prob.mean(),
             # )
-            # aggregate_loss = (
-            #    torch.max(
-            #        action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage
-            #    )
-            #    + value_loss
-            # )
+            aggregate_loss = (
+               torch.max(
+                   action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage
+               )
+               + value_loss
+            )
             aggregate_loss.backward()
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
