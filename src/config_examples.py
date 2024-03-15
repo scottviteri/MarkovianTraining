@@ -5,15 +5,15 @@ g2 = InitialConfig(
     model_name="distilgpt2",
     lr=1e-6,
     optimizer="adam",
-    batch_size=1,
+    batch_size=2,
     num_batches=300,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
     interval_print=1,
-    wandb=True,
+    wandb=False,
     load_model=False,
-    do_lora=False,
-    num_beams=4,
+    do_lora=True,
+    num_beams=3,
     training_ctxt_size=200,
     dataset=InitDatasetType(
         task=ArithmeticTask(
@@ -31,9 +31,9 @@ g2 = InitialConfig(
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
-    inference_cfg=InferenceConfig(num_return_sequences=4),
+    inference_cfg=InferenceConfig(num_return_sequences=3),
     trainer_cfg=TrainerConfig(
-        prediction_training_length=30, inference_training_length=10
+        prediction_training_length=1, inference_training_length=30
     ),
     perturbation_cfg=None,
     # perturbation_cfg=PerturbationConfig(
@@ -241,36 +241,36 @@ mst = InitialConfig(
     optimizer="adam",
     batch_size=1,
     num_batches=1000,
-    obs_to_action_ratio=0.5,
-    interval_save_weights=1001,
-    interval_print=3,
+    obs_to_action_ratio=0.075,
+    interval_save_weights=900,
+    interval_print=1,
     wandb=True,
     load_model=False,
     do_lora=False,
-    num_beams=12,
-    training_ctxt_size=200,
+    num_beams=1,
+    training_ctxt_size=1000,
     dataset=InitDatasetType(
         task=ArithmeticTask(
-            num_terms=6,
-            num_digits=2,
+            num_terms=3,
+            num_digits=3,
             cumulative=False,
             operations=["+", "-", "*"],
-            probs=[1.0, 0.0, 0.0],
+            probs=[0.0, 0.0, 1.0],
         ),
         peek_every=None,
     ),
-    inference_cfg=InferenceConfig(num_return_sequences=12),
+    inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
-        filter_best_actions=1,
+        filter_best_actions=None,
         train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
     trainer_cfg=TrainerConfig(
-        prediction_training_length=90, inference_training_length=10
+        prediction_training_length=1, inference_training_length=1000
     ),
     perturbation_cfg=None,
     debug=None,
 )
 
-configs = [g2]
+configs = [mst]

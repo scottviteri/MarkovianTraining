@@ -20,6 +20,98 @@ import torch.nn as nn
 from src.training_types import *
 from src.prepare_dataset import prepare_dataset
 
+from transformers import (
+    PreTrainedModel,
+    AutoModelForCausalLM,
+    AutoConfig,
+    GenerationMixin,
+    GPT2LMHeadModel,
+)
+import torch
+import torch.nn as nn
+
+
+class ModelWithQHead(PreTrainedModel, GenerationMixin):
+    def __init__(self, model_name_or_path, config):
+        super().__init__(config)
+        self.transformer = AutoModelForCausalLM.from_pretrained(
+            model_name_or_path, config=config
+        )
+        self.qhead = copy.deepcopy(self.transformer)
+
+        mlp_modules = get_mlp_modules(self.qhead)
+        peft_config = LoraConfig(
+            task_type="CAUSAL_LM",
+            inference_mode=False,
+            r=4,
+            lora_alpha=8,
+            lora_dropout=0.1,
+            target_modules=mlp_modules,
+        )
+        ## print("Num Linear Layers: ", len(linear_layers))
+        self.qhead = get_peft_model(self.qhead, peft_config)
+        self.qhead.print_trainable_parameters()
+        ## Grouping q_head and q_head_block together for easier parameter management
+        last_layer = (
+            self.transformer.model.layers[-1]
+            if "mistral" in model_name_or_path
+            else self.transformer.transformer.h[-1]
+        )
+        self.v_head_group = nn.ModuleDict(
+            {
+                "v_head_block": copy.deepcopy(last_layer),
+                "v_head": nn.Linear(
+                    self.transformer.lm_head.weight.shape[1], 1, bias=True
+                ),
+            }
+        )
+
+        ## Zero-initialize weights in q_head_block and q_head
+        # for name, param in self.q_head_group["q_head_block"].named_parameters():
+        #    if "weight" in name:
+        #        torch.nn.init.zeros_(param)
+        # torch.nn.init.zeros_(self.q_head_group["q_head"].weight)
+
+        # To set q_head and q_head_block parameters to require_grad=True, use:
+        # for param in self.q_head_group.parameters():
+        #     param.requires_grad = True
+
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        add_q_head=True,
+        get_v_head=False,
+        **kwargs,
+    ):
+        # if add_q_head:
+        #    self.transformer.enable_adapter_layers()
+        # else:
+        #    self.transformer.disable_adapter_layers()
+        outputs = (self.qhead if add_q_head else self.transformer)(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=get_v_head,
+            # **kwargs,
+            **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
+        )
+        if get_v_head:
+            pre_values = self.v_head_group["v_head_block"](outputs.hidden_states[-1])[0]
+            values = self.v_head_group["v_head"](pre_values).squeeze(-1)
+            return outputs, values
+        # if add_q_head:
+        #    hidden_states = outputs.hidden_states[-1]
+        #    pre_q_values = self.q_head_group["q_head_block"](hidden_states)[0]
+        #    q_values = self.q_head_group["q_head"](pre_q_values)
+        #    outputs.logits += q_values
+        return outputs
+
+    def prepare_inputs_for_generation(self, input_ids, **kwargs):
+        return self.transformer.prepare_inputs_for_generation(input_ids, **kwargs)
+
+    def _reorder_cache(self, past_key_values, beam_idx):
+        return self.transformer._reorder_cache(past_key_values, beam_idx)
+
 
 def load_cfg_from_file(file_location: str) -> InitialConfig:
     with open(file_location) as f:
@@ -38,7 +130,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 
-    predictor_lm, causal_lm_tokenizer, ctxt_size = get_model(
+    causal_lm, causal_lm_tokenizer, ctxt_size = get_model(
         device,
         init_cfg.load_model,
         init_cfg.model_name,
@@ -47,10 +139,13 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         init_cfg.do_lora,
     )
 
-    inference_lm = torch.nn.Linear(
-        predictor_lm.lm_head.weight.shape[-1], 1, bias=False, device=device
-    )
-    torch.nn.init.xavier_uniform_(inference_lm.weight)
+    # causal_lm.q_head = torch.nn.Linear(
+    #    causal_lm.lm_head.weight.shape[-1],
+    #    causal_lm.lm_head.weight.shape[0],
+    #    bias=False,
+    #    device=device,
+    # )
+    # torch.nn.init.zeros_(causal_lm.q_head.weight)
 
     # predictor_lm = copy.deepcopy(inference_lm)
     # for param in predictor_lm.parameters():
@@ -92,7 +187,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         model_name=init_cfg.model_name,
         lr=init_cfg.lr,
         optimizer=init_cfg.optimizer,
-        vhead_optimizer=None,
+        qhead_optimizer=init_cfg.optimizer,
         batch_size=init_cfg.batch_size,
         num_batches=init_cfg.num_batches,
         obs_to_action_ratio=init_cfg.obs_to_action_ratio,
@@ -120,8 +215,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         action_prefix_tensor=action_prefix,
         obs_prefix_tensor=obs_prefix,
         ctxt_size=ctxt_size,
-        predictor_lm=predictor_lm,
-        inference_lm=inference_lm,  # predictor_lm,
+        causal_lm=causal_lm,  # predictor_lm,
         causal_lm_tokenizer=causal_lm_tokenizer,
         inference_cfg=init_cfg.inference_cfg,
         prediction_cfg=init_cfg.prediction_cfg,
@@ -182,12 +276,12 @@ def get_prefixes(
     tok_p_obs: Optional[int],
 ):
     if tok_p_obs:
-        observation_prefix = "\nObservation: "
+        observation_prefix = ""
         observation_prefix_tokens = tokenizer.encode(
             observation_prefix, add_special_tokens=False
         )
         observation_prefix_tensor = einops.repeat(
-            torch.tensor(observation_prefix_tokens),
+            torch.tensor(observation_prefix_tokens, dtype=torch.int64),
             "tokens -> batch tokens",
             batch=batch_size,
         ).to(device)
@@ -197,10 +291,11 @@ def get_prefixes(
         tokens_per_pure_observation = None
 
     if tok_p_action:
-        action_prefix = "\nStepByStep: "
+        # action_prefix = "\nStepByStep:"
+        action_prefix = "Reasoning:"
         action_prefix_tokens = tokenizer.encode(action_prefix, add_special_tokens=False)
         action_prefix_tensor = einops.repeat(
-            torch.tensor(action_prefix_tokens),
+            torch.tensor(action_prefix_tokens, dtype=torch.int64),
             "tokens -> batch tokens",
             batch=batch_size,
         ).to(device)
@@ -210,7 +305,7 @@ def get_prefixes(
         tokens_per_pure_action = None
 
     if tok_p_loss:
-        reward_prefix = "\nLoss: "
+        reward_prefix = "\nLoss:"
         reward_prefix_tokens = tokenizer.encode(reward_prefix, add_special_tokens=False)
         reward_prefix_tensor = einops.repeat(
             torch.tensor(reward_prefix_tokens),
@@ -273,64 +368,38 @@ def get_model(
     with device:
         padding_side = get_padding_side(model_name)
         if load_model:
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                path_2_model,
-                torch_dtype=torch.float16,
-            )
+            model_location = "./saved_weights_and_losses/" + model_name + "_weights"
+            config = AutoConfig.from_pretrained(model_location)
+            causal_lm = ModelWithQHead(model_location, config)
         else:
-            causal_lm = AutoModelForCausalLM.from_pretrained(
-                model_dict[model_name],
-                use_flash_attention_2=model_name in ["llama"],
-            )
+            config = AutoConfig.from_pretrained(model_dict[model_name])
+            causal_lm = ModelWithQHead(model_dict[model_name], config)
+
         causal_lm.bfloat16()
         causal_lm_tokenizer = AutoTokenizer.from_pretrained(
             model_dict[model_name], padding_side=padding_side
         )
-        #  causal_lm_tokenizer.add_special_tokens({"pad_token": "<pad>"})
-        ## causal_lm.config.pad_token_id = causal_lm_tokenizer.pad_token_id
-        # causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.vocab_size
         causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
-        # causal_lm.resize_token_embeddings(len(causal_lm_tokenizer))
-        # causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
         ctxt_size = get_ctxt_size(model_name, causal_lm)
-
-        # causal_lm.v_head = torch.nn.Linear(
-        #    causal_lm.lm_head.weight.shape[-1], 1, bias=False
-        # )
-        ## Initialize weights of v_head
-        # torch.nn.init.xavier_uniform_(causal_lm.v_head.weight)
-        # causal_lm.q_head = causal_lm.lm_head
-
-    if do_lora:
-        # linear_layers = get_linear_layers(causal_lm)
-        peft_config = LoraConfig(
-            task_type="CAUSAL_LM",
-            inference_mode=False,
-            r=64,
-            lora_alpha=128,
-            lora_dropout=0.1,
-            # target_modules=linear_layers
-        )
-        # print("Num Linear Layers: ", len(linear_layers))
-        causal_lm = get_peft_model(causal_lm, peft_config)
-        causal_lm.print_trainable_parameters()
+        for name, param in causal_lm.transformer.named_parameters():
+            param.requires_grad = False
+        for name, param in causal_lm.qhead.named_parameters():
+            param.requires_grad = True
+        for name, param in causal_lm.v_head_group.named_parameters():
+            param.requires_grad = True
 
     causal_lm.tokenizer = causal_lm_tokenizer
     return causal_lm, causal_lm_tokenizer, ctxt_size
 
 
-def get_linear_layers(model):
-    return list(
-        set(
-            map(
-                lambda x: x[0].split(".")[-1],
-                filter(
-                    lambda x: isinstance(x[1], torch.nn.Linear),
-                    model.named_modules(),
-                ),
-            )
-        )
-    )
+def get_mlp_modules(model):
+    modules = []
+    for x in model.named_parameters():
+        parts = x[0].split(".")
+        if "mlp" in parts:
+            modules.append(".".join(parts[: parts.index("mlp") + 2]))
+    # return [x[0].split(".") for x in model.named_parameters() if "mlp" in x[0]]
+    return list(set(modules))
 
 
 def create_run_name(cfg: Config) -> str:
@@ -384,41 +453,78 @@ def create_run_name(cfg: Config) -> str:
     return run_name
 
 
-def predict_observation(cfg, action, obs, return_values=False, per_batch=False):
-    with nullcontext() if cfg.training_predictor_mode else torch.no_grad():
-        loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-        mkv_input_sequence = torch.cat([action, obs], dim=1)
-        mkv_attention_mask = (
-            mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
-        ).long()
-        prediction = cfg.predictor_lm(
-            mkv_input_sequence,
-            attention_mask=mkv_attention_mask,
-            output_hidden_states=return_values,
-        )
-        mkv_logits = prediction.logits[:, :-1, :]
-        mkv_loss_tensor = loss_fn(
-            input=einops.rearrange(
-                mkv_logits,
-                "batch seq_length vocab_size -> batch vocab_size seq_length",
-            ),
-            target=mkv_input_sequence[:, 1:],
-        )
-        if per_batch:
-            obs_loss = (mkv_loss_tensor * mkv_attention_mask[:, 1:]).sum(
-                dim=1
-            ) / mkv_attention_mask[:, 1:].sum(dim=1)
-        else:
-            obs_loss = (
-                mkv_loss_tensor * mkv_attention_mask[:, 1:]
-            ).sum() / mkv_attention_mask[:, 1:].sum()
-    with torch.no_grad() if cfg.training_predictor_mode else nullcontext():
-        estimated_values = (
-            cfg.inference_lm(prediction.hidden_states[-1])[:, : cfg.tok_p_action, 0]
-            if return_values
-            else None
-        )
-    return obs_loss, estimated_values
+def entropy_from_logits(logits):
+    # Apply softmax to get the probabilities
+    probs = torch.nn.functional.softmax(logits, dim=-1)
+    # Compute log probabilities
+    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+    # Compute the entropy
+    entropy = -torch.sum(probs * log_probs, dim=-1)
+    return entropy
+
+
+def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=False):
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
+    attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+    prediction, values = cfg.causal_lm(
+        input_sequence,
+        attention_mask=attention_mask,
+        add_q_head=add_q_head,
+        get_v_head=True,
+    )
+    action_logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
+    action_loss_tensor = loss_fn(
+        input=einops.rearrange(
+            action_logits,
+            "batch seq_length vocab_size -> batch vocab_size seq_length",
+        ),
+        target=input_sequence[:, 1:],
+    )[:, -cfg.tok_p_pure_action :]
+    negentropy = -entropy_from_logits(action_logits).mean()
+    pure_action_attention_mask = attention_mask[:, -cfg.tok_p_pure_action :]
+    if per_batch:
+        action_loss = (action_loss_tensor * pure_action_attention_mask).sum(
+            dim=1
+        ) / pure_action_attention_mask.sum(dim=1)
+    else:
+        action_loss = (
+            action_loss_tensor * pure_action_attention_mask
+        ).sum() / pure_action_attention_mask.sum()
+    return action_loss, values, negentropy
+
+
+def predict_observation(cfg, action, obs, add_q_head, per_batch=False):
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    mkv_input_sequence = torch.cat([action, obs], dim=1)
+    mkv_attention_mask = (
+        mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
+    ).long()
+    prediction = cfg.causal_lm(
+        mkv_input_sequence,
+        attention_mask=mkv_attention_mask,
+        add_q_head=add_q_head,
+        get_v_head=False,
+    )
+    mkv_logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
+    mkv_loss_tensor = loss_fn(
+        input=einops.rearrange(
+            mkv_logits,
+            "batch seq_length vocab_size -> batch vocab_size seq_length",
+        ),
+        target=mkv_input_sequence[:, 1:],
+    )[:, -cfg.tok_p_pure_obs :]
+    pure_obs_attention_mask = mkv_attention_mask[:, -cfg.tok_p_pure_obs :]
+    if per_batch:
+        obs_loss = (mkv_loss_tensor * pure_obs_attention_mask).sum(
+            dim=1
+        ) / pure_obs_attention_mask.sum(dim=1)
+    else:
+        obs_loss = (
+            mkv_loss_tensor * pure_obs_attention_mask
+        ).sum() / pure_obs_attention_mask.sum()
+    return obs_loss
+
     # obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs :]
     # obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][
     #    :, -cfg.tok_p_pure_obs :

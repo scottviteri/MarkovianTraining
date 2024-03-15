@@ -3,6 +3,9 @@
 import torch
 import torch.nn as nn
 from torch.cuda.amp import autocast
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 import numpy as np
 from tqdm import tqdm
 import einops
@@ -18,14 +21,15 @@ from matplotlib import pyplot as plt
 import functools
 from contextlib import nullcontext
 import bitsandbytes
+import transformers
 from transformers.generation import beam_search
 from collections import UserDict
-import torch.distributed as dist
 
 from src.training_types import *
 from src.utilities import (
     extend_initial_config,
     log_and_print_info,
+    predict_action,
     predict_observation,
     get_neg_log_probs,
     get_masked_mean,
@@ -35,16 +39,13 @@ from src.utilities import (
 from src.config_examples import configs
 from src.beam import BeamSearchScorer
 
-import transformers
 from transformers.models.gptj.modeling_gptj import GPTJBlock
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 from transformers.models.mistral.modeling_mistral import MistralDecoderLayer
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
-
 from src.evaluate_via_gpt import evaluate_via_gpt
 import src.config_examples
-import torch.distributed as dist
 
 
 def save_weights(cfg, batch_index):
@@ -55,13 +56,13 @@ def save_weights(cfg, batch_index):
     ):
         print(f"Saving trained_{cfg.model_name} \n\n")
         cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
-        cfg.predictor_lm.save_pretrained(cfg.path_2_model)
+        cfg.causal_lm.save_pretrained(cfg.path_2_model)
 
 
-def default_action(cfg):
+def get_default_action(cfg):
     initial_helpful_msg = (
         cfg.causal_lm_tokenizer(
-            "Use StepByStep spaces to help predict your next observation.",
+            "I will restate and work through the following question step by step, decomposing problems into subproblems as needed.",
             return_tensors="pt",
         )["input_ids"]
         .repeat(cfg.batch_size, 1)
@@ -86,43 +87,71 @@ def default_action(cfg):
 
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
-    (
-        prev_action_loss,
-        prev_observation_loss,
-        action_loss,
-        observation_loss,
-        perturbed_loss,
-    ) = losses
     if cfg.wandb and dist.get_rank() == 0:
-        wandb.log(
-            {
-                "Batch Index": batch_index,
-                "Aggregate Loss": aggregate_loss,
-                "Perturbed Loss": perturbed_loss,
-                "Previous Action Loss": prev_action_loss,
-                "Previous Observation Loss": prev_observation_loss,
-                "Action Loss": action_loss,
-                "Observation Loss": observation_loss,
-            },
-            step=batch_index,
-        )
+        if cfg.prediction_cfg.train_O_given_prev_O:
+            observation_loss = losses[0]
+            wandb.log(
+                {"Batch Index": batch_index, "Observation Loss": aggregate_loss},
+                step=batch_index,
+            )
+        else:
+            (action_loss, observation_loss, value_loss, negentropy, perturbed_loss) = (
+                losses
+            )
+            if value_loss:
+                wandb.log(
+                    {
+                        "Batch Index": batch_index,
+                        "Aggregate Loss": aggregate_loss,
+                        "Perturbed Loss": perturbed_loss,
+                        "Action Loss": action_loss,
+                        "Observation Loss": observation_loss.mean(),
+                        "Value Loss": value_loss,
+                        "Negentropy": negentropy,
+                    },
+                    step=batch_index,
+                )
+            else:
+                wandb.log(
+                    {
+                        "Batch Index": batch_index,
+                        "Aggregate Loss": aggregate_loss,
+                        "Perturbed Loss": perturbed_loss,
+                        "Action Loss": action_loss,
+                        "Observation Loss": observation_loss.mean(),
+                        "Negentropy": negentropy,
+                    },
+                    step=batch_index,
+                )
 
 
 def log_print_losses(cfg, batch_index, aggregate_loss, losses):
-    (
-        prev_action_loss,
-        prev_observation_loss,
-        action_loss,
-        observation_loss,
-        perturbed_loss,
-    ) = losses
+
     if batch_index % cfg.interval_print == 0 and dist.get_rank() == 0:
-        with open(cfg.path_2_log, "a") as f:
-            multi_print(f"Aggregate loss: {aggregate_loss}", f)
-            multi_print(
-                f"PrevAction/PrevObservation/Action/Obs/Pert loss: {prev_action_loss:0.4f}/{prev_observation_loss:0.4f}/{action_loss:0.4f}/{observation_loss:0.4f}/{perturbed_loss}",
-                f,
-            )
+        if cfg.prediction_cfg.train_O_given_prev_O:
+            observation_loss = losses[0]
+            with open(cfg.path_2_log, "a") as f:
+                multi_print(f"Obs loss: {observation_loss:0.4f}", f)
+        else:
+            (
+                action_loss,
+                observation_loss,
+                value_loss,
+                negentropy,
+                perturbed_loss,
+            ) = losses
+            with open(cfg.path_2_log, "a") as f:
+                multi_print(f"Aggregate loss: {aggregate_loss}", f)
+                if value_loss:
+                    multi_print(
+                        f"Action/Obs/Q/NegEnt/Pert loss: {action_loss:0.4f}/{observation_loss.mean():0.4f}/{value_loss:0.4f}/{negentropy:0.4f}/{perturbed_loss}",
+                        f,
+                    )
+                else:
+                    multi_print(
+                        f"Action/Obs/Pert loss: {action_loss:0.4f}/{observation_loss.mean():0.4f}/{perturbed_loss}",
+                        f,
+                    )
 
 
 def log_print_oa(
@@ -219,10 +248,10 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
         )
 
         (
-            prev_action_loss,
-            prev_observation_loss,
             action_loss,
             observation_loss,
+            value_loss,
+            negentropy,
             perturbed_loss,
         ) = losses
 
@@ -233,7 +262,9 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
             "action": repr(cfg.causal_lm_tokenizer.decode(action[0])),
             "obs": repr(cfg.causal_lm_tokenizer.decode(obs[0])),
             # "action_loss": action_loss.item(),
-            "observation_loss": observation_loss.item(),
+            "observation_loss": observation_loss.mean().item(),
+            "value_loss": value_loss.item() if value_loss is not None else 0.0,
+            "negentropy": negentropy.item() if negentropy is not None else 0.0,
             "perturbed_loss": (
                 perturbed_loss.item() if perturbed_loss is not None else 0.0
             ),
@@ -241,9 +272,9 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
         append_traj_to_storage(cfg.traj_path, traj_data)
 
 
-def sample(cfg, prev_action, prev_obs, observation):
+def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
     inference_cfg = cfg.inference_cfg
-    # cfg.predictor_lm.eval()
+    # cfg.causal_lm.eval()
     with torch.inference_mode():
         with autocast(
             # cache_enabled=False,
@@ -257,7 +288,7 @@ def sample(cfg, prev_action, prev_obs, observation):
                 max_new_tokens=cfg.tok_p_pure_action,
                 min_new_tokens=cfg.tok_p_pure_action,
                 do_sample=False,
-                num_beams=cfg.num_beams,
+                # num_beams=cfg.num_beams,
                 bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
                 renormalize_logits=True,
                 remove_invalid_values=True,
@@ -269,6 +300,7 @@ def sample(cfg, prev_action, prev_obs, observation):
                 length_penalty=1.0,
                 early_stopping=False,
             )
+            cfg.causal_lm.generation_config = generation_config
 
             input_ids = torch.cat(
                 [prev_action, prev_obs, cfg.action_prefix_tensor], dim=1
@@ -286,6 +318,7 @@ def sample(cfg, prev_action, prev_obs, observation):
                         min_new_tokens=generation_config.min_new_tokens,
                         eos_token_id=generation_config.eos_token_id,
                     ),
+                    transformers.generation.TemperatureLogitsWarper(1.0),
                     transformers.generation.InfNanRemoveLogitsProcessor(),
                     transformers.LogitNormalization(),
                 ]
@@ -304,27 +337,29 @@ def sample(cfg, prev_action, prev_obs, observation):
             # option transformers.BeamSearchScorer
 
             ## if cfg.training_predictor_mode:
-            # action_candidates = cfg.predictor_lm.generate(
+            # action_candidates = cfg.causal_lm.generate(
             #   inputs=input_ids,
             #   generation_config=generation_config,
             # )[:, -cfg.tok_p_action :]
             ## else:
-            beam_scorer = transformers.BeamSearchScorer(
-                # cfg=cfg,
-                # obs=beam_observations,
-                batch_size=cfg.batch_size,
-                num_beams=generation_config.num_beams,
-                device=cfg.device,
-                length_penalty=generation_config.length_penalty,
-                do_early_stopping=generation_config.early_stopping,
-                num_beam_hyps_to_keep=generation_config.num_return_sequences,
-                max_length=input_ids.shape[-1] + generation_config.max_new_tokens,
-            )
-            action_candidates = cfg.predictor_lm.beam_search(
+            # beam_scorer = transformers.BeamSearchScorer(
+            #    # cfg=cfg,
+            #    # obs=beam_observations,
+            #    batch_size=cfg.batch_size,
+            #    num_beams=generation_config.num_beams,
+            #    device=cfg.device,
+            #    length_penalty=generation_config.length_penalty,
+            #    do_early_stopping=generation_config.early_stopping,
+            #    num_beam_hyps_to_keep=generation_config.num_return_sequences,
+            #    max_length=input_ids.shape[-1] + generation_config.max_new_tokens,
+            # )
+            action_candidates = cfg.causal_lm.greedy_search(
                 beam_input_ids,
-                beam_scorer,
+                # beam_scorer,
+                use_q_head=use_q_head,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
-                logits_processor=logits_processor,
+                logits_warper=logits_processor,
+                # logits_processor=logits_processor,
                 stopping_criteria=stopping_criteria,
                 pad_token_id=generation_config.pad_token_id,
                 eos_token_id=generation_config.eos_token_id,
@@ -335,8 +370,45 @@ def sample(cfg, prev_action, prev_obs, observation):
             return action_candidates
 
 
+
+def get_neg_log_probs(cfg, input_sequence):
+    """
+    Computes the loss tensor for a given input sequence.
+
+    Args:
+        cfg: Configuration object containing model and tokenizer information.
+        input_sequence: The input sequence tensor for which the loss is to be computed.
+
+    Returns:
+        The computed loss tensor.
+    """
+    attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+    logits = cfg.causal_lm(input_sequence, attention_mask=attention_mask).logits[
+        :, :-1, :
+    ]
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    loss_tensor = loss_fn(
+        input=einops.rearrange(
+            logits,
+            "batch seq_length vocab_size -> batch vocab_size seq_length",
+        ),
+        target=input_sequence[:, 1:],
+    )
+    return loss_tensor
+
+
+def get_masked_mean(arr, mask):
+    return (arr * mask).sum() / mask.sum()
+
 def update_weights(
-    cfg, batch_index, prev_action, prev_obs, action, obs, do_weight_update=True
+    cfg,
+    batch_index,
+    prev_action,
+    prev_obs,
+    action,
+    default_action,
+    obs,
+    do_weight_update=True,
 ):
     prediction_cfg = cfg.prediction_cfg
 
@@ -352,8 +424,7 @@ def update_weights(
             )
             loss_tensor = get_neg_log_probs(cfg, torch.cat([prev_obs, obs], dim=1))
             aggregate_loss = loss_tensor[:, -cfg.tok_p_pure_obs :].mean()
-            if prediction_cfg.train_O_given_prev_O or not cfg.training_predictor_mode:
-                return aggregate_loss, None, []
+            return aggregate_loss, None, []
 
         prev_action = prev_action.repeat_interleave(
             cfg.inference_cfg.num_return_sequences, dim=0
@@ -363,65 +434,62 @@ def update_weights(
         )
         obs = obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
 
-        if cfg.training_predictor_mode:
-            cfg.predictor_lm.train()
-            cfg.inference_lm.eval()
-            obs_loss, _ = predict_observation(cfg, action, obs)
-            aoa = torch.cat([prev_action, prev_obs, action], dim=1)
-            aoa_mask = (aoa != cfg.causal_lm_tokenizer.pad_token_id).long()
-            with torch.no_grad():
-                aoa_nlp = get_neg_log_probs(cfg, aoa)
-
-            prev_action_tensor = aoa_nlp[:, : cfg.tok_p_action]
-            prev_observation_tensor = aoa_nlp[
-                :, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs
-            ]
-            action_tensor = aoa_nlp[:, -cfg.tok_p_pure_action :]
-
-            prev_action_loss = get_masked_mean(
-                prev_action_tensor, aoa_mask[:, : cfg.tok_p_action]
+        action_loss, values, negentropy = predict_action(
+            cfg, prev_action, prev_obs, action, add_q_head=True
+        )
+        old_critic_action_loss, old_critic_values, old_critic_negentropy = (
+            predict_action(cfg, prev_action, prev_obs, action, add_q_head=False)
+        )
+        obs_loss = predict_observation(
+            cfg, action, obs, add_q_head=False, per_batch=True
+        )
+        default_obs_loss = predict_observation(
+            cfg, default_action, obs, add_q_head=False, per_batch=True
+        )
+        # (negentropy - old_critic_negentropy) * 0.1 +
+        if do_weight_update:
+            normalized_negentropy = negentropy - old_critic_negentropy
+            normalized_obs_loss = obs_loss - default_obs_loss
+            repeated_obs_losses = normalized_obs_loss.unsqueeze(1).repeat(
+                1, values.shape[1]
             )
-            prev_observation_loss = get_masked_mean(
-                prev_observation_tensor,
-                aoa_mask[:, cfg.tok_p_action : cfg.tok_p_action + cfg.tok_p_obs],
+            value_loss = torch.mean(torch.abs(values - repeated_obs_losses))
+            cfg.optimizer.zero_grad()
+            action_log_prob = -action_loss
+            obs_log_prob = -obs_loss
+            old_critic_action_log_prob = -old_critic_action_loss
+            action_prob_ratio = torch.exp(action_log_prob - old_critic_action_log_prob)
+            clipped_ratio = torch.clamp(action_prob_ratio, 0.7, 1.3)
+            value_loss = torch.abs(values - repeated_obs_losses).mean()
+            neg_advantage = (negentropy + repeated_obs_losses - values.detach()).mean()
+            # neg_advantage = obs_loss.mean()
+            if cfg.wandb:
+                wandb.log(
+                    {
+                        "Values": values.mean(),
+                        "Normalized Obs Loss": normalized_obs_loss.mean(),
+                        "Value Loss": value_loss,
+                        "Old Critic Action Loss": old_critic_action_loss,
+                        "Action Prob Ratio": action_prob_ratio,
+                    },
+                    step=batch_index,
+                )
+            # aggregate_loss = action_loss * (normalized_obs_loss.mean() + negentropy * .1)
+            # aggregate_loss = -torch.min(
+            #    action_prob_ratio * obs_log_prob.mean(),
+            #    clipped_ratio * obs_log_prob.mean(),
+            # )
+            aggregate_loss = (
+                torch.max(
+                    action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage
+                )
+                + value_loss
             )
-            action_loss = get_masked_mean(
-                action_tensor, aoa_mask[:, -cfg.tok_p_pure_action :]
-            )
-            aggregate_loss = obs_loss
-            # aggregate_loss = action_loss + obs_loss
-            # aggregate_loss = sum(map(lambda x: x[1] if x[0] else 0.0,
-            #                         zip([prediction_cfg.train_A_given_AO, prediction_cfg.train_O_given_A],
-            #                                [action_loss, obs_loss])))
-            if do_weight_update:
-                cfg.vhead_optimizer.zero_grad()
-                cfg.optimizer.zero_grad()
-                aggregate_loss.backward()
-                cfg.optimizer.step()
-                cfg.vhead_optimizer.zero_grad()
-                cfg.optimizer.zero_grad()
-                cfg.vhead_optimizer.zero_grad()
-                cfg.optimizer.zero_grad()
-            losses = [prev_action_loss, prev_observation_loss, action_loss, obs_loss]
-            return aggregate_loss, losses
-        else:  # training value function
-            cfg.predictor_lm.eval()
-            cfg.inference_lm.train()
-            obs_losses, estimated_values = predict_observation(
-                cfg, action, obs, return_values=True, per_batch=True
-            )
-            expanded_obs_scores = (
-                -obs_losses.detach().unsqueeze(-1).expand_as(estimated_values)
-            )
-            aggregate_loss = torch.nn.L1Loss()(estimated_values, expanded_obs_scores)
-            if do_weight_update:
-                cfg.vhead_optimizer.zero_grad()
-                cfg.optimizer.zero_grad()
-                aggregate_loss.backward()
-                cfg.vhead_optimizer.step()
-                cfg.vhead_optimizer.zero_grad()
-                cfg.optimizer.zero_grad()
-            return aggregate_loss, []
+            aggregate_loss.backward()
+            cfg.optimizer.step()
+            cfg.optimizer.zero_grad()
+        losses = [action_loss, obs_loss, value_loss, negentropy]
+        return aggregate_loss, losses
 
 
 def log_and_save(
@@ -437,25 +505,17 @@ def log_and_save(
     losses,
 ):
 
-    if cfg.training_predictor_mode:
-        # Save trajectories for post-training eval to .json
-        save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses)
-        save_weights(cfg, batch_index)
-        log_wandb(cfg, batch_index, aggregate_loss, losses)
-        log_print_losses(cfg, batch_index, aggregate_loss, losses)
-    else:
-
-        if cfg.wandb and dist.get_rank() == 0:
-            if cfg.prediction_cfg.train_O_given_prev_O:
-                wandb.log(
-                    {"Batch Index": batch_index, "Observation Loss": aggregate_loss},
-                    step=batch_index,
-                )
-            elif not cfg.training_predictor_mode:
-                wandb.log(
-                    {"Batch Index": batch_index, "Value Estimate Loss": aggregate_loss},
-                    step=batch_index,
-                )
+    # if cfg.training_predictor_mode:
+    #    # Save trajectories for post-training eval to .json
+    #    save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses)
+    #    save_weights(cfg, batch_index)
+    #    log_wandb(cfg, batch_index, aggregate_loss, losses)
+    #    log_print_losses(cfg, batch_index, aggregate_loss, losses)
+    # else:
+    save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses)
+    save_weights(cfg, batch_index)
+    log_wandb(cfg, batch_index, aggregate_loss, losses)
+    log_print_losses(cfg, batch_index, aggregate_loss, losses)
 
     log_print_oa(
         cfg,
@@ -466,7 +526,7 @@ def log_and_save(
         obs,
         is_guidance_action,
         is_first,
-        aggregate_loss=aggregate_loss if not cfg.training_predictor_mode else None,
+        aggregate_loss=aggregate_loss,  # if not cfg.training_predictor_mode else None,
     )
 
     with open(cfg.path_2_log, "a") as f:
@@ -503,7 +563,7 @@ def perturb_action(action, cfg):
 
 
 def trainer(cfg):
-    state = [default_action(cfg), 0, None]
+    state = [get_default_action(cfg), 0, None]
 
     def update(datapt_pair):
         nonlocal state
@@ -518,20 +578,20 @@ def trainer(cfg):
                 cfg.trainer_cfg.inference_training_length,
             )
             mode_index = batch_index % (pred_len + inf_len)
-            if mode_index == 0:  # switch from inf mode to pred mode
-                assert not cfg.training_predictor_mode
-                # for name, param in cfg.predictor_lm.named_parameters():
-                #    param.requires_grad = "v_head" not in name
-                cfg.training_predictor_mode = True
-            elif mode_index == pred_len:
-                assert cfg.training_predictor_mode
-                # cfg.predictor_lm.load_state_dict(cfg.predictor_lm.state_dict())
-                # for name, param in cfg.predictor_lm.named_parameters():
-                #    param.requires_grad = "v_head" in name
-                cfg.training_predictor_mode = False
+            # if mode_index == 0:  # switch from inf mode to pred mode
+            #    assert not cfg.training_predictor_mode
+            #    # for name, param in cfg.causal_lm.named_parameters():
+            #    #    param.requires_grad = "q_head" not in name
+            #    cfg.training_predictor_mode = True
+            # elif mode_index == pred_len:
+            #    assert cfg.training_predictor_mode
+            #    # cfg.causal_lm.load_state_dict(cfg.causal_lm.state_dict())
+            #    # for name, param in cfg.causal_lm.named_parameters():
+            #    #    param.requires_grad = "q_head" in name
+            #    cfg.training_predictor_mode = False
 
         if is_first:
-            prev_action = default_action(cfg)
+            prev_action = get_default_action(cfg)
             log_print_oa(
                 cfg,
                 batch_index,
@@ -551,7 +611,8 @@ def trainer(cfg):
         elif cfg.prediction_cfg.train_O_given_prev_O:
             action = prev_action
         else:
-            action = sample(cfg, prev_action, prev_obs, obs)
+            action = sample(cfg, prev_action, prev_obs, obs, use_q_head=True)
+            default_action = sample(cfg, prev_action, prev_obs, obs, use_q_head=False)
         # action : [batch * beam, tok_p_action]
 
         aggregate_loss, losses = update_weights(
@@ -560,6 +621,7 @@ def trainer(cfg):
             prev_action,
             prev_obs,
             action,
+            default_action,
             obs,
             do_weight_update=not isinstance(cfg.debug, NoWeightUpdates),
         )
@@ -618,6 +680,9 @@ def train_via_update(cfg):
 
 def train_model(init_cfg):
     cfg = extend_initial_config(init_cfg)
+    # cfg.causal_lm = DDP(
+    #    cfg.causal_lm, device_ids=[dist.get_rank()]  # , find_unused_parameters=True
+    # )
     if not cfg.load_model:
         with open(cfg.path_2_log, "w") as f:
             print("")
@@ -628,42 +693,20 @@ def train_model(init_cfg):
             project="collaborative-training-many-per-context-window",
             name=create_run_name(cfg),
         )
-    print("Predictor: ", cfg.predictor_lm)
+    print("Causal LM: ", cfg.causal_lm)
     if cfg.optimizer == "sgd":
         cfg.optimizer = torch.optim.SGD(
-            cfg.predictor_lm.parameters(), lr=cfg.lr
+            cfg.causal_lm.parameters(), lr=cfg.lr
         )  # , momentum=0.01)
     elif cfg.optimizer == "adam":
-        # cfg.optimizer = bitsandbytes.optim.AdamW8bit(  # torch.optim.Adam(  #
-        #    list(filter(lambda x: "v_head" not in x, cfg.predictor_lm.parameters())),
-        #    lr=cfg.lr,
-        # )
-        # vhead_params = [
-        #    param
-        #    for name, param in cfg.predictor_lm.named_parameters()
-        #    if "v_head" in name
-        # ]
-        vhead_params = [param for param in cfg.inference_lm.parameters()]
-        non_vhead_params = [
-            param
-            for name, param in cfg.predictor_lm.named_parameters()
-            if "v_head" not in name
-        ]
         cfg.optimizer = bitsandbytes.optim.AdamW8bit(  # torch.optim.Adam(  #
-            non_vhead_params,
+            list(cfg.causal_lm.qhead.parameters())
+            + list(cfg.causal_lm.v_head_group.parameters()),
             lr=cfg.lr,
         )
 
-        cfg.vhead_optimizer = bitsandbytes.optim.AdamW8bit(  # torch.optim.Adam(  #
-            vhead_params,
-            lr=1e-3,
-        )
-        print()
-        # for name, param in cfg.predictor_lm.named_parameters():
-        #    param.requires_grad = "v_head" in name
-
     elif cfg.optimizer == "rmsprop":
-        cfg.optimizer = torch.optim.RMSprop(cfg.predictor_lm.parameters(), lr=cfg.lr)
+        cfg.optimizer = torch.optim.RMSprop(cfg.causal_lm.parameters(), lr=cfg.lr)
     else:
         raise ValueError(
             f"Unsupported optimizer: {cfg.optimizer}. Please choose 'sgd', 'adam', or 'rmsprop'."
