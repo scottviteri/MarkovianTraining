@@ -200,7 +200,7 @@ def arithmetic_generator(num_terms, num_digits, cumulative, operations, probs):
         question = question[:-1] + "."
 
         # answer = f"A: {total}"
-        answer = f"{total}"
+        answer = f"Answer: {total}"
         yield {"Question": question, "Answer": answer}
 
 
@@ -256,9 +256,11 @@ def tokenize_and_pad(
     action_prefix_tensor = action_prefix_tensor.to(device)
     obs_prefix_tensor = obs_prefix_tensor.to(device)
     # indexing here because mistral tokenizer adds two tokens to the beginning!
-    obs_tok = tokenizer(d["Observation"], return_tensors="pt")["input_ids"][0].to(
+    obs_tok = tokenizer(
+        d["Observation"], add_special_tokens=False, return_tensors="pt"
+    )["input_ids"][0].to(
         device
-    )[2:]
+    )  # [2:]
     assert len(obs_tok) < tok_p_pure_obs
     obs_pad_tok = torch.full(
         (tok_p_pure_obs - len(obs_tok),),
@@ -267,9 +269,9 @@ def tokenize_and_pad(
         device=device,
     )
     if "Action" in d:
-        action_tok = tokenizer(d["Action"], return_tensors="pt")["input_ids"][0].to(
-            device
-        )
+        action_tok = tokenizer(
+            d["Action"], add_special_tokens=False, return_tensors="pt"
+        )["input_ids"][0].to(device)
         assert len(action_tok) < tok_p_pure_action
         action_pad_tok = torch.full(
             (tok_p_pure_action - len(action_tok),),
@@ -289,28 +291,28 @@ def tokenize_and_pad(
         }
 
 
-def fill_to_size(tokenizer, begin, end, size):
-    begin_tok = tokenizer(begin, return_tensors="pt")["input_ids"][0]
-    end_tok = tokenizer(end, return_tensors="pt")["input_ids"][0]
-    middle_tok = torch.full(
-        (size - len(begin_tok) - len(end_tok),),
-        tokenizer.pad_token_id,
-        dtype=torch.int64,
-    )
-    return torch.cat((begin_tok, middle_tok, end_tok))
-
-
-def prep_bb(tokenizer, device, tok_per_pure_obs, itr):
-    itr = group_pairs(itr)
-    itr = map(
-        lambda x: (
-            "A: " + x[0]["targets"][0] + "\n",
-            x[1]["inputs"].split("?")[0] + "?\n",
-        ),
-        itr,
-    )
-    itr = map(lambda x: fill_to_size(tokenizer, x[0], x[1], tok_per_pure_obs), itr)
-    return map(lambda x: x.to(device), itr)
+# def fill_to_size(tokenizer, begin, end, size):
+#    begin_tok = tokenizer(begin, return_tensors="pt")["input_ids"][0]
+#    end_tok = tokenizer(end, return_tensors="pt")["input_ids"][0]
+#    middle_tok = torch.full(
+#        (size - len(begin_tok) - len(end_tok),),
+#        tokenizer.pad_token_id,
+#        dtype=torch.int64,
+#    )
+#    return torch.cat((begin_tok, middle_tok, end_tok))
+#
+#
+# def prep_bb(tokenizer, device, tok_per_pure_obs, itr):
+#    itr = group_pairs(itr)
+#    itr = map(
+#        lambda x: (
+#            "A: " + x[0]["targets"][0] + "\n",
+#            x[1]["inputs"].split("?")[0] + "?\n",
+#        ),
+#        itr,
+#    )
+#    itr = map(lambda x: fill_to_size(tokenizer, x[0], x[1], tok_per_pure_obs), itr)
+#    return map(lambda x: x.to(device), itr)
 
 
 def to_qa_traj_itr(itr):
@@ -336,30 +338,30 @@ def to_qa_traj_itr(itr):
             )
 
 
-def merge_qa(device, tokenizer, tok_p_pure_action, tok_p_pure_obs):
-    assert tok_p_pure_action >= 40
-    assert tok_p_pure_obs >= 15
-
-    def merge_qa_aux(d1, d2):
-        t1 = tokenizer.encode(d1["Answer"] + "\n", return_tensors="pt")[0]
-        t2 = tokenizer.encode(d2["Question"] + "\n", return_tensors="pt")[0]
-        space = tokenizer.encode(" ")[0]
-        obs_padding = torch.full(
-            size=(tok_p_pure_obs - len(t1) - len(t2),), fill_value=space
-        )
-        tokenized_expl = tokenizer.encode(d2["Explanation"], return_tensors="pt")[0]
-        action_padding = torch.full(
-            size=(tok_p_pure_action - len(tokenized_expl),), fill_value=space
-        )
-        obs = torch.cat([t1, obs_padding, t2]).to(device)
-        action = torch.cat([tokenized_expl, action_padding]).to(device)
-        return {"Observation": obs, "Action": action}
-
-    return merge_qa_aux
-
-
-def merge_qa_bigbench(d1, d2):
-    return ("A: " + d1["targets"][0] + "\n", d2["inputs"].split("?")[0] + "?\n")
+# def merge_qa(device, tokenizer, tok_p_pure_action, tok_p_pure_obs):
+#    assert tok_p_pure_action >= 40
+#    assert tok_p_pure_obs >= 15
+#
+#    def merge_qa_aux(d1, d2):
+#        t1 = tokenizer.encode(d1["Answer"] + "\n", return_tensors="pt")[0]
+#        t2 = tokenizer.encode(d2["Question"] + "\n", return_tensors="pt")[0]
+#        space = tokenizer.encode(" ")[0]
+#        obs_padding = torch.full(
+#            size=(tok_p_pure_obs - len(t1) - len(t2),), fill_value=space
+#        )
+#        tokenized_expl = tokenizer.encode(d2["Explanation"], return_tensors="pt")[0]
+#        action_padding = torch.full(
+#            size=(tok_p_pure_action - len(tokenized_expl),), fill_value=space
+#        )
+#        obs = torch.cat([t1, obs_padding, t2]).to(device)
+#        action = torch.cat([tokenized_expl, action_padding]).to(device)
+#        return {"Observation": obs, "Action": action}
+#
+#    return merge_qa_aux
+#
+#
+# def merge_qa_bigbench(d1, d2):
+#    return ("A: " + d1["targets"][0] + "\n", d2["inputs"].split("?")[0] + "?\n")
 
 
 def get_pure_obs(batch_size, tok_per_pure_obs, device, itr_ds):
