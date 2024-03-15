@@ -452,7 +452,7 @@ def update_weights(
             obs_log_prob = -obs_loss
             old_critic_action_log_prob = -old_critic_action_loss
             action_prob_ratio = torch.exp(action_log_prob - old_critic_action_log_prob)
-            clipped_ratio = torch.clamp(action_prob_ratio, 0.9, 1.1)
+            clipped_ratio = torch.clamp(action_prob_ratio, 0.7, 1.3)
             value_loss = torch.abs(values - repeated_obs_losses).mean()
             neg_advantage = (repeated_obs_losses - values.detach()).mean()
             # neg_advantage = obs_loss.mean()
@@ -466,16 +466,16 @@ def update_weights(
                 },
                 step=batch_index,
             )
-            #aggregate_loss = action_loss * (normalized_obs_loss.mean() + negentropy * .1)
+            # aggregate_loss = action_loss * (normalized_obs_loss.mean() + negentropy * .1)
             # aggregate_loss = -torch.min(
             #    action_prob_ratio * obs_log_prob.mean(),
             #    clipped_ratio * obs_log_prob.mean(),
             # )
             aggregate_loss = (
-               torch.max(
-                   action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage
-               )
-               + value_loss
+                torch.max(
+                    action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage
+                )
+                + value_loss
             )
             aggregate_loss.backward()
             cfg.optimizer.step()

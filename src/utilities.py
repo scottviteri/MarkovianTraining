@@ -276,10 +276,10 @@ def get_prefixes(
     tok_p_obs: Optional[int],
 ):
     if tok_p_obs:
-        observation_prefix = ""
+        observation_prefix = "Answer: "
         observation_prefix_tokens = tokenizer.encode(
             observation_prefix, add_special_tokens=False
-        )
+        )[2:]
         observation_prefix_tensor = einops.repeat(
             torch.tensor(observation_prefix_tokens, dtype=torch.int64),
             "tokens -> batch tokens",
@@ -292,8 +292,8 @@ def get_prefixes(
 
     if tok_p_action:
         # action_prefix = "\nStepByStep:"
-        action_prefix = ""
-        action_prefix_tokens = tokenizer.encode(action_prefix, add_special_tokens=False)
+        action_prefix = "StepByStep: "
+        action_prefix_tokens = tokenizer.encode(action_prefix, add_special_tokens=False)[2:]
         action_prefix_tensor = einops.repeat(
             torch.tensor(action_prefix_tokens, dtype=torch.int64),
             "tokens -> batch tokens",
