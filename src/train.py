@@ -55,7 +55,7 @@ def save_weights(cfg, batch_index):
 def get_default_action(cfg):
     initial_helpful_msg = (
         cfg.causal_lm_tokenizer(
-            "Use StepByStep spaces to help predict your next observation.",
+            "I will restate and work through the following question step by step, decomposing problems into subproblems as needed.",
             return_tensors="pt",
         )["input_ids"]
         .repeat(cfg.batch_size, 1)
@@ -448,17 +448,34 @@ def update_weights(
             value_loss = torch.mean(torch.abs(values - repeated_obs_losses))
             cfg.optimizer.zero_grad()
             action_log_prob = -action_loss
+            obs_log_prob = -obs_loss
             old_critic_action_log_prob = -old_critic_action_loss
             action_prob_ratio = torch.exp(action_log_prob - old_critic_action_log_prob)
-            clipped_ratio = torch.clamp(action_prob_ratio, 0.8, 1.2)
+            clipped_ratio = torch.clamp(action_prob_ratio, 0.9, 1.1)
             value_loss = torch.abs(values - repeated_obs_losses).mean()
-            neg_advantage = (repeated_obs_losses - values.detach()).mean()
-            aggregate_loss = (
-                torch.max(
-                    action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage
-                )
-                + value_loss
+            # neg_advantage = (repeated_obs_losses - values.detach()).mean()
+            # neg_advantage = obs_loss.mean()
+            wandb.log(
+                {
+                    "Values": values.mean(),
+                    "Normalized Obs Loss": normalized_obs_loss.mean(),
+                    "Value Loss": value_loss,
+                    "Old Critic Action Loss": old_critic_action_loss,
+                    "Action Prob Ratio": action_prob_ratio,
+                },
+                step=batch_index,
             )
+            aggregate_loss = action_loss * (obs_loss.mean() + negentropy * 0.1)
+            # aggregate_loss = -torch.min(
+            #    action_prob_ratio * obs_log_prob.mean(),
+            #    clipped_ratio * obs_log_prob.mean(),
+            # )
+            # aggregate_loss = (
+            #    torch.max(
+            #        action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage
+            #    )
+            #    + value_loss
+            # )
             aggregate_loss.backward()
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()

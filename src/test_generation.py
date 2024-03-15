@@ -8,7 +8,7 @@ from src.utilities import extend_initial_config
 
 
 test_config = InitialConfig(
-    model_name="distilgpt2",
+    model_name="mistral",
     lr=1e-6,
     optimizer="adam",
     batch_size=2,
@@ -50,32 +50,58 @@ test_config = InitialConfig(
     debug=None,
 )
 
+# TODO: make sure that my code tokenizes to the right
+
+
+def wrap_questions(begin, end, questions, answer):
+    answer_length = len(str(answer))
+    return [
+        begin + question[:-answer_length] + end + str(answer) for question in questions
+    ]
+
+
+def check_strictly_decreasing(cfg, questions, answer):
+    # this method assumes a tokenizer which splits a number into digits
+    tokenizer_out = cfg.causal_lm_tokenizer(
+        questions, return_tensors="pt", padding=True
+    )
+    tokenized_questions = tokenizer_out["input_ids"].to(device=cfg.device)
+    attention_mask = tokenizer_out["attention_mask"].to(device=cfg.device)
+    predictions = cfg.causal_lm(tokenized_questions, attention_mask=attention_mask)
+    probs = torch.softmax(predictions.logits, dim=-1)[:, :-1, :]
+    correct_probs = torch.gather(
+        probs, 2, tokenized_questions[:, 1:].unsqueeze(-1)
+    ).squeeze(-1)
+    answer_probs = correct_probs[:, -len(str(answer)) :]
+    answer_mean_probs = answer_probs.mean(dim=1)
+    print(answer_mean_probs)
+    return torch.all(
+        answer_mean_probs[:-1] > answer_mean_probs[1:]
+    )  # , "answer_mean_probs should be strictly decreasing"
+
 
 def test_critic():
     cfg = extend_initial_config(test_config)
     repeat = "210 210 210 210 210 210 210 210 210 210 210 210 210 210 210"
-    in_pieces = "Let's break down the expression 23 + 14 + 81 + 92 by evaluating the tens place first: 20 + 10 + 80 + 90 = 200. Now, let's add the ones place: 3 + 4 + 1 + 2 = 10. Combining the results from the tens and ones places gives us the final answer:"
-    in_order = "Let's evaluate 23 + 14 + 81 + 92. First, add 23 and 14 to get 37. Then, add 37 and 81 to get 118. Finally, add 118 and 92 to arrive at the final result:"
-    in_order_corrupted = "Let's evaluate 23 + 14 + 81 + 92. First, add 23 and 14 to get 27. Then, add 27 and 81 to get 108. Finally, add 108 and 92 to arrive at the final result:"
-    direct_question = "The solution to 23 + 14 + 81 + 92 is"
-    random_test = "I am a flying banana"
+    in_order = "Let's evaluate 23 + 14 + 81 + 92. First, add 23 and 14 to get 37. Then, add 37 and 81 to get 118. Finally, add 118 and 92 to arrive at the final result 210"
+    in_pieces = "Let's break down the expression 23 + 14 + 81 + 92 by evaluating the tens place first: 20 + 10 + 80 + 90 = 200. Now, let's add the ones place: 3 + 4 + 1 + 2 = 10. Combining the results from the tens and ones places gives us the final answer 210"
+    in_order_corrupted = "Let's evaluate 23 + 14 + 81 + 92. First, add 23 and 14 to get 27. Then, add 27 and 81 to get 108. Finally, add 108 and 92 to arrive at the final result 210"
+    direct_question = "The solution to 23 + 14 + 81 + 92 is 210"
+    random_test = "I am a flying banana 210"
     input_strings = [
         repeat,
-        in_pieces,
         in_order,
+        in_pieces,
         in_order_corrupted,
         direct_question,
         random_test,
     ]
-    tokenizer_out = cfg.causal_lm_tokenizer(
-        input_strings, return_tensors="pt", padding=True
-    )
-    question = tokenizer_out["input_ids"].to(device=cfg.device)
-    attention_mask = tokenizer_out["attention_mask"].to(device=cfg.device)
-    answer_index = cfg.causal_lm_tokenizer("210")["input_ids"][0]
-    out = cfg.causal_lm(question, attention_mask=attention_mask)
-    probabilities = torch.softmax(out.logits, dim=-1)[:, -1, answer_index]
-    assert 1 == 1
+    # spaces are ok here because no generation
+    # input_strings = wrap_questions("StepByStep: ", "Observation: ", input_strings, 210)
+    # input_strings = wrap_questions("StepByStep: ", "", input_strings, 210)
+    assert check_strictly_decreasing(
+        cfg, input_strings, 210
+    ), "Should be strictly decreasing"
     # assert torch.all(
     #    probabilities[:-1] > probabilities[1:]
     # ), "Probabilities should be strictly decreasing"
@@ -84,28 +110,22 @@ def test_critic():
 def test_critic_2():
     cfg = extend_initial_config(test_config)
     repeat = "486 486 486 486 486 486 486 486 486 486 486 486 486 486 486"
-    in_pieces = "Let's break down the expression 23 + 14 + 81 + 92 + 57 + 63 + 76 + 80 by evaluating the tens place first: 20 + 10 + 80 + 90 + 50 + 60 + 70 + 80 = 460. Now, let's add the ones place: 3 + 4 + 1 + 2 + 7 + 3 + 6 + 0 = 26. Combining the results from the tens and ones places gives us the final answer:"
-    in_order = "Let's evaluate 23 + 14 + 81 + 92 + 57 + 63 + 76 + 80. First, add 23 and 14 to get 37. Then, add 37 and 81 to get 118. Next, add 118 and 92 to get 210. Then, add 210 and 57 to get 267. Next, add 267 and 63 to get 330. Then, add 330 and 76 to get 406. Finally, add 406 and 80 to arrive at the final result:"
-    in_order_corrupted = "Let's evaluate 23 + 14 + 81 + 92 + 57 + 63 + 76 + 80. First, add 23 and 14 to get 27. Then, add 27 and 81 to get 108. Next, add 108 and 92 to get 200. Then, add 200 and 57 to get 257. Next, add 257 and 63 to get 320. Then, add 320 and 76 to get 396. Finally, add 396 and 80 to arrive at the final result:"
-    direct_question = "The solution to 23 + 14 + 81 + 92 + 57 + 63 + 76 + 80 is"
-    random_test = "I am a flying banana"
+    in_order = "Let's evaluate 23 + 14 + 81 + 92 + 57 + 63 + 76 + 80. First, add 23 and 14 to get 37. Then, add 37 and 81 to get 118. Next, add 118 and 92 to get 210. Then, add 210 and 57 to get 267. Next, add 267 and 63 to get 330. Then, add 330 and 76 to get 406. Finally, add 406 and 80 to arrive at the final result: 486"
+    in_pieces = "Let's break down the expression 23 + 14 + 81 + 92 + 57 + 63 + 76 + 80 by evaluating the tens place first: 20 + 10 + 80 + 90 + 50 + 60 + 70 + 80 = 460. Now, let's add the ones place: 3 + 4 + 1 + 2 + 7 + 3 + 6 + 0 = 26. Combining the results from the tens and ones places gives us the final answer: 486"
+    in_order_corrupted = "Let's evaluate 23 + 14 + 81 + 92 + 57 + 63 + 76 + 80. First, add 23 and 14 to get 27. Then, add 27 and 81 to get 108. Next, add 108 and 92 to get 200. Then, add 200 and 57 to get 257. Next, add 257 and 63 to get 320. Then, add 320 and 76 to get 396. Finally, add 396 and 80 to arrive at the final result: 486"
+    direct_question = "The solution to 23 + 14 + 81 + 92 + 57 + 63 + 76 + 80 is 486"
+    random_test = "I am a flying banana 486"
     input_strings = [
         repeat,
-        in_pieces,
         in_order,
+        in_pieces,
         in_order_corrupted,
         direct_question,
         random_test,
     ]
-    tokenizer_out = cfg.causal_lm_tokenizer(
-        input_strings, return_tensors="pt", padding=True
-    )
-    question = tokenizer_out["input_ids"].to(device=cfg.device)
-    attention_mask = tokenizer_out["attention_mask"].to(device=cfg.device)
-    answer_index = cfg.causal_lm_tokenizer("486")["input_ids"][0]
-    out = cfg.causal_lm(question, attention_mask=attention_mask)
-    probabilities = torch.softmax(out.logits, dim=-1)[:, -1, answer_index]
-    assert 1 == 1
+    assert check_strictly_decreasing(
+        cfg, wrap_questions("StepByStep: ", input_strings, "Observation: "), 486
+    ), "should be strictly decreasing"
 
 
 def test_num_return_sequences():

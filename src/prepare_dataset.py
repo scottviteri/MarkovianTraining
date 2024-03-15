@@ -178,7 +178,8 @@ def arithmetic_generator(num_terms, num_digits, cumulative, operations, probs):
     #     num = random.randint(10 ** (num_digits - 1), 10 ** num_digits - 1)
 
     while 1:
-        question = "Q: <Simplify> "
+        # question = "Q: <Simplify>"
+        question = "Question: "
         total = 0.0
 
         # Generate random numbers
@@ -195,7 +196,8 @@ def arithmetic_generator(num_terms, num_digits, cumulative, operations, probs):
                 op_rand = ops_rand[i - 1]
                 total = valid_ops[op_rand](total, num)
                 question += f"{op_rand} {num} "
-        question += "</Simplify>"
+        # question += "</Simplify>"
+        question = question[:-1] + "."
 
         # answer = f"A: {total}"
         answer = f"{total}"
@@ -253,9 +255,10 @@ def tokenize_and_pad(
 ):
     action_prefix_tensor = action_prefix_tensor.to(device)
     obs_prefix_tensor = obs_prefix_tensor.to(device)
+    # indexing here because mistral tokenizer adds two tokens to the beginning!
     obs_tok = tokenizer(d["Observation"], return_tensors="pt")["input_ids"][0].to(
         device
-    )
+    )[2:]
     assert len(obs_tok) < tok_p_pure_obs
     obs_pad_tok = torch.full(
         (tok_p_pure_obs - len(obs_tok),),

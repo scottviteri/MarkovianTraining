@@ -276,12 +276,12 @@ def get_prefixes(
     tok_p_obs: Optional[int],
 ):
     if tok_p_obs:
-        observation_prefix = "\nObservation: "
+        observation_prefix = ""
         observation_prefix_tokens = tokenizer.encode(
             observation_prefix, add_special_tokens=False
         )
         observation_prefix_tensor = einops.repeat(
-            torch.tensor(observation_prefix_tokens),
+            torch.tensor(observation_prefix_tokens, dtype=torch.int64),
             "tokens -> batch tokens",
             batch=batch_size,
         ).to(device)
@@ -291,10 +291,11 @@ def get_prefixes(
         tokens_per_pure_observation = None
 
     if tok_p_action:
-        action_prefix = "\nStepByStep: "
+        # action_prefix = "\nStepByStep:"
+        action_prefix = ""
         action_prefix_tokens = tokenizer.encode(action_prefix, add_special_tokens=False)
         action_prefix_tensor = einops.repeat(
-            torch.tensor(action_prefix_tokens),
+            torch.tensor(action_prefix_tokens, dtype=torch.int64),
             "tokens -> batch tokens",
             batch=batch_size,
         ).to(device)
@@ -304,7 +305,7 @@ def get_prefixes(
         tokens_per_pure_action = None
 
     if tok_p_loss:
-        reward_prefix = "\nLoss: "
+        reward_prefix = "\nLoss:"
         reward_prefix_tokens = tokenizer.encode(reward_prefix, add_special_tokens=False)
         reward_prefix_tensor = einops.repeat(
             torch.tensor(reward_prefix_tokens),
