@@ -26,9 +26,16 @@ from transformers.generation import beam_search
 from collections import UserDict
 
 from src.training_types import *
-from src.utilities import extend_initial_config, log_and_print_info
-from src.utilities import create_run_name, multi_print
-from src.utilities import predict_action, predict_observation
+from src.utilities import (
+    extend_initial_config,
+    log_and_print_info,
+    predict_action,
+    predict_observation,
+    get_neg_log_probs,
+    get_masked_mean,
+    create_run_name,
+    multi_print,
+)
 from src.config_examples import configs
 from src.beam import BeamSearchScorer
 
@@ -363,6 +370,7 @@ def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
             return action_candidates
 
 
+
 def get_neg_log_probs(cfg, input_sequence):
     """
     Computes the loss tensor for a given input sequence.
@@ -391,7 +399,6 @@ def get_neg_log_probs(cfg, input_sequence):
 
 def get_masked_mean(arr, mask):
     return (arr * mask).sum() / mask.sum()
-
 
 def update_weights(
     cfg,

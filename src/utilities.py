@@ -530,3 +530,33 @@ def predict_observation(cfg, action, obs, add_q_head, per_batch=False):
     #    :, -cfg.tok_p_pure_obs :
     # ].sum(dim=-1)
     # return obs_losses, obs_tensor
+
+
+def get_neg_log_probs(cfg, input_sequence):
+    """
+    Computes the loss tensor for a given input sequence.
+
+    Args:
+        cfg: Configuration object containing model and tokenizer information.
+        input_sequence: The input sequence tensor for which the loss is to be computed.
+
+    Returns:
+        The computed loss tensor.
+    """
+    attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+    logits = cfg.predictor_lm(input_sequence, attention_mask=attention_mask).logits[
+        :, :-1, :
+    ]
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    loss_tensor = loss_fn(
+        input=einops.rearrange(
+            logits,
+            "batch seq_length vocab_size -> batch vocab_size seq_length",
+        ),
+        target=input_sequence[:, 1:],
+    )
+    return loss_tensor
+
+
+def get_masked_mean(arr, mask):
+    return (arr * mask).sum() / mask.sum()
