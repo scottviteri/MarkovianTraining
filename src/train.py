@@ -281,7 +281,7 @@ def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
                 max_new_tokens=cfg.tok_p_pure_action,
                 min_new_tokens=cfg.tok_p_pure_action,
                 do_sample=False,
-                num_beams=cfg.num_beams,
+                # num_beams=cfg.num_beams,
                 bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
                 renormalize_logits=True,
                 remove_invalid_values=True,
@@ -335,20 +335,20 @@ def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
             #   generation_config=generation_config,
             # )[:, -cfg.tok_p_action :]
             ## else:
-            beam_scorer = transformers.BeamSearchScorer(
-                # cfg=cfg,
-                # obs=beam_observations,
-                batch_size=cfg.batch_size,
-                num_beams=generation_config.num_beams,
-                device=cfg.device,
-                length_penalty=generation_config.length_penalty,
-                do_early_stopping=generation_config.early_stopping,
-                num_beam_hyps_to_keep=generation_config.num_return_sequences,
-                max_length=input_ids.shape[-1] + generation_config.max_new_tokens,
-            )
-            action_candidates = cfg.causal_lm.beam_sample(
+            # beam_scorer = transformers.BeamSearchScorer(
+            #    # cfg=cfg,
+            #    # obs=beam_observations,
+            #    batch_size=cfg.batch_size,
+            #    num_beams=generation_config.num_beams,
+            #    device=cfg.device,
+            #    length_penalty=generation_config.length_penalty,
+            #    do_early_stopping=generation_config.early_stopping,
+            #    num_beam_hyps_to_keep=generation_config.num_return_sequences,
+            #    max_length=input_ids.shape[-1] + generation_config.max_new_tokens,
+            # )
+            action_candidates = cfg.causal_lm.greedy_search(
                 beam_input_ids,
-                beam_scorer,
+                # beam_scorer,
                 use_q_head=use_q_head,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
                 logits_warper=logits_processor,
@@ -454,18 +454,19 @@ def update_weights(
             action_prob_ratio = torch.exp(action_log_prob - old_critic_action_log_prob)
             clipped_ratio = torch.clamp(action_prob_ratio, 0.7, 1.3)
             value_loss = torch.abs(values - repeated_obs_losses).mean()
-            neg_advantage = (repeated_obs_losses - values.detach()).mean()
+            neg_advantage = (negentropy + repeated_obs_losses - values.detach()).mean()
             # neg_advantage = obs_loss.mean()
-            wandb.log(
-                {
-                    "Values": values.mean(),
-                    "Normalized Obs Loss": normalized_obs_loss.mean(),
-                    "Value Loss": value_loss,
-                    "Old Critic Action Loss": old_critic_action_loss,
-                    "Action Prob Ratio": action_prob_ratio,
-                },
-                step=batch_index,
-            )
+            if cfg.wandb:
+                wandb.log(
+                    {
+                        "Values": values.mean(),
+                        "Normalized Obs Loss": normalized_obs_loss.mean(),
+                        "Value Loss": value_loss,
+                        "Old Critic Action Loss": old_critic_action_loss,
+                        "Action Prob Ratio": action_prob_ratio,
+                    },
+                    step=batch_index,
+                )
             # aggregate_loss = action_loss * (normalized_obs_loss.mean() + negentropy * .1)
             # aggregate_loss = -torch.min(
             #    action_prob_ratio * obs_log_prob.mean(),

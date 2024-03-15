@@ -241,21 +241,21 @@ mst = InitialConfig(
     optimizer="adam",
     batch_size=1,
     num_batches=1000,
-    obs_to_action_ratio=0.75,
-    interval_save_weights=1001,
-    interval_print=3,
+    obs_to_action_ratio=0.075,
+    interval_save_weights=900,
+    interval_print=1,
     wandb=True,
     load_model=False,
     do_lora=False,
-    num_beams=2,
-    training_ctxt_size=200,
+    num_beams=1,
+    training_ctxt_size=1000,
     dataset=InitDatasetType(
         task=ArithmeticTask(
-            num_terms=6,
-            num_digits=2,
+            num_terms=3,
+            num_digits=3,
             cumulative=False,
             operations=["+", "-", "*"],
-            probs=[1.0, 0.0, 0.0],
+            probs=[0.0, 0.0, 1.0],
         ),
         peek_every=None,
     ),
@@ -273,4 +273,4 @@ mst = InitialConfig(
     debug=None,
 )
 
-configs = [g2]
+configs = [mst]
