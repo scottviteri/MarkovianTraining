@@ -485,7 +485,7 @@ def update_weights(
             )
         
         if do_weight_update:
-           cfg.optimizer.zero_grad()
+            cfg.optimizer.zero_grad()
             aggregate_loss.backward()
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
