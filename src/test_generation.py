@@ -123,8 +123,9 @@ def test_critic_2():
         direct_question,
         random_test,
     ]
+    # wrap_questions("StepByStep: ", input_strings, "Observation: ", 486)
     assert check_strictly_decreasing(
-        cfg, wrap_questions("StepByStep: ", input_strings, "Observation: "), 486
+        cfg, input_strings, 486 
     ), "should be strictly decreasing"
 
 
