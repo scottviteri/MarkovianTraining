@@ -59,31 +59,31 @@ def save_weights(cfg, batch_index):
         cfg.causal_lm.save_pretrained(cfg.path_2_model)
 
 
-def get_default_action(cfg):
-    initial_helpful_msg = (
-        cfg.causal_lm_tokenizer(
-            "I will restate and work through the following question step by step, decomposing problems into subproblems as needed.",
-            return_tensors="pt",
-        )["input_ids"]
-        .repeat(cfg.batch_size, 1)
-        .to(cfg.device)
-    )
-    assert initial_helpful_msg.shape[-1] < cfg.tok_p_pure_obs
-    prev_action = torch.cat(
-        (
-            cfg.action_prefix_tensor,
-            initial_helpful_msg,
-            torch.full(
-                (cfg.batch_size, cfg.tok_p_pure_action - initial_helpful_msg.shape[-1]),
-                fill_value=cfg.causal_lm_tokenizer.pad_token_id,
-                dtype=torch.int64,
-                device=cfg.device,
-            ),
-        ),
-        dim=1,
-    )
-    # prev_action = initial_helpful_msg
-    return prev_action
+# def get_default_action(cfg):
+#    initial_helpful_msg = (
+#        cfg.causal_lm_tokenizer(
+#            "I will restate and work through the following question step by step, decomposing problems into subproblems as needed.",
+#            return_tensors="pt",
+#        )["input_ids"]
+#        .repeat(cfg.batch_size, 1)
+#        .to(cfg.device)
+#    )
+#    assert initial_helpful_msg.shape[-1] < cfg.tok_p_pure_obs
+#    prev_action = torch.cat(
+#        (
+#            cfg.prefix_tensors.action_prefix_tensor,
+#            initial_helpful_msg,
+#            torch.full(
+#                (cfg.batch_size, cfg.tok_p_pure_action - initial_helpful_msg.shape[-1]),
+#                fill_value=cfg.causal_lm_tokenizer.pad_token_id,
+#                dtype=torch.int64,
+#                device=cfg.device,
+#            ),
+#        ),
+#        dim=1,
+#    )
+#    # prev_action = initial_helpful_msg
+#    return prev_action
 
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
@@ -289,7 +289,12 @@ def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
                 min_new_tokens=cfg.tok_p_pure_action,
                 do_sample=False,
                 # num_beams=cfg.num_beams,
-                bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id, cfg.causal_lm_tokenizer.eos_token_id]],
+                bad_words_ids=[
+                    [
+                        cfg.causal_lm_tokenizer.pad_token_id,
+                        cfg.causal_lm_tokenizer.eos_token_id,
+                    ]
+                ],
                 renormalize_logits=True,
                 remove_invalid_values=True,
                 num_return_sequences=cfg.inference_cfg.num_return_sequences,
@@ -303,7 +308,7 @@ def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
             cfg.causal_lm.generation_config = generation_config
 
             input_ids = torch.cat(
-                [prev_action, prev_obs, cfg.action_prefix_tensor], dim=1
+                [prev_action, prev_obs, cfg.prefix_tensors.action_prefix_tensor], dim=1
             )
             attention_mask = (input_ids != cfg.causal_lm_tokenizer.pad_token_id).long()
 
@@ -370,7 +375,6 @@ def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
             return action_candidates
 
 
-
 def get_neg_log_probs(cfg, input_sequence):
     """
     Computes the loss tensor for a given input sequence.
@@ -400,6 +404,7 @@ def get_neg_log_probs(cfg, input_sequence):
 def get_masked_mean(arr, mask):
     return (arr * mask).sum() / mask.sum()
 
+
 def log_manual_observations(cfg, obs):
     repeat = "210 210 210 210 210 210 210 210 210 210 210 210 210 210 210"
     in_order = "Let's evaluate 23 + 14 + 81 + 92. First, add 23 and 14 to get 37. Then, add 37 and 81 to get 118. Finally, add 118 and 92 to arrive at the final result 210"
@@ -416,9 +421,8 @@ def log_manual_observations(cfg, obs):
         random_test,
     ]
 
-    obs_loss = predict_observation(
-        cfg, action, obs, add_q_head=False, per_batch=True
-    )
+    obs_loss = predict_observation(cfg, action, obs, add_q_head=False, per_batch=True)
+
 
 def update_weights(
     cfg,
@@ -438,9 +442,7 @@ def update_weights(
         ),
     ):
         if prediction_cfg.train_O_given_prev_O:
-            assert (
-                not prediction_cfg.train_O_given_A
-            )
+            assert not prediction_cfg.train_O_given_A
             loss_tensor = get_neg_log_probs(cfg, torch.cat([prev_obs, obs], dim=1))
             aggregate_loss = loss_tensor[:, -cfg.tok_p_pure_obs :].mean()
             return aggregate_loss, None, []
@@ -486,11 +488,9 @@ def update_weights(
         # )
         # (negentropy - old_critic_negentropy) * 0.1 +
         aggregate_loss = (
-                torch.max(
-                    action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage
-                )
-                + value_loss
-            )
+            torch.max(action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage)
+            + value_loss
+        )
         if cfg.wandb:
             wandb.log(
                 {
@@ -502,8 +502,7 @@ def update_weights(
                 },
                 step=batch_index,
             )
-        
-        
+
         if do_weight_update:
             cfg.optimizer.zero_grad()
             aggregate_loss.backward()
@@ -555,7 +554,7 @@ def log_and_save(
 
 
 def perturb_action(action, cfg):
-    offset = cfg.action_prefix_tensor.shape[-1]
+    offset = cfg.prefix_tensors.action_prefix_tensor.shape[-1]
     # PERTURBATION 1
     # Given n <= cfg.tok_p_pure_action, change token through randomization
     frac_randomize = cfg.perturbation_cfg.frac_of_tokens_to_randomize
@@ -584,21 +583,21 @@ def perturb_action(action, cfg):
 
 
 def trainer(cfg):
-    state = [get_default_action(cfg), 0, None]
+    # state = [get_default_action(cfg), 0, None]
+    state = TrainerState(action=None, obs=None, batch_index=0, aggregate_loss=None)
 
-    def update(datapt_pair):
+    def update(datapt):
         nonlocal state
-        prev_datapt, datapt = datapt_pair
+        # prev_datapt, datapt = datapt_pair
         is_first = "First" in datapt and datapt["First"]
-        prev_action, batch_index, _ = state
-        prev_obs, obs = prev_datapt["Observation"], datapt["Observation"]
-
-        if batch_index > 0:
+        # prev_obs, obs = prev_datapt["Observation"], datapt["Observation"]
+        obs = datapt["Observation"]
+        if state.batch_index > 0:
             pred_len, inf_len = (
                 cfg.trainer_cfg.prediction_training_length,
                 cfg.trainer_cfg.inference_training_length,
             )
-            mode_index = batch_index % (pred_len + inf_len)
+            mode_index = state.batch_index % (pred_len + inf_len)
             # if mode_index == 0:  # switch from inf mode to pred mode
             #    assert not cfg.training_predictor_mode
             #    # for name, param in cfg.causal_lm.named_parameters():
@@ -612,78 +611,93 @@ def trainer(cfg):
             #    cfg.training_predictor_mode = False
 
         if is_first:
-            prev_action = get_default_action(cfg)
+            prev_action = cfg.prefix_tensors.first_action_prefix_tensor
+            # get_default_action(cfg)
             log_print_oa(
                 cfg,
-                batch_index,
+                state.batch_index,
                 prev_action,
-                prev_obs,
+                state.obs,
                 None,
                 obs,
                 "Action" in datapt,
                 is_first,
                 None,
             )
-            state = [prev_action, batch_index + 1, None]
-            return
-        # now can assume that prev_datapt contains the question and datapt contains the Answer
-        if "Action" in datapt:
-            action = datapt["Action"]
-        elif cfg.prediction_cfg.train_O_given_prev_O:
-            action = prev_action
-        else:
-            action = sample(cfg, prev_action, prev_obs, obs, use_q_head=True)
-            default_action = sample(cfg, prev_action, prev_obs, obs, use_q_head=False)
-        # action : [batch * beam, tok_p_action]
-
-        aggregate_loss, losses = update_weights(
-            cfg,
-            batch_index,
-            prev_action,
-            prev_obs,
-            action,
-            default_action,
-            obs,
-            do_weight_update=not isinstance(cfg.debug, NoWeightUpdates),
-        )
-
-        if (
-            cfg.perturbation_cfg is not None
-            and batch_index % cfg.perturbation_cfg.eval_every == 0
-        ):
-            perturbed_action = perturb_action(action, cfg)
-            aggregate_loss0, losses0 = update_weights(
-                cfg,
-                batch_index,
-                prev_action,
-                prev_obs,
-                perturbed_action,
-                obs,
-                do_weight_update=False,
+            state = TrainerState(
+                action=cfg.prefix_tensors.action_prefix_tensor,
+                obs=obs,
+                batch_index=state.batch_index,
+                aggregate_loss=None,
             )
-            perturbed_loss = losses0[-1]
-        else:
-            perturbed_loss = None
-        losses.append(perturbed_loss)
 
-        log_and_save(
-            cfg,
-            batch_index,
-            prev_action,
-            prev_obs,
-            action,
-            obs,
-            "Action" in datapt,
-            is_first,
-            aggregate_loss,
-            losses,
-        )
-        state = [action, batch_index + 1, aggregate_loss]
-        return
+            return
+        else:
+            # now can assume that prev_datapt contains the question and datapt contains the Answer
+            if "Action" in datapt:
+                action = datapt["Action"]
+            elif cfg.prediction_cfg.train_O_given_prev_O:
+                action = state.action
+            else:
+                action = sample(cfg, state.action, state.obs, obs, use_q_head=True)
+                default_action = sample(
+                    cfg, state.action, state.obs, obs, use_q_head=False
+                )
+            # action : [batch * beam, tok_p_action]
+
+            aggregate_loss, losses = update_weights(
+                cfg,
+                state.batch_index,
+                state.action,
+                state.obs,
+                action,
+                default_action,
+                obs,
+                do_weight_update=not isinstance(cfg.debug, NoWeightUpdates),
+            )
+
+            if (
+                cfg.perturbation_cfg is not None
+                and state.batch_index % cfg.perturbation_cfg.eval_every == 0
+            ):
+                perturbed_action = perturb_action(action, cfg)
+                aggregate_loss0, losses0 = update_weights(
+                    cfg,
+                    state.batch_index,
+                    state.action,
+                    state.obs,
+                    perturbed_action,
+                    obs,
+                    do_weight_update=False,
+                )
+                perturbed_loss = losses0[-1]
+            else:
+                perturbed_loss = None
+            losses.append(perturbed_loss)
+
+            log_and_save(
+                cfg,
+                state.batch_index,
+                state.action,
+                state.obs,
+                action,
+                obs,
+                "Action" in datapt,
+                is_first,
+                aggregate_loss,
+                losses,
+            )
+            state = TrainerState(
+                action=action,
+                obs=obs,
+                batch_index=state.batch_index + 1,
+                aggregate_loss=aggregate_loss,
+            )
+            return
 
     def pi():
         nonlocal state
-        return state[-1]
+        return state.aggregate_loss
 
     return update, pi
 

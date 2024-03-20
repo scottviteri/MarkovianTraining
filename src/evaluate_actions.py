@@ -82,7 +82,7 @@ class ActionEvaluator:
     @staticmethod
     def perturb_action(action, cfg):
         action_out = copy.deepcopy(action)
-        offset = cfg.action_prefix_tensor.shape[-1]
+        offset = cfg.prefix_tensors.action_prefix_tensor.shape[-1]
         # PERTURBATION 1
         # Given n <= cfg.tok_p_pure_action, change token through randomization
         frac_randomize = cfg.perturbation_cfg.frac_of_tokens_to_randomize

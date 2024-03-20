@@ -39,18 +39,14 @@ def prepare_dataset(
     init_cfg,
     causal_lm_tokenizer,
     device,
-    action_prefix_tensor,
-    obs_prefix_tensor,
     tok_p_pure_action,
     tok_p_pure_obs,
-    action_prefix,
-    obs_prefix,
+    prefix_tensors,
 ):
     task = init_cfg.dataset.task
     dict_ds = initialize_dataset(
         task,
-        action_prefix_tensor,
-        obs_prefix_tensor,
+        prefix_tensors,
         tok_p_pure_action,
         tok_p_pure_obs,
         init_cfg,
@@ -63,8 +59,7 @@ def prepare_dataset(
 
 def initialize_dataset(
     task,
-    action_prefix_tensor,
-    obs_prefix_tensor,
+    prefix_tensors,
     tok_p_pure_action,
     tok_p_pure_obs,
     init_cfg,
@@ -75,8 +70,7 @@ def initialize_dataset(
     if isinstance(task, ArithmeticTask):
         return init_arithmetic_dataset(
             task,
-            action_prefix_tensor,
-            obs_prefix_tensor,
+            prefix_tensors,
             tok_p_pure_action,
             tok_p_pure_obs,
             init_cfg,
@@ -91,8 +85,7 @@ def initialize_dataset(
 
 def init_arithmetic_dataset(
     task,
-    action_prefix_tensor,
-    obs_prefix_tensor,
+    prefix_tensors,
     tok_p_pure_action,
     tok_p_pure_obs,
     init_cfg,
@@ -125,14 +118,11 @@ def init_arithmetic_dataset(
     def tokenize_and_pad(
         device,
         tokenizer,
-        action_prefix_tensor,
-        obs_prefix_tensor,
+        prefix_tensors,
         tok_p_pure_action,
         tok_p_pure_obs,
         d,
     ):
-        action_prefix_tensor = action_prefix_tensor.to(device)
-        obs_prefix_tensor = obs_prefix_tensor.to(device)
         # indexing here because mistral tokenizer adds two tokens to the beginning!
         # but it shouldn't if add_special_tokens=False ...
         obs_tok = tokenizer(
@@ -159,15 +149,19 @@ def init_arithmetic_dataset(
                 device=device,
             )
             return {
-                "Observation": torch.cat([obs_prefix_tensor[0], obs_tok, obs_pad_tok]),
+                "Observation": torch.cat(
+                    [prefix_tensors.obs_prefix_tensor[0], obs_tok, obs_pad_tok]
+                ),
                 "Action": torch.cat(
-                    [action_prefix_tensor[0], action_tok, action_pad_tok]
+                    [prefix_tensors.action_prefix_tensor[0], action_tok, action_pad_tok]
                 ),
                 "First": d["First"],
             }
         else:
             return {
-                "Observation": torch.cat([obs_prefix_tensor[0], obs_tok, obs_pad_tok]),
+                "Observation": torch.cat(
+                    [prefix_tensors.obs_prefix_tensor[0], obs_tok, obs_pad_tok]
+                ),
                 "First": d["First"],
             }
 
@@ -190,8 +184,7 @@ def init_arithmetic_dataset(
                 tokenize_and_pad(
                     device,
                     causal_lm_tokenizer,
-                    action_prefix_tensor,
-                    obs_prefix_tensor,
+                    prefix_tensors,
                     tok_p_pure_action,
                     tok_p_pure_obs,
                     b,
@@ -316,8 +309,12 @@ def finalize_dataset(dict_ds, init_cfg):
         grouped_obs = torch.stack([d["Observation"] for d in batch])
         if "Action" in batch[0]:
             grouped_actions = torch.stack([d["Action"] for d in batch])
-            return {"Observation": grouped_obs, "Action": grouped_actions}
-        return {"Observation": grouped_obs}
+            return {
+                "Observation": grouped_obs,
+                "Action": grouped_actions,
+                "First": batch[0]["First"],
+            }
+        return {"Observation": grouped_obs, "First": batch[0]["First"]}
 
     def group_pairs(itr):
         first = next(itr)
@@ -335,7 +332,7 @@ def finalize_dataset(dict_ds, init_cfg):
         # dict_ds = debug(dict_ds)
     dict_ds = map(stack_batch, dict_ds)
     # dict_ds = debug(dict_ds)
-    dict_ds = group_pairs(dict_ds)
+    # dict_ds = group_pairs(dict_ds)
     # dict_ds = debug(dict_ds)
     return take(init_cfg.num_batches, dict_ds)
 
@@ -384,15 +381,17 @@ def debug(itr):
 
 
 def unused_functions():
-    def prepend_prefix_tensors(obs_prefix_tensor, action_prefix_tensor, itr_ds):
+    def prepend_prefix_tensors(prefix_tensors, itr_ds):
         out_d = {}
         for d in itr_ds:
             if "Observation" in d:
                 out_d["Observation"] = torch.cat(
-                    (obs_prefix_tensor, d["Observation"]), dim=1
+                    (prefix_tensors.obs_prefix_tensor, d["Observation"]), dim=1
                 )
             if "Action" in d:
-                out_d["Action"] = torch.cat((action_prefix_tensor, d["Action"]), dim=1)
+                out_d["Action"] = torch.cat(
+                    (prefix_tensors.action_prefix_tensor, d["Action"]), dim=1
+                )
         return out_d
 
     def jsonl_to_dict_iterator(filename: str) -> Iterator[Dict]:

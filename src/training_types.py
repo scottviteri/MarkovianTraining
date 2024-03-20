@@ -9,11 +9,19 @@ from transformers import (
 import torch
 from enum import Enum
 
+
+@dataclass
+class TrainerState:
+    action: Optional[torch.tensor]
+    obs: Optional[torch.tensor]
+    batch_index: int
+    aggregate_loss: Optional[float]
+
+
 GptEval = NamedTuple("GptEval", [("num_evals", int), ("use_gptj", bool)])
 PredictionConfig = NamedTuple(
     "PredictionConfig",
     [
-        ("filter_best_actions", Optional[int]),
         ("train_O_given_A", bool),
         ("train_O_given_prev_O", bool),
     ],
@@ -100,6 +108,14 @@ class InitialConfig:
 
 
 @dataclass
+class PrefixTensors:
+    first_action_prefix_tensor: torch.Tensor
+    first_obs_prefix_tensor: torch.Tensor
+    action_prefix_tensor: torch.Tensor
+    obs_prefix_tensor: torch.Tensor
+
+
+@dataclass
 class Config:
     model_name: str
     causal_lm: PreTrainedModel
@@ -122,12 +138,11 @@ class Config:
     traj_path: str
     path_2_model: str
     path_2_tokenizer: str
-    tok_p_action: Optional[int]
-    tok_p_obs: Optional[int]
-    tok_p_pure_action: Optional[int]
-    tok_p_pure_obs: Optional[int]
-    action_prefix_tensor: Optional[torch.Tensor]
-    obs_prefix_tensor: Optional[torch.Tensor]
+    tok_p_action: int
+    tok_p_obs: int
+    tok_p_pure_action: int
+    tok_p_pure_obs: int
+    prefix_tensors: PrefixTensors
     ctxt_size: Optional[int]
     dataset: DatasetType
     inference_cfg: InferenceConfig

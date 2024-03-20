@@ -160,29 +160,23 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     )
     tok_p_action = int(training_ctxt_size / (init_cfg.obs_to_action_ratio + 2))
     tok_p_obs = int(tok_p_action * init_cfg.obs_to_action_ratio)
-    tok_p_loss = None
 
     tok_per_pure, prefix_tensors = get_prefixes(
         causal_lm_tokenizer,
         init_cfg.batch_size,
         device,
-        tok_p_loss,
         tok_p_action,
         tok_p_obs,
     )
-    tok_p_pure_loss, tok_p_pure_action, tok_p_pure_obs = tok_per_pure
-    loss_prefix, action_prefix, obs_prefix = prefix_tensors
+    tok_p_pure_action, tok_p_pure_obs = tok_per_pure
 
     dataset = prepare_dataset(
         init_cfg,
         causal_lm_tokenizer,
         device,
-        action_prefix,
-        obs_prefix,
         tok_p_pure_action,
         tok_p_pure_obs,
-        action_prefix,
-        obs_prefix,
+        prefix_tensors,
     )
 
     return Config(
@@ -214,8 +208,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         tok_p_obs=tok_p_obs,
         tok_p_pure_action=tok_p_pure_action,
         tok_p_pure_obs=tok_p_pure_obs,
-        action_prefix_tensor=action_prefix,
-        obs_prefix_tensor=obs_prefix,
+        prefix_tensors=prefix_tensors,
         ctxt_size=ctxt_size,
         causal_lm=causal_lm,  # predictor_lm,
         causal_lm_tokenizer=causal_lm_tokenizer,
@@ -273,55 +266,38 @@ def get_prefixes(
     tokenizer: PreTrainedTokenizer,
     batch_size: int,
     device: torch.device,
-    tok_p_loss: Optional[int],
-    tok_p_action: Optional[int],
-    tok_p_obs: Optional[int],
+    tok_p_action: int,
+    tok_p_obs: int,
 ):
-    if tok_p_obs:
-        observation_prefix = ""
-        observation_prefix_tokens = tokenizer.encode(
-            observation_prefix, add_special_tokens=False
-        )
-        observation_prefix_tensor = einops.repeat(
-            torch.tensor(observation_prefix_tokens, dtype=torch.int64),
+    def tokenize_and_repeat(prefix_string):
+        prefix_tokens = tokenizer.encode(prefix_string, add_special_tokens=False)
+        repeated_prefix_tokens = einops.repeat(
+            torch.tensor(prefix_tokens, dtype=torch.int64),
             "tokens -> batch tokens",
             batch=batch_size,
         ).to(device)
-        tokens_per_pure_observation = tok_p_obs - len(observation_prefix_tokens)
-    else:
-        observation_prefix_tensor = None
-        tokens_per_pure_observation = None
+        return repeated_prefix_tokens
 
-    if tok_p_action:
-        # action_prefix = "\nStepByStep:"
-        action_prefix = "Reasoning:"
-        action_prefix_tokens = tokenizer.encode(action_prefix, add_special_tokens=False)
-        action_prefix_tensor = einops.repeat(
-            torch.tensor(action_prefix_tokens, dtype=torch.int64),
-            "tokens -> batch tokens",
-            batch=batch_size,
-        ).to(device)
-        tokens_per_pure_action = tok_p_action - len(action_prefix_tokens)
-    else:
-        action_prefix_tensor = None
-        tokens_per_pure_action = None
+    first_action_prefix_tensor = tokenize_and_repeat(
+        "I will restate and work through the following question step by step, decomposing problems into subproblems as needed."
+    )
 
-    if tok_p_loss:
-        reward_prefix = "\nLoss:"
-        reward_prefix_tokens = tokenizer.encode(reward_prefix, add_special_tokens=False)
-        reward_prefix_tensor = einops.repeat(
-            torch.tensor(reward_prefix_tokens),
-            "tokens -> batch tokens",
-            batch=batch_size,
-        ).to(device)
-        tokens_per_pure_reward = tok_p_loss - len(reward_prefix_tokens)
-    else:
-        reward_prefix_tensor = None
-        tokens_per_pure_reward = None
+    first_obs_prefix_tensor = tokenize_and_repeat("Question:")
+
+    action_prefix_tensor = tokenize_and_repeat("Reasoning:")
+    tokens_per_pure_action = tok_p_action - action_prefix_tensor.shape[1]
+
+    obs_prefix_tensor = tokenize_and_repeat("Answer:")
+    tokens_per_pure_obs = tok_p_obs - obs_prefix_tensor.shape[1]
 
     return (
-        (tokens_per_pure_reward, tokens_per_pure_action, tokens_per_pure_observation),
-        (reward_prefix_tensor, action_prefix_tensor, observation_prefix_tensor),
+        (tokens_per_pure_action, tokens_per_pure_obs),
+        PrefixTensors(
+            first_action_prefix_tensor,
+            first_obs_prefix_tensor,
+            action_prefix_tensor,
+            obs_prefix_tensor,
+        ),
     )
 
 
