@@ -11,6 +11,29 @@ import numpy as np
 from src.prepare_dataset import *
 from src.training_types import *
 
+"""
+This file controlles dataset loading. 
+Think of the input data as consisting of trajectories of observations.
+Each observation is a fixed number of tokens.
+The high level logic is in init_arithmetic_dataset and prepare_dataset.
+arithmetic_generator creates an iter of {"Action":_, "Observation": _} dicts.
+Actions (if provided) override the transformer generated action. 
+to_qa_traj_itr creates an iter of iters, and each inner iter is a trajectory.
+The question-answer format consists of trajectories of length two.
+traj_itr_to_batch_lst creates a |batch|-len list.
+    Each element pulls from one trajs at a time, never splitting a traj.
+tokenize_batches tokenizes action and observations.
+apply_debug_transformations: optionally repeat obs or replace w/ random toks.
+finalize_dataset contains peek_every_n, stack_batch, group_pairs, and take.
+peek_every_n filters all but every nth Action suggestion.
+stack_batch turns the list of iters into a single iter, by batching the tensors.
+group_pairs turns (a,b,c,d,...) into ((a,b),(b,c),(c,d),...).
+    So the main loops sees the observation and previous obs at once.
+take restricts the dataset to the cfg-specified number of datapoints. 
+place debug(itr) at the point where you want to inspect the dataflow
+    It helps to set a breakpoint inside of the debug function
+"""
+
 
 def prepare_dataset(
     init_cfg,
@@ -288,6 +311,14 @@ def finalize_dataset(dict_ds, init_cfg):
             else:
                 yield {"Observation": d["Observation"], "First": d["First"]}
 
+    def stack_batch(batch):
+        # do I want each batch to separately be able to add actions? Seems unnecessary for now
+        grouped_obs = torch.stack([d["Observation"] for d in batch])
+        if "Action" in batch[0]:
+            grouped_actions = torch.stack([d["Action"] for d in batch])
+            return {"Observation": grouped_obs, "Action": grouped_actions}
+        return {"Observation": grouped_obs}
+
     def group_pairs(itr):
         first = next(itr)
         while 1:
@@ -350,15 +381,6 @@ def debug(itr):
         next_val = next(itr)
         print(next_val)
         yield next_val
-
-
-def stack_batch(batch):
-    # do I want each batch to separately be able to add actions? Seems unnecessary for now
-    grouped_obs = torch.stack([d["Observation"] for d in batch])
-    if "Action" in batch[0]:
-        grouped_actions = torch.stack([d["Action"] for d in batch])
-        return {"Observation": grouped_obs, "Action": grouped_actions}
-    return {"Observation": grouped_obs}
 
 
 def unused_functions():
