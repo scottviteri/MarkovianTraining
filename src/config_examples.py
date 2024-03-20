@@ -19,7 +19,6 @@ g2 = InitialConfig(
         task=ArithmeticTask(
             num_terms=6,
             num_digits=2,
-            cumulative=False,
             operations=["+", "-", "*"],
             probs=[1.0, 0.0, 0.0],
         ),
@@ -62,7 +61,6 @@ g2_ar = InitialConfig(
         task=ArithmeticTask(
             num_terms=2,
             num_digits=3,
-            cumulative=False,
             operations=None,
             probs=None,
         ),
@@ -100,7 +98,6 @@ g2_ei = InitialConfig(
         task=ArithmeticTask(
             num_terms=2,
             num_digits=3,
-            cumulative=False,
             operations=None,
             probs=None,
         ),
@@ -139,7 +136,6 @@ g2_p2 = InitialConfig(
         task=ArithmeticTask(
             num_terms=2,
             num_digits=3,
-            cumulative=False,
             operations=None,
             probs=None,
         ),
@@ -177,7 +173,6 @@ gj = InitialConfig(
         task=ArithmeticTask(
             num_terms=2,
             num_digits=3,
-            cumulative=False,
             operations=None,
             probs=None,
         ),
@@ -215,7 +210,6 @@ lma = InitialConfig(
         task=ArithmeticTask(
             num_terms=2,
             num_digits=3,
-            cumulative=False,
             operations=None,
             probs=None,
         ),
@@ -241,19 +235,18 @@ mst = InitialConfig(
     optimizer="adam",
     batch_size=1,
     num_batches=1000,
-    obs_to_action_ratio=0.075,
+    obs_to_action_ratio=0.5,
     interval_save_weights=900,
     interval_print=1,
-    wandb=True,
+    wandb=False,
     load_model=False,
     do_lora=False,
     num_beams=1,
-    training_ctxt_size=1000,
+    training_ctxt_size=250,
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=3,
             num_digits=3,
-            cumulative=False,
             operations=["+", "-", "*"],
             probs=[0.0, 0.0, 1.0],
         ),
@@ -273,4 +266,41 @@ mst = InitialConfig(
     debug=None,
 )
 
-configs = [mst]
+phi2 = InitialConfig(
+    model_name="phi2",
+    lr=1e-6,
+    optimizer="adam",
+    batch_size=1,
+    num_batches=1000,
+    obs_to_action_ratio=0.5,
+    interval_save_weights=900,
+    interval_print=1,
+    wandb=False,
+    load_model=False,
+    do_lora=False,
+    num_beams=1,
+    training_ctxt_size=250,
+    dataset=InitDatasetType(
+        task=ArithmeticTask(
+            num_terms=3,
+            num_digits=3,
+            operations=["+", "-", "*"],
+            probs=[0.0, 0.0, 1.0],
+        ),
+        peek_every=None,
+    ),
+    inference_cfg=InferenceConfig(num_return_sequences=1),
+    prediction_cfg=PredictionConfig(
+        filter_best_actions=None,
+        train_A_given_AO=False,
+        train_O_given_A=True,
+        train_O_given_prev_O=False,
+    ),
+    trainer_cfg=TrainerConfig(
+        prediction_training_length=1, inference_training_length=1000
+    ),
+    perturbation_cfg=None,
+    debug=None,
+)
+
+configs = [phi2]

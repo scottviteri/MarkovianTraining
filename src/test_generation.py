@@ -8,7 +8,7 @@ from src.utilities import extend_initial_config
 
 
 test_config = InitialConfig(
-    model_name="phi2",
+    model_name="mistral",
     lr=1e-6,
     optimizer="adam",
     batch_size=2,
@@ -25,7 +25,6 @@ test_config = InitialConfig(
         task=ArithmeticTask(
             num_terms=6,
             num_digits=2,
-            cumulative=False,
             operations=["+", "-", "*"],
             probs=[1.0, 0.0, 0.0],
         ),
@@ -63,7 +62,12 @@ def wrap_questions(begin, end, questions, answer):
 def check_strictly_decreasing(cfg, questions, answer):
     # this method assumes a tokenizer which splits a number into digits
     tokenizer_out = cfg.causal_lm_tokenizer(
-        questions, return_tensors="pt", padding=True
+        questions, return_tensors="pt", padding=True,
+        add_special_tokens=True
+    )
+    tokenizer_out_2 = cfg.causal_lm_tokenizer(
+        questions, return_tensors="pt", padding=True,
+        add_special_tokens=False
     )
     tokenized_questions = tokenizer_out["input_ids"].to(device=cfg.device)
     attention_mask = tokenizer_out["attention_mask"].to(device=cfg.device)

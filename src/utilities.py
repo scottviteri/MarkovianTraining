@@ -293,7 +293,8 @@ def get_prefixes(
     if tok_p_action:
         # action_prefix = "\nStepByStep:"
         action_prefix = "Reasoning:"
-        action_prefix_tokens = tokenizer.encode(action_prefix, add_special_tokens=False)
+        action_prefix_tokens = tokenizer.encode(
+            action_prefix, add_special_tokens=False)
         action_prefix_tensor = einops.repeat(
             torch.tensor(action_prefix_tokens, dtype=torch.int64),
             "tokens -> batch tokens",
@@ -413,8 +414,6 @@ def create_run_name(cfg: Config) -> str:
         run_name += (
             f"ari_nt={cfg.dataset.task.num_terms}_nd={cfg.dataset.task.num_digits}_"
         )
-        if cfg.dataset.task.cumulative:
-            run_name += "cm_"
     else:
         run_name += "wiki_"
     if cfg.lr != 1e-4:

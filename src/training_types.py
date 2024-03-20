@@ -53,7 +53,6 @@ ArithmeticTask = NamedTuple(
     [
         ("num_digits", int),
         ("num_terms", int),
-        ("cumulative", bool),
         ("operations", Optional[list]),
         ("probs", Optional[list]),
     ],

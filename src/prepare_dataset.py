@@ -28,7 +28,6 @@ def prepare_dataset(
         itr_ds = arithmetic_generator(
             task.num_terms,
             task.num_digits,
-            task.cumulative,
             task.operations,
             task.probs,
         )
@@ -153,7 +152,7 @@ def peek_every_n(n, dict_itr):
             yield {"Observation": d["Observation"], "First": d["First"]}
 
 
-def arithmetic_generator(num_terms, num_digits, cumulative, operations, probs):
+def arithmetic_generator(num_terms, num_digits, operations, probs):
     # If not specified, use simple addition
     if operations is None:
         operations = ["+"]
@@ -168,14 +167,6 @@ def arithmetic_generator(num_terms, num_digits, cumulative, operations, probs):
             op in valid_ops.keys()
         ), f"Invalid operation {op} not in {valid_ops.keys()}"
     assert len(probs) == len(operations), "len(Operations) != len(probs)"
-
-    assert not cumulative, NotImplementedError("Cumulative not implemented")
-    # I am not sure why we need the cumulative option. Keeping this snipet for @Scott
-    # if cumulative:
-    #     n = random.randint(1, num_digits)
-    #     num = random.randint(10 ** (n - 1), 10 ** n - 1)
-    # else:
-    #     num = random.randint(10 ** (num_digits - 1), 10 ** num_digits - 1)
 
     while 1:
         # question = "Q: <Simplify>"
