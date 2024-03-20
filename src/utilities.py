@@ -130,6 +130,8 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 
+    assert init_cfg.num_beams == 1, "Only supporting num_beams = 1 currently"
+
     causal_lm, causal_lm_tokenizer, ctxt_size = get_model(
         device,
         init_cfg.load_model,
@@ -293,8 +295,7 @@ def get_prefixes(
     if tok_p_action:
         # action_prefix = "\nStepByStep:"
         action_prefix = "Reasoning:"
-        action_prefix_tokens = tokenizer.encode(
-            action_prefix, add_special_tokens=False)
+        action_prefix_tokens = tokenizer.encode(action_prefix, add_special_tokens=False)
         action_prefix_tensor = einops.repeat(
             torch.tensor(action_prefix_tokens, dtype=torch.int64),
             "tokens -> batch tokens",
