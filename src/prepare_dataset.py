@@ -3,13 +3,13 @@ import einops
 from datasets import load_dataset
 from itertools import islice, tee
 from typing import Iterator, Dict
-from src.prepare_dataset import *
+
 import json
 import operator
 import numpy as np
 
+from src.prepare_dataset import *
 from src.training_types import *
-
 
 def prepare_dataset(
     init_cfg,
@@ -79,31 +79,6 @@ def prepare_dataset(
         )
         dict_ds = map(lambda x: {"Observation": x}, pure_obs)
 
-    # elif dataset_name == "bigbench":
-    #    itr_ds = iter(load_dataset(dataset_name, task_name, split="train", streaming=True))
-    #    tokenized_ds = map(
-    #        lambda x: causal_lm_tokenizer(x, return_tensors="pt")["input_ids"].to(device)[0],
-    #        qa_ds)
-    #    filled_ds = map(
-    #        lambda x: torch.cat([x,
-    #                             torch.full((tok_p_pure_obs - x.shape[-1],),
-    #                                        causal_lm_tokenizer.pad_token_id, dtype=torch.int64, device=device)
-    #        ], dim=-1),
-    #        tokenized_ds
-    #    )
-    #    #filled_ds = fill_to_size(causal_lm_tokenizer, tokenized_ds)
-    #    #torch.full((size - len(begin_tok) - len(end_tok),), tokenizer.pad_token_id, dtype=torch.int64)
-    #    batched_itr = batch(init_cfg.batch_size, filled_ds)
-    #    #paired_batches = group_pairs(batched_itr)
-    #    #itr = map(lambda x: map(merge_qa_bigbench, x[0], x[1]), batched_itr)
-    #    #itr = map(
-    #    #    lambda batch: list(map(lambda i: fill_to_size(causal_lm_tokenizer, i[0], i[1], tok_p_pure_obs), batch)),
-    #    #    itr)
-    #    itr = map(lambda batch: torch.stack(batch, dim=0).to(device), batched_itr)
-    #    #pure_obs = concat_batches_to_len(tok_p_pure_obs, itr)
-    #    dict_ds = map(lambda x: {"Observation": x}, itr)
-    #    print(next(dict_ds))
-
     else:
         assert False, "Unknown dataset"
 
@@ -138,7 +113,6 @@ def prepare_dataset(
     dict_ds = group_pairs(dict_ds)
     return take(init_cfg.num_batches, dict_ds)
 
-
 def peek_every_n(n, dict_itr):
     i = 0
     for d in dict_itr:
@@ -150,7 +124,6 @@ def peek_every_n(n, dict_itr):
             i += 1
         else:
             yield {"Observation": d["Observation"], "First": d["First"]}
-
 
 def arithmetic_generator(num_terms, num_digits, operations, probs):
     # If not specified, use simple addition
@@ -169,13 +142,9 @@ def arithmetic_generator(num_terms, num_digits, operations, probs):
     assert len(probs) == len(operations), "len(Operations) != len(probs)"
 
     while 1:
-        # question = "Q: <Simplify>"
         question = "Question: "
         total = 0.0
-
-        # Generate random numbers
         nums = torch.randint(0, 10**num_digits - 1, (num_terms,))
-        # Generate random operations
         ops_rand = np.random.choice(operations, num_terms - 1, p=probs)
 
         for i in range(num_terms):
@@ -187,19 +156,15 @@ def arithmetic_generator(num_terms, num_digits, operations, probs):
                 op_rand = ops_rand[i - 1]
                 total = valid_ops[op_rand](total, num)
                 question += f"{op_rand} {num} "
-        # question += "</Simplify>"
         question = question[:-1] + "."
 
-        # answer = f"A: {total}"
         answer = f"Answer: {total}"
         yield {"Question": question, "Answer": answer}
-
 
 def jsonl_to_dict_iterator(filename: str) -> Iterator[Dict]:
     with open(filename, "r") as infile:
         for line in infile:
             yield json.loads(line)
-
 
 def concat_batches_to_len(length, itr):
     batch = next(itr)
@@ -209,23 +174,19 @@ def concat_batches_to_len(length, itr):
         yield batch[:, :length]
         batch = batch[:, length:]
 
-
 def batch(batch_size, itr):
     while 1:
         new_list = [next(itr) for _ in range(batch_size)]
         yield new_list
-
 
 def flatten(itrs):
     while 1:
         for itr in itrs:
             yield next(itr)
 
-
 def nth_iterators(n, itr):
     itrs = tee(itr, n)
     return (islice(itr, i, None, n) for i, itr in enumerate(itrs))
-
 
 def group_pairs(itr):
     first = next(itr)
@@ -233,7 +194,6 @@ def group_pairs(itr):
         second = next(itr)
         yield (first, second)
         first = second
-
 
 def tokenize_and_pad(
     device,
@@ -247,6 +207,7 @@ def tokenize_and_pad(
     action_prefix_tensor = action_prefix_tensor.to(device)
     obs_prefix_tensor = obs_prefix_tensor.to(device)
     # indexing here because mistral tokenizer adds two tokens to the beginning!
+    # but it shouldn't if add_special_tokens=False ...
     obs_tok = tokenizer(
         d["Observation"], add_special_tokens=False, return_tensors="pt"
     )["input_ids"][0].to(
@@ -281,31 +242,6 @@ def tokenize_and_pad(
             "First": d["First"],
         }
 
-
-# def fill_to_size(tokenizer, begin, end, size):
-#    begin_tok = tokenizer(begin, return_tensors="pt")["input_ids"][0]
-#    end_tok = tokenizer(end, return_tensors="pt")["input_ids"][0]
-#    middle_tok = torch.full(
-#        (size - len(begin_tok) - len(end_tok),),
-#        tokenizer.pad_token_id,
-#        dtype=torch.int64,
-#    )
-#    return torch.cat((begin_tok, middle_tok, end_tok))
-#
-#
-# def prep_bb(tokenizer, device, tok_per_pure_obs, itr):
-#    itr = group_pairs(itr)
-#    itr = map(
-#        lambda x: (
-#            "A: " + x[0]["targets"][0] + "\n",
-#            x[1]["inputs"].split("?")[0] + "?\n",
-#        ),
-#        itr,
-#    )
-#    itr = map(lambda x: fill_to_size(tokenizer, x[0], x[1], tok_per_pure_obs), itr)
-#    return map(lambda x: x.to(device), itr)
-
-
 def to_qa_traj_itr(itr):
     while 1:
         d = next(itr)
@@ -328,33 +264,6 @@ def to_qa_traj_itr(itr):
                 ]
             )
 
-
-# def merge_qa(device, tokenizer, tok_p_pure_action, tok_p_pure_obs):
-#    assert tok_p_pure_action >= 40
-#    assert tok_p_pure_obs >= 15
-#
-#    def merge_qa_aux(d1, d2):
-#        t1 = tokenizer.encode(d1["Answer"] + "\n", return_tensors="pt")[0]
-#        t2 = tokenizer.encode(d2["Question"] + "\n", return_tensors="pt")[0]
-#        space = tokenizer.encode(" ")[0]
-#        obs_padding = torch.full(
-#            size=(tok_p_pure_obs - len(t1) - len(t2),), fill_value=space
-#        )
-#        tokenized_expl = tokenizer.encode(d2["Explanation"], return_tensors="pt")[0]
-#        action_padding = torch.full(
-#            size=(tok_p_pure_action - len(tokenized_expl),), fill_value=space
-#        )
-#        obs = torch.cat([t1, obs_padding, t2]).to(device)
-#        action = torch.cat([tokenized_expl, action_padding]).to(device)
-#        return {"Observation": obs, "Action": action}
-#
-#    return merge_qa_aux
-#
-#
-# def merge_qa_bigbench(d1, d2):
-#    return ("A: " + d1["targets"][0] + "\n", d2["inputs"].split("?")[0] + "?\n")
-
-
 def get_pure_obs(batch_size, tok_per_pure_obs, device, itr_ds):
     # batch in a way that keeps state so that you only add to a batch index
     #  with fewer than tok_per_pure_obs tokens
@@ -375,7 +284,6 @@ def get_pure_obs(batch_size, tok_per_pure_obs, device, itr_ds):
         yield out_tensor
     return batches
 
-
 def traj_itr_to_batch_lst(batch_size, traj_itr):
     batch_itrs = [next(traj_itr) for _ in range(batch_size)]
     while 1:
@@ -389,7 +297,6 @@ def traj_itr_to_batch_lst(batch_size, traj_itr):
             out_lst.append(next_item)
         yield out_lst
 
-
 def prepend_prefix_tensors(obs_prefix_tensor, action_prefix_tensor, itr_ds):
     out_d = {}
     for d in itr_ds:
@@ -401,7 +308,6 @@ def prepend_prefix_tensors(obs_prefix_tensor, action_prefix_tensor, itr_ds):
             out_d["Action"] = torch.cat((action_prefix_tensor, d["Action"]), dim=1)
     return out_d
 
-
 def stack_batch(batch):
     # do I want each batch to separately be able to add actions? Seems unnecessary for now
     grouped_obs = torch.stack([d["Observation"] for d in batch])
@@ -409,7 +315,6 @@ def stack_batch(batch):
         grouped_actions = torch.stack([d["Action"] for d in batch])
         return {"Observation": grouped_obs, "Action": grouped_actions}
     return {"Observation": grouped_obs}
-
 
 def stack_buffer(batch):
     # do I want each batch to separately be able to add actions? Seems unnecessary for now
@@ -430,11 +335,9 @@ def stack_buffer(batch):
         )
     }
 
-
 def take(num_batches, itr_ds):
     for _ in range(num_batches):
         yield next(itr_ds)
-
 
 def repeat_every_n_points(n, itr):
     first_n_vals = [next(itr) for _ in range(n)]
@@ -443,18 +346,15 @@ def repeat_every_n_points(n, itr):
         yield first_n_vals[i]
         i = (i + 1) % n
 
-
 def debug(itr):
     next_val = next(itr)
     print(next_val)
     yield next_val
 
-
 def debug_shape(itr):
     next_val = next(itr)
     print(next_val.shape)
     yield next_val
-
 
 def repeat_point_n_times(n, itr):
     while 1:

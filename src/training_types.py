@@ -14,7 +14,6 @@ PredictionConfig = NamedTuple(
     "PredictionConfig",
     [
         ("filter_best_actions", Optional[int]),
-        ("train_A_given_AO", bool),
         ("train_O_given_A", bool),
         ("train_O_given_prev_O", bool),
     ],

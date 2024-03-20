@@ -32,7 +32,6 @@ test_config = InitialConfig(
     ),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None,
-        train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),

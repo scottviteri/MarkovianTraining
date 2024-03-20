@@ -439,8 +439,7 @@ def update_weights(
     ):
         if prediction_cfg.train_O_given_prev_O:
             assert (
-                not prediction_cfg.train_A_given_AO
-                and not prediction_cfg.train_O_given_A
+                not prediction_cfg.train_O_given_A
             )
             loss_tensor = get_neg_log_probs(cfg, torch.cat([prev_obs, obs], dim=1))
             aggregate_loss = loss_tensor[:, -cfg.tok_p_pure_obs :].mean()

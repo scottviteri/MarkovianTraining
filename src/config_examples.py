@@ -26,7 +26,6 @@ g2 = InitialConfig(
     ),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None,
-        train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
@@ -69,7 +68,6 @@ g2_ar = InitialConfig(
     inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None,
-        train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
@@ -106,7 +104,6 @@ g2_ei = InitialConfig(
     inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None,
-        train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
@@ -144,7 +141,6 @@ g2_p2 = InitialConfig(
     inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None,
-        train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
@@ -181,7 +177,6 @@ gj = InitialConfig(
     inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None,
-        train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
@@ -218,7 +213,6 @@ lma = InitialConfig(
     inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None,
-        train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
@@ -255,7 +249,6 @@ mst = InitialConfig(
     inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None,
-        train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),
@@ -292,7 +285,6 @@ phi2 = InitialConfig(
     inference_cfg=InferenceConfig(num_return_sequences=1),
     prediction_cfg=PredictionConfig(
         filter_best_actions=None,
-        train_A_given_AO=False,
         train_O_given_A=True,
         train_O_given_prev_O=False,
     ),

@@ -422,8 +422,6 @@ def create_run_name(cfg: Config) -> str:
         run_name += f"AR_"
     if prediction_cfg.train_O_given_A:
         run_name += f"M_"
-    if prediction_cfg.train_A_given_AO:
-        run_name += f"EI_"
     if cfg.dataset.peek_every is not None:
         run_name += f"pe{cfg.dataset.peek_every}_"
 
