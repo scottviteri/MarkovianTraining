@@ -43,8 +43,8 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         peft_config = LoraConfig(
             task_type="CAUSAL_LM",
             inference_mode=False,
-            r=4,
-            lora_alpha=8,
+            r=8,
+            lora_alpha=16,
             lora_dropout=0.1,
             target_modules=mlp_modules,
         )
@@ -53,9 +53,9 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         self.qhead.print_trainable_parameters()
         ## Grouping q_head and q_head_block together for easier parameter management
         last_layer = (
-            self.transformer.model.layers[-1]
-            if "mistral" in model_name_or_path
-            else self.transformer.transformer.h[-1]
+            self.transformer.transformer.h[-1]
+            if "gpt2" in model_name_or_path
+            else self.transformer.model.layers[-1]
         )
         self.v_head_group = nn.ModuleDict(
             {

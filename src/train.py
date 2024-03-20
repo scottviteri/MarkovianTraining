@@ -400,6 +400,26 @@ def get_neg_log_probs(cfg, input_sequence):
 def get_masked_mean(arr, mask):
     return (arr * mask).sum() / mask.sum()
 
+def log_manual_observations(cfg, obs):
+    repeat = "210 210 210 210 210 210 210 210 210 210 210 210 210 210 210"
+    in_order = "Let's evaluate 23 + 14 + 81 + 92. First, add 23 and 14 to get 37. Then, add 37 and 81 to get 118. Finally, add 118 and 92 to arrive at the final result 210"
+    in_pieces = "Let's break down the expression 23 + 14 + 81 + 92 by evaluating the tens place first: 20 + 10 + 80 + 90 = 200. Now, let's add the ones place: 3 + 4 + 1 + 2 = 10. Combining the results from the tens and ones places gives us the final answer 210"
+    in_order_corrupted = "Let's evaluate 23 + 14 + 81 + 92. First, add 23 and 14 to get 27. Then, add 27 and 81 to get 108. Finally, add 108 and 92 to arrive at the final result 210"
+    direct_question = "The solution to 23 + 14 + 81 + 92 is 210"
+    random_test = "I am a flying banana 210"
+    input_strings = [
+        repeat,
+        in_order,
+        in_pieces,
+        in_order_corrupted,
+        direct_question,
+        random_test,
+    ]
+
+    obs_loss = predict_observation(
+        cfg, action, obs, add_q_head=False, per_batch=True
+    )
+
 def update_weights(
     cfg,
     batch_index,
@@ -483,6 +503,7 @@ def update_weights(
                 },
                 step=batch_index,
             )
+        
         
         if do_weight_update:
             cfg.optimizer.zero_grad()
