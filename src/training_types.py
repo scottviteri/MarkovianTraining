@@ -11,6 +11,28 @@ from enum import Enum
 
 
 @dataclass
+class QADatapt:
+    question: str
+    explanation: Optional[str]
+    answer: str
+
+
+@dataclass
+class Datapt:
+    action: Optional[torch.tensor]
+    obs: torch.tensor
+    is_first: bool
+
+
+@dataclass
+class ContextSizes:
+    first_action_size: int
+    first_obs_size: int
+    action_size: int
+    obs_size: int
+
+
+@dataclass
 class TrainerState:
     action: Optional[torch.tensor]
     obs: Optional[torch.tensor]

@@ -293,10 +293,10 @@ def get_prefixes(
     return (
         (tokens_per_pure_action, tokens_per_pure_obs),
         PrefixTensors(
-            first_action_prefix_tensor,
-            first_obs_prefix_tensor,
-            action_prefix_tensor,
-            obs_prefix_tensor,
+            first_action_prefix_tensor=first_action_prefix_tensor,
+            first_obs_prefix_tensor=first_obs_prefix_tensor,
+            action_prefix_tensor=action_prefix_tensor,
+            obs_prefix_tensor=obs_prefix_tensor,
         ),
     )
 

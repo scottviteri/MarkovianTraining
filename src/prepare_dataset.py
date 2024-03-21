@@ -95,25 +95,17 @@ def init_arithmetic_dataset(
 
     def to_qa_traj_itr(itr):
         while 1:
-            d = next(itr)
-            if "Explanation" in d:
-                yield iter(
-                    [
-                        {"Observation": d["Question"], "First": True},
-                        {
-                            "Action": d["Explanation"],
-                            "Observation": d["Answer"],
-                            "First": False,
-                        },
-                    ]
-                )
-            else:
-                yield iter(
-                    [
-                        {"Observation": d["Question"], "First": True},
-                        {"Observation": d["Answer"], "First": False},
-                    ]
-                )
+            qa = next(itr)
+            yield iter(
+                [
+                    Datapt(
+                        action="I will restate and work through the following question step by step, decomposing problems into subproblems as needed.",
+                        obs=qa.question,
+                        is_first=True,
+                    ),
+                    Datapt(action=qa.explanation, obs=qa.answer, is_first=False),
+                ]
+            )
 
     def tokenize_and_pad(
         device,
@@ -121,13 +113,13 @@ def init_arithmetic_dataset(
         prefix_tensors,
         tok_p_pure_action,
         tok_p_pure_obs,
-        d,
+        datapt,
     ):
         # indexing here because mistral tokenizer adds two tokens to the beginning!
         # but it shouldn't if add_special_tokens=False ...
-        obs_tok = tokenizer(
-            d["Observation"], add_special_tokens=False, return_tensors="pt"
-        )["input_ids"][0].to(
+        obs_tok = tokenizer(datapt.obs, add_special_tokens=False, return_tensors="pt")[
+            "input_ids"
+        ][0].to(
             device
         )  # [2:]
         assert len(obs_tok) < tok_p_pure_obs
@@ -137,9 +129,9 @@ def init_arithmetic_dataset(
             dtype=torch.int64,
             device=device,
         )
-        if "Action" in d:
+        if datapt.action:
             action_tok = tokenizer(
-                d["Action"], add_special_tokens=False, return_tensors="pt"
+                datapt.action, add_special_tokens=False, return_tensors="pt"
             )["input_ids"][0].to(device)
             assert len(action_tok) < tok_p_pure_action
             action_pad_tok = torch.full(
@@ -148,22 +140,23 @@ def init_arithmetic_dataset(
                 dtype=torch.int64,
                 device=device,
             )
-            return {
-                "Observation": torch.cat(
+            return Datapt(
+                obs=torch.cat(
                     [prefix_tensors.obs_prefix_tensor[0], obs_tok, obs_pad_tok]
                 ),
-                "Action": torch.cat(
+                action=torch.cat(
                     [prefix_tensors.action_prefix_tensor[0], action_tok, action_pad_tok]
                 ),
-                "First": d["First"],
-            }
+                is_first=datapt.is_first,
+            )
         else:
-            return {
-                "Observation": torch.cat(
+            return Datapt(
+                obs=torch.cat(
                     [prefix_tensors.obs_prefix_tensor[0], obs_tok, obs_pad_tok]
                 ),
-                "First": d["First"],
-            }
+                action=None,
+                is_first=datapt.is_first,
+            )
 
     def traj_itr_to_batch_lst(batch_size, traj_itr):
         batch_itrs = [next(traj_itr) for _ in range(batch_size)]
@@ -294,27 +287,25 @@ def finalize_dataset(dict_ds, init_cfg):
         We will use an action iff it remains unfiltered through prepare_dataset.
         """
         i = 0
-        for d in dict_itr:
-            if "Action" in d:
-                if i % n == 0:
-                    yield d
-                else:
-                    yield {"Observation": d["Observation"], "First": d["First"]}
-                i += 1
+        for datapt in dict_itr:
+            if i % n != 0:
+                yield Datapt(action=None, obs=datapt.obs, is_first=datapt.is_first)
             else:
-                yield {"Observation": d["Observation"], "First": d["First"]}
+                yield datapt
+            i += 1
 
     def stack_batch(batch):
         # do I want each batch to separately be able to add actions? Seems unnecessary for now
-        grouped_obs = torch.stack([d["Observation"] for d in batch])
-        if "Action" in batch[0]:
-            grouped_actions = torch.stack([d["Action"] for d in batch])
-            return {
-                "Observation": grouped_obs,
-                "Action": grouped_actions,
-                "First": batch[0]["First"],
-            }
-        return {"Observation": grouped_obs, "First": batch[0]["First"]}
+        grouped_obs = torch.stack([d.obs for d in batch])
+        return Datapt(
+            action=(
+                torch.stack([d.action for d in batch])
+                if batch[0].action is not None
+                else None
+            ),
+            obs=grouped_obs,
+            is_first=batch[0].is_first,
+        )
 
     def group_pairs(itr):
         first = next(itr)
@@ -353,7 +344,7 @@ def arithmetic_generator(num_terms, num_digits, operations, probs):
     assert len(probs) == len(operations), "len(Operations) != len(probs)"
 
     while 1:
-        question = "Question: "
+        question = ""
         total = 0.0
         nums = torch.randint(0, 10**num_digits - 1, (num_terms,))
         ops_rand = np.random.choice(operations, num_terms - 1, p=probs)
@@ -369,8 +360,8 @@ def arithmetic_generator(num_terms, num_digits, operations, probs):
                 question += f"{op_rand} {num} "
         question = question[:-1] + "."
 
-        answer = f"Answer: {total}"
-        yield {"Question": question, "Answer": answer}
+        answer = f"{total}"
+        yield QADatapt(question=question, explanation=None, answer=answer)
 
 
 def debug(itr):

@@ -165,7 +165,7 @@ def log_print_oa(
     is_first,
     aggregate_loss,
 ):
-    if not is_first and batch_index % cfg.interval_print == 0 and dist.get_rank() == 0:
+    if batch_index % cfg.interval_print == 0 and dist.get_rank() == 0:
         with open(cfg.path_2_log, "a") as f:
             multi_print(f"Batch Index: {batch_index}", f)
             if aggregate_loss:
@@ -173,14 +173,14 @@ def log_print_oa(
             multi_print(f"Training predictor mode: {cfg.training_predictor_mode}", f)
             multi_print(f"Is First: {is_first}", f)
             multi_print(
-                f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0]))}",
-                f,
-            )
-            multi_print(
-                f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
+                f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0])) if prev_action is not None else None}",
                 f,
             )
             if not is_first:
+                multi_print(
+                    f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
+                    f,
+                )
                 if is_guidance_action:
                     multi_print(
                         f"Guidance Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
@@ -589,9 +589,7 @@ def trainer(cfg):
     def update(datapt):
         nonlocal state
         # prev_datapt, datapt = datapt_pair
-        is_first = "First" in datapt and datapt["First"]
-        # prev_obs, obs = prev_datapt["Observation"], datapt["Observation"]
-        obs = datapt["Observation"]
+        # prev_obs, obs = prev_datapt.obs, datapt.obs
         if state.batch_index > 0:
             pred_len, inf_len = (
                 cfg.trainer_cfg.prediction_training_length,
@@ -610,23 +608,22 @@ def trainer(cfg):
             #    #    param.requires_grad = "q_head" in name
             #    cfg.training_predictor_mode = False
 
-        if is_first:
-            prev_action = cfg.prefix_tensors.first_action_prefix_tensor
+        if datapt.is_first:
             # get_default_action(cfg)
             log_print_oa(
-                cfg,
-                state.batch_index,
-                prev_action,
-                state.obs,
-                None,
-                obs,
-                "Action" in datapt,
-                is_first,
-                None,
+                cfg=cfg,
+                batch_index=state.batch_index,
+                prev_action=None,
+                prev_obs=state.obs,
+                action=datapt.action,
+                obs=datapt.obs,
+                is_guidance_action=datapt.action is not None,
+                is_first=datapt.is_first,
+                aggregate_loss=state.aggregate_loss,
             )
             state = TrainerState(
-                action=cfg.prefix_tensors.action_prefix_tensor,
-                obs=obs,
+                action=datapt.action,
+                obs=datapt.obs,
                 batch_index=state.batch_index,
                 aggregate_loss=None,
             )
@@ -634,14 +631,16 @@ def trainer(cfg):
             return
         else:
             # now can assume that prev_datapt contains the question and datapt contains the Answer
-            if "Action" in datapt:
-                action = datapt["Action"]
+            if datapt.action:
+                action = datapt.action
             elif cfg.prediction_cfg.train_O_given_prev_O:
-                action = state.action
+                action = state.action  # why?
             else:
-                action = sample(cfg, state.action, state.obs, obs, use_q_head=True)
+                action = sample(
+                    cfg, state.action, state.obs, datapt.obs, use_q_head=True
+                )
                 default_action = sample(
-                    cfg, state.action, state.obs, obs, use_q_head=False
+                    cfg, state.action, state.obs, datapt.obs, use_q_head=False
                 )
             # action : [batch * beam, tok_p_action]
 
@@ -652,7 +651,7 @@ def trainer(cfg):
                 state.obs,
                 action,
                 default_action,
-                obs,
+                datapt.obs,
                 do_weight_update=not isinstance(cfg.debug, NoWeightUpdates),
             )
 
@@ -667,7 +666,7 @@ def trainer(cfg):
                     state.action,
                     state.obs,
                     perturbed_action,
-                    obs,
+                    datapt.obs,
                     do_weight_update=False,
                 )
                 perturbed_loss = losses0[-1]
@@ -681,15 +680,15 @@ def trainer(cfg):
                 state.action,
                 state.obs,
                 action,
-                obs,
-                "Action" in datapt,
-                is_first,
+                datapt.obs,
+                datapt.action is not None,
+                datapt.is_first,
                 aggregate_loss,
                 losses,
             )
             state = TrainerState(
                 action=action,
-                obs=obs,
+                obs=datapt.obs,
                 batch_index=state.batch_index + 1,
                 aggregate_loss=aggregate_loss,
             )
