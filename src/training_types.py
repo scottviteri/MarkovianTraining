@@ -124,7 +124,7 @@ class InitialConfig:
     inference_cfg: InferenceConfig
     prediction_cfg: PredictionConfig
     trainer_cfg: TrainerConfig
-    training_ctxt_size: Optional[int]
+    ctxt_sizes: ContextSizes
     dataset: InitDatasetType
     perturbation_cfg: Optional[PerturbationConfig]
     debug: Optional[DebugType]
@@ -156,18 +156,14 @@ class Config:
     load_model: bool
     do_lora: bool
     num_beams: int
-    training_ctxt_size: int
     device: str
     path_2_log: str
     traj_path: str
     path_2_model: str
     path_2_tokenizer: str
-    tok_p_action: int
-    tok_p_obs: int
-    tok_p_pure_action: int
-    tok_p_pure_obs: int
     prefix_tensors: PrefixTensors
-    ctxt_size: Optional[int]
+    pure_ctxt_sizes: ContextSizes
+    ctxt_sizes: ContextSizes
     dataset: DatasetType
     inference_cfg: InferenceConfig
     prediction_cfg: PredictionConfig

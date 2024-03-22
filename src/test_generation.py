@@ -20,7 +20,7 @@ test_config = InitialConfig(
     load_model=False,
     do_lora=True,
     num_beams=3,
-    training_ctxt_size=200,
+    ctxt_sizes = Datapt(first_action_size=50, first_obs_size=80, action_size=100, obs_size=20)
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=6,
@@ -150,16 +150,16 @@ def test_num_return_sequences():
         output_scores=True,
         do_sample=True,
         temperature=1.0,
-        min_new_tokens=cfg.tok_p_pure_action,
-        max_new_tokens=cfg.tok_p_pure_action,
+        min_new_tokens=cfg.pure_ctxt_sizes.action_size,
+        max_new_tokens=cfg.pure_ctxt_sizes.action_size,
         pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
         num_return_sequences=cfg.inference_cfg.num_return_sequences,
-    )[:, -cfg.tok_p_pure_action :]
+    )[:, -cfg.pure_ctxt_sizes.action_size :]
 
     # Check if action_candidates have the expected shape
     expected_shape = (
         cfg.batch_size * cfg.inference_cfg.num_return_sequences,
-        cfg.tok_p_pure_action,
+        cfg.pure_ctxt_sizes.action_size,
     )
     assert (
         action_candidates.shape == expected_shape

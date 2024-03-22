@@ -56,7 +56,9 @@ class BeamSearchScorer(transformers.BeamScorer):
         next_beam_scores = []
         next_beam_tokens = []
         next_beam_indices = []
-        actions = input_ids[:, self.cfg.tok_p_action + self.cfg.tok_p_obs :]
+        actions = input_ids[
+            :, self.cfg.ctxt_sizes.action_size + self.cfg.ctxt_sizes.obs_size :
+        ]
         next_inds = copy.deepcopy(next_indices)
         for i in range(next_inds.shape[0]):
             next_inds[i] += self.cfg.num_beams * i
@@ -78,7 +80,10 @@ class BeamSearchScorer(transformers.BeamScorer):
             next_beam_scores.append(top_scores)
             next_beam_tokens.append(next_tokens[begin:end][top_indices])
             next_beam_indices.append(next_inds[begin:end][top_indices])
-            if input_ids.shape[-1] == 2 * self.cfg.tok_p_action + self.cfg.tok_p_obs:
+            if (
+                input_ids.shape[-1]
+                == 2 * self.cfg.ctxt_sizes.action_size + self.cfg.ctxt_sizes.obs_size
+            ):
                 self._is_done = True
             # print(f"Current generation index: {action.shape[-1]}")
 

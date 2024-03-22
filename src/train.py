@@ -68,13 +68,13 @@ def save_weights(cfg, batch_index):
 #        .repeat(cfg.batch_size, 1)
 #        .to(cfg.device)
 #    )
-#    assert initial_helpful_msg.shape[-1] < cfg.tok_p_pure_obs
+#    assert initial_helpful_msg.shape[-1] < cfg.pure_ctxt_sizes.obs_size
 #    prev_action = torch.cat(
 #        (
 #            cfg.prefix_tensors.action_prefix_tensor,
 #            initial_helpful_msg,
 #            torch.full(
-#                (cfg.batch_size, cfg.tok_p_pure_action - initial_helpful_msg.shape[-1]),
+#                (cfg.batch_size, cfg.pure_ctxt_sizes.action_size - initial_helpful_msg.shape[-1]),
 #                fill_value=cfg.causal_lm_tokenizer.pad_token_id,
 #                dtype=torch.int64,
 #                device=cfg.device,
@@ -287,8 +287,8 @@ def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
             ),
         ):
             generation_config = transformers.GenerationConfig(
-                max_new_tokens=cfg.tok_p_pure_action,
-                min_new_tokens=cfg.tok_p_pure_action,
+                max_new_tokens=cfg.pure_ctxt_sizes.action_size,
+                min_new_tokens=cfg.pure_ctxt_sizes.action_size,
                 do_sample=False,
                 # num_beams=cfg.num_beams,
                 bad_words_ids=[
@@ -347,7 +347,7 @@ def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
             # action_candidates = cfg.causal_lm.generate(
             #   inputs=input_ids,
             #   generation_config=generation_config,
-            # )[:, -cfg.tok_p_action :]
+            # )[:, -cfg.cfg.ctxt_sizes.action_size :]
             ## else:
             # beam_scorer = transformers.BeamSearchScorer(
             #    # cfg=cfg,
@@ -373,7 +373,7 @@ def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
                 output_scores=generation_config.output_scores,
                 return_dict_in_generate=generation_config.return_dict_in_generate,
                 synced_gpus=False,
-            )[:, -cfg.tok_p_action :]
+            )[:, -cfg.ctxt_sizes.action_size :]
             return action_candidates
 
 
@@ -422,8 +422,13 @@ def log_manual_observations(cfg, obs):
         direct_question,
         random_test,
     ]
-
-    obs_loss = predict_observation(cfg, action, obs, add_q_head=False, per_batch=True)
+    obs_losses = []
+    for action in input_strings:
+        obs_loss = predict_observation(
+            cfg, action, obs, add_q_head=False, per_batch=True
+        )
+        obs_losses.append(obs_loss)
+    print(obs_losses)
 
 
 def update_weights(
@@ -446,7 +451,7 @@ def update_weights(
         if prediction_cfg.train_O_given_prev_O:
             assert not prediction_cfg.train_O_given_A
             loss_tensor = get_neg_log_probs(cfg, torch.cat([prev_obs, obs], dim=1))
-            aggregate_loss = loss_tensor[:, -cfg.tok_p_pure_obs :].mean()
+            aggregate_loss = loss_tensor[:, -cfg.pure_ctxt_sizes.obs_size :].mean()
             return aggregate_loss, None, []
 
         prev_action = prev_action.repeat_interleave(
@@ -558,7 +563,7 @@ def log_and_save(
 def perturb_action(action, cfg):
     offset = cfg.prefix_tensors.action_prefix_tensor.shape[-1]
     # PERTURBATION 1
-    # Given n <= cfg.tok_p_pure_action, change token through randomization
+    # Given n <= cfg.pure_ctxt_sizes.action_size, change token through randomization
     frac_randomize = cfg.perturbation_cfg.frac_of_tokens_to_randomize
     assert 1.0 >= frac_randomize >= 0.0, f"frac_randomize is {frac_randomize}"
     perturb_target_inds = torch.randint(
@@ -573,7 +578,7 @@ def perturb_action(action, cfg):
     )
 
     # PERTURBATION 2
-    # Given a fraction of cfg.tok_p_pure_action, replace with spaces/padding
+    # Given a fraction of cfg.pure_ctxt_sizes.action_size, replace with spaces/padding
     frac_spaces = cfg.perturbation_cfg.frac_of_tokens_to_pad
     assert 1.0 >= frac_spaces >= 0.0, f"frac_randomize is {frac_spaces}"
     token_id_space = cfg.causal_lm_tokenizer.encode(" ")[-1]
@@ -644,7 +649,7 @@ def trainer(cfg):
                 default_action = sample(
                     cfg, state.action, state.obs, datapt.obs, use_q_head=False
                 )
-            # action : [batch * beam, tok_p_action]
+            # action : [batch * beam, cfg.ctxt_sizes.action_size]
 
             aggregate_loss, losses = update_weights(
                 cfg,
