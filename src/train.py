@@ -52,7 +52,7 @@ def save_weights(cfg, batch_index):
     if (
         batch_index > 0
         and batch_index % cfg.interval_save_weights == 0
-        and dist.get_rank() == 0
+        and (not cfg.use_torchrun or dist.get_rank() == 0)
     ):
         print(f"Saving trained_{cfg.model_name} \n\n")
         cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
@@ -87,7 +87,7 @@ def save_weights(cfg, batch_index):
 
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
-    if cfg.wandb and dist.get_rank() == 0:
+    if cfg.wandb and (not cfg.use_torchrun or dist.get_rank() == 0):
         if cfg.prediction_cfg.train_O_given_prev_O:
             observation_loss = losses[0]
             wandb.log(
@@ -127,7 +127,9 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
 
 def log_print_losses(cfg, batch_index, aggregate_loss, losses):
 
-    if batch_index % cfg.interval_print == 0 and dist.get_rank() == 0:
+    if batch_index % cfg.interval_print == 0 and (
+        not cfg.use_torchrun or dist.get_rank() == 0
+    ):
         if cfg.prediction_cfg.train_O_given_prev_O:
             observation_loss = losses[0]
             with open(cfg.path_2_log, "a") as f:
@@ -165,7 +167,9 @@ def log_print_oa(
     is_first,
     aggregate_loss,
 ):
-    if batch_index % cfg.interval_print == 0 and dist.get_rank() == 0:
+    if batch_index % cfg.interval_print == 0 and (
+        not cfg.use_torchrun or dist.get_rank() == 0
+    ):
         with open(cfg.path_2_log, "a") as f:
             multi_print(f"Batch Index: {batch_index}", f)
             if aggregate_loss:
@@ -220,9 +224,7 @@ def append_traj_to_storage(traj_path, traj_data):
 
 
 def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses):
-    """"""
-
-    if dist.get_rank() == 0:
+    if not cfg.use_torchrun or dist.get_rank() == 0:
         if batch_index == 0:
             # Adding a UID to the file name to avoid overwriting
             cfg.traj_path += f"_{datetime.now(timezone.utc).timestamp():0.0f}.json"
@@ -714,6 +716,10 @@ def train_via_update(cfg):
 
 def train_model(init_cfg):
     cfg = extend_initial_config(init_cfg)
+    if cfg.use_torchrun:
+        dist.init_process_group(backend="nccl")
+        torch.cuda.set_device(dist.get_rank())
+        print("rank", dist.get_rank())
     # cfg.causal_lm = DDP(
     #    cfg.causal_lm, device_ids=[dist.get_rank()]  # , find_unused_parameters=True
     # )
@@ -722,7 +728,7 @@ def train_model(init_cfg):
             print("")
     with open(cfg.path_2_log, "a") as f:
         f.write("")
-    if cfg.wandb and dist.get_rank() == 0:
+    if cfg.wandb and (not cfg.use_torchrun or dist.get_rank() == 0):
         wandb.init(
             project="collaborative-training-many-per-context-window",
             name=create_run_name(cfg),
@@ -746,13 +752,10 @@ def train_model(init_cfg):
             f"Unsupported optimizer: {cfg.optimizer}. Please choose 'sgd', 'adam', or 'rmsprop'."
         )
     train_via_update(cfg)
-    if cfg.wandb and dist.get_rank() == 0:
+    if cfg.wandb and (not cfg.use_torchrun or dist.get_rank() == 0):
         wandb.finish()
 
 
 if __name__ == "__main__":
-    dist.init_process_group(backend="nccl")
-    torch.cuda.set_device(dist.get_rank())
-    print("rank", dist.get_rank())
     for init_cfg in configs:
         train_model(init_cfg)

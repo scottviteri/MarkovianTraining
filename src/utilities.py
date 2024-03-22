@@ -189,6 +189,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         obs_to_action_ratio=init_cfg.obs_to_action_ratio,
         interval_save_weights=init_cfg.interval_save_weights,
         interval_print=init_cfg.interval_print,
+        use_torchrun=init_cfg.use_torchrun,
         wandb=init_cfg.wandb,
         load_model=init_cfg.load_model,
         do_lora=init_cfg.do_lora,

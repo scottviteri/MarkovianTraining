@@ -116,6 +116,7 @@ class InitialConfig:
     obs_to_action_ratio: float
     interval_save_weights: int
     interval_print: int
+    use_torchrun: bool
     wandb: bool
     load_model: bool
     do_lora: bool
@@ -150,6 +151,7 @@ class Config:
     obs_to_action_ratio: float
     interval_save_weights: int
     interval_print: int
+    use_torchrun: bool
     wandb: bool
     load_model: bool
     do_lora: bool
