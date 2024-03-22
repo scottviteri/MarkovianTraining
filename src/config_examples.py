@@ -2,7 +2,6 @@ import os
 
 from src.training_types import *
 
-
 g2 = InitialConfig(
     model_name="distilgpt2",
     lr=1e-6,
@@ -16,7 +15,9 @@ g2 = InitialConfig(
     load_model=False,
     do_lora=True,
     num_beams=1,
-    training_ctxt_size=200,
+    ctxt_sizes=ContextSizes(
+        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
+    ),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=6,
@@ -56,7 +57,9 @@ g2_ar = InitialConfig(
     load_model=False,
     do_lora=False,
     num_beams=1,
-    training_ctxt_size=150,
+    ctxt_sizes=ContextSizes(
+        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
+    ),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=2,
@@ -91,7 +94,9 @@ g2_ei = InitialConfig(
     load_model=False,
     do_lora=False,
     num_beams=1,
-    training_ctxt_size=150,
+    ctxt_sizes=ContextSizes(
+        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
+    ),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=2,
@@ -127,7 +132,9 @@ g2_p2 = InitialConfig(
     load_model=False,
     do_lora=False,
     num_beams=1,
-    training_ctxt_size=150,
+    ctxt_sizes=ContextSizes(
+        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
+    ),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=2,
@@ -162,7 +169,9 @@ gj = InitialConfig(
     load_model=False,
     do_lora=False,
     num_beams=1,
-    training_ctxt_size=150,
+    ctxt_sizes=ContextSizes(
+        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
+    ),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=2,
@@ -197,7 +206,9 @@ lma = InitialConfig(
     load_model=False,
     do_lora=False,
     num_beams=1,
-    training_ctxt_size=200,
+    ctxt_sizes=ContextSizes(
+        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
+    ),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=2,
@@ -232,7 +243,9 @@ mst = InitialConfig(
     load_model=False,
     do_lora=False,
     num_beams=1,
-    training_ctxt_size=250,
+    ctxt_sizes=ContextSizes(
+        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
+    ),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=3,
@@ -267,7 +280,9 @@ phi2 = InitialConfig(
     load_model=False,
     do_lora=False,
     num_beams=1,
-    training_ctxt_size=250,
+    ctxt_sizes=ContextSizes(
+        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
+    ),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=3,

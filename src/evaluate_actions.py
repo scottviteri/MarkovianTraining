@@ -84,7 +84,7 @@ class ActionEvaluator:
         action_out = copy.deepcopy(action)
         offset = cfg.prefix_tensors.action_prefix_tensor.shape[-1]
         # PERTURBATION 1
-        # Given n <= cfg.tok_p_pure_action, change token through randomization
+        # Given n <= cfg.pure_ctxt_sizes.action_size, change token through randomization
         frac_randomize = cfg.perturbation_cfg.frac_of_tokens_to_randomize
         assert 1.0 >= frac_randomize >= 0.0, f"frac_randomize is {frac_randomize}"
         perturb_target_inds = torch.randint(
@@ -99,7 +99,7 @@ class ActionEvaluator:
         )
 
         # PERTURBATION 2
-        # Given a fraction of cfg.tok_p_pure_action, replace with spaces/padding
+        # Given a fraction of cfg.pure_ctxt_sizes.action_size, replace with spaces/padding
         frac_spaces = cfg.perturbation_cfg.frac_of_tokens_to_pad
         assert 1.0 >= frac_spaces >= 0.0, f"frac_randomize is {frac_spaces}"
         token_id_space = cfg.causal_lm_tokenizer.encode(" ")[-1]

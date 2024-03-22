@@ -132,7 +132,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
 
     assert init_cfg.num_beams == 1, "Only supporting num_beams = 1 currently"
 
-    causal_lm, causal_lm_tokenizer, ctxt_size = get_model(
+    causal_lm, causal_lm_tokenizer = get_model(
         device,
         init_cfg.load_model,
         init_cfg.model_name,
@@ -153,29 +153,14 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     # for param in predictor_lm.parameters():
     #    param.requires_grad = False
 
-    training_ctxt_size = (
-        ctxt_size
-        if init_cfg.training_ctxt_size is None
-        else init_cfg.training_ctxt_size
+    pure_ctxt_sizes, prefix_tensors = get_prefixes(
+        causal_lm_tokenizer, init_cfg.batch_size, device, init_cfg.ctxt_sizes
     )
-    tok_p_action = int(training_ctxt_size / (init_cfg.obs_to_action_ratio + 2))
-    tok_p_obs = int(tok_p_action * init_cfg.obs_to_action_ratio)
-
-    tok_per_pure, prefix_tensors = get_prefixes(
-        causal_lm_tokenizer,
-        init_cfg.batch_size,
-        device,
-        tok_p_action,
-        tok_p_obs,
-    )
-    tok_p_pure_action, tok_p_pure_obs = tok_per_pure
-
     dataset = prepare_dataset(
         init_cfg,
         causal_lm_tokenizer,
         device,
-        tok_p_pure_action,
-        tok_p_pure_obs,
+        pure_ctxt_sizes,
         prefix_tensors,
     )
 
@@ -193,7 +178,6 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         load_model=init_cfg.load_model,
         do_lora=init_cfg.do_lora,
         num_beams=init_cfg.num_beams,
-        training_ctxt_size=init_cfg.training_ctxt_size,
         device=device,
         dataset=DatasetType(
             task=init_cfg.dataset.task,
@@ -204,12 +188,9 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         traj_path=traj_path,
         path_2_model=path_2_model,
         path_2_tokenizer=path_2_tokenizer,
-        tok_p_action=tok_p_action,
-        tok_p_obs=tok_p_obs,
-        tok_p_pure_action=tok_p_pure_action,
-        tok_p_pure_obs=tok_p_pure_obs,
+        pure_ctxt_sizes=pure_ctxt_sizes,
+        ctxt_sizes=init_cfg.ctxt_sizes,
         prefix_tensors=prefix_tensors,
-        ctxt_size=ctxt_size,
         causal_lm=causal_lm,  # predictor_lm,
         causal_lm_tokenizer=causal_lm_tokenizer,
         inference_cfg=init_cfg.inference_cfg,
@@ -266,8 +247,7 @@ def get_prefixes(
     tokenizer: PreTrainedTokenizer,
     batch_size: int,
     device: torch.device,
-    tok_p_action: int,
-    tok_p_obs: int,
+    ctxt_sizes: ContextSizes,
 ):
     def tokenize_and_repeat(prefix_string):
         prefix_tokens = tokenizer.encode(prefix_string, add_special_tokens=False)
@@ -281,17 +261,28 @@ def get_prefixes(
     first_action_prefix_tensor = tokenize_and_repeat(
         "I will restate and work through the following question step by step, decomposing problems into subproblems as needed."
     )
+    tokens_per_pure_first_action = (
+        ctxt_sizes.first_action_size - first_action_prefix_tensor.shape[1]
+    )
 
     first_obs_prefix_tensor = tokenize_and_repeat("Question:")
+    tokens_per_pure_first_obs = (
+        ctxt_sizes.first_obs_size - first_obs_prefix_tensor.shape[1]
+    )
 
     action_prefix_tensor = tokenize_and_repeat("Reasoning:")
-    tokens_per_pure_action = tok_p_action - action_prefix_tensor.shape[1]
+    tokens_per_pure_action = ctxt_sizes.action_size - action_prefix_tensor.shape[1]
 
     obs_prefix_tensor = tokenize_and_repeat("Answer:")
-    tokens_per_pure_obs = tok_p_obs - obs_prefix_tensor.shape[1]
+    tokens_per_pure_obs = ctxt_sizes.obs_size - obs_prefix_tensor.shape[1]
 
     return (
-        (tokens_per_pure_action, tokens_per_pure_obs),
+        ContextSizes(
+            first_action_size=tokens_per_pure_first_action,
+            first_obs_size=tokens_per_pure_first_obs,
+            action_size=tokens_per_pure_action,
+            obs_size=tokens_per_pure_obs,
+        ),
         PrefixTensors(
             first_action_prefix_tensor=first_action_prefix_tensor,
             first_obs_prefix_tensor=first_obs_prefix_tensor,
@@ -301,7 +292,7 @@ def get_prefixes(
     )
 
 
-def get_ctxt_size(model_name, causal_lm):
+def get_ctxt_window_size(model_name, causal_lm):
     if model_name == "mistral":
         ctxt_size = causal_lm.config.sliding_window
     elif model_name == "tinystories":
@@ -358,7 +349,6 @@ def get_model(
             model_dict[model_name], padding_side=padding_side
         )
         causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
-        ctxt_size = get_ctxt_size(model_name, causal_lm)
         for name, param in causal_lm.transformer.named_parameters():
             param.requires_grad = False
         for name, param in causal_lm.qhead.named_parameters():
@@ -367,7 +357,7 @@ def get_model(
             param.requires_grad = True
 
     causal_lm.tokenizer = causal_lm_tokenizer
-    return causal_lm, causal_lm_tokenizer, ctxt_size
+    return causal_lm, causal_lm_tokenizer
 
 
 def get_mlp_modules(model):
@@ -422,8 +412,7 @@ def create_run_name(cfg: Config) -> str:
         run_name += "lra_"
     if cfg.num_beams:
         run_name += f"nbe{cfg.num_beams}_"
-    if cfg.training_ctxt_size:
-        run_name += f"ics{cfg.training_ctxt_size}_"
+    run_name += f"cs{cfg.ctxt_sizes}"
     return run_name
 
 
@@ -454,9 +443,9 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=Fal
             "batch seq_length vocab_size -> batch vocab_size seq_length",
         ),
         target=input_sequence[:, 1:],
-    )[:, -cfg.tok_p_pure_action :]
+    )[:, -cfg.pure_ctxt_sizes.action_size :]
     negentropy = -entropy_from_logits(action_logits).mean()
-    pure_action_attention_mask = attention_mask[:, -cfg.tok_p_pure_action :]
+    pure_action_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.action_size :]
     if per_batch:
         action_loss = (action_loss_tensor * pure_action_attention_mask).sum(
             dim=1
@@ -487,8 +476,8 @@ def predict_observation(cfg, action, obs, add_q_head, per_batch=False):
             "batch seq_length vocab_size -> batch vocab_size seq_length",
         ),
         target=mkv_input_sequence[:, 1:],
-    )[:, -cfg.tok_p_pure_obs :]
-    pure_obs_attention_mask = mkv_attention_mask[:, -cfg.tok_p_pure_obs :]
+    )[:, -cfg.pure_ctxt_sizes.obs_size :]
+    pure_obs_attention_mask = mkv_attention_mask[:, -cfg.pure_ctxt_sizes.obs_size :]
     if per_batch:
         obs_loss = (mkv_loss_tensor * pure_obs_attention_mask).sum(
             dim=1
@@ -499,9 +488,9 @@ def predict_observation(cfg, action, obs, add_q_head, per_batch=False):
         ).sum() / pure_obs_attention_mask.sum()
     return obs_loss
 
-    # obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.tok_p_pure_obs :]
+    # obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.pure_ctxt_sizes.obs_size :]
     # obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][
-    #    :, -cfg.tok_p_pure_obs :
+    #    :, -cfg.pure_ctxt_sizes.obs_size :
     # ].sum(dim=-1)
     # return obs_losses, obs_tensor
 

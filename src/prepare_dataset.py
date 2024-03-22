@@ -39,16 +39,14 @@ def prepare_dataset(
     init_cfg,
     causal_lm_tokenizer,
     device,
-    tok_p_pure_action,
-    tok_p_pure_obs,
+    pure_ctxt_sizes,
     prefix_tensors,
 ):
     task = init_cfg.dataset.task
     dict_ds = initialize_dataset(
         task,
         prefix_tensors,
-        tok_p_pure_action,
-        tok_p_pure_obs,
+        pure_ctxt_sizes,
         init_cfg,
         causal_lm_tokenizer,
         device,
@@ -60,8 +58,7 @@ def prepare_dataset(
 def initialize_dataset(
     task,
     prefix_tensors,
-    tok_p_pure_action,
-    tok_p_pure_obs,
+    pure_ctxt_sizes,
     init_cfg,
     causal_lm_tokenizer,
     device,
@@ -71,8 +68,7 @@ def initialize_dataset(
         return init_arithmetic_dataset(
             task,
             prefix_tensors,
-            tok_p_pure_action,
-            tok_p_pure_obs,
+            pure_ctxt_sizes,
             init_cfg,
             causal_lm_tokenizer,
             device,
@@ -86,8 +82,7 @@ def initialize_dataset(
 def init_arithmetic_dataset(
     task,
     prefix_tensors,
-    tok_p_pure_action,
-    tok_p_pure_obs,
+    pure_ctxt_sizes,
     init_cfg,
     causal_lm_tokenizer,
     device,
@@ -111,20 +106,25 @@ def init_arithmetic_dataset(
         device,
         tokenizer,
         prefix_tensors,
-        tok_p_pure_action,
-        tok_p_pure_obs,
+        pure_ctxt_sizes,
         datapt,
     ):
-        # indexing here because mistral tokenizer adds two tokens to the beginning!
-        # but it shouldn't if add_special_tokens=False ...
         obs_tok = tokenizer(datapt.obs, add_special_tokens=False, return_tensors="pt")[
             "input_ids"
-        ][0].to(
-            device
-        )  # [2:]
-        assert len(obs_tok) < tok_p_pure_obs
+        ][0].to(device)
+        tok_per_pure_action = (
+            pure_ctxt_sizes.first_action_size
+            if datapt.is_first
+            else pure_ctxt_sizes.action_size
+        )
+        tok_per_pure_obs = (
+            pure_ctxt_sizes.first_obs_size
+            if datapt.is_first
+            else pure_ctxt_sizes.obs_size
+        )
+        assert len(obs_tok) < tok_per_pure_obs
         obs_pad_tok = torch.full(
-            (tok_p_pure_obs - len(obs_tok),),
+            (tok_per_pure_obs - len(obs_tok),),
             tokenizer.pad_token_id,
             dtype=torch.int64,
             device=device,
@@ -133,9 +133,9 @@ def init_arithmetic_dataset(
             action_tok = tokenizer(
                 datapt.action, add_special_tokens=False, return_tensors="pt"
             )["input_ids"][0].to(device)
-            assert len(action_tok) < tok_p_pure_action
+            assert len(action_tok) < tok_per_pure_action
             action_pad_tok = torch.full(
-                (tok_p_pure_action - len(action_tok),),
+                (tok_per_pure_action - len(action_tok),),
                 tokenizer.pad_token_id,
                 dtype=torch.int64,
                 device=device,
@@ -178,8 +178,7 @@ def init_arithmetic_dataset(
                     device,
                     causal_lm_tokenizer,
                     prefix_tensors,
-                    tok_p_pure_action,
-                    tok_p_pure_obs,
+                    pure_ctxt_sizes,
                     b,
                 )
                 for b in batch_lst
@@ -205,13 +204,16 @@ def init_arithmetic_dataset(
 
 
 def init_wikipedia_dataset(init_cfg, causal_lm_tokenizer, device):
-    def get_pure_obs(batch_size, tok_per_pure_obs, itr_ds):
+    # I don't know if this works anymore
+    # only need is_first at the beginning
+    def gen_wiki_datapts(batch_size, tok_per_pure_obs, itr_ds):
         # batch in a way that keeps state so that you only add to a batch index
         #  with fewer than tok_per_pure_obs tokens
         batches = [
             torch.empty((1, 0), dtype=torch.int64, device=device)
             for _ in range(batch_size)
         ]
+        first = True
         while 1:
             for i in range(len(batches)):
                 while batches[i].shape[1] < tok_per_pure_obs:
@@ -223,8 +225,9 @@ def init_wikipedia_dataset(init_cfg, causal_lm_tokenizer, device):
             )
             for i in range(len(batches)):
                 batches[i] = batches[i][:, tok_per_pure_obs:]
-            yield out_tensor
-        return batches
+            yield Datapt(action=None, obs=out_tensor, is_first=first)
+            first = False
+        assert False, "Ran out of data"
 
     itr_ds = iter(
         load_dataset("wikipedia", "20220301.en", split="train", streaming=True)
@@ -235,10 +238,10 @@ def init_wikipedia_dataset(init_cfg, causal_lm_tokenizer, device):
         ),
         itr_ds,
     )
-    pure_obs = get_pure_obs(
-        init_cfg.batch_size, init_cfg.tok_p_pure_obs, device, ds_tokenized
+    # use an underestimate of the total number of allowed tokens
+    return gen_wiki_datapts(
+        init_cfg.batch_size, init_cfg.ctxt_sizes // 2, device, ds_tokenized
     )
-    return map(lambda x: {"Observation": x}, pure_obs)
 
 
 def apply_debug_transformations(dict_ds, init_cfg, causal_lm_tokenizer):
