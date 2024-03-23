@@ -233,9 +233,9 @@ def init_wikipedia_dataset(init_cfg, causal_lm_tokenizer, device):
         load_dataset("wikipedia", "20220301.en", split="train", streaming=True)
     )
     ds_tokenized = map(
-        lambda x: causal_lm_tokenizer(x["text"], return_tensors="pt")["input_ids"].to(
-            device
-        ),
+        lambda x: causal_lm_tokenizer(
+            x["text"], return_tensors="pt", add_special_tokens=False
+        )["input_ids"].to(device),
         itr_ds,
     )
     # use an underestimate of the total number of allowed tokens
