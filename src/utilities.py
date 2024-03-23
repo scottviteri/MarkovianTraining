@@ -17,8 +17,8 @@ from contextlib import nullcontext
 
 import torch.nn as nn
 
-from src.training_types import *
-from src.prepare_dataset import prepare_dataset
+from training_types import *
+from prepare_dataset import prepare_dataset
 
 from transformers import (
     PreTrainedModel,
@@ -124,7 +124,10 @@ def load_cfg_from_file(file_location: str) -> InitialConfig:
 
 
 def extend_initial_config(init_cfg: InitialConfig) -> Config:
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if init_cfg.use_mac:
+        device = torch.device("mps")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     path_2_log = f"saved_weights_and_losses/{init_cfg.model_name}_log.txt"
     traj_path = f"saved_weights_and_losses/{init_cfg.model_name}_traj"
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
@@ -174,7 +177,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         obs_to_action_ratio=init_cfg.obs_to_action_ratio,
         interval_save_weights=init_cfg.interval_save_weights,
         interval_print=init_cfg.interval_print,
-        use_torchrun=init_cfg.use_torchrun,
+        use_mac=init_cfg.use_mac,
         wandb=init_cfg.wandb,
         load_model=init_cfg.load_model,
         do_lora=init_cfg.do_lora,

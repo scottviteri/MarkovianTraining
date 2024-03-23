@@ -1,6 +1,7 @@
 import os
 
-from src.training_types import *
+from training_types import *
+
 
 g2 = InitialConfig(
     model_name="distilgpt2",
@@ -11,14 +12,12 @@ g2 = InitialConfig(
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
     interval_print=1,
-    use_torchrun=False,
+    use_mac=False,
     wandb=False,
     load_model=False,
     do_lora=True,
     num_beams=1,
-    ctxt_sizes=ContextSizes(
-        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
-    ),
+    ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=6,
@@ -53,15 +52,13 @@ g2_ar = InitialConfig(
     num_batches=10,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
-    use_torchrun=False,
+    use_mac=False,
     interval_print=21,
     wandb=False,
     load_model=False,
     do_lora=False,
     num_beams=1,
-    ctxt_sizes=ContextSizes(
-        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
-    ),
+    ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=2,
@@ -91,15 +88,13 @@ g2_ei = InitialConfig(
     num_batches=10,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
-    use_torchrun=False,
+    use_mac=False,
     interval_print=21,
     wandb=False,
     load_model=False,
     do_lora=False,
     num_beams=1,
-    ctxt_sizes=ContextSizes(
-        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
-    ),
+    ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=2,
@@ -130,15 +125,13 @@ g2_p2 = InitialConfig(
     num_batches=1000,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
-    use_torchrun=False,
+    use_mac=False,
     interval_print=21,
     wandb=False,
     load_model=False,
     do_lora=False,
     num_beams=1,
-    ctxt_sizes=ContextSizes(
-        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
-    ),
+    ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=2,
@@ -168,15 +161,13 @@ gj = InitialConfig(
     num_batches=1000,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
-    use_torchrun=False,
+    use_mac=False,
     interval_print=5,
     wandb=False,
     load_model=False,
     do_lora=False,
     num_beams=1,
-    ctxt_sizes=ContextSizes(
-        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
-    ),
+    ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=2,
@@ -206,15 +197,13 @@ lma = InitialConfig(
     num_batches=1000,
     obs_to_action_ratio=0.5,
     interval_save_weights=3000,
-    use_torchrun=False,
+    use_mac=False,
     interval_print=11,
     wandb=True,
     load_model=False,
     do_lora=False,
     num_beams=1,
-    ctxt_sizes=ContextSizes(
-        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
-    ),
+    ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=2,
@@ -244,15 +233,13 @@ mst = InitialConfig(
     num_batches=1000,
     obs_to_action_ratio=0.5,
     interval_save_weights=900,
-    use_torchrun=False,
+    use_mac=False,
     interval_print=1,
     wandb=False,
     load_model=False,
     do_lora=False,
     num_beams=1,
-    ctxt_sizes=ContextSizes(
-        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
-    ),
+    ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=3,
@@ -282,15 +269,13 @@ phi2 = InitialConfig(
     num_batches=1000,
     obs_to_action_ratio=0.5,
     interval_save_weights=900,
-    use_torchrun=False,
+    use_mac=False,
     interval_print=1,
     wandb=False,
     load_model=False,
     do_lora=False,
     num_beams=1,
-    ctxt_sizes=ContextSizes(
-        first_action_size=50, first_obs_size=80, action_size=100, obs_size=20
-    ),
+    ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
             num_terms=3,

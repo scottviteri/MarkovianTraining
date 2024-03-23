@@ -6,10 +6,11 @@ from typing import List
 from openai import OpenAI
 import time
 
-from src.training_types import *
-from src.utilities import log_and_print_info
+from training_types import *
+from utilities import log_and_print_info
 
-def evaluate_via_gpt(cfg : Config):
+
+def evaluate_via_gpt(cfg: Config):
     def log_filter(line):
         if line == "\n":
             return False
@@ -49,7 +50,9 @@ def evaluate_via_gpt(cfg : Config):
             yield d
 
     def throttle(num_batches, itr):
-        thresholds = torch.linspace(0, num_batches, cfg.training_type.num_evals).tolist()
+        thresholds = torch.linspace(
+            0, num_batches, cfg.training_type.num_evals
+        ).tolist()
         current_index = -1
         for t in thresholds:
             # print("threshold: ",t)
@@ -65,8 +68,7 @@ def evaluate_via_gpt(cfg : Config):
             messages=[
                 {
                     "role": "system",
-                    "content": 
-"""
+                    "content": """
 Look at helpful_msg and observation, and give a numerical response from 0 to 1 saying how much the helpful_msg helps you predict the observation. 
 0 denotes that the helpful_msg that you would do just as well or better at predicting the observation without the helpful_msg.
 1 denotes that you can now completely predict the observation, and that you would otherwise have no idea what the observation would be.
@@ -75,8 +77,7 @@ Output a single floating point number from 0 to 1 with no other text.
                 },
                 {
                     "role": "user",
-                    "content": 
-f"""
+                    "content": f"""
     <helpful_msg> {act} </helpful_msg>
     <observation> {obs} </observation>
 """,
@@ -85,14 +86,15 @@ f"""
         )
         return (int(d["Batch"]), float(response.choices[0].message.content))
 
-
     def gptj_rating(d):
         act, obs = d["Action"], d["Observation"]
-        input_ids = cfg.causal_lm_tokenizer.encode(act + obs, return_tensors='pt')
+        input_ids = cfg.causal_lm_tokenizer.encode(act + obs, return_tensors="pt")
         with torch.no_grad():
-            logits = cfg.predictor_lm(input_ids).logits[:,:-1,:]
+            logits = cfg.predictor_lm(input_ids).logits[:, :-1, :]
         loss_fn = torch.nn.CrossEntropyLoss()
-        loss = loss_fn(target=input_ids[:,1:], input=einops.rearrange(logits, "b s v -> b v s"))
+        loss = loss_fn(
+            target=input_ids[:, 1:], input=einops.rearrange(logits, "b s v -> b v s")
+        )
         return (int(d["Batch"]), float(loss.item()))
 
     def wandb_log(line):
@@ -139,4 +141,3 @@ f"""
     with open(cfg.path_2_log, "r") as file:
         log_itr = iter(file.readlines())
     return log_result(num_batches, log_itr)
-

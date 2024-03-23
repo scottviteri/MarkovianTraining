@@ -25,8 +25,8 @@ import transformers
 from transformers.generation import beam_search
 from collections import UserDict
 
-from src.training_types import *
-from src.utilities import (
+from training_types import *
+from utilities import (
     extend_initial_config,
     log_and_print_info,
     predict_action,
@@ -36,23 +36,23 @@ from src.utilities import (
     create_run_name,
     multi_print,
 )
-from src.config_examples import configs
-from src.beam import BeamSearchScorer
+from config_examples import configs
+from beam import BeamSearchScorer
 
 from transformers.models.gptj.modeling_gptj import GPTJBlock
 from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 from transformers.models.mistral.modeling_mistral import MistralDecoderLayer
 from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
-from src.evaluate_via_gpt import evaluate_via_gpt
-import src.config_examples
+from evaluate_via_gpt import evaluate_via_gpt
+import config_examples
 
 
 def save_weights(cfg, batch_index):
     if (
         batch_index > 0
         and batch_index % cfg.interval_save_weights == 0
-        and (not cfg.use_torchrun or dist.get_rank() == 0)
+        and (cfg.use_mac or dist.get_rank() == 0)
     ):
         print(f"Saving trained_{cfg.model_name} \n\n")
         cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
@@ -87,7 +87,7 @@ def save_weights(cfg, batch_index):
 
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
-    if cfg.wandb and (not cfg.use_torchrun or dist.get_rank() == 0):
+    if cfg.wandb and (cfg.use_mac or dist.get_rank() == 0):
         if cfg.prediction_cfg.train_O_given_prev_O:
             observation_loss = losses[0]
             wandb.log(
@@ -127,9 +127,7 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
 
 def log_print_losses(cfg, batch_index, aggregate_loss, losses):
 
-    if batch_index % cfg.interval_print == 0 and (
-        not cfg.use_torchrun or dist.get_rank() == 0
-    ):
+    if batch_index % cfg.interval_print == 0 and (cfg.use_mac or dist.get_rank() == 0):
         if cfg.prediction_cfg.train_O_given_prev_O:
             observation_loss = losses[0]
             with open(cfg.path_2_log, "a") as f:
@@ -167,9 +165,7 @@ def log_print_oa(
     is_first,
     aggregate_loss,
 ):
-    if batch_index % cfg.interval_print == 0 and (
-        not cfg.use_torchrun or dist.get_rank() == 0
-    ):
+    if batch_index % cfg.interval_print == 0 and (cfg.use_mac or dist.get_rank() == 0):
         with open(cfg.path_2_log, "a") as f:
             multi_print(f"Batch Index: {batch_index}", f)
             if aggregate_loss:
@@ -224,7 +220,7 @@ def append_traj_to_storage(traj_path, traj_data):
 
 
 def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses):
-    if not cfg.use_torchrun or dist.get_rank() == 0:
+    if cfg.use_mac or dist.get_rank() == 0:
         if batch_index == 0:
             # Adding a UID to the file name to avoid overwriting
             cfg.traj_path += f"_{datetime.now(timezone.utc).timestamp():0.0f}.json"
@@ -278,13 +274,17 @@ def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
     inference_cfg = cfg.inference_cfg
     # cfg.causal_lm.eval()
     with torch.inference_mode():
-        with autocast(
-            # cache_enabled=False,
-            dtype=(
-                torch.bfloat16
-                if cfg.model_name in ["llama", "mistral"]
-                else torch.float16
-            ),
+        with (
+            nullcontext
+            if cfg.use_mac
+            else autocast(
+                # cache_enabled=False,
+                dtype=(
+                    torch.bfloat16
+                    if cfg.model_name in ["llama", "mistral"]
+                    else torch.float16
+                ),
+            )
         ):
             generation_config = transformers.GenerationConfig(
                 max_new_tokens=cfg.pure_ctxt_sizes.action_size,
@@ -443,10 +443,16 @@ def update_weights(
 ):
     prediction_cfg = cfg.prediction_cfg
 
-    with autocast(
-        dtype=(
-            torch.bfloat16 if cfg.model_name in ["llama", "mistral"] else torch.float16
-        ),
+    with (
+        nullcontext
+        if cfg.use_mac
+        else autocast(
+            dtype=(
+                torch.bfloat16
+                if cfg.model_name in ["llama", "mistral"]
+                else torch.float16
+            ),
+        )
     ):
         if prediction_cfg.train_O_given_prev_O:
             assert not prediction_cfg.train_O_given_A
@@ -721,7 +727,7 @@ def train_via_update(cfg):
 
 def train_model(init_cfg):
     cfg = extend_initial_config(init_cfg)
-    if cfg.use_torchrun:
+    if not cfg.use_mac:
         dist.init_process_group(backend="nccl")
         torch.cuda.set_device(dist.get_rank())
         print("rank", dist.get_rank())
@@ -733,18 +739,20 @@ def train_model(init_cfg):
             print("")
     with open(cfg.path_2_log, "a") as f:
         f.write("")
-    if cfg.wandb and (not cfg.use_torchrun or dist.get_rank() == 0):
+    if cfg.wandb and (cfg.use_mac or dist.get_rank() == 0):
         wandb.init(
             project="collaborative-training-many-per-context-window",
             name=create_run_name(cfg),
         )
     print("Causal LM: ", cfg.causal_lm)
     if cfg.optimizer == "sgd":
-        cfg.optimizer = torch.optim.SGD(
+        optimizer = torch.optim.SGD if cfg.use_mac else bitsandbytes.optim.SGD8bit
+        cfg.optimizer = optimizer(
             cfg.causal_lm.parameters(), lr=cfg.lr
         )  # , momentum=0.01)
     elif cfg.optimizer == "adam":
-        cfg.optimizer = bitsandbytes.optim.AdamW8bit(  # torch.optim.Adam(  #
+        optimizer = torch.optim.AdamW if cfg.use_mac else bitsandbytes.optim.AdamW8bit
+        cfg.optimizer = optimizer(  # torch.optim.Adam(  #
             list(cfg.causal_lm.qhead.parameters())
             + list(cfg.causal_lm.v_head_group.parameters()),
             lr=cfg.lr,
@@ -757,7 +765,7 @@ def train_model(init_cfg):
             f"Unsupported optimizer: {cfg.optimizer}. Please choose 'sgd', 'adam', or 'rmsprop'."
         )
     train_via_update(cfg)
-    if cfg.wandb and (not cfg.use_torchrun or dist.get_rank() == 0):
+    if cfg.wandb and (cfg.use_mac or dist.get_rank() == 0):
         wandb.finish()
 
 

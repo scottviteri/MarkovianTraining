@@ -5,8 +5,8 @@ import einops
 from collections import UserDict
 import copy
 
-from src.training_types import *
-from src.utilities import predict_observation
+from training_types import *
+from utilities import predict_observation
 
 
 class BeamSearchScorer(transformers.BeamScorer):
