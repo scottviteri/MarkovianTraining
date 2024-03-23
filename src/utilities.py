@@ -264,7 +264,7 @@ def get_prefixes(
         return repeated_prefix_tokens
 
     first_action_prefix_tensor = tokenize_and_repeat(
-        "I will restate and work through the following question step by step, decomposing problems into subproblems as needed."
+        "Work through the following question step by step, decomposing problems into subproblems as needed."
     )
     tokens_per_pure_first_action = (
         ctxt_sizes.first_action_size - first_action_prefix_tensor.shape[1]
@@ -278,7 +278,7 @@ def get_prefixes(
     action_prefix_tensor = tokenize_and_repeat("Reasoning:")
     tokens_per_pure_action = ctxt_sizes.action_size - action_prefix_tensor.shape[1]
 
-    obs_prefix_tensor = tokenize_and_repeat("Answer:")
+    obs_prefix_tensor = tokenize_and_repeat("Answer: ")
     tokens_per_pure_obs = ctxt_sizes.obs_size - obs_prefix_tensor.shape[1]
 
     return (
@@ -323,7 +323,13 @@ def get_padding_side(model_name):
 
 
 def get_model(
-    device, load_model, model_name, path_2_tokenizer, path_2_model, do_lora=None, use_mac=False,
+    device,
+    load_model,
+    model_name,
+    path_2_tokenizer,
+    path_2_model,
+    do_lora=None,
+    use_mac=False,
 ):
     """Load model"""
     model_dict = {
@@ -331,7 +337,7 @@ def get_model(
         "llama": "meta-llama/Llama-2-13b-hf",
         "distilgpt2": "distilgpt2",
         "gptj": "EleutherAI/gpt-j-6b",
-        "mistral": "mistralai/Mistral-7B-v0.1",
+        "mistral": "mistralai/Mistral-7B-Instruct-v0.2",
         "gpt2": "gpt2",
         "gpt2-medium": "gpt2-medium",
         "gpt2-large": "gpt2-large",
@@ -432,9 +438,51 @@ def entropy_from_logits(logits):
     return entropy
 
 
+def wrap_input_tokens(cfg, instruct, rest, is_prediction=False):
+    start_tokens = torch.full(
+        (cfg.batch_size, 1),
+        cfg.causal_lm_tokenizer.bos_token_id,
+        dtype=torch.int64,
+        device=cfg.device,
+    )
+    needs_start_token = cfg.model_name in ["mistral", "llama"]
+    needs_instruct_token = "Instruct" in cfg.causal_lm.name_or_path
+    begin_instruct_tokens = (
+        cfg.causal_lm_tokenizer.encode(
+            (
+                "[INST] Use the following reasoning to help predict the answer."
+                if is_prediction
+                else "[INST]"
+            ),
+            return_tensors="pt",
+            add_special_tokens=False,
+        )
+        .to(cfg.device)
+        .repeat((cfg.batch_size, 1))
+    )
+    end_instruct_tokens = (
+        cfg.causal_lm_tokenizer.encode(
+            "[/INST]", return_tensors="pt", add_special_tokens=False
+        )
+        .to(cfg.device)
+        .repeat((cfg.batch_size, 1))
+    )
+    token_parts = []
+    if needs_start_token:
+        token_parts.append(start_tokens)
+    if needs_instruct_token:
+        token_parts.append(begin_instruct_tokens)
+    token_parts.extend(instruct)
+    if needs_instruct_token:
+        token_parts.append(end_instruct_tokens)
+    token_parts.extend(rest)
+    final_input_sequence = torch.cat(token_parts, dim=1)
+    return final_input_sequence
+
+
 def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=False):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    input_sequence = torch.cat([prev_action, prev_obs, action], dim=1)
+    input_sequence = wrap_input_tokens(cfg, [prev_action, prev_obs], [action])
     attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
     prediction, values = cfg.causal_lm(
         input_sequence,
@@ -463,9 +511,49 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=Fal
     return action_loss, values, negentropy
 
 
+def test_sequence(cfg, input_sequence):
+    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
+    prediction = cfg.causal_lm(
+        input_sequence,
+        add_q_head=False,
+        get_v_head=False,
+    )
+    logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
+    loss_tensor = loss_fn(
+        input=einops.rearrange(
+            logits,
+            "batch seq_length vocab_size -> batch vocab_size seq_length",
+        ),
+        target=input_sequence[:, 1:],
+    )
+    return loss_tensor
+
+
+def test_string(cfg, s):
+    return test_sequence(
+        cfg,
+        torch.tensor(
+            [cfg.causal_lm_tokenizer.encode(s, add_special_tokens=True)],
+            device=cfg.device,
+        ),
+    )
+
+
+def translate_single_tokens(cfg, string):
+    encoded = cfg.causal_lm_tokenizer.encode(string, add_special_tokens=False)
+    return [cfg.causal_lm_tokenizer.decode([x]) for x in encoded]
+
+
+# test_string(cfg, "Answer: 123")
+# tensor([[12.2443,  0.0759,  3.6301,  0.9889,  2.1633,  3.1531]],
+#       device='cuda:0')
+# translate_single_tokens(cfg, "Answer: 123")
+# ['Answer', ':', '', '1', '2', '3']
+
+
 def predict_observation(cfg, action, obs, add_q_head, per_batch=False):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    mkv_input_sequence = torch.cat([action, obs], dim=1)
+    mkv_input_sequence = wrap_input_tokens(cfg, [action], [obs], is_prediction=True)
     mkv_attention_mask = (
         mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
     ).long()

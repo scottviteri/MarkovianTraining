@@ -166,7 +166,7 @@ def log_print_oa(
     aggregate_loss,
 ):
     if batch_index % cfg.interval_print == 0 and (cfg.use_mac or dist.get_rank() == 0):
-        with open(cfg.path_2_log, "a") as f:
+        with open(cfg.path_2_log, "a", encoding="utf-8") as f:
             multi_print(f"Batch Index: {batch_index}", f)
             if aggregate_loss:
                 multi_print(f"Aggregate Loss: {aggregate_loss}", f)
@@ -309,7 +309,7 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
                         min_new_tokens=cfg.pure_ctxt_sizes.action_size,
                         eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
                     ),
-                    transformers.generation.TemperatureLogitsWarper(1.0),
+                    transformers.generation.TemperatureLogitsWarper(0.6),
                     transformers.generation.InfNanRemoveLogitsProcessor(),
                     transformers.LogitNormalization(),
                 ]

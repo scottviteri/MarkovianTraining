@@ -274,13 +274,13 @@ mst = InitialConfig(
     load_model=False,
     do_lora=False,
     num_beams=1,
-    ctxt_sizes=ContextSizes(60, 20, 130, 20),
+    ctxt_sizes=ContextSizes(60, 50, 200, 20),
     dataset=InitDatasetType(
         task=ArithmeticTask(
-            num_terms=3,
-            num_digits=3,
+            num_terms=6,
+            num_digits=2,
             operations=["+", "-", "*"],
-            probs=[0.0, 0.0, 1.0],
+            probs=[1.0, 0.0, 0.0],
         ),
         peek_every=None,
     ),

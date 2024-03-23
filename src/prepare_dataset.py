@@ -129,6 +129,16 @@ def init_arithmetic_dataset(
             dtype=torch.int64,
             device=device,
         )
+        action_prefix_tensor = (
+            prefix_tensors.first_action_prefix_tensor
+            if datapt.is_first
+            else prefix_tensors.action_prefix_tensor
+        )
+        obs_prefix_tensor = (
+            prefix_tensors.first_obs_prefix_tensor
+            if datapt.is_first
+            else prefix_tensors.obs_prefix_tensor
+        )
         if datapt.action:
             action_tok = tokenizer(
                 datapt.action, add_special_tokens=False, return_tensors="pt"
@@ -141,19 +151,13 @@ def init_arithmetic_dataset(
                 device=device,
             )
             return Datapt(
-                obs=torch.cat(
-                    [prefix_tensors.obs_prefix_tensor[0], obs_tok, obs_pad_tok]
-                ),
-                action=torch.cat(
-                    [prefix_tensors.action_prefix_tensor[0], action_tok, action_pad_tok]
-                ),
+                obs=torch.cat([obs_prefix_tensor[0], obs_tok, obs_pad_tok]),
+                action=torch.cat([action_prefix_tensor[0], action_tok, action_pad_tok]),
                 is_first=datapt.is_first,
             )
         else:
             return Datapt(
-                obs=torch.cat(
-                    [prefix_tensors.obs_prefix_tensor[0], obs_tok, obs_pad_tok]
-                ),
+                obs=torch.cat([obs_prefix_tensor[0], obs_tok, obs_pad_tok]),
                 action=None,
                 is_first=datapt.is_first,
             )
