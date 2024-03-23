@@ -2,7 +2,6 @@ import os
 
 from training_types import *
 
-
 g2 = InitialConfig(
     model_name="distilgpt2",
     lr=1e-6,

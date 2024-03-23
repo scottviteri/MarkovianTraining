@@ -142,6 +142,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         path_2_tokenizer,
         path_2_model,
         init_cfg.do_lora,
+        use_mac=init_cfg.use_mac,
     )
 
     # causal_lm.q_head = torch.nn.Linear(
@@ -322,7 +323,7 @@ def get_padding_side(model_name):
 
 
 def get_model(
-    device, load_model, model_name, path_2_tokenizer, path_2_model, do_lora=None
+    device, load_model, model_name, path_2_tokenizer, path_2_model, do_lora=None, use_mac=False,
 ):
     """Load model"""
     model_dict = {
@@ -348,7 +349,8 @@ def get_model(
             config = AutoConfig.from_pretrained(model_dict[model_name])
             causal_lm = ModelWithQHead(model_dict[model_name], config)
 
-        causal_lm.bfloat16()
+        if not use_mac:
+            causal_lm.bfloat16()
         causal_lm_tokenizer = AutoTokenizer.from_pretrained(
             model_dict[model_name], padding_side=padding_side
         )

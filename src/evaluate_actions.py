@@ -233,6 +233,7 @@ def main():
 
     # Set model
     configs[0].model = "gpt2"  # data["model"]
+    configs[0].use_mac = True  # data["model"]
     configs[0].perturbation_cfg = None
     configs[0].training_predictor_mode = False
     cfg = extend_initial_config(configs[0])
