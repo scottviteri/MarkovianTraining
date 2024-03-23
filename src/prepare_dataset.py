@@ -8,8 +8,8 @@ import json
 import operator
 import numpy as np
 
-from src.prepare_dataset import *
-from src.training_types import *
+from prepare_dataset import *
+from training_types import *
 
 """
 This file controlles dataset loading. 

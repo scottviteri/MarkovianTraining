@@ -3,8 +3,8 @@ import os
 from torchtyping import TensorType, patch_typeguard
 from typeguard import typechecked
 from einops import repeat
-from src.training_types import *
-from src.utilities import extend_initial_config
+from training_types import *
+from utilities import extend_initial_config
 
 
 test_config = InitialConfig(

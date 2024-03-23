@@ -9,9 +9,9 @@ import matplotlib.pyplot as plt
 import copy
 import numpy as np
 
-from src.utilities import extend_initial_config, predict_observation
-from src.config_examples import configs
-from src.training_types import PerturbationConfig
+from utilities import extend_initial_config, predict_observation
+from config_examples import configs
+from training_types import PerturbationConfig
 
 
 class ActionEvaluator:
