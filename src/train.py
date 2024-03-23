@@ -270,7 +270,7 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
         append_traj_to_storage(cfg.traj_path, traj_data)
 
 
-def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
+def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
     inference_cfg = cfg.inference_cfg
     # cfg.causal_lm.eval()
     with torch.inference_mode():
@@ -286,88 +286,66 @@ def sample(cfg, prev_action, prev_obs, observation, use_q_head=True):
                 ),
             )
         ):
-            generation_config = transformers.GenerationConfig(
-                max_new_tokens=cfg.pure_ctxt_sizes.action_size,
-                min_new_tokens=cfg.pure_ctxt_sizes.action_size,
-                do_sample=False,
-                # num_beams=cfg.num_beams,
-                bad_words_ids=[
-                    [
-                        cfg.causal_lm_tokenizer.pad_token_id,
-                        cfg.causal_lm_tokenizer.eos_token_id,
-                    ]
-                ],
-                renormalize_logits=True,
-                remove_invalid_values=True,
-                num_return_sequences=cfg.inference_cfg.num_return_sequences,
-                output_scores=True,
-                pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
-                eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
-                return_dict_in_generate=False,
-                length_penalty=1.0,
-                early_stopping=False,
-            )
-            cfg.causal_lm.generation_config = generation_config
-
             input_ids = torch.cat(
                 [prev_action, prev_obs, cfg.prefix_tensors.action_prefix_tensor], dim=1
             )
             attention_mask = (input_ids != cfg.causal_lm_tokenizer.pad_token_id).long()
 
-            logits_processor = transformers.generation.LogitsProcessorList(
+            bad_words_ids = [
+                [
+                    cfg.causal_lm_tokenizer.bos_token_id,
+                    cfg.causal_lm_tokenizer.eos_token_id,
+                ]
+            ]
+
+            logits_warper = transformers.generation.LogitsProcessorList(
                 [
                     transformers.generation.NoBadWordsLogitsProcessor(
-                        generation_config.bad_words_ids,
-                        eos_token_id=generation_config.eos_token_id,
+                        bad_words_ids,
+                        eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
                     ),
                     transformers.generation.MinNewTokensLengthLogitsProcessor(
                         prompt_length_to_skip=input_ids.shape[-1],
-                        min_new_tokens=generation_config.min_new_tokens,
-                        eos_token_id=generation_config.eos_token_id,
+                        min_new_tokens=cfg.pure_ctxt_sizes.action_size,
+                        eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
                     ),
                     transformers.generation.TemperatureLogitsWarper(1.0),
                     transformers.generation.InfNanRemoveLogitsProcessor(),
                     transformers.LogitNormalization(),
                 ]
             )
-            stopping_criteria = transformers.generation.StoppingCriteriaList(
-                [
-                    transformers.generation.MaxLengthCriteria(
-                        max_length=input_ids.shape[-1]
-                        + generation_config.max_new_tokens
-                    )
-                ]
+            # stopping_criteria = transformers.generation.StoppingCriteriaList(
+            #    [
+            #        transformers.generation.MaxLengthCriteria(
+            #            max_length=input_ids.shape[-1] + cfg.pure_ctxt_sizes.action_size
+            #        )
+            #    ]
+            # )
+
+            generation_config = transformers.GenerationConfig(
+                max_new_tokens=cfg.pure_ctxt_sizes.action_size,
+                min_new_tokens=cfg.pure_ctxt_sizes.action_size,
+                do_sample=True,
+                logits_warper=logits_warper,
+                # num_beams=cfg.num_beams,
+                # renormalize_logits=True,
+                # remove_invalid_values=True,
+                num_return_sequences=cfg.inference_cfg.num_return_sequences,
+                output_scores=True,
+                pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+                eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
+                return_dict_in_generate=False,
+                # length_penalty=1.0,
+                # early_stopping=False,
             )
+            cfg.causal_lm.generation_config = generation_config
 
             beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
             beam_observations = observation.repeat_interleave(cfg.num_beams, dim=0)
-            # option transformers.BeamSearchScorer
-
-            ## if cfg.training_predictor_mode:
-            # action_candidates = cfg.causal_lm.generate(
-            #   inputs=input_ids,
-            #   generation_config=generation_config,
-            # )[:, -cfg.cfg.ctxt_sizes.action_size :]
-            ## else:
-            # beam_scorer = transformers.BeamSearchScorer(
-            #    # cfg=cfg,
-            #    # obs=beam_observations,
-            #    batch_size=cfg.batch_size,
-            #    num_beams=generation_config.num_beams,
-            #    device=cfg.device,
-            #    length_penalty=generation_config.length_penalty,
-            #    do_early_stopping=generation_config.early_stopping,
-            #    num_beam_hyps_to_keep=generation_config.num_return_sequences,
-            #    max_length=input_ids.shape[-1] + generation_config.max_new_tokens,
-            # )
-            action_candidates = cfg.causal_lm.sample(
+            action_candidates = cfg.causal_lm.generate(
                 beam_input_ids,
-                # beam_scorer,
-                use_q_head=use_q_head,
+                add_q_head=add_q_head,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
-                logits_warper=logits_processor,
-                # logits_processor=logits_processor,
-                stopping_criteria=stopping_criteria,
                 pad_token_id=generation_config.pad_token_id,
                 eos_token_id=generation_config.eos_token_id,
                 output_scores=generation_config.output_scores,
@@ -650,10 +628,10 @@ def trainer(cfg):
                 action = state.action  # why?
             else:
                 action = sample(
-                    cfg, state.action, state.obs, datapt.obs, use_q_head=True
+                    cfg, state.action, state.obs, datapt.obs, add_q_head=True
                 )
                 default_action = sample(
-                    cfg, state.action, state.obs, datapt.obs, use_q_head=False
+                    cfg, state.action, state.obs, datapt.obs, add_q_head=False
                 )
             # action : [batch * beam, cfg.ctxt_sizes.action_size]
 

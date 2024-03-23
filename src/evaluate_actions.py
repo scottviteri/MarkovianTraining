@@ -229,8 +229,8 @@ def main():
     file_name = "mistral_traj_1710131589.json"
 
     # Set model
-    configs[0].model = "gpt2"  # data["model"]
-    configs[0].use_mac = True  # data["model"]
+    configs[0].model = "mst"  # data["model"]
+    configs[0].use_mac = False  # data["model"]
     configs[0].perturbation_cfg = None
     configs[0].training_predictor_mode = False
     cfg = extend_initial_config(configs[0])
@@ -238,7 +238,7 @@ def main():
     eval_class = ActionEvaluator(configs=[cfg], f_name=file_name, n_step=50)
     res = eval_class.evaluate()
     print(res)
-    eval_class.plot_results(res["gpt2"], model_name="gpt2", train_model="mistral7b")
+    eval_class.plot_results(res["mst"], model_name="mistral7b", train_model="mistral7b")
 
 
 if __name__ == "__main__":

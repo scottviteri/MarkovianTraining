@@ -224,42 +224,6 @@ lma = InitialConfig(
     debug=None,
 )
 
-mst = InitialConfig(
-    model_name="mistral",
-    lr=1e-6,
-    optimizer="adam",
-    batch_size=1,
-    num_batches=1000,
-    obs_to_action_ratio=0.5,
-    interval_save_weights=900,
-    use_mac=False,
-    interval_print=1,
-    wandb=False,
-    load_model=False,
-    do_lora=False,
-    num_beams=1,
-    ctxt_sizes=ContextSizes(50, 50, 100, 50),
-    dataset=InitDatasetType(
-        task=ArithmeticTask(
-            num_terms=3,
-            num_digits=3,
-            operations=["+", "-", "*"],
-            probs=[0.0, 0.0, 1.0],
-        ),
-        peek_every=None,
-    ),
-    inference_cfg=InferenceConfig(num_return_sequences=1),
-    prediction_cfg=PredictionConfig(
-        train_O_given_A=True,
-        train_O_given_prev_O=False,
-    ),
-    trainer_cfg=TrainerConfig(
-        prediction_training_length=1, inference_training_length=1000
-    ),
-    perturbation_cfg=None,
-    debug=None,
-)
-
 phi2 = InitialConfig(
     model_name="phi2",
     lr=1e-6,
@@ -296,4 +260,41 @@ phi2 = InitialConfig(
     debug=None,
 )
 
-configs = [g2]
+mst = InitialConfig(
+    model_name="mistral",
+    lr=1e-6,
+    optimizer="adam",
+    batch_size=1,
+    num_batches=1000,
+    obs_to_action_ratio=0.5,
+    interval_save_weights=900,
+    use_mac=False,
+    interval_print=1,
+    wandb=False,
+    load_model=False,
+    do_lora=False,
+    num_beams=1,
+    ctxt_sizes=ContextSizes(60, 20, 130, 20),
+    dataset=InitDatasetType(
+        task=ArithmeticTask(
+            num_terms=3,
+            num_digits=3,
+            operations=["+", "-", "*"],
+            probs=[0.0, 0.0, 1.0],
+        ),
+        peek_every=None,
+    ),
+    inference_cfg=InferenceConfig(num_return_sequences=1),
+    prediction_cfg=PredictionConfig(
+        train_O_given_A=True,
+        train_O_given_prev_O=False,
+    ),
+    trainer_cfg=TrainerConfig(
+        prediction_training_length=1, inference_training_length=1000
+    ),
+    perturbation_cfg=None,
+    debug=None,
+)
+
+
+configs = [mst]
