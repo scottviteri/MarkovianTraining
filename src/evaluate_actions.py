@@ -153,9 +153,6 @@ class ActionEvaluator:
                 # Introduce a Batch Dimension
                 action_tok = action_tok.view(1, -1).to(cfg.device)
                 obs_tok = obs_tok.view(1, -1).to(cfg.device)
-                # ToDo: Send to cuda?
-                # print(action_str)
-                # print(obs_str)
 
                 actions_tok_pert = {}
                 for key, p in self._perts.items():
