@@ -8,6 +8,7 @@ import json
 import matplotlib.pyplot as plt
 import copy
 import numpy as np
+import tqdm
 
 from src.utilities import extend_initial_config, predict_observation
 from src.config_examples import configs
@@ -24,7 +25,7 @@ class ActionEvaluator:
         perturbations: dict = None,
         n_max: int = None,
         n_step: int = None,
-        path_to_dir: str = "saved_weights_and_losses/",
+        path_to_dir: str = "src/saved_weights_and_losses/",
     ):
         self._f_name = f_name
         self._configs = configs
@@ -81,7 +82,7 @@ class ActionEvaluator:
 
     @staticmethod
     def perturb_action(action, cfg):
-        action_out = copy.deepcopy(action)
+        action_out = copy.deepcopy(action).to(cfg.device)
         offset = cfg.prefix_tensors.action_prefix_tensor.shape[-1]
         # PERTURBATION 1
         # Given n <= cfg.pure_ctxt_sizes.action_size, change token through randomization
@@ -96,7 +97,7 @@ class ActionEvaluator:
             low=0,
             high=cfg.causal_lm_tokenizer.vocab_size,
             size=[int(frac_randomize * (action.shape[-1] - offset))],
-        )
+        ).to(cfg.device)
 
         # PERTURBATION 2
         # Given a fraction of cfg.pure_ctxt_sizes.action_size, replace with spaces/padding
@@ -111,12 +112,12 @@ class ActionEvaluator:
 
     @staticmethod
     def calculate_loss(cfg, action, obs):
-        cfg.predictor_lm.eval()
-        cfg.inference_lm = cfg.predictor_lm
+        cfg.causal_lm.eval()
+        cfg.inference_lm = cfg.causal_lm
         # Probably unnecessary
         cfg.inference_lm.eval()
 
-        obs_loss, _ = predict_observation(cfg, action, obs)
+        obs_loss = predict_observation(cfg, action, obs, add_q_head=False)
 
         return obs_loss
 
@@ -131,16 +132,14 @@ class ActionEvaluator:
         eval_results = {}
         for cfg in self._configs:
             tok = cfg.causal_lm_tokenizer
-            mod = cfg.predictor_lm
-            # ToDo: Send to cuda?
-            # mod.to("mps")
+            mod = cfg.causal_lm
             mod.eval()
 
             eval_loss = {"Training": [], "Pure": []}
             for keys in self._perts:
                 eval_loss[keys] = []
 
-            for step_i, step in enumerate(self._data["trajectory"]):
+            for step_i, step in enumerate(tqdm.tqdm(self._data["trajectory"])):
                 if step_i >= self._n_max:
                     break
                 if step_i % self._n_step != 0:
@@ -152,8 +151,8 @@ class ActionEvaluator:
                 obs_tok = torch.tensor(tok.encode(obs_str))
 
                 # Introduce a Batch Dimension
-                action_tok = action_tok.view(1, -1)
-                obs_tok = obs_tok.view(1, -1)
+                action_tok = action_tok.view(1, -1).to(cfg.device)
+                obs_tok = obs_tok.view(1, -1).to(cfg.device)
                 # ToDo: Send to cuda?
                 # print(action_str)
                 # print(obs_str)
