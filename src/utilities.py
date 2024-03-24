@@ -30,7 +30,6 @@ from transformers import (
 import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
-import inflect
 
 
 class ModelWithQHead(PreTrainedModel, GenerationMixin):
@@ -536,23 +535,6 @@ def test_sequence(predictor, input_sequence):
         target=input_sequence[:, 1:],
     )
     return loss_tensor
-
-
-def integer_to_text(number: int) -> str:
-    """
-    Converts an integer to its canonical written form.
-
-    Args:
-    number (int): The integer to convert.
-
-    Returns:
-    str: The canonical written form of the integer.
-    """
-    p = inflect.engine()
-    if number < 0:
-        return "negative " + p.number_to_words(abs(number))
-    else:
-        return p.number_to_words(number)
 
 
 def test_string(predictor, tokenizer, s, add_bos=False):
