@@ -264,13 +264,13 @@ mst = InitialConfig(
     model_name="mistral",
     lr=1e-6,
     optimizer="adam",
-    batch_size=1,
+    batch_size=8,
     num_batches=1000,
     obs_to_action_ratio=0.5,
     interval_save_weights=900,
     use_mac=False,
     interval_print=1,
-    wandb=False,
+    wandb=True,
     load_model=False,
     do_lora=False,
     num_beams=1,
@@ -295,6 +295,5 @@ mst = InitialConfig(
     perturbation_cfg=None,
     debug=None,
 )
-
 
 configs = [mst]

@@ -470,7 +470,8 @@ def update_weights(
         action_prob_ratio = torch.exp(action_log_prob - old_critic_action_log_prob)
         clipped_ratio = torch.clamp(action_prob_ratio, 0.7, 1.3)
         value_loss = torch.abs(values - repeated_obs_losses).mean()
-        neg_advantage = (negentropy + repeated_obs_losses - values.detach()).mean()
+        # negentropy +
+        neg_advantage = (repeated_obs_losses - values.detach()).mean()
         # neg_advantage = obs_loss.mean()
         # aggregate_loss = action_loss * (normalized_obs_loss.mean() + negentropy * .1)
         # aggregate_loss = -torch.min(

@@ -29,6 +29,8 @@ from transformers import (
 )
 import torch
 import torch.nn as nn
+from matplotlib import pyplot as plt
+import inflect
 
 
 class ModelWithQHead(PreTrainedModel, GenerationMixin):
@@ -278,7 +280,7 @@ def get_prefixes(
     action_prefix_tensor = tokenize_and_repeat("Reasoning:")
     tokens_per_pure_action = ctxt_sizes.action_size - action_prefix_tensor.shape[1]
 
-    obs_prefix_tensor = tokenize_and_repeat("Answer: ")
+    obs_prefix_tensor = tokenize_and_repeat("Answer:")
     tokens_per_pure_obs = ctxt_sizes.obs_size - obs_prefix_tensor.shape[1]
 
     return (
@@ -337,7 +339,8 @@ def get_model(
         "llama": "meta-llama/Llama-2-13b-hf",
         "distilgpt2": "distilgpt2",
         "gptj": "EleutherAI/gpt-j-6b",
-        "mistral": "mistralai/Mistral-7B-Instruct-v0.2",
+        "mistral": "mistralai/Mistral-7B-v0.1",
+        # "mistral": "mistralai/Mistral-7B-Instruct-v0.2",
         "gpt2": "gpt2",
         "gpt2-medium": "gpt2-medium",
         "gpt2-large": "gpt2-large",
@@ -438,22 +441,20 @@ def entropy_from_logits(logits):
     return entropy
 
 
-def wrap_input_tokens(cfg, instruct, rest, is_prediction=False):
+def wrap_input_tokens(
+    cfg, instruct, rest, use_start_token=False, use_instruct_tokens=False
+):
     start_tokens = torch.full(
         (cfg.batch_size, 1),
         cfg.causal_lm_tokenizer.bos_token_id,
         dtype=torch.int64,
         device=cfg.device,
     )
-    needs_start_token = cfg.model_name in ["mistral", "llama"]
-    needs_instruct_token = "Instruct" in cfg.causal_lm.name_or_path
+    # needs_start_token = cfg.model_name in ["mistral", "llama"]
+    # needs_instruct_token = "Instruct" in cfg.causal_lm.name_or_path
     begin_instruct_tokens = (
         cfg.causal_lm_tokenizer.encode(
-            (
-                "[INST] Use the following reasoning to help predict the answer."
-                if is_prediction
-                else "[INST]"
-            ),
+            ("[INST] Use the following reasoning to help predict the answer."),
             return_tensors="pt",
             add_special_tokens=False,
         )
@@ -468,12 +469,12 @@ def wrap_input_tokens(cfg, instruct, rest, is_prediction=False):
         .repeat((cfg.batch_size, 1))
     )
     token_parts = []
-    if needs_start_token:
+    if use_start_token:
         token_parts.append(start_tokens)
-    if needs_instruct_token:
+    if use_instruct_tokens:
         token_parts.append(begin_instruct_tokens)
     token_parts.extend(instruct)
-    if needs_instruct_token:
+    if use_instruct_tokens:
         token_parts.append(end_instruct_tokens)
     token_parts.extend(rest)
     final_input_sequence = torch.cat(token_parts, dim=1)
@@ -500,23 +501,31 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=Fal
     )[:, -cfg.pure_ctxt_sizes.action_size :]
     negentropy = -entropy_from_logits(action_logits).mean()
     pure_action_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.action_size :]
+    masked_losses = action_loss_tensor * pure_action_attention_mask
+    if True:
+        plt.figure(1)
+        plt.plot(masked_losses[0].tolist())
+        plt.savefig("action.png")
+        # print(
+        #    [
+        #        cfg.causal_lm_tokenizer.decode([x])
+        #        for x in input_sequence[0, -cfg.pure_ctxt_sizes.action_size :].tolist()
+        #    ]
+        # )
+        plt.clf()
     if per_batch:
-        action_loss = (action_loss_tensor * pure_action_attention_mask).sum(
-            dim=1
-        ) / pure_action_attention_mask.sum(dim=1)
+        action_loss = masked_losses.sum(dim=1) / pure_action_attention_mask.sum(dim=1)
     else:
-        action_loss = (
-            action_loss_tensor * pure_action_attention_mask
-        ).sum() / pure_action_attention_mask.sum()
+        action_loss = masked_losses.sum() / pure_action_attention_mask.sum()
     return action_loss, values, negentropy
 
 
-def test_sequence(cfg, input_sequence):
+def test_sequence(predictor, input_sequence):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    prediction = cfg.causal_lm(
+    prediction = predictor(
         input_sequence,
-        add_q_head=False,
-        get_v_head=False,
+        # add_q_head=False,
+        # get_v_head=False,
     )
     logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
     loss_tensor = loss_fn(
@@ -529,19 +538,47 @@ def test_sequence(cfg, input_sequence):
     return loss_tensor
 
 
-def test_string(cfg, s):
-    return test_sequence(
-        cfg,
+def integer_to_text(number: int) -> str:
+    """
+    Converts an integer to its canonical written form.
+
+    Args:
+    number (int): The integer to convert.
+
+    Returns:
+    str: The canonical written form of the integer.
+    """
+    p = inflect.engine()
+    if number < 0:
+        return "negative " + p.number_to_words(abs(number))
+    else:
+        return p.number_to_words(number)
+
+
+def test_string(predictor, tokenizer, s, add_bos=False):
+    encoding = tokenizer.encode(s, add_special_tokens=add_bos)
+    neg_log_probs = test_sequence(
+        predictor,
         torch.tensor(
-            [cfg.causal_lm_tokenizer.encode(s, add_special_tokens=True)],
-            device=cfg.device,
+            [encoding],
+            device=predictor.device,
         ),
-    )
+    )[0].tolist()
+    rounded_nll = list(map(lambda x: round(x, 3), neg_log_probs))
+    # print(encoding)
+    # print(rounded_nll)
+    return encoding, rounded_nll
 
 
-def translate_single_tokens(cfg, string):
-    encoded = cfg.causal_lm_tokenizer.encode(string, add_special_tokens=False)
-    return [cfg.causal_lm_tokenizer.decode([x]) for x in encoded]
+def inspect_string(predictor, tokenizer, s, add_bos=False):
+    encoding, losses = test_string(predictor, tokenizer, s, add_bos=add_bos)
+    c = list(zip(encoding[1:], losses))
+    return [(tokenizer.decode([x]), y) for x, y in c]
+
+
+def translate_single_tokens(tokenizer, string):
+    encoded = tokenizer.encode(string, add_special_tokens=False)
+    return [tokenizer.decode([x]) for x in encoded]
 
 
 # test_string(cfg, "Answer: 123")
@@ -553,37 +590,56 @@ def translate_single_tokens(cfg, string):
 
 def predict_observation(cfg, action, obs, add_q_head, per_batch=False):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    mkv_input_sequence = wrap_input_tokens(cfg, [action], [obs], is_prediction=True)
-    mkv_attention_mask = (
-        mkv_input_sequence != cfg.causal_lm_tokenizer.pad_token_id
-    ).long()
+    input_sequence = wrap_input_tokens(cfg, [action], [obs])
+    attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
     prediction = cfg.causal_lm(
-        mkv_input_sequence,
-        attention_mask=mkv_attention_mask,
+        input_sequence,
+        attention_mask=attention_mask,
         add_q_head=add_q_head,
         get_v_head=False,
     )
-    mkv_logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
-    mkv_loss_tensor = loss_fn(
+    logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
+    loss_tensor = loss_fn(
         input=einops.rearrange(
-            mkv_logits,
+            logits,
             "batch seq_length vocab_size -> batch vocab_size seq_length",
         ),
-        target=mkv_input_sequence[:, 1:],
+        target=input_sequence[:, 1:],
     )[:, -cfg.pure_ctxt_sizes.obs_size :]
-    pure_obs_attention_mask = mkv_attention_mask[:, -cfg.pure_ctxt_sizes.obs_size :]
+    pure_obs_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.obs_size :]
+    masked_losses = loss_tensor * pure_obs_attention_mask
+    if True:
+        plt.figure(2)
+        plt.plot(masked_losses[0].tolist())
+        plt.savefig("obs.png")
+        # print(
+        #    [
+        #        cfg.causal_lm_tokenizer.decode([x])
+        #        for x in input_sequence[0, -cfg.pure_ctxt_sizes.obs_size :].tolist()
+        #    ]
+        # )
+        # print(repr(cfg.causal_lm_tokenizer.decode(input_sequence[0].tolist())))
+        token_loss_pairs = inspect_string(
+            cfg.causal_lm,
+            cfg.causal_lm_tokenizer,
+            cfg.causal_lm_tokenizer.decode(input_sequence[0].tolist()),
+        )
+        targetted_pairs = token_loss_pairs[
+            -cfg.pure_ctxt_sizes.obs_size - 3 : -cfg.pure_ctxt_sizes.obs_size + 5
+        ]
+        print(targetted_pairs)
+        plt.clf()
+    # slicing [:,1:] is a hack because of mistral number tokenization creating a leading space token!
     if per_batch:
-        obs_loss = (mkv_loss_tensor * pure_obs_attention_mask).sum(
+        obs_loss = masked_losses[:, 1:].sum(dim=1) / pure_obs_attention_mask[:, 1:].sum(
             dim=1
-        ) / pure_obs_attention_mask.sum(dim=1)
+        )
     else:
-        obs_loss = (
-            mkv_loss_tensor * pure_obs_attention_mask
-        ).sum() / pure_obs_attention_mask.sum()
+        obs_loss = masked_losses[:, 1:].sum() / pure_obs_attention_mask[:, 1:].sum()
     return obs_loss
 
-    # obs_tensor = (mkv_loss_tensor * mkv_attention_mask[:, 1:])[:, -cfg.pure_ctxt_sizes.obs_size :]
-    # obs_losses = obs_tensor.sum(dim=-1) / mkv_attention_mask[:, 1:][
+    # obs_tensor = (loss_tensor * attention_mask[:, 1:])[:, -cfg.pure_ctxt_sizes.obs_size :]
+    # obs_losses = obs_tensor.sum(dim=-1) / attention_mask[:, 1:][
     #    :, -cfg.pure_ctxt_sizes.obs_size :
     # ].sum(dim=-1)
     # return obs_losses, obs_tensor
