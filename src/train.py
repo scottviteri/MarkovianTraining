@@ -453,11 +453,17 @@ def update_weights(
             predict_action(cfg, prev_action, prev_obs, action, add_q_head=False)
         )
         obs_loss = predict_observation(
-            cfg, action, obs, add_q_head=False, per_batch=True
+            cfg, action, obs, add_q_head=False, per_batch=True, is_default_action=False
         )
-        default_obs_loss = predict_observation(
-            cfg, default_action, obs, add_q_head=False, per_batch=True
-        )
+        with torch.no_grad():  # just to be sure
+            default_obs_loss = predict_observation(
+                cfg,
+                default_action,
+                obs,
+                add_q_head=False,
+                per_batch=True,
+                is_default_action=True,
+            )
         normalized_negentropy = negentropy - old_critic_negentropy
         normalized_obs_loss = obs_loss - default_obs_loss
         repeated_obs_losses = normalized_obs_loss.unsqueeze(1).repeat(

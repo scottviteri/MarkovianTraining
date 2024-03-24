@@ -338,8 +338,8 @@ def get_model(
         "llama": "meta-llama/Llama-2-13b-hf",
         "distilgpt2": "distilgpt2",
         "gptj": "EleutherAI/gpt-j-6b",
-        "mistral": "mistralai/Mistral-7B-v0.1",
-        # "mistral": "mistralai/Mistral-7B-Instruct-v0.2",
+        # "mistral": "mistralai/Mistral-7B-v0.1",
+        "mistral": "mistralai/Mistral-7B-Instruct-v0.2",
         "gpt2": "gpt2",
         "gpt2-medium": "gpt2-medium",
         "gpt2-large": "gpt2-large",
@@ -441,7 +441,12 @@ def entropy_from_logits(logits):
 
 
 def wrap_input_tokens(
-    cfg, instruct, rest, use_start_token=False, use_instruct_tokens=False
+    cfg,
+    instruct,
+    rest,
+    use_start_token=False,
+    use_instruct_tokens=False,
+    is_prediction=False,
 ):
     start_tokens = torch.full(
         (cfg.batch_size, 1),
@@ -453,7 +458,11 @@ def wrap_input_tokens(
     # needs_instruct_token = "Instruct" in cfg.causal_lm.name_or_path
     begin_instruct_tokens = (
         cfg.causal_lm_tokenizer.encode(
-            ("[INST] Use the following reasoning to help predict the answer."),
+            (
+                "[INST] Use the following reasoning to help predict the answer."
+                if is_prediction
+                else "[INST]"
+            ),
             return_tensors="pt",
             add_special_tokens=False,
         )
@@ -482,7 +491,14 @@ def wrap_input_tokens(
 
 def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=False):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    input_sequence = wrap_input_tokens(cfg, [prev_action, prev_obs], [action])
+    input_sequence = wrap_input_tokens(
+        cfg,
+        [prev_action, prev_obs],
+        [action],
+        use_start_token=True,
+        use_instruct_tokens=True,
+        is_prediction=False,
+    )
     attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
     prediction, values = cfg.causal_lm(
         input_sequence,
@@ -570,9 +586,18 @@ def translate_single_tokens(tokenizer, string):
 # ['Answer', ':', '', '1', '2', '3']
 
 
-def predict_observation(cfg, action, obs, add_q_head, per_batch=False):
+def predict_observation(
+    cfg, action, obs, add_q_head, per_batch=False, is_default_action=False
+):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    input_sequence = wrap_input_tokens(cfg, [action], [obs])
+    input_sequence = wrap_input_tokens(
+        cfg,
+        [action],
+        [obs],
+        use_start_token=True,
+        use_instruct_tokens=True,
+        is_prediction=True,
+    )
     attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
     prediction = cfg.causal_lm(
         input_sequence,
@@ -590,35 +615,39 @@ def predict_observation(cfg, action, obs, add_q_head, per_batch=False):
     )[:, -cfg.pure_ctxt_sizes.obs_size :]
     pure_obs_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.obs_size :]
     masked_losses = loss_tensor * pure_obs_attention_mask
-    if True:
-        plt.figure(2)
-        plt.plot(masked_losses[0].tolist())
-        plt.savefig("obs.png")
-        # print(
-        #    [
-        #        cfg.causal_lm_tokenizer.decode([x])
-        #        for x in input_sequence[0, -cfg.pure_ctxt_sizes.obs_size :].tolist()
-        #    ]
-        # )
-        # print(repr(cfg.causal_lm_tokenizer.decode(input_sequence[0].tolist())))
-        token_loss_pairs = inspect_string(
-            cfg.causal_lm,
-            cfg.causal_lm_tokenizer,
-            cfg.causal_lm_tokenizer.decode(input_sequence[0].tolist()),
-        )
-        targetted_pairs = token_loss_pairs[
-            -cfg.pure_ctxt_sizes.obs_size - 3 : -cfg.pure_ctxt_sizes.obs_size + 5
-        ]
-        print(targetted_pairs)
-        plt.clf()
-    # slicing [:,1:] is a hack because of mistral number tokenization creating a leading space token!
-    if per_batch:
-        obs_loss = masked_losses[:, 1:].sum(dim=1) / pure_obs_attention_mask[:, 1:].sum(
-            dim=1
-        )
+    plt.figure()
+    plt.plot(masked_losses[0].tolist())
+    if is_default_action:
+        plt.savefig("obs_default.png")
     else:
-        obs_loss = masked_losses[:, 1:].sum() / pure_obs_attention_mask[:, 1:].sum()
-    return obs_loss
+        plt.savefig("obs.png")
+    # print(
+    #    [
+    #        cfg.causal_lm_tokenizer.decode([x])
+    #        for x in input_sequence[0, -cfg.pure_ctxt_sizes.obs_size :].tolist()
+    #    ]
+    # )
+    # print(repr(cfg.causal_lm_tokenizer.decode(input_sequence[0].tolist())))
+    token_loss_pairs = inspect_string(
+        cfg.causal_lm,
+        cfg.causal_lm_tokenizer,
+        cfg.causal_lm_tokenizer.decode(input_sequence[0].tolist()),
+    )
+    targeted_pairs = token_loss_pairs[
+        -cfg.pure_ctxt_sizes.obs_size - 3 : -cfg.pure_ctxt_sizes.obs_size + 5
+    ]
+    plt.clf()
+
+    # slicing [:,1:] is a hack because of mistral number tokenization creating a leading space token!
+    batch_obs_losses = masked_losses[:, 1:].sum(dim=1) / pure_obs_attention_mask[
+        :, 1:
+    ].sum(dim=1)
+    print(
+        "Default:" if is_default_action else "Updated:",
+        batch_obs_losses[0].item(),
+        targeted_pairs,
+    )
+    return batch_obs_losses if per_batch else batch_obs_losses.mean()
 
     # obs_tensor = (loss_tensor * attention_mask[:, 1:])[:, -cfg.pure_ctxt_sizes.obs_size :]
     # obs_losses = obs_tensor.sum(dim=-1) / attention_mask[:, 1:][
