@@ -85,26 +85,18 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         get_v_head=False,
         **kwargs,
     ):
-        # if add_q_head:
-        #    self.transformer.enable_adapter_layers()
-        # else:
-        #    self.transformer.disable_adapter_layers()
         outputs = (self.qhead if add_q_head else self.transformer)(
             input_ids=input_ids,
             attention_mask=attention_mask,
             output_hidden_states=get_v_head,
-            # **kwargs,
             **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
         )
         if get_v_head:
-            pre_values = self.v_head_group["v_head_block"](outputs.hidden_states[-1].detach())[0]
+            pre_values = self.v_head_group["v_head_block"](
+                outputs.hidden_states[-1].detach()
+            )[0]
             values = self.v_head_group["v_head"](pre_values).squeeze(-1)
             return outputs, values
-        # if add_q_head:
-        #    hidden_states = outputs.hidden_states[-1]
-        #    pre_q_values = self.q_head_group["q_head_block"](hidden_states)[0]
-        #    q_values = self.q_head_group["q_head"](pre_q_values)
-        #    outputs.logits += q_values
         return outputs
 
     def prepare_inputs_for_generation(self, input_ids, **kwargs):

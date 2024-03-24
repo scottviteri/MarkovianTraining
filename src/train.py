@@ -160,6 +160,7 @@ def log_print_oa(
     prev_action,
     prev_obs,
     action,
+    default_action,
     obs,
     is_guidance_action,
     is_first,
@@ -191,6 +192,10 @@ def log_print_oa(
                         f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
                         f,
                     )
+                multi_print(
+                    f"Default Action: {repr(cfg.causal_lm_tokenizer.decode(default_action[0]))}",
+                    f,
+                )
             multi_print(
                 f"Observation: {repr(cfg.causal_lm_tokenizer.decode(obs[0]))}", f
             )
@@ -449,11 +454,16 @@ def update_weights(
             cfg, prev_action, prev_obs, action, add_q_head=True
         )
         with torch.no_grad():  # just to be sure
-            old_critic_action_loss, old_critic_values, old_critic_negentropy = (
-                predict_action(cfg, prev_action, prev_obs, action, add_q_head=False)
+            old_critic_action_loss, _, old_critic_negentropy = predict_action(
+                cfg, prev_action, prev_obs, action, add_q_head=False
             )
             obs_loss = predict_observation(
-                cfg, action, obs, add_q_head=False, per_batch=True, is_default_action=False
+                cfg,
+                action,
+                obs,
+                add_q_head=False,
+                per_batch=True,
+                is_default_action=False,
             )
             default_obs_loss = predict_observation(
                 cfg,
@@ -515,6 +525,7 @@ def log_and_save(
     prev_action,
     prev_obs,
     action,
+    default_action,
     obs,
     is_guidance_action,
     is_first,
@@ -535,14 +546,15 @@ def log_and_save(
     log_print_losses(cfg, batch_index, aggregate_loss, losses)
 
     log_print_oa(
-        cfg,
-        batch_index,
-        prev_action,
-        prev_obs,
-        action,
-        obs,
-        is_guidance_action,
-        is_first,
+        cfg=cfg,
+        batch_index=batch_index,
+        prev_action=prev_action,
+        prev_obs=prev_obs,
+        action=action,
+        default_action=default_action,
+        obs=obs,
+        is_guidance_action=is_guidance_action,
+        is_first=is_first,
         aggregate_loss=aggregate_loss,  # if not cfg.training_predictor_mode else None,
     )
 
@@ -613,6 +625,7 @@ def trainer(cfg):
                 prev_action=None,
                 prev_obs=state.obs,
                 action=datapt.action,
+                default_action=datapt.action,
                 obs=datapt.obs,
                 is_guidance_action=datapt.action is not None,
                 is_first=datapt.is_first,
@@ -677,6 +690,7 @@ def trainer(cfg):
                 state.action,
                 state.obs,
                 action,
+                default_action,
                 datapt.obs,
                 datapt.action is not None,
                 datapt.is_first,
