@@ -445,17 +445,16 @@ def update_weights(
             cfg.inference_cfg.num_return_sequences, dim=0
         )
         obs = obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
-
         action_loss, values, negentropy = predict_action(
             cfg, prev_action, prev_obs, action, add_q_head=True
         )
-        old_critic_action_loss, old_critic_values, old_critic_negentropy = (
-            predict_action(cfg, prev_action, prev_obs, action, add_q_head=False)
-        )
-        obs_loss = predict_observation(
-            cfg, action, obs, add_q_head=False, per_batch=True, is_default_action=False
-        )
         with torch.no_grad():  # just to be sure
+            old_critic_action_loss, old_critic_values, old_critic_negentropy = (
+                predict_action(cfg, prev_action, prev_obs, action, add_q_head=False)
+            )
+            obs_loss = predict_observation(
+                cfg, action, obs, add_q_head=False, per_batch=True, is_default_action=False
+            )
             default_obs_loss = predict_observation(
                 cfg,
                 default_action,
