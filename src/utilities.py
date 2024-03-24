@@ -66,6 +66,10 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
                 ),
             }
         )
+        assert (
+            self.qhead.base_model.model.model.layers[-3].mlp.up_proj.base_layer.weight
+            == self.transformer.model.layers[-3].mlp.up_proj.weight
+        ).all(), "Should be same weights"
 
         ## Zero-initialize weights in q_head_block and q_head
         # for name, param in self.q_head_group["q_head_block"].named_parameters():
@@ -357,8 +361,8 @@ def get_model(
         causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
         for name, param in causal_lm.transformer.named_parameters():
             param.requires_grad = False
-        for name, param in causal_lm.qhead.named_parameters():
-            param.requires_grad = True
+        # for name, param in causal_lm.qhead.named_parameters():
+        #    param.requires_grad = True
         for name, param in causal_lm.v_head_group.named_parameters():
             param.requires_grad = True
 

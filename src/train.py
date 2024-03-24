@@ -60,33 +60,6 @@ def save_weights(cfg, batch_index):
         cfg.causal_lm.save_pretrained(cfg.path_2_model)
 
 
-# def get_default_action(cfg):
-#    initial_helpful_msg = (
-#        cfg.causal_lm_tokenizer(
-#            "I will restate and work through the following question step by step, decomposing problems into subproblems as needed.",
-#            return_tensors="pt",
-#        )["input_ids"]
-#        .repeat(cfg.batch_size, 1)
-#        .to(cfg.device)
-#    )
-#    assert initial_helpful_msg.shape[-1] < cfg.pure_ctxt_sizes.obs_size
-#    prev_action = torch.cat(
-#        (
-#            cfg.prefix_tensors.action_prefix_tensor,
-#            initial_helpful_msg,
-#            torch.full(
-#                (cfg.batch_size, cfg.pure_ctxt_sizes.action_size - initial_helpful_msg.shape[-1]),
-#                fill_value=cfg.causal_lm_tokenizer.pad_token_id,
-#                dtype=torch.int64,
-#                device=cfg.device,
-#            ),
-#        ),
-#        dim=1,
-#    )
-#    # prev_action = initial_helpful_msg
-#    return prev_action
-
-
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
     if cfg.wandb and (cfg.use_mac or dist.get_rank() == 0):
         if cfg.prediction_cfg.train_O_given_prev_O:
@@ -318,11 +291,11 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
                         bad_words_ids,
                         eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
                     ),
-                    transformers.generation.MinNewTokensLengthLogitsProcessor(
-                        prompt_length_to_skip=input_ids.shape[-1],
-                        min_new_tokens=cfg.pure_ctxt_sizes.action_size,
-                        eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
-                    ),
+                    # transformers.generation.MinNewTokensLengthLogitsProcessor(
+                    #    prompt_length_to_skip=input_ids.shape[-1],
+                    #    min_new_tokens=cfg.pure_ctxt_sizes.action_size,
+                    #    eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
+                    # ),
                     transformers.generation.TemperatureLogitsWarper(0.6),
                     transformers.generation.InfNanRemoveLogitsProcessor(),
                     transformers.LogitNormalization(),
@@ -337,8 +310,10 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
             # )
 
             generation_config = transformers.GenerationConfig(
-                max_new_tokens=cfg.pure_ctxt_sizes.action_size,
-                min_new_tokens=cfg.pure_ctxt_sizes.action_size,
+                # max_new_tokens=cfg.pure_ctxt_sizes.action_size,
+                # min_new_tokens=cfg.pure_ctxt_sizes.action_size,
+                min_length=2 * cfg.ctxt_sizes.action_size + cfg.ctxt_sizes.obs_size,
+                max_length=2 * cfg.ctxt_sizes.action_size + cfg.ctxt_sizes.obs_size,
                 do_sample=True,
                 logits_warper=logits_warper,
                 # num_beams=cfg.num_beams,
@@ -359,12 +334,13 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
             action_candidates = cfg.causal_lm.generate(
                 beam_input_ids,
                 add_q_head=add_q_head,
+                get_v_head=False,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
                 pad_token_id=generation_config.pad_token_id,
                 eos_token_id=generation_config.eos_token_id,
                 output_scores=generation_config.output_scores,
                 return_dict_in_generate=generation_config.return_dict_in_generate,
-                synced_gpus=False,
+                # synced_gpus=False,
             )[:, -cfg.ctxt_sizes.action_size :]
             return action_candidates
 
@@ -434,6 +410,22 @@ def update_weights(
     do_weight_update=True,
 ):
     prediction_cfg = cfg.prediction_cfg
+
+    assert (
+        (
+            cfg.causal_lm.qhead.base_model.model.model.layers[
+                -3
+            ].mlp.up_proj.base_layer.weight
+            - cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
+        )
+        .abs()
+        .sum()
+        .item(0)
+        == 0,
+        "Frozen weight copies should be equal",
+    )
+
+    # assert (cfg.causal_lm.qhead.base_model.model.model.layers[-3].mlp.up_proj.base_layer.weight == cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight).all(), "These weights should be frozen and equal."
 
     with (
         nullcontext
