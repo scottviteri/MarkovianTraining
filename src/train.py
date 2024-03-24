@@ -35,6 +35,7 @@ from utilities import (
     get_masked_mean,
     create_run_name,
     multi_print,
+    wrap_input_tokens,
 )
 from config_examples import configs
 from beam import BeamSearchScorer
@@ -291,8 +292,16 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
                 ),
             )
         ):
-            input_ids = torch.cat(
-                [prev_action, prev_obs, cfg.prefix_tensors.action_prefix_tensor], dim=1
+            # input_ids = torch.cat(
+            #    [prev_action, prev_obs, cfg.prefix_tensors.action_prefix_tensor], dim=1
+            # )
+            input_ids = wrap_input_tokens(
+                cfg,
+                [prev_action, prev_obs],
+                [cfg.prefix_tensors.action_prefix_tensor],
+                use_start_token=True,
+                use_instruct_tokens=True,
+                is_prediction=False,
             )
             attention_mask = (input_ids != cfg.causal_lm_tokenizer.pad_token_id).long()
 
