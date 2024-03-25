@@ -94,7 +94,7 @@ def init_arithmetic_dataset(
             yield iter(
                 [
                     Datapt(
-                        action="I will restate and work through the following question step by step, decomposing problems into subproblems as needed.",
+                        action="",
                         obs=qa.question,
                         is_first=True,
                     ),
