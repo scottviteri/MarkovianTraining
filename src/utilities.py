@@ -174,6 +174,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         qhead_optimizer=init_cfg.optimizer,
         batch_size=init_cfg.batch_size,
         num_batches=init_cfg.num_batches,
+        replay_buffer_size=init_cfg.replay_buffer_size,
         obs_to_action_ratio=init_cfg.obs_to_action_ratio,
         interval_save_weights=init_cfg.interval_save_weights,
         interval_print=init_cfg.interval_print,
@@ -553,17 +554,17 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=Fal
     negentropy = -entropy_from_logits(action_logits).mean()
     pure_action_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.action_size :]
     masked_losses = action_loss_tensor * pure_action_attention_mask
-    if True:
-        plt.figure(1)
-        plt.plot(masked_losses[0].tolist())
-        plt.savefig("action.png")
-        # print(
-        #    [
-        #        cfg.causal_lm_tokenizer.decode([x])
-        #        for x in input_sequence[0, -cfg.pure_ctxt_sizes.action_size :].tolist()
-        #    ]
-        # )
-        plt.clf()
+    # if True:
+    #    plt.figure()
+    #    plt.plot(masked_losses[0].tolist())
+    #    plt.savefig("action.png")
+    #    # print(
+    #    #    [
+    #    #        cfg.causal_lm_tokenizer.decode([x])
+    #    #        for x in input_sequence[0, -cfg.pure_ctxt_sizes.action_size :].tolist()
+    #    #    ]
+    #    # )
+    #    plt.clf()
     if per_batch:
         action_loss = masked_losses.sum(dim=1) / pure_action_attention_mask.sum(dim=1)
     else:
@@ -651,19 +652,12 @@ def predict_observation(
     )[:, -cfg.pure_ctxt_sizes.obs_size :]
     pure_obs_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.obs_size :]
     masked_losses = loss_tensor * pure_obs_attention_mask
-    plt.figure()
-    plt.plot(masked_losses[0, 1:].tolist())  # also sliced to remove space
-    if is_default_action:
-        plt.savefig("obs_default.png")
-    else:
-        plt.savefig("obs.png")
-    # print(
-    #    [
-    #        cfg.causal_lm_tokenizer.decode([x])
-    #        for x in input_sequence[0, -cfg.pure_ctxt_sizes.obs_size :].tolist()
-    #    ]
-    # )
-    # print(repr(cfg.causal_lm_tokenizer.decode(input_sequence[0].tolist())))
+    # plt.figure()
+    # plt.plot(masked_losses[0, 1:].tolist())  # also sliced to remove space
+    # if is_default_action:
+    #    plt.savefig("obs_default.png")
+    # else:
+    #    plt.savefig("obs.png")
     token_loss_pairs = inspect_string(
         cfg.causal_lm,
         cfg.causal_lm_tokenizer,
