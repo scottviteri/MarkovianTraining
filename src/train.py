@@ -296,7 +296,7 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
                     #    min_new_tokens=cfg.pure_ctxt_sizes.action_size,
                     #    eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
                     # ),
-                    transformers.generation.TemperatureLogitsWarper(0.6),
+                    transformers.generation.TemperatureLogitsWarper(1.0),
                     transformers.generation.InfNanRemoveLogitsProcessor(),
                     transformers.LogitNormalization(),
                 ]
@@ -309,19 +309,6 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
             #    ]
             # )
 
-            generation_config = transformers.GenerationConfig(
-                max_new_tokens=cfg.pure_ctxt_sizes.action_size,
-                min_new_tokens=cfg.pure_ctxt_sizes.action_size,
-                do_sample=True,
-                logits_warper=logits_warper,
-                num_return_sequences=cfg.inference_cfg.num_return_sequences,
-                output_scores=True,
-                pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
-                eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
-                return_dict_in_generate=False,
-            )
-            cfg.causal_lm.generation_config = generation_config
-
             beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
             beam_observations = observation.repeat_interleave(cfg.num_beams, dim=0)
             action_candidates = cfg.causal_lm.generate(
@@ -329,10 +316,10 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
                 add_q_head=add_q_head,
                 get_v_head=False,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
-                pad_token_id=generation_config.pad_token_id,
-                eos_token_id=generation_config.eos_token_id,
-                output_scores=generation_config.output_scores,
-                return_dict_in_generate=generation_config.return_dict_in_generate,
+                pad_token_id=cfg.causal_lm.generation_config.pad_token_id,
+                eos_token_id=cfg.causal_lm.generation_config.eos_token_id,
+                output_scores=cfg.causal_lm.generation_config.output_scores,
+                return_dict_in_generate=cfg.causal_lm.generation_config.return_dict_in_generate,
                 # synced_gpus=False,
             )[:, -cfg.ctxt_sizes.action_size :]
             return action_candidates

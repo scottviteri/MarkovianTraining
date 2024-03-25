@@ -20,6 +20,7 @@ import torch.nn as nn
 from training_types import *
 from prepare_dataset import prepare_dataset
 
+import transformers
 from transformers import (
     PreTrainedModel,
     AutoModelForCausalLM,
@@ -138,25 +139,17 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         init_cfg.model_name,
         path_2_tokenizer,
         path_2_model,
+        init_cfg.inference_cfg.num_return_sequences,
         init_cfg.do_lora,
         use_mac=init_cfg.use_mac,
     )
 
-    # causal_lm.q_head = torch.nn.Linear(
-    #    causal_lm.lm_head.weight.shape[-1],
-    #    causal_lm.lm_head.weight.shape[0],
-    #    bias=False,
-    #    device=device,
-    # )
-    # torch.nn.init.zeros_(causal_lm.q_head.weight)
-
-    # predictor_lm = copy.deepcopy(inference_lm)
-    # for param in predictor_lm.parameters():
-    #    param.requires_grad = False
-
     pure_ctxt_sizes, prefix_tensors = get_prefixes(
         causal_lm_tokenizer, init_cfg.batch_size, device, init_cfg.ctxt_sizes
     )
+    causal_lm.generation_config.min_new_tokens = pure_ctxt_sizes.action_size
+    causal_lm.generation_config.max_new_tokens = pure_ctxt_sizes.action_size
+
     dataset = prepare_dataset(
         init_cfg,
         causal_lm_tokenizer,
@@ -325,6 +318,7 @@ def get_model(
     model_name,
     path_2_tokenizer,
     path_2_model,
+    num_return_sequences,
     do_lora=None,
     use_mac=False,
 ):
@@ -367,6 +361,45 @@ def get_model(
             param.requires_grad = True
 
     causal_lm.tokenizer = causal_lm_tokenizer
+    bad_words_ids = [
+        [
+            causal_lm_tokenizer.bos_token_id,
+            causal_lm_tokenizer.eos_token_id,
+        ]
+    ]
+    logits_warper = transformers.generation.LogitsProcessorList(
+        [
+            transformers.generation.NoBadWordsLogitsProcessor(
+                bad_words_ids,
+                eos_token_id=causal_lm_tokenizer.eos_token_id,
+            ),
+            # transformers.generation.MinNewTokensLengthLogitsProcessor(
+            #    prompt_length_to_skip=input_ids.shape[-1],
+            #    min_new_tokens=cfg.pure_ctxt_sizes.action_size,
+            #    eos_token_id=causal_lm_tokenizer.eos_token_id,
+            # ),
+            transformers.generation.TemperatureLogitsWarper(1.0),
+            transformers.generation.InfNanRemoveLogitsProcessor(),
+            transformers.LogitNormalization(),
+        ]
+    )
+    # stopping_criteria = transformers.generation.StoppingCriteriaList(
+    #    [
+    #        transformers.generation.MaxLengthCriteria(
+    #            max_length=input_ids.shape[-1] + cfg.pure_ctxt_sizes.action_size
+    #        )
+    #    ]
+    # )
+    generation_config = transformers.GenerationConfig(
+        do_sample=True,
+        logits_warper=logits_warper,
+        num_return_sequences=num_return_sequences,
+        output_scores=True,
+        pad_token_id=causal_lm_tokenizer.pad_token_id,
+        eos_token_id=causal_lm_tokenizer.eos_token_id,
+        return_dict_in_generate=False,
+    )
+    causal_lm.generation_config = generation_config
     return causal_lm, causal_lm_tokenizer
 
 
