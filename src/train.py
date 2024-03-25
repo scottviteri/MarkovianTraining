@@ -310,22 +310,15 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
             # )
 
             generation_config = transformers.GenerationConfig(
-                # max_new_tokens=cfg.pure_ctxt_sizes.action_size,
-                # min_new_tokens=cfg.pure_ctxt_sizes.action_size,
-                min_length=2 * cfg.ctxt_sizes.action_size + cfg.ctxt_sizes.obs_size,
-                max_length=2 * cfg.ctxt_sizes.action_size + cfg.ctxt_sizes.obs_size,
+                max_new_tokens=cfg.pure_ctxt_sizes.action_size,
+                min_new_tokens=cfg.pure_ctxt_sizes.action_size,
                 do_sample=True,
                 logits_warper=logits_warper,
-                # num_beams=cfg.num_beams,
-                # renormalize_logits=True,
-                # remove_invalid_values=True,
                 num_return_sequences=cfg.inference_cfg.num_return_sequences,
                 output_scores=True,
                 pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
                 eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
                 return_dict_in_generate=False,
-                # length_penalty=1.0,
-                # early_stopping=False,
             )
             cfg.causal_lm.generation_config = generation_config
 

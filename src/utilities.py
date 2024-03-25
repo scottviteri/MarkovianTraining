@@ -612,7 +612,7 @@ def predict_observation(
     pure_obs_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.obs_size :]
     masked_losses = loss_tensor * pure_obs_attention_mask
     plt.figure()
-    plt.plot(masked_losses[0].tolist())
+    plt.plot(masked_losses[0, 1:].tolist())  # also sliced to remove space
     if is_default_action:
         plt.savefig("obs_default.png")
     else:
