@@ -412,18 +412,11 @@ def update_weights(
     prediction_cfg = cfg.prediction_cfg
 
     assert (
-        (
-            cfg.causal_lm.qhead.base_model.model.model.layers[
-                -3
-            ].mlp.up_proj.base_layer.weight
-            - cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
-        )
-        .abs()
-        .sum()
-        .item(0)
-        == 0,
-        "Frozen weight copies should be equal",
-    )
+        cfg.causal_lm.qhead.base_model.model.model.layers[
+            -3
+        ].mlp.up_proj.base_layer.weight
+        - cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
+    ).abs().sum().item() == 0, "Frozen weight copies should be equal"
 
     # assert (cfg.causal_lm.qhead.base_model.model.model.layers[-3].mlp.up_proj.base_layer.weight == cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight).all(), "These weights should be frozen and equal."
 
