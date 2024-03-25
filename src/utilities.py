@@ -97,10 +97,12 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
         )
         if get_v_head:
-            pre_values = self.v_head_group["v_head_block"](
-                outputs.hidden_states[-1].detach()
-            )[0]
-            values = self.v_head_group["v_head"](pre_values).squeeze(-1)
+            #pre_values = self.v_head_group["v_head_block"](
+            #    outputs.hidden_states[-1].detach()
+            #)[0]
+            #values = self.v_head_group["v_head"](pre_values).squeeze(-1)
+            hidden_states = outputs.hidden_states[-1].detach()
+            values = self.v_head_group["v_head"](hidden_states).squeeze(-1)
             return outputs, values
         return outputs
 
@@ -325,7 +327,7 @@ def get_model(
     """Load model"""
     model_dict = {
         "tinystories": "roneneldan/TinyStories-1M",
-        "llama": "meta-llama/Llama-2-13b-hf",
+        "llama": "meta-llama/Llama-2-7b-chat-hf",
         "distilgpt2": "distilgpt2",
         "gptj": "EleutherAI/gpt-j-6b",
         # "mistral": "mistralai/Mistral-7B-v0.1",
@@ -355,8 +357,8 @@ def get_model(
         causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
         for name, param in causal_lm.transformer.named_parameters():
             param.requires_grad = False
-        # for name, param in causal_lm.qhead.named_parameters():
-        #    param.requires_grad = True
+        for name, param in causal_lm.qhead.named_parameters():
+            param.requires_grad = ".lora" in name:
         for name, param in causal_lm.v_head_group.named_parameters():
             param.requires_grad = True
 
