@@ -90,7 +90,8 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         get_v_head=False,
         **kwargs,
     ):
-        outputs = (self.qhead if add_q_head else self.transformer)(
+        model = self.qhead if add_q_head else self.transformer
+        outputs = model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             output_hidden_states=get_v_head,
@@ -107,7 +108,13 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         return outputs
 
     def prepare_inputs_for_generation(self, input_ids, **kwargs):
-        return self.transformer.prepare_inputs_for_generation(input_ids, **kwargs)
+        generation_inputs = self.transformer.prepare_inputs_for_generation(
+            input_ids, **kwargs
+        )
+        generation_inputs.update(
+            {"add_q_head": kwargs["add_q_head"], "get_v_head": kwargs["get_v_head"]}
+        )
+        return generation_inputs
 
     def _reorder_cache(self, past_key_values, beam_idx):
         return self.transformer._reorder_cache(past_key_values, beam_idx)
