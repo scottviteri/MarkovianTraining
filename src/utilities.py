@@ -262,9 +262,7 @@ def get_prefixes(
         ).to(device)
         return repeated_prefix_tokens
 
-    first_action_prefix_tensor = tokenize_and_repeat(
-        "Work through the following question step by step, decomposing problems into subproblems as needed."
-    )
+    first_action_prefix_tensor = tokenize_and_repeat("")
     tokens_per_pure_first_action = (
         ctxt_sizes.first_action_size - first_action_prefix_tensor.shape[1]
     )

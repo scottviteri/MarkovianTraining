@@ -468,6 +468,7 @@ def update_weights(
         #    clipped_ratio * obs_log_prob.mean(),
         # )
         # (negentropy - old_critic_negentropy) * 0.1 +
+        #aggregate_loss = action_prob_ratio * neg_advantage + value_loss
         aggregate_loss = (
             torch.max(action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage)
             + value_loss
