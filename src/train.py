@@ -484,11 +484,16 @@ def update_weights(
                 step=batch_index,
             )
 
+        weights_before = cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
         if do_weight_update:
             cfg.optimizer.zero_grad()
             aggregate_loss.backward()
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
+        assert (
+            weights_before
+            == cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
+        ).all(), "Should be frozen"
         losses = [action_loss, obs_loss, value_loss, negentropy]
         return aggregate_loss, losses
 
