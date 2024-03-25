@@ -485,14 +485,21 @@ def update_weights(
             )
 
         weights_before = cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
+        non_qhead_weights_before = cfg.causal_lm.qhead.base_model.model.model.layers[
+            -3
+        ].mlp.up_proj.weight
         if do_weight_update:
             cfg.optimizer.zero_grad()
             aggregate_loss.backward()
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
+        weights_after = cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
+        non_qhead_weights_after = cfg.causal_lm.qhead.base_model.model.model.layers[
+            -3
+        ].mlp.up_proj.weight
+        assert (weights_before == weights_after).all(), "Should be frozen"
         assert (
-            weights_before
-            == cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
+            non_qhead_weights_before == non_qhead_weights_after
         ).all(), "Should be frozen"
         losses = [action_loss, obs_loss, value_loss, negentropy]
         return aggregate_loss, losses
