@@ -349,9 +349,10 @@ def get_model(
     with device:
         padding_side = get_padding_side(model_name)
         if load_model:
-            model_location = "./saved_weights_and_losses/" + model_name + "_weights"
-            config = AutoConfig.from_pretrained(model_location)
-            causal_lm = ModelWithQHead(model_location, config)
+            # model_location = "./saved_weights_and_losses/" + model_name + "_weights"
+            config = AutoConfig.from_pretrained(model_dict[model_name])
+            causal_lm = torch.load(path_2_model + ".pth").module
+            # causal_lm = ModelWithQHead(model_location, config)
         else:
             config = AutoConfig.from_pretrained(model_dict[model_name])
             causal_lm = ModelWithQHead(model_dict[model_name], config)

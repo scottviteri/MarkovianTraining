@@ -57,7 +57,8 @@ def save_weights(cfg, batch_index):
     ):
         print(f"Saving trained_{cfg.model_name} \n\n")
         cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
-        cfg.causal_lm.save_pretrained(cfg.path_2_model)
+        torch.save(cfg.causal_lm, cfg.path_2_model+".pth")
+        #cfg.causal_lm.save_pretrained(cfg.path_2_model)
 
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
