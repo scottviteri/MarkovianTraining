@@ -306,15 +306,15 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
 
             beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
             beam_observations = observation.repeat_interleave(cfg.num_beams, dim=0)
-            action_candidates = cfg.causal_lm.generate(
+            action_candidates = cfg.causal_lm.module.generate(
                 beam_input_ids,
                 add_q_head=add_q_head,
                 get_v_head=False,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
-                pad_token_id=cfg.causal_lm.generation_config.pad_token_id,
-                eos_token_id=cfg.causal_lm.generation_config.eos_token_id,
-                output_scores=cfg.causal_lm.generation_config.output_scores,
-                return_dict_in_generate=cfg.causal_lm.generation_config.return_dict_in_generate,
+                pad_token_id=cfg.causal_lm.module.generation_config.pad_token_id,
+                eos_token_id=cfg.causal_lm.module.generation_config.eos_token_id,
+                output_scores=cfg.causal_lm.module.generation_config.output_scores,
+                return_dict_in_generate=cfg.causal_lm.module.generation_config.return_dict_in_generate,
                 # synced_gpus=False,
             )[:, -cfg.ctxt_sizes.action_size :]
             return action_candidates
@@ -388,13 +388,13 @@ def update_weights(
     prediction_cfg = cfg.prediction_cfg
 
     assert (
-        cfg.causal_lm.qhead.base_model.model.model.layers[
+        cfg.causal_lm.module.qhead.base_model.model.model.layers[
             -3
         ].mlp.up_proj.base_layer.weight
-        - cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
+        - cfg.causal_lm.module.transformer.model.layers[-3].mlp.up_proj.weight
     ).abs().sum().item() == 0, "Frozen weight copies should be equal"
 
-    # assert (cfg.causal_lm.qhead.base_model.model.model.layers[-3].mlp.up_proj.base_layer.weight == cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight).all(), "These weights should be frozen and equal."
+    # assert (cfg.causal_lm.module.qhead.base_model.model.model.layers[-3].mlp.up_proj.base_layer.weight == cfg.causal_lm.module.transformer.model.layers[-3].mlp.up_proj.weight).all(), "These weights should be frozen and equal."
 
     with (
         nullcontext
@@ -481,19 +481,27 @@ def update_weights(
                 step=batch_index,
             )
 
-        weights_before = cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
-        non_qhead_weights_before = cfg.causal_lm.qhead.base_model.model.model.layers[
+        weights_before = cfg.causal_lm.module.transformer.model.layers[
             -3
         ].mlp.up_proj.weight
+        non_qhead_weights_before = (
+            cfg.causal_lm.module.qhead.base_model.model.model.layers[
+                -3
+            ].mlp.up_proj.weight
+        )
         if do_weight_update:
             cfg.optimizer.zero_grad()
             aggregate_loss.backward()
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
-        weights_after = cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
-        non_qhead_weights_after = cfg.causal_lm.qhead.base_model.model.model.layers[
+        weights_after = cfg.causal_lm.module.transformer.model.layers[
             -3
         ].mlp.up_proj.weight
+        non_qhead_weights_after = (
+            cfg.causal_lm.module.qhead.base_model.model.model.layers[
+                -3
+            ].mlp.up_proj.weight
+        )
         assert (weights_before == weights_after).all(), "Should be frozen"
         assert (
             non_qhead_weights_before == non_qhead_weights_after
@@ -739,9 +747,7 @@ def train_model(init_cfg):
         dist.init_process_group(backend="nccl")
         torch.cuda.set_device(dist.get_rank())
         print("rank", dist.get_rank())
-    # cfg.causal_lm = DDP(
-    #    cfg.causal_lm, device_ids=[dist.get_rank()]  # , find_unused_parameters=True
-    # )
+
     if not cfg.load_model:
         with open(cfg.path_2_log, "w") as f:
             print("")
@@ -765,13 +771,17 @@ def train_model(init_cfg):
             + list(cfg.causal_lm.v_head_group.parameters()),
             lr=cfg.lr,
         )
-
     elif cfg.optimizer == "rmsprop":
         cfg.optimizer = torch.optim.RMSprop(cfg.causal_lm.parameters(), lr=cfg.lr)
     else:
         raise ValueError(
             f"Unsupported optimizer: {cfg.optimizer}. Please choose 'sgd', 'adam', or 'rmsprop'."
         )
+    cfg.causal_lm = DDP(
+        cfg.causal_lm,
+        device_ids=list(range(dist.get_rank())),
+        find_unused_parameters=True,
+    )
     train_via_update(cfg)
     if cfg.wandb and (cfg.use_mac or dist.get_rank() == 0):
         wandb.finish()
