@@ -779,7 +779,7 @@ def train_model(init_cfg):
         )
     cfg.causal_lm = DDP(
         cfg.causal_lm,
-        device_ids=list(range(dist.get_rank())),
+        device_ids=[dist.get_rank()],
         find_unused_parameters=True,
     )
     train_via_update(cfg)
