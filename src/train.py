@@ -57,8 +57,8 @@ def save_weights(cfg, batch_index):
     ):
         print(f"Saving trained_{cfg.model_name} \n\n")
         cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
-        torch.save(cfg.causal_lm, cfg.path_2_model+".pth")
-        #cfg.causal_lm.save_pretrained(cfg.path_2_model)
+        torch.save(cfg.causal_lm, cfg.path_2_model + ".pth")
+        # cfg.causal_lm.save_pretrained(cfg.path_2_model)
 
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
@@ -388,12 +388,13 @@ def update_weights(
 ):
     prediction_cfg = cfg.prediction_cfg
 
-    assert (
-        cfg.causal_lm.module.qhead.base_model.model.model.layers[
-            -3
-        ].mlp.up_proj.base_layer.weight
-        - cfg.causal_lm.module.transformer.model.layers[-3].mlp.up_proj.weight
-    ).abs().sum().item() == 0, "Frozen weight copies should be equal"
+    if "llama" in cfg.model_name or "mistral" in cfg.model_name:
+        assert (
+            cfg.causal_lm.module.qhead.base_model.model.model.layers[
+                -3
+            ].mlp.up_proj.base_layer.weight
+            - cfg.causal_lm.module.transformer.model.layers[-3].mlp.up_proj.weight
+        ).abs().sum().item() == 0, "Frozen weight copies should be equal"
 
     # assert (cfg.causal_lm.module.qhead.base_model.model.model.layers[-3].mlp.up_proj.base_layer.weight == cfg.causal_lm.module.transformer.model.layers[-3].mlp.up_proj.weight).all(), "These weights should be frozen and equal."
 
@@ -482,31 +483,36 @@ def update_weights(
                 step=batch_index,
             )
 
-        weights_before = cfg.causal_lm.module.transformer.model.layers[
-            -3
-        ].mlp.up_proj.weight
-        non_qhead_weights_before = (
-            cfg.causal_lm.module.qhead.base_model.model.model.layers[
+        if "llama" in cfg.model_name or "mistral" in cfg.model_name:
+            weights_before = cfg.causal_lm.module.transformer.model.layers[
                 -3
             ].mlp.up_proj.weight
-        )
+            non_qhead_weights_before = (
+                cfg.causal_lm.module.qhead.base_model.model.model.layers[
+                    -3
+                ].mlp.up_proj.weight
+            )
+
         if do_weight_update:
             cfg.optimizer.zero_grad()
             aggregate_loss.backward()
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
-        weights_after = cfg.causal_lm.module.transformer.model.layers[
-            -3
-        ].mlp.up_proj.weight
-        non_qhead_weights_after = (
-            cfg.causal_lm.module.qhead.base_model.model.model.layers[
+
+        if "llama" in cfg.model_name or "mistral" in cfg.model_name:
+            weights_after = cfg.causal_lm.module.transformer.model.layers[
                 -3
             ].mlp.up_proj.weight
-        )
-        assert (weights_before == weights_after).all(), "Should be frozen"
-        assert (
-            non_qhead_weights_before == non_qhead_weights_after
-        ).all(), "Should be frozen"
+            non_qhead_weights_after = (
+                cfg.causal_lm.module.qhead.base_model.model.model.layers[
+                    -3
+                ].mlp.up_proj.weight
+            )
+            assert (weights_before == weights_after).all(), "Should be frozen"
+            assert (
+                non_qhead_weights_before == non_qhead_weights_after
+            ).all(), "Should be frozen"
+
         losses = [action_loss, obs_loss, value_loss, negentropy]
         return aggregate_loss, losses
 

@@ -68,10 +68,13 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
                 ),
             }
         )
-        assert (
-            self.qhead.base_model.model.model.layers[-3].mlp.up_proj.base_layer.weight
-            == self.transformer.model.layers[-3].mlp.up_proj.weight
-        ).all(), "Should be same weights"
+        if "llama" in model_name_or_path or "mistral" in model_name_or_path:
+            assert (
+                self.qhead.base_model.model.model.layers[
+                    -3
+                ].mlp.up_proj.base_layer.weight
+                == self.transformer.model.layers[-3].mlp.up_proj.weight
+            ).all(), "Should be same weights"
 
         ## Zero-initialize weights in q_head_block and q_head
         # for name, param in self.q_head_group["q_head_block"].named_parameters():
