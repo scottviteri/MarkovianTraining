@@ -676,7 +676,6 @@ def trainer(cfg):
                 action,
                 default_action,
                 datapt.obs,
-                datapt.action is not None,
                 datapt.is_first,
                 aggregate_loss,
                 losses,
