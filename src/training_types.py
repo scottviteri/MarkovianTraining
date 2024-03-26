@@ -121,7 +121,7 @@ class InitialConfig:
     optimizer: str
     batch_size: int
     num_batches: int
-    replay_buffer_size: int
+    replay_buffer_size: Optional[int]
     obs_to_action_ratio: float
     interval_save_weights: int
     interval_print: int
@@ -157,7 +157,7 @@ class Config:
     qhead_optimizer: torch.optim.Optimizer
     batch_size: int
     num_batches: int
-    replay_buffer_size: int
+    replay_buffer_size: Optional[int]
     obs_to_action_ratio: float
     interval_save_weights: int
     interval_print: int

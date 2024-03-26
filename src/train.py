@@ -693,7 +693,7 @@ def trainer(cfg):
                 datapt=Datapt(action=action, obs=datapt.obs, is_first=datapt.is_first),
                 loss=aggregate_loss,
             )
-            if action_is_generated:
+            if action_is_generated and cfg.replay_buffer_size is not None:
                 new_replay_buffer = (
                     state.replay_buffer[:-1]
                     if len(state.replay_buffer) == cfg.replay_buffer_size
@@ -725,7 +725,8 @@ def train_via_update(cfg):
         state = pi()
         # batch index will still increase on a replay buffer sample
         if (
-            state.batch_index % cfg.replay_buffer_size == 0
+            cfg.replay_buffer_size is not None
+            and state.batch_index % cfg.replay_buffer_size == 0
             and len(state.replay_buffer) >= cfg.replay_buffer_size
             and datapt.is_first
         ):
