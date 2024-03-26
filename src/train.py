@@ -469,7 +469,7 @@ def update_weights(
             torch.max(action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage)
             + value_loss
         )
-        if cfg.wandb and action_is_generated:
+        if cfg.wandb and dist.get_rank() == 0 and action_is_generated:
             wandb.log(
                 {
                     "Values": values.mean(),
@@ -743,17 +743,20 @@ def train_via_update(cfg):
 
 
 def train_model(init_cfg):
-    cfg = extend_initial_config(init_cfg)
-    if not cfg.use_mac:
+    if not init_cfg.use_mac:
         dist.init_process_group(backend="nccl")
         torch.cuda.set_device(dist.get_rank())
         print("rank", dist.get_rank())
+
+    cfg = extend_initial_config(init_cfg)
+    cfg.causal_lm.to(dist.get_rank())
 
     if not cfg.load_model:
         with open(cfg.path_2_log, "w") as f:
             print("")
     with open(cfg.path_2_log, "a") as f:
         f.write("")
+
     if cfg.wandb and (cfg.use_mac or dist.get_rank() == 0):
         wandb.init(
             project="collaborative-training-many-per-context-window",

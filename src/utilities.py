@@ -1,5 +1,6 @@
 import torch
 import torchtyping
+import torch.distributed as dist
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
@@ -672,11 +673,12 @@ def predict_observation(
     batch_obs_losses = masked_losses[:, 1:].sum(dim=1) / pure_obs_attention_mask[
         :, 1:
     ].sum(dim=1)
-    print(
-        "Default:" if is_default_action else "Updated:",
-        batch_obs_losses[0].item(),
-        targeted_pairs,
-    )
+    if dist.get_rank() == 0:
+        print(
+            "Default:" if is_default_action else "Updated:",
+            batch_obs_losses[0].item(),
+            targeted_pairs,
+        )
     return batch_obs_losses if per_batch else batch_obs_losses.mean()
 
     # obs_tensor = (loss_tensor * attention_mask[:, 1:])[:, -cfg.pure_ctxt_sizes.obs_size :]
