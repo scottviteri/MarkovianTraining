@@ -364,10 +364,10 @@ def arithmetic_generator(num_terms, num_digits, operations, probs):
             else:
                 op_rand = ops_rand[i - 1]
                 total = valid_ops[op_rand](total, num)
-                if op_rand != 1:
-                    question += f"{op_rand} {num} "
+                if op_rand == "-":
+                    question += f"+ -{num} "
                 else:
-                    question += f"+ -{num} " 
+                    question += f"{op_rand} {num} "
         question = question[:-1] + "."
 
         answer = f"{total}"
