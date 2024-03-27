@@ -668,10 +668,11 @@ def predict_observation(
         cfg.causal_lm_tokenizer,
         cfg.causal_lm_tokenizer.decode(input_sequence[0].tolist()),
     )
-    targeted_pairs = token_loss_pairs[
-        -cfg.pure_ctxt_sizes.obs_size - 3 : -cfg.pure_ctxt_sizes.obs_size + 5
+    targeted_pairs = [
+        p
+        for p in token_loss_pairs[-cfg.pure_ctxt_sizes.obs_size - 3 :]
+        if str(cfg.causal_lm_tokenizer.pad_token) != p[0]
     ]
-    plt.clf()
 
     # slicing [:,1:] is a hack because of mistral number tokenization creating a leading space token!
     batch_obs_losses = masked_losses[:, 1:].sum(dim=1) / pure_obs_attention_mask[
