@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Union, NamedTuple, Iterable, Dict
+from typing import Optional, Union, NamedTuple, Iterable, Dict, List
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
@@ -33,11 +33,19 @@ class ContextSizes:
 
 
 @dataclass
+class ScoredTrajectory:
+    prev_datapt: Datapt
+    datapt: Datapt
+    loss: float
+
+
+@dataclass
 class TrainerState:
     action: Optional[torch.tensor]
     obs: Optional[torch.tensor]
     batch_index: int
     aggregate_loss: Optional[float]
+    replay_buffer: List[ScoredTrajectory]
 
 
 GptEval = NamedTuple("GptEval", [("num_evals", int), ("use_gptj", bool)])
@@ -113,6 +121,7 @@ class InitialConfig:
     optimizer: str
     batch_size: int
     num_batches: int
+    replay_buffer_size: Optional[int]
     obs_to_action_ratio: float
     interval_save_weights: int
     interval_print: int
@@ -148,6 +157,7 @@ class Config:
     qhead_optimizer: torch.optim.Optimizer
     batch_size: int
     num_batches: int
+    replay_buffer_size: Optional[int]
     obs_to_action_ratio: float
     interval_save_weights: int
     interval_print: int

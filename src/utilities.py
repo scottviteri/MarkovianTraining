@@ -1,5 +1,6 @@
 import torch
 import torchtyping
+import torch.distributed as dist
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
@@ -67,10 +68,13 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
                 ),
             }
         )
-        assert (
-            self.qhead.base_model.model.model.layers[-3].mlp.up_proj.base_layer.weight
-            == self.transformer.model.layers[-3].mlp.up_proj.weight
-        ).all(), "Should be same weights"
+        if "llama" in model_name_or_path or "mistral" in model_name_or_path:
+            assert (
+                self.qhead.base_model.model.model.layers[
+                    -3
+                ].mlp.up_proj.base_layer.weight
+                == self.transformer.model.layers[-3].mlp.up_proj.weight
+            ).all(), "Should be same weights"
 
         ## Zero-initialize weights in q_head_block and q_head
         # for name, param in self.q_head_group["q_head_block"].named_parameters():
@@ -174,6 +178,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         qhead_optimizer=init_cfg.optimizer,
         batch_size=init_cfg.batch_size,
         num_batches=init_cfg.num_batches,
+        replay_buffer_size=init_cfg.replay_buffer_size,
         obs_to_action_ratio=init_cfg.obs_to_action_ratio,
         interval_save_weights=init_cfg.interval_save_weights,
         interval_print=init_cfg.interval_print,
@@ -262,9 +267,7 @@ def get_prefixes(
         ).to(device)
         return repeated_prefix_tokens
 
-    first_action_prefix_tensor = tokenize_and_repeat(
-        "Work through the following question step by step, decomposing problems into subproblems as needed."
-    )
+    first_action_prefix_tensor = tokenize_and_repeat("")
     tokens_per_pure_first_action = (
         ctxt_sizes.first_action_size - first_action_prefix_tensor.shape[1]
     )
@@ -349,9 +352,10 @@ def get_model(
     with device:
         padding_side = get_padding_side(model_name)
         if load_model:
-            model_location = "./saved_weights_and_losses/" + model_name + "_weights"
-            config = AutoConfig.from_pretrained(model_location)
-            causal_lm = ModelWithQHead(model_location, config)
+            # model_location = "./saved_weights_and_losses/" + model_name + "_weights"
+            config = AutoConfig.from_pretrained(model_dict[model_name])
+            causal_lm = torch.load(path_2_model + ".pth").module
+            # causal_lm = ModelWithQHead(model_location, config)
         else:
             config = AutoConfig.from_pretrained(model_dict[model_name])
             causal_lm = ModelWithQHead(model_dict[model_name], config)
@@ -555,17 +559,17 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=Fal
     negentropy = -entropy_from_logits(action_logits).mean()
     pure_action_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.action_size :]
     masked_losses = action_loss_tensor * pure_action_attention_mask
-    if True:
-        plt.figure(1)
-        plt.plot(masked_losses[0].tolist())
-        plt.savefig("action.png")
-        # print(
-        #    [
-        #        cfg.causal_lm_tokenizer.decode([x])
-        #        for x in input_sequence[0, -cfg.pure_ctxt_sizes.action_size :].tolist()
-        #    ]
-        # )
-        plt.clf()
+    # if True:
+    #    plt.figure()
+    #    plt.plot(masked_losses[0].tolist())
+    #    plt.savefig("action.png")
+    #    # print(
+    #    #    [
+    #    #        cfg.causal_lm_tokenizer.decode([x])
+    #    #        for x in input_sequence[0, -cfg.pure_ctxt_sizes.action_size :].tolist()
+    #    #    ]
+    #    # )
+    #    plt.clf()
     if per_batch:
         action_loss = masked_losses.sum(dim=1) / pure_action_attention_mask.sum(dim=1)
     else:
@@ -653,38 +657,33 @@ def predict_observation(
     )[:, -cfg.pure_ctxt_sizes.obs_size :]
     pure_obs_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.obs_size :]
     masked_losses = loss_tensor * pure_obs_attention_mask
-    plt.figure()
-    plt.plot(masked_losses[0, 1:].tolist())  # also sliced to remove space
-    if is_default_action:
-        plt.savefig("obs_default.png")
-    else:
-        plt.savefig("obs.png")
-    # print(
-    #    [
-    #        cfg.causal_lm_tokenizer.decode([x])
-    #        for x in input_sequence[0, -cfg.pure_ctxt_sizes.obs_size :].tolist()
-    #    ]
-    # )
-    # print(repr(cfg.causal_lm_tokenizer.decode(input_sequence[0].tolist())))
+    # plt.figure()
+    # plt.plot(masked_losses[0, 1:].tolist())  # also sliced to remove space
+    # if is_default_action:
+    #    plt.savefig("obs_default.png")
+    # else:
+    #    plt.savefig("obs.png")
     token_loss_pairs = inspect_string(
         cfg.causal_lm,
         cfg.causal_lm_tokenizer,
         cfg.causal_lm_tokenizer.decode(input_sequence[0].tolist()),
     )
-    targeted_pairs = token_loss_pairs[
-        -cfg.pure_ctxt_sizes.obs_size - 3 : -cfg.pure_ctxt_sizes.obs_size + 5
+    targeted_pairs = [
+        p
+        for p in token_loss_pairs[-cfg.pure_ctxt_sizes.obs_size - 3 :]
+        if str(cfg.causal_lm_tokenizer.pad_token) != p[0]
     ]
-    plt.clf()
 
     # slicing [:,1:] is a hack because of mistral number tokenization creating a leading space token!
     batch_obs_losses = masked_losses[:, 1:].sum(dim=1) / pure_obs_attention_mask[
         :, 1:
     ].sum(dim=1)
-    print(
-        "Default:" if is_default_action else "Updated:",
-        batch_obs_losses[0].item(),
-        targeted_pairs,
-    )
+    if dist.get_rank() == 0:
+        print(
+            "Default:" if is_default_action else "Updated:",
+            batch_obs_losses[0].item(),
+            targeted_pairs,
+        )
     return batch_obs_losses if per_batch else batch_obs_losses.mean()
 
     # obs_tensor = (loss_tensor * attention_mask[:, 1:])[:, -cfg.pure_ctxt_sizes.obs_size :]

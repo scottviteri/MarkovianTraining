@@ -57,7 +57,8 @@ def save_weights(cfg, batch_index):
     ):
         print(f"Saving trained_{cfg.model_name} \n\n")
         cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
-        cfg.causal_lm.save_pretrained(cfg.path_2_model)
+        torch.save(cfg.causal_lm, cfg.path_2_model + ".pth")
+        # cfg.causal_lm.save_pretrained(cfg.path_2_model)
 
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
@@ -99,7 +100,7 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                 )
 
 
-def log_print_losses(cfg, batch_index, aggregate_loss, losses):
+def log_print_losses(cfg, batch_index, action_is_generated, aggregate_loss, losses):
 
     if batch_index % cfg.interval_print == 0 and (cfg.use_mac or dist.get_rank() == 0):
         if cfg.prediction_cfg.train_O_given_prev_O:
@@ -115,6 +116,8 @@ def log_print_losses(cfg, batch_index, aggregate_loss, losses):
                 perturbed_loss,
             ) = losses
             with open(cfg.path_2_log, "a") as f:
+                if not action_is_generated:
+                    multi_print(f"Pre-Generated Action", f)
                 multi_print(f"Aggregate loss: {aggregate_loss}", f)
                 if value_loss:
                     multi_print(
@@ -136,7 +139,6 @@ def log_print_oa(
     action,
     default_action,
     obs,
-    is_guidance_action,
     is_first,
     aggregate_loss,
 ):
@@ -156,16 +158,10 @@ def log_print_oa(
                     f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
                     f,
                 )
-                if is_guidance_action:
-                    multi_print(
-                        f"Guidance Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
-                        f,
-                    )
-                else:
-                    multi_print(
-                        f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
-                        f,
-                    )
+                multi_print(
+                    f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
+                    f,
+                )
                 multi_print(
                     f"Default Action: {repr(cfg.causal_lm_tokenizer.decode(default_action[0]))}",
                     f,
@@ -311,15 +307,15 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
 
             beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
             beam_observations = observation.repeat_interleave(cfg.num_beams, dim=0)
-            action_candidates = cfg.causal_lm.generate(
+            action_candidates = cfg.causal_lm.module.generate(
                 beam_input_ids,
                 add_q_head=add_q_head,
                 get_v_head=False,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
-                pad_token_id=cfg.causal_lm.generation_config.pad_token_id,
-                eos_token_id=cfg.causal_lm.generation_config.eos_token_id,
-                output_scores=cfg.causal_lm.generation_config.output_scores,
-                return_dict_in_generate=cfg.causal_lm.generation_config.return_dict_in_generate,
+                pad_token_id=cfg.causal_lm.module.generation_config.pad_token_id,
+                eos_token_id=cfg.causal_lm.module.generation_config.eos_token_id,
+                output_scores=cfg.causal_lm.module.generation_config.output_scores,
+                return_dict_in_generate=cfg.causal_lm.module.generation_config.return_dict_in_generate,
                 # synced_gpus=False,
             )[:, -cfg.ctxt_sizes.action_size :]
             return action_candidates
@@ -384,6 +380,7 @@ def update_weights(
     batch_index,
     prev_action,
     prev_obs,
+    action_is_generated,
     action,
     default_action,
     obs,
@@ -391,14 +388,15 @@ def update_weights(
 ):
     prediction_cfg = cfg.prediction_cfg
 
-    assert (
-        cfg.causal_lm.qhead.base_model.model.model.layers[
-            -3
-        ].mlp.up_proj.base_layer.weight
-        - cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
-    ).abs().sum().item() == 0, "Frozen weight copies should be equal"
+    if "llama" in cfg.model_name or "mistral" in cfg.model_name:
+        assert (
+            cfg.causal_lm.module.qhead.base_model.model.model.layers[
+                -3
+            ].mlp.up_proj.base_layer.weight
+            - cfg.causal_lm.module.transformer.model.layers[-3].mlp.up_proj.weight
+        ).abs().sum().item() == 0, "Frozen weight copies should be equal"
 
-    # assert (cfg.causal_lm.qhead.base_model.model.model.layers[-3].mlp.up_proj.base_layer.weight == cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight).all(), "These weights should be frozen and equal."
+    # assert (cfg.causal_lm.module.qhead.base_model.model.model.layers[-3].mlp.up_proj.base_layer.weight == cfg.causal_lm.module.transformer.model.layers[-3].mlp.up_proj.weight).all(), "These weights should be frozen and equal."
 
     with (
         nullcontext
@@ -468,11 +466,12 @@ def update_weights(
         #    clipped_ratio * obs_log_prob.mean(),
         # )
         # (negentropy - old_critic_negentropy) * 0.1 +
+        # aggregate_loss = action_prob_ratio * neg_advantage + value_loss
         aggregate_loss = (
             torch.max(action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage)
             + value_loss
         )
-        if cfg.wandb:
+        if cfg.wandb and dist.get_rank() == 0 and action_is_generated:
             wandb.log(
                 {
                     "Values": values.mean(),
@@ -484,23 +483,36 @@ def update_weights(
                 step=batch_index,
             )
 
-        weights_before = cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
-        non_qhead_weights_before = cfg.causal_lm.qhead.base_model.model.model.layers[
-            -3
-        ].mlp.up_proj.weight
+        if "llama" in cfg.model_name or "mistral" in cfg.model_name:
+            weights_before = cfg.causal_lm.module.transformer.model.layers[
+                -3
+            ].mlp.up_proj.weight
+            non_qhead_weights_before = (
+                cfg.causal_lm.module.qhead.base_model.model.model.layers[
+                    -3
+                ].mlp.up_proj.weight
+            )
+
         if do_weight_update:
             cfg.optimizer.zero_grad()
             aggregate_loss.backward()
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
-        weights_after = cfg.causal_lm.transformer.model.layers[-3].mlp.up_proj.weight
-        non_qhead_weights_after = cfg.causal_lm.qhead.base_model.model.model.layers[
-            -3
-        ].mlp.up_proj.weight
-        assert (weights_before == weights_after).all(), "Should be frozen"
-        assert (
-            non_qhead_weights_before == non_qhead_weights_after
-        ).all(), "Should be frozen"
+
+        if "llama" in cfg.model_name or "mistral" in cfg.model_name:
+            weights_after = cfg.causal_lm.module.transformer.model.layers[
+                -3
+            ].mlp.up_proj.weight
+            non_qhead_weights_after = (
+                cfg.causal_lm.module.qhead.base_model.model.model.layers[
+                    -3
+                ].mlp.up_proj.weight
+            )
+            assert (weights_before == weights_after).all(), "Should be frozen"
+            assert (
+                non_qhead_weights_before == non_qhead_weights_after
+            ).all(), "Should be frozen"
+
         losses = [action_loss, obs_loss, value_loss, negentropy]
         return aggregate_loss, losses
 
@@ -510,10 +522,10 @@ def log_and_save(
     batch_index,
     prev_action,
     prev_obs,
+    action_is_generated,
     action,
     default_action,
     obs,
-    is_guidance_action,
     is_first,
     aggregate_loss,
     losses,
@@ -526,10 +538,12 @@ def log_and_save(
     #    log_wandb(cfg, batch_index, aggregate_loss, losses)
     #    log_print_losses(cfg, batch_index, aggregate_loss, losses)
     # else:
-    save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses)
+
     save_weights(cfg, batch_index)
-    log_wandb(cfg, batch_index, aggregate_loss, losses)
-    log_print_losses(cfg, batch_index, aggregate_loss, losses)
+    if action_is_generated:
+        save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses)
+        log_wandb(cfg, batch_index, aggregate_loss, losses)
+    log_print_losses(cfg, batch_index, action_is_generated, aggregate_loss, losses)
 
     log_print_oa(
         cfg=cfg,
@@ -539,7 +553,6 @@ def log_and_save(
         action=action,
         default_action=default_action,
         obs=obs,
-        is_guidance_action=is_guidance_action,
         is_first=is_first,
         aggregate_loss=aggregate_loss,  # if not cfg.training_predictor_mode else None,
     )
@@ -579,7 +592,10 @@ def perturb_action(action, cfg):
 
 def trainer(cfg):
     # state = [get_default_action(cfg), 0, None]
-    state = TrainerState(action=None, obs=None, batch_index=0, aggregate_loss=None)
+    state = TrainerState(
+        action=None, obs=None, batch_index=0, aggregate_loss=None, replay_buffer=[]
+    )
+    # replay buffer as trajectory and a score
 
     def update(datapt):
         nonlocal state
@@ -591,17 +607,6 @@ def trainer(cfg):
                 cfg.trainer_cfg.inference_training_length,
             )
             mode_index = state.batch_index % (pred_len + inf_len)
-            # if mode_index == 0:  # switch from inf mode to pred mode
-            #    assert not cfg.training_predictor_mode
-            #    # for name, param in cfg.causal_lm.named_parameters():
-            #    #    param.requires_grad = "q_head" not in name
-            #    cfg.training_predictor_mode = True
-            # elif mode_index == pred_len:
-            #    assert cfg.training_predictor_mode
-            #    # cfg.causal_lm.load_state_dict(cfg.causal_lm.state_dict())
-            #    # for name, param in cfg.causal_lm.named_parameters():
-            #    #    param.requires_grad = "q_head" in name
-            #    cfg.training_predictor_mode = False
 
         if datapt.is_first:
             # get_default_action(cfg)
@@ -613,7 +618,6 @@ def trainer(cfg):
                 action=datapt.action,
                 default_action=datapt.action,
                 obs=datapt.obs,
-                is_guidance_action=datapt.action is not None,
                 is_first=datapt.is_first,
                 aggregate_loss=state.aggregate_loss,
             )
@@ -622,16 +626,22 @@ def trainer(cfg):
                 obs=datapt.obs,
                 batch_index=state.batch_index,
                 aggregate_loss=None,
+                replay_buffer=state.replay_buffer,
             )
 
             return
         else:
             # now can assume that prev_datapt contains the question and datapt contains the Answer
-            if datapt.action:
+            action_is_generated = False
+            if datapt.action is not None:
                 action = datapt.action
+                default_action = sample(
+                    cfg, state.action, state.obs, datapt.obs, add_q_head=False
+                )
             elif cfg.prediction_cfg.train_O_given_prev_O:
                 action = state.action  # why?
             else:
+                action_is_generated = True
                 action = sample(
                     cfg, state.action, state.obs, datapt.obs, add_q_head=True
                 )
@@ -645,6 +655,7 @@ def trainer(cfg):
                 state.batch_index,
                 state.action,
                 state.obs,
+                action_is_generated,
                 action,
                 default_action,
                 datapt.obs,
@@ -661,6 +672,7 @@ def trainer(cfg):
                     state.batch_index,
                     state.action,
                     state.obs,
+                    action_is_generated,  # we could pass True if needed
                     perturbed_action,
                     datapt.obs,
                     do_weight_update=False,
@@ -675,54 +687,83 @@ def trainer(cfg):
                 state.batch_index,
                 state.action,
                 state.obs,
+                action_is_generated,
                 action,
                 default_action,
                 datapt.obs,
-                datapt.action is not None,
                 datapt.is_first,
                 aggregate_loss,
                 losses,
             )
+            new_buffer_element = ScoredTrajectory(
+                prev_datapt=Datapt(action=state.action, obs=state.obs, is_first=True),
+                datapt=Datapt(action=action, obs=datapt.obs, is_first=datapt.is_first),
+                loss=aggregate_loss,
+            )
+            if action_is_generated and cfg.replay_buffer_size is not None:
+                new_replay_buffer = (
+                    state.replay_buffer[:-1]
+                    if len(state.replay_buffer) == cfg.replay_buffer_size
+                    else state.replay_buffer
+                ) + [new_buffer_element]
+            else:
+                new_replay_buffer = state.replay_buffer
+
             state = TrainerState(
                 action=action,
                 obs=datapt.obs,
-                batch_index=state.batch_index + 1,
+                batch_index=state.batch_index + (1 if action_is_generated else 0),
                 aggregate_loss=aggregate_loss,
+                replay_buffer=new_replay_buffer,
             )
             return
 
     def pi():
         nonlocal state
-        return state.aggregate_loss
+        return state
 
     return update, pi
 
 
 def train_via_update(cfg):
-    aggregate_losses = []
+    # aggregate_losses = []
     update, pi = trainer(cfg)
-    for datapt_pair in tqdm(cfg.dataset.dataloader, total=cfg.num_batches):
-        aggregate_loss = pi()
-        if aggregate_loss is not None:
-            aggregate_losses.append(aggregate_loss)
-        update(datapt_pair)
-    return aggregate_losses
+    for datapt in tqdm(cfg.dataset.dataloader, total=cfg.num_batches):
+        state = pi()
+        # batch index will still increase on a replay buffer sample
+        if (
+            cfg.replay_buffer_size is not None
+            and state.batch_index % cfg.replay_buffer_size == 0
+            and len(state.replay_buffer) >= cfg.replay_buffer_size
+            and datapt.is_first
+        ):
+            top_trajectories = sorted(state.replay_buffer, key=lambda x: x.loss)[
+                : cfg.replay_buffer_size // 10
+            ]
+            for trajectory in top_trajectories:
+                update(trajectory.prev_datapt)
+                update(trajectory.datapt)
+        # if aggregate_loss is not None:
+        #    aggregate_losses.append(state.aggregate_loss)
+        update(datapt)
+    # return aggregate_losses
 
 
 def train_model(init_cfg):
-    cfg = extend_initial_config(init_cfg)
-    if not cfg.use_mac:
+    if not init_cfg.use_mac:
         dist.init_process_group(backend="nccl")
         torch.cuda.set_device(dist.get_rank())
         print("rank", dist.get_rank())
-    # cfg.causal_lm = DDP(
-    #    cfg.causal_lm, device_ids=[dist.get_rank()]  # , find_unused_parameters=True
-    # )
+
+    cfg = extend_initial_config(init_cfg)
+    cfg.causal_lm.to(dist.get_rank())
+
     if not cfg.load_model:
         with open(cfg.path_2_log, "w") as f:
             print("")
     with open(cfg.path_2_log, "a") as f:
         f.write("")
+
     if cfg.wandb and (cfg.use_mac or dist.get_rank() == 0):
         wandb.init(
             project="collaborative-training-many-per-context-window",
@@ -741,13 +782,17 @@ def train_model(init_cfg):
             + list(cfg.causal_lm.v_head_group.parameters()),
             lr=cfg.lr,
         )
-
     elif cfg.optimizer == "rmsprop":
         cfg.optimizer = torch.optim.RMSprop(cfg.causal_lm.parameters(), lr=cfg.lr)
     else:
         raise ValueError(
             f"Unsupported optimizer: {cfg.optimizer}. Please choose 'sgd', 'adam', or 'rmsprop'."
         )
+    cfg.causal_lm = DDP(
+        cfg.causal_lm,
+        device_ids=[dist.get_rank()],
+        find_unused_parameters=True,
+    )
     train_via_update(cfg)
     if cfg.wandb and (cfg.use_mac or dist.get_rank() == 0):
         wandb.finish()
