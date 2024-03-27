@@ -501,7 +501,7 @@ def wrap_input_tokens(
     begin_instruct_tokens = (
         cfg.causal_lm_tokenizer.encode(
             (
-                "[INST] Use the following reasoning to help predict the answer."
+                "[INST] Use the following possibly fallible reasoning to help predict the true numerical answer, which will come after the 'Answer:' tag."
                 if is_prediction
                 else "[INST]"
             ),
