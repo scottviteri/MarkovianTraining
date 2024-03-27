@@ -490,8 +490,9 @@ def wrap_input_tokens(
     use_instruct_tokens=False,
     is_prediction=False,
 ):
+    assert instruct[0].shape[0] == rest[0].shape[0]
     start_tokens = torch.full(
-        (cfg.batch_size, 1),
+        (instruct[0].shape[0], 1),
         cfg.causal_lm_tokenizer.bos_token_id,
         dtype=torch.int64,
         device=cfg.device,
@@ -509,14 +510,14 @@ def wrap_input_tokens(
             add_special_tokens=False,
         )
         .to(cfg.device)
-        .repeat((cfg.batch_size, 1))
+        .repeat((instruct[0].shape[0], 1))
     )
     end_instruct_tokens = (
         cfg.causal_lm_tokenizer.encode(
             "[/INST]", return_tensors="pt", add_special_tokens=False
         )
         .to(cfg.device)
-        .repeat((cfg.batch_size, 1))
+        .repeat((instruct[0].shape[0], 1))
     )
     token_parts = []
     if use_start_token:

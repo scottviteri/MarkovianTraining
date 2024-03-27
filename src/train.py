@@ -14,7 +14,7 @@ import json
 import random
 import os
 from datasets import load_dataset
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from openai import OpenAI
 from matplotlib import pyplot as plt
@@ -194,11 +194,18 @@ def append_traj_to_storage(traj_path, traj_data):
         json.dump(data, file, indent=4)
 
 
-def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses):
+def save_trajectory(
+    cfg, batch_index, prev_action, prev_obs, action, obs, losses, aggregate_loss
+):
     if cfg.use_mac or dist.get_rank() == 0:
         if batch_index == 0:
-            # Adding a UID to the file name to avoid overwriting
-            cfg.traj_path += f"_{datetime.now(timezone.utc).timestamp():0.0f}.json"
+            # Get the current date and time in PDT
+            current_time = datetime.now(timezone(timedelta(hours=-7)))
+            # Format the timestamp in a human-readable format
+            timestamp = current_time.strftime("%Y%m%d_%H%M%S")
+            # Append the formatted timestamp to the file path
+            cfg.traj_path += f"_{timestamp}.json"
+            # cfg.traj_path += f"_{datetime.now(timezone.utc).timestamp():0.0f}.json"
 
         # Does nothing if file already exists
         init_traj_storage(
@@ -230,11 +237,12 @@ def save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses
 
         traj_data = {
             "batch_index": batch_index,
-            # "prev_action": repr(cfg.causal_lm_tokenizer.decode(prev_action[0])),
-            "prev_obs": repr(cfg.causal_lm_tokenizer.decode(prev_obs[0])),
-            "action": repr(cfg.causal_lm_tokenizer.decode(action[0])),
-            "obs": repr(cfg.causal_lm_tokenizer.decode(obs[0])),
-            # "action_loss": action_loss.item(),
+            "prev_action": cfg.causal_lm_tokenizer.decode(prev_action[0]),
+            "prev_obs": cfg.causal_lm_tokenizer.decode(prev_obs[0]),
+            "action": cfg.causal_lm_tokenizer.decode(action[0]),
+            "obs": cfg.causal_lm_tokenizer.decode(obs[0]),
+            "aggregate_loss": aggregate_loss.item(),
+            "action_loss": action_loss.item(),
             "observation_loss": observation_loss.mean().item(),
             "value_loss": value_loss.item() if value_loss is not None else 0.0,
             "negentropy": negentropy.item() if negentropy is not None else 0.0,
@@ -541,7 +549,9 @@ def log_and_save(
 
     save_weights(cfg, batch_index)
     if action_is_generated:
-        save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses)
+        save_trajectory(
+            cfg, batch_index, prev_action, prev_obs, action, obs, losses, aggregate_loss
+        )
         log_wandb(cfg, batch_index, aggregate_loss, losses)
     log_print_losses(cfg, batch_index, action_is_generated, aggregate_loss, losses)
 

@@ -4,6 +4,7 @@
 # ToDo: Send models/data to cuda? (Marked in code)
 
 import torch
+import torch.distributed as dist
 import json
 import matplotlib.pyplot as plt
 import copy
@@ -25,7 +26,7 @@ class ActionEvaluator:
         perturbations: dict = None,
         n_max: int = None,
         n_step: int = None,
-        path_to_dir: str = "src/saved_weights_and_losses/",
+        path_to_dir: str = "saved_weights_and_losses/",
     ):
         self._f_name = f_name
         self._configs = configs
@@ -226,19 +227,26 @@ class ActionEvaluator:
 
 def main():
     # file_name = "gpt2_traj_1709608868.json"
-    file_name = "mistral_traj_1710131589.json"
+    file_name = "mistral_traj_1711522015_corrected.json"
 
     # Set model
-    configs[0].model = "mst"  # data["model"]
-    configs[0].use_mac = False  # data["model"]
-    configs[0].perturbation_cfg = None
-    configs[0].training_predictor_mode = False
+    init_cfg = configs[0]
+    assert init_cfg.model_name == "mistral"  # data["model"]
+    # init_cfg.use_mac = False  # data["model"]
+    assert init_cfg.perturbation_cfg is None
+    if not init_cfg.use_mac:
+        dist.init_process_group(backend="nccl")
+        torch.cuda.set_device(dist.get_rank())
+        print("rank", dist.get_rank())
+
     cfg = extend_initial_config(configs[0])
 
     eval_class = ActionEvaluator(configs=[cfg], f_name=file_name, n_step=50)
     res = eval_class.evaluate()
     print(res)
-    eval_class.plot_results(res["mst"], model_name="mistral7b", train_model="mistral7b")
+    eval_class.plot_results(
+        res[cfg.model_name], model_name="mistral7b", train_model="mistral7b"
+    )
 
 
 if __name__ == "__main__":
