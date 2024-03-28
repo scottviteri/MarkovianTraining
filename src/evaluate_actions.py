@@ -1,8 +1,3 @@
-""""""
-
-# TODO: Variate temperature? use for uncertainty or keep fixed?
-# ToDo: Send models/data to cuda? (Marked in code)
-
 import torch
 import torch.distributed as dist
 import json
@@ -14,6 +9,36 @@ import tqdm
 from utilities import extend_initial_config, predict_observation
 from config_examples import configs
 from training_types import PerturbationConfig
+
+
+def perturb_action(action, cfg):
+    action_out = copy.deepcopy(action).to(cfg.device)
+    offset = cfg.prefix_tensors.action_prefix_tensor.shape[-1]
+    # PERTURBATION 1
+    # Given n <= cfg.pure_ctxt_sizes.action_size, change token through randomization
+    frac_randomize = cfg.perturbation_cfg.frac_of_tokens_to_randomize
+    assert 1.0 >= frac_randomize >= 0.0, f"frac_randomize is {frac_randomize}"
+    perturb_target_inds = torch.randint(
+        low=offset,
+        high=action.shape[-1],
+        size=[int(frac_randomize * (action.shape[-1] - offset))],
+    )
+    action_out[:, perturb_target_inds] = torch.randint(
+        low=0,
+        high=cfg.causal_lm_tokenizer.vocab_size,
+        size=[int(frac_randomize * (action.shape[-1] - offset))],
+    ).to(cfg.device)
+
+    # PERTURBATION 2
+    # Given a fraction of cfg.pure_ctxt_sizes.action_size, replace with spaces/padding
+    frac_spaces = cfg.perturbation_cfg.frac_of_tokens_to_pad
+    assert 1.0 >= frac_spaces >= 0.0, f"frac_randomize is {frac_spaces}"
+    token_id_space = cfg.causal_lm_tokenizer.encode(" ")[-1]
+    action_out[:, offset + int((1.0 - frac_spaces) * (action.shape[-1] - offset)) :] = (
+        token_id_space
+    )
+
+    return action_out
 
 
 class ActionEvaluator:
@@ -82,36 +107,6 @@ class ActionEvaluator:
         }
 
     @staticmethod
-    def perturb_action(action, cfg):
-        action_out = copy.deepcopy(action).to(cfg.device)
-        offset = cfg.prefix_tensors.action_prefix_tensor.shape[-1]
-        # PERTURBATION 1
-        # Given n <= cfg.pure_ctxt_sizes.action_size, change token through randomization
-        frac_randomize = cfg.perturbation_cfg.frac_of_tokens_to_randomize
-        assert 1.0 >= frac_randomize >= 0.0, f"frac_randomize is {frac_randomize}"
-        perturb_target_inds = torch.randint(
-            low=offset,
-            high=action.shape[-1],
-            size=[int(frac_randomize * (action.shape[-1] - offset))],
-        )
-        action_out[:, perturb_target_inds] = torch.randint(
-            low=0,
-            high=cfg.causal_lm_tokenizer.vocab_size,
-            size=[int(frac_randomize * (action.shape[-1] - offset))],
-        ).to(cfg.device)
-
-        # PERTURBATION 2
-        # Given a fraction of cfg.pure_ctxt_sizes.action_size, replace with spaces/padding
-        frac_spaces = cfg.perturbation_cfg.frac_of_tokens_to_pad
-        assert 1.0 >= frac_spaces >= 0.0, f"frac_randomize is {frac_spaces}"
-        token_id_space = cfg.causal_lm_tokenizer.encode(" ")[-1]
-        action_out[
-            :, offset + int((1.0 - frac_spaces) * (action.shape[-1] - offset)) :
-        ] = token_id_space
-
-        return action_out
-
-    @staticmethod
     def calculate_loss(cfg, action, obs):
         cfg.causal_lm.eval()
         cfg.inference_lm = cfg.causal_lm
@@ -158,7 +153,7 @@ class ActionEvaluator:
                 actions_tok_pert = {}
                 for key, p in self._perts.items():
                     cfg.perturbation_cfg = p
-                    action_tok_pert = self.perturb_action(action_tok, cfg)
+                    action_tok_pert = perturb_action(action_tok, cfg)
                     actions_tok_pert[key] = action_tok_pert
                     # ToDo: Send to cuda?
                     # print(tok.batch_decode(action_tok_pert))
@@ -235,10 +230,6 @@ def main():
     assert init_cfg.model_name == "mistral"  # data["model"]
     # init_cfg.use_mac = False  # data["model"]
     assert init_cfg.perturbation_cfg is None
-    # if not init_cfg.use_mac:
-    #    dist.init_process_group(backend="nccl")
-    #    torch.cuda.set_device(dist.get_rank())
-    #    print("rank", dist.get_rank())
 
     cfg = extend_initial_config(configs[0])
 

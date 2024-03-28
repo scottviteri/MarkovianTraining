@@ -19,6 +19,7 @@ from utilities import (
     wrap_input_tokens,
 )
 from config_examples import configs
+from evaluate_actions import perturb_action
 
 
 def save_weights(cfg, batch_index):
@@ -102,22 +103,6 @@ def log_print_losses(cfg, batch_index, action_is_generated, aggregate_loss, loss
                     )
 
 
-def append_traj_to_storage(traj_path, traj_data):
-    """Append data for a training step to the JSON file."""
-    # Load existing data
-    with open(traj_path, "r") as file:
-        data = json.load(file)
-
-    # Append new trajectory
-    if "trajectory" not in data:
-        data["trajectory"] = []
-    data["trajectory"].append(traj_data)
-
-    # Write updated data back to the file
-    with open(traj_path, "w") as file:
-        json.dump(data, file, indent=4)
-
-
 def save_trajectory(
     cfg, batch_index, prev_action, prev_obs, action, obs, losses, aggregate_loss
 ):
@@ -146,10 +131,20 @@ def save_trajectory(
                 perturbed_loss.item() if perturbed_loss is not None else 0.0
             ),
         }
-        append_traj_to_storage(cfg.traj_path, traj_data)
+        with open(cfg.traj_path, "r") as file:
+            data = json.load(file)
+
+        # Append new trajectory
+        if "trajectory" not in data:
+            data["trajectory"] = []
+        data["trajectory"].append(traj_data)
+
+        # Write updated data back to the file
+        with open(cfg.traj_path, "w") as file:
+            json.dump(data, file, indent=4)
 
 
-def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
+def sample(cfg, prev_action, prev_obs, add_q_head=True):
     with torch.inference_mode():
         with (
             nullcontext
@@ -182,7 +177,6 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
                 eos_token_id=cfg.causal_lm.module.generation_config.eos_token_id,
                 output_scores=cfg.causal_lm.module.generation_config.output_scores,
                 return_dict_in_generate=cfg.causal_lm.module.generation_config.return_dict_in_generate,
-                # synced_gpus=False,
             )[:, -cfg.ctxt_sizes.action_size :]
             return action_candidates
 
@@ -232,8 +226,6 @@ def update_weights(
             - cfg.causal_lm.module.transformer.model.layers[-3].mlp.up_proj.weight
         ).abs().sum().item() == 0, "Frozen weight copies should be equal"
 
-    # assert (cfg.causal_lm.module.qhead.base_model.model.model.layers[-3].mlp.up_proj.base_layer.weight == cfg.causal_lm.module.transformer.model.layers[-3].mlp.up_proj.weight).all(), "These weights should be frozen and equal."
-
     with (
         nullcontext
         if cfg.use_mac
@@ -281,7 +273,6 @@ def update_weights(
                 per_batch=True,
                 is_default_action=True,
             )
-        normalized_negentropy = negentropy - old_critic_negentropy
         normalized_obs_loss = obs_loss - default_obs_loss
         repeated_obs_losses = normalized_obs_loss.unsqueeze(1).repeat(
             1, values.shape[1]
@@ -359,7 +350,7 @@ def handle_perturbation(cfg, state, action_is_generated, action, datapt):
         and state.batch_index % cfg.perturbation_cfg.eval_every == 0
     ):
         perturbed_action = perturb_action(action, cfg)
-        aggregate_loss0, losses0 = update_weights(
+        _, losses0 = update_weights(
             cfg,
             state.batch_index,
             state.action,
@@ -413,66 +404,14 @@ def log_and_save(
         multi_print("______________________________________________________", f)
 
 
-def perturb_action(action, cfg):
-    offset = cfg.prefix_tensors.action_prefix_tensor.shape[-1]
-    # PERTURBATION 1
-    # Given n <= cfg.pure_ctxt_sizes.action_size, change token through randomization
-    frac_randomize = cfg.perturbation_cfg.frac_of_tokens_to_randomize
-    assert 1.0 >= frac_randomize >= 0.0, f"frac_randomize is {frac_randomize}"
-    perturb_target_inds = torch.randint(
-        low=offset,
-        high=action.shape[-1],
-        size=[int(frac_randomize * (action.shape[-1] - offset))],
-    )
-    action[:, perturb_target_inds] = torch.randint(
-        low=0,
-        high=cfg.causal_lm_tokenizer.vocab_size,
-        size=[int(frac_randomize * (action.shape[-1] - offset))],
-    )
-
-    # PERTURBATION 2
-    # Given a fraction of cfg.pure_ctxt_sizes.action_size, replace with spaces/padding
-    frac_spaces = cfg.perturbation_cfg.frac_of_tokens_to_pad
-    assert 1.0 >= frac_spaces >= 0.0, f"frac_randomize is {frac_spaces}"
-    token_id_space = cfg.causal_lm_tokenizer.encode(" ")[-1]
-    action[:, offset + int((1.0 - frac_spaces) * (action.shape[-1] - offset)) :] = (
-        token_id_space
-    )
-
-    return action
-
-
 def trainer(cfg):
-    # state = [get_default_action(cfg), 0, None]
     state = TrainerState(
         action=None, obs=None, batch_index=0, aggregate_loss=None, replay_buffer=[]
     )
-    # replay buffer as trajectory and a score
 
     def update(datapt):
         nonlocal state
-        # prev_datapt, datapt = datapt_pair
-        # prev_obs, obs = prev_datapt.obs, datapt.obs
-        if state.batch_index > 0:
-            pred_len, inf_len = (
-                cfg.trainer_cfg.prediction_training_length,
-                cfg.trainer_cfg.inference_training_length,
-            )
-            mode_index = state.batch_index % (pred_len + inf_len)
-
         if datapt.is_first:
-            # get_default_action(cfg)
-            log_print_oa(
-                cfg=cfg,
-                batch_index=state.batch_index,
-                prev_action=None,
-                prev_obs=state.obs,
-                action=datapt.action,
-                default_action=datapt.action,
-                obs=datapt.obs,
-                is_first=datapt.is_first,
-                aggregate_loss=state.aggregate_loss,
-            )
             state = TrainerState(
                 action=datapt.action,
                 obs=datapt.obs,
@@ -482,78 +421,70 @@ def trainer(cfg):
             )
 
             return
+        # now can assume that prev_datapt contains the question and datapt contains the Answer
+        action_is_generated = False
+        if datapt.action is not None:
+            action = datapt.action
+            default_action = sample(cfg, state.action, state.obs, add_q_head=False)
+        elif cfg.prediction_cfg.train_O_given_prev_O:
+            action = state.action  # why?
         else:
-            # now can assume that prev_datapt contains the question and datapt contains the Answer
-            action_is_generated = False
-            if datapt.action is not None:
-                action = datapt.action
-                default_action = sample(
-                    cfg, state.action, state.obs, datapt.obs, add_q_head=False
-                )
-            elif cfg.prediction_cfg.train_O_given_prev_O:
-                action = state.action  # why?
-            else:
-                action_is_generated = True
-                action = sample(
-                    cfg, state.action, state.obs, datapt.obs, add_q_head=True
-                )
-                default_action = sample(
-                    cfg, state.action, state.obs, datapt.obs, add_q_head=False
-                )
-            # action : [batch * beam, cfg.ctxt_sizes.action_size]
+            action_is_generated = True
+            action = sample(cfg, state.action, state.obs, add_q_head=True)
+            default_action = sample(cfg, state.action, state.obs, add_q_head=False)
 
-            aggregate_loss, losses = update_weights(
-                cfg,
-                state.batch_index,
-                state.action,
-                state.obs,
-                action_is_generated,
-                action,
-                default_action,
-                datapt.obs,
-                do_weight_update=not isinstance(cfg.debug, NoWeightUpdates),
-            )
+        aggregate_loss, losses = update_weights(
+            cfg,
+            state.batch_index,
+            state.action,
+            state.obs,
+            action_is_generated,
+            action,
+            default_action,
+            datapt.obs,
+            do_weight_update=not isinstance(cfg.debug, NoWeightUpdates),
+        )
 
-            perturbed_loss = handle_perturbation(
-                cfg, state, action_is_generated, action, datapt
-            )
-            losses.append(perturbed_loss)
+        perturbed_loss = handle_perturbation(
+            cfg, state, action_is_generated, action, datapt
+        )
+        losses.append(perturbed_loss)
 
-            log_and_save(
-                cfg,
-                state.batch_index,
-                state.action,
-                state.obs,
-                action_is_generated,
-                action,
-                default_action,
-                datapt.obs,
-                datapt.is_first,
-                aggregate_loss,
-                losses,
-            )
-            new_buffer_element = ScoredTrajectory(
-                prev_datapt=Datapt(action=state.action, obs=state.obs, is_first=True),
-                datapt=Datapt(action=action, obs=datapt.obs, is_first=datapt.is_first),
-                loss=aggregate_loss,
-            )
-            if action_is_generated and cfg.replay_buffer_size is not None:
-                new_replay_buffer = (
-                    state.replay_buffer[:-1]
-                    if len(state.replay_buffer) == cfg.replay_buffer_size
-                    else state.replay_buffer
-                ) + [new_buffer_element]
-            else:
-                new_replay_buffer = state.replay_buffer
+        log_and_save(
+            cfg,
+            state.batch_index,
+            state.action,
+            state.obs,
+            action_is_generated,
+            action,
+            default_action,
+            datapt.obs,
+            datapt.is_first,
+            aggregate_loss,
+            losses,
+        )
+        new_buffer_element = ScoredTrajectory(
+            prev_datapt=Datapt(action=state.action, obs=state.obs, is_first=True),
+            datapt=Datapt(action=action, obs=datapt.obs, is_first=datapt.is_first),
+            loss=aggregate_loss,
+        )
+        if action_is_generated and cfg.replay_buffer_size is not None:
+            new_replay_buffer = (
+                state.replay_buffer[:-1]
+                if len(state.replay_buffer) == cfg.replay_buffer_size
+                else state.replay_buffer
+            ) + [new_buffer_element]
+        else:
+            new_replay_buffer = state.replay_buffer
 
-            state = TrainerState(
-                action=action,
-                obs=datapt.obs,
-                batch_index=state.batch_index + (1 if action_is_generated else 0),
-                aggregate_loss=aggregate_loss,
-                replay_buffer=new_replay_buffer,
-            )
-            return
+        state = TrainerState(
+            action=action,
+            obs=datapt.obs,
+            batch_index=state.batch_index + (1 if action_is_generated else 0),
+            aggregate_loss=aggregate_loss,
+            replay_buffer=new_replay_buffer,
+        )
+        return
 
     def pi():
         nonlocal state
