@@ -37,7 +37,7 @@ place debug(itr) at the point where you want to inspect the dataflow
 
 def prepare_dataset(
     init_cfg,
-    causal_lm_tokenizer,
+    tokenizer,
     device,
     pure_ctxt_sizes,
     prefix_tensors,
@@ -48,10 +48,10 @@ def prepare_dataset(
         prefix_tensors,
         pure_ctxt_sizes,
         init_cfg,
-        causal_lm_tokenizer,
+        tokenizer,
         device,
     )
-    dict_ds = apply_debug_transformations(dict_ds, init_cfg, causal_lm_tokenizer)
+    dict_ds = apply_debug_transformations(dict_ds, init_cfg, tokenizer)
     return finalize_dataset(dict_ds, init_cfg)
 
 
@@ -60,7 +60,7 @@ def initialize_dataset(
     prefix_tensors,
     pure_ctxt_sizes,
     init_cfg,
-    causal_lm_tokenizer,
+    tokenizer,
     device,
 ):
 
@@ -70,7 +70,7 @@ def initialize_dataset(
             prefix_tensors,
             pure_ctxt_sizes,
             init_cfg,
-            causal_lm_tokenizer,
+            tokenizer,
             device,
         )
     elif isinstance(task, WikipediaTask):
@@ -84,7 +84,7 @@ def init_arithmetic_dataset(
     prefix_tensors,
     pure_ctxt_sizes,
     init_cfg,
-    causal_lm_tokenizer,
+    tokenizer,
     device,
 ):
 
@@ -180,7 +180,7 @@ def init_arithmetic_dataset(
             lambda batch_lst: [
                 tokenize_and_pad(
                     device,
-                    causal_lm_tokenizer,
+                    tokenizer,
                     prefix_tensors,
                     pure_ctxt_sizes,
                     b,
@@ -207,7 +207,7 @@ def init_arithmetic_dataset(
     return itr_ds
 
 
-def init_wikipedia_dataset(init_cfg, causal_lm_tokenizer, device):
+def init_wikipedia_dataset(init_cfg, tokenizer, device):
     # I don't know if this works anymore
     # only need is_first at the beginning
     def gen_wiki_datapts(batch_size, tok_per_pure_obs, itr_ds):
@@ -237,9 +237,9 @@ def init_wikipedia_dataset(init_cfg, causal_lm_tokenizer, device):
         load_dataset("wikipedia", "20220301.en", split="train", streaming=True)
     )
     ds_tokenized = map(
-        lambda x: causal_lm_tokenizer(
-            x["text"], return_tensors="pt", add_special_tokens=False
-        )["input_ids"].to(device),
+        lambda x: tokenizer(x["text"], return_tensors="pt", add_special_tokens=False)[
+            "input_ids"
+        ].to(device),
         itr_ds,
     )
     # use an underestimate of the total number of allowed tokens
@@ -248,14 +248,14 @@ def init_wikipedia_dataset(init_cfg, causal_lm_tokenizer, device):
     )
 
 
-def apply_debug_transformations(dict_ds, init_cfg, causal_lm_tokenizer):
+def apply_debug_transformations(dict_ds, init_cfg, tokenizer):
     def replace_with_random_tokens(dict_ds):
         dict_ds = map(
             lambda d: {
                 **d,
                 "Observation": torch.randint(
                     0,
-                    causal_lm_tokenizer.vocab_size,
+                    tokenizer.vocab_size,
                     d["Observation"].shape,
                     device=d["Observation"].device,
                     dtype=d["Observation"].dtype,

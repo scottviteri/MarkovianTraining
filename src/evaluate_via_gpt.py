@@ -87,7 +87,7 @@ Output a single floating point number from 0 to 1 with no other text.
 
     def gptj_rating(d):
         act, obs = d["Action"], d["Observation"]
-        input_ids = cfg.causal_lm_tokenizer.encode(act + obs, return_tensors="pt")
+        input_ids = cfg.tokenizer.encode(act + obs, return_tensors="pt")
         with torch.no_grad():
             logits = cfg.predictor_lm(input_ids).logits[:, :-1, :]
         loss_fn = torch.nn.CrossEntropyLoss()

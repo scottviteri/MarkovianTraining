@@ -171,7 +171,7 @@ class PrefixTensors:
 class Config:
     model_name: str
     causal_lm: PreTrainedModel
-    causal_lm_tokenizer: Optional[PreTrainedTokenizer]
+    tokenizer: Optional[PreTrainedTokenizer]
     rank: int
     lr: float
     optimizer: torch.optim.Optimizer

@@ -25,7 +25,7 @@ def perturb_action(action, cfg):
     )
     action_out[:, perturb_target_inds] = torch.randint(
         low=0,
-        high=cfg.causal_lm_tokenizer.vocab_size,
+        high=cfg.tokenizer.vocab_size,
         size=[int(frac_randomize * (action.shape[-1] - offset))],
     ).to(cfg.device)
 
@@ -33,7 +33,7 @@ def perturb_action(action, cfg):
     # Given a fraction of cfg.pure_ctxt_sizes.action_size, replace with spaces/padding
     frac_spaces = cfg.perturbation_cfg.frac_of_tokens_to_pad
     assert 1.0 >= frac_spaces >= 0.0, f"frac_randomize is {frac_spaces}"
-    token_id_space = cfg.causal_lm_tokenizer.encode(" ")[-1]
+    token_id_space = cfg.tokenizer.encode(" ")[-1]
     action_out[:, offset + int((1.0 - frac_spaces) * (action.shape[-1] - offset)) :] = (
         token_id_space
     )
@@ -127,7 +127,7 @@ class ActionEvaluator:
 
         eval_results = {}
         for cfg in self._configs:
-            tok = cfg.causal_lm_tokenizer
+            tok = cfg.tokenizer
             mod = cfg.causal_lm
             mod.eval()
 

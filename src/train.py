@@ -29,7 +29,7 @@ def save_weights(cfg, batch_index):
         and (cfg.use_mac or cfg.rank == 0)
     ):
         print(f"Saving trained_{cfg.model_name} \n\n")
-        cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
+        cfg.tokenizer.save_pretrained(cfg.path_2_tokenizer)
         torch.save(cfg.causal_lm, cfg.path_2_model + ".pth")
 
 
@@ -118,10 +118,10 @@ def save_trajectory(
 
         traj_data = {
             "batch_index": batch_index,
-            "prev_action": cfg.causal_lm_tokenizer.decode(prev_action[0]),
-            "prev_obs": cfg.causal_lm_tokenizer.decode(prev_obs[0]),
-            "action": cfg.causal_lm_tokenizer.decode(action[0]),
-            "obs": cfg.causal_lm_tokenizer.decode(obs[0]),
+            "prev_action": cfg.tokenizer.decode(prev_action[0]),
+            "prev_obs": cfg.tokenizer.decode(prev_obs[0]),
+            "action": cfg.tokenizer.decode(action[0]),
+            "obs": cfg.tokenizer.decode(obs[0]),
             "aggregate_loss": aggregate_loss.item(),
             "action_loss": action_loss.item(),
             "observation_loss": observation_loss.mean().item(),
@@ -166,7 +166,7 @@ def sample(cfg, prev_action, prev_obs, add_q_head=True):
                 use_instruct_tokens=True,
                 is_prediction=False,
             )
-            attention_mask = (input_ids != cfg.causal_lm_tokenizer.pad_token_id).long()
+            attention_mask = (input_ids != cfg.tokenizer.pad_token_id).long()
             beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
             action_candidates = cfg.causal_lm.module.generate(
                 beam_input_ids,

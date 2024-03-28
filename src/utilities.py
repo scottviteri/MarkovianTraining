@@ -152,7 +152,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
 
     assert init_cfg.num_beams == 1, "Only supporting num_beams = 1 currently"
 
-    causal_lm, causal_lm_tokenizer = get_model(
+    causal_lm, tokenizer = get_model(
         device,
         init_cfg.load_model,
         init_cfg.model_name,
@@ -164,7 +164,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     )
 
     pure_ctxt_sizes, prefix_tensors = get_prefixes(
-        causal_lm_tokenizer, init_cfg.batch_size, device, init_cfg.ctxt_sizes
+        tokenizer, init_cfg.batch_size, device, init_cfg.ctxt_sizes
     )
     causal_lm.generation_config.min_new_tokens = pure_ctxt_sizes.action_size
     causal_lm.generation_config.max_new_tokens = pure_ctxt_sizes.action_size
@@ -221,7 +221,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
 
     dataset = prepare_dataset(
         init_cfg,
-        causal_lm_tokenizer,
+        tokenizer,
         device,
         pure_ctxt_sizes,
         prefix_tensors,
@@ -257,7 +257,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         ctxt_sizes=init_cfg.ctxt_sizes,
         prefix_tensors=prefix_tensors,
         causal_lm=causal_lm,  # predictor_lm,
-        causal_lm_tokenizer=causal_lm_tokenizer,
+        tokenizer=tokenizer,
         inference_cfg=init_cfg.inference_cfg,
         prediction_cfg=init_cfg.prediction_cfg,
         trainer_cfg=init_cfg.trainer_cfg,
@@ -289,25 +289,23 @@ def log_print_oa(
                 if aggregate_loss:
                     multi_print(f"Aggregate Loss: {aggregate_loss}", f)
                 multi_print(
-                    f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0])) if prev_action is not None else None}",
+                    f"Prev Action: {repr(cfg.tokenizer.decode(prev_action[0])) if prev_action is not None else None}",
                     f,
                 )
                 if not is_first:
                     multi_print(
-                        f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
+                        f"Prev Observation: {repr(cfg.tokenizer.decode(prev_obs[0]))}",
                         f,
                     )
                     multi_print(
-                        f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
+                        f"Action: {repr(cfg.tokenizer.decode(action[0]))}",
                         f,
                     )
                     multi_print(
-                        f"Default Action: {repr(cfg.causal_lm_tokenizer.decode(default_action[0]))}",
+                        f"Default Action: {repr(cfg.tokenizer.decode(default_action[0]))}",
                         f,
                     )
-                multi_print(
-                    f"Observation: {repr(cfg.causal_lm_tokenizer.decode(obs[0]))}", f
-                )
+                multi_print(f"Observation: {repr(cfg.tokenizer.decode(obs[0]))}", f)
 
 
 def get_prefixes(
@@ -410,20 +408,18 @@ def get_model(
     with device:
         padding_side = get_padding_side(model_name)
         if load_model:
-            # model_location = "./saved_weights_and_losses/" + model_name + "_weights"
             config = AutoConfig.from_pretrained(model_dict[model_name])
             causal_lm = torch.load(path_2_model + ".pth").module
-            # causal_lm = ModelWithQHead(model_location, config)
         else:
             config = AutoConfig.from_pretrained(model_dict[model_name])
             causal_lm = ModelWithQHead(model_dict[model_name], config)
 
         if not use_mac:
             causal_lm.bfloat16()
-        causal_lm_tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer = AutoTokenizer.from_pretrained(
             model_dict[model_name], padding_side=padding_side
         )
-        causal_lm_tokenizer.pad_token_id = causal_lm_tokenizer.eos_token_id
+        tokenizer.pad_token_id = tokenizer.eos_token_id
         for name, param in causal_lm.transformer.named_parameters():
             param.requires_grad = False
         for name, param in causal_lm.qhead.named_parameters():
@@ -431,23 +427,23 @@ def get_model(
         for name, param in causal_lm.v_head_group.named_parameters():
             param.requires_grad = True
 
-    causal_lm.tokenizer = causal_lm_tokenizer
+    causal_lm.tokenizer = tokenizer
     bad_words_ids = [
         [
-            causal_lm_tokenizer.bos_token_id,
-            causal_lm_tokenizer.eos_token_id,
+            tokenizer.bos_token_id,
+            tokenizer.eos_token_id,
         ]
     ]
     logits_warper = transformers.generation.LogitsProcessorList(
         [
             transformers.generation.NoBadWordsLogitsProcessor(
                 bad_words_ids,
-                eos_token_id=causal_lm_tokenizer.eos_token_id,
+                eos_token_id=tokenizer.eos_token_id,
             ),
             # transformers.generation.MinNewTokensLengthLogitsProcessor(
             #    prompt_length_to_skip=input_ids.shape[-1],
             #    min_new_tokens=cfg.pure_ctxt_sizes.action_size,
-            #    eos_token_id=causal_lm_tokenizer.eos_token_id,
+            #    eos_token_id=tokenizer.eos_token_id,
             # ),
             transformers.generation.TemperatureLogitsWarper(1.0),
             transformers.generation.InfNanRemoveLogitsProcessor(),
@@ -466,12 +462,12 @@ def get_model(
         logits_warper=logits_warper,
         num_return_sequences=num_return_sequences,
         output_scores=True,
-        pad_token_id=causal_lm_tokenizer.pad_token_id,
-        eos_token_id=causal_lm_tokenizer.eos_token_id,
+        pad_token_id=tokenizer.pad_token_id,
+        eos_token_id=tokenizer.eos_token_id,
         return_dict_in_generate=False,
     )
     causal_lm.generation_config = generation_config
-    return causal_lm, causal_lm_tokenizer
+    return causal_lm, tokenizer
 
 
 def get_mlp_modules(model):
@@ -548,14 +544,14 @@ def wrap_input_tokens(
     assert instruct[0].shape[0] == rest[0].shape[0]
     start_tokens = torch.full(
         (instruct[0].shape[0], 1),
-        cfg.causal_lm_tokenizer.bos_token_id,
+        cfg.tokenizer.bos_token_id,
         dtype=torch.int64,
         device=cfg.device,
     )
     # needs_start_token = cfg.model_name in ["mistral", "llama"]
     # needs_instruct_token = "Instruct" in cfg.causal_lm.name_or_path
     begin_instruct_tokens = (
-        cfg.causal_lm_tokenizer.encode(
+        cfg.tokenizer.encode(
             (
                 "[INST] Use the following possibly mistaken reasoning to help predict the true numerical answer, which will come immediately after the 'Answer:' tag. Try to spot flaws in the provided reasoning to guide your prediction."
                 if is_prediction
@@ -568,9 +564,7 @@ def wrap_input_tokens(
         .repeat((instruct[0].shape[0], 1))
     )
     end_instruct_tokens = (
-        cfg.causal_lm_tokenizer.encode(
-            "[/INST]", return_tensors="pt", add_special_tokens=False
-        )
+        cfg.tokenizer.encode("[/INST]", return_tensors="pt", add_special_tokens=False)
         .to(cfg.device)
         .repeat((instruct[0].shape[0], 1))
     )
@@ -597,7 +591,7 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=Fal
         use_instruct_tokens=True,
         is_prediction=False,
     )
-    attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+    attention_mask = (input_sequence != cfg.tokenizer.pad_token_id).long()
     prediction, values = cfg.causal_lm(
         input_sequence,
         attention_mask=attention_mask,
@@ -621,7 +615,7 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=Fal
     #    plt.savefig("action.png")
     #    # print(
     #    #    [
-    #    #        cfg.causal_lm_tokenizer.decode([x])
+    #    #        cfg.tokenizer.decode([x])
     #    #        for x in input_sequence[0, -cfg.pure_ctxt_sizes.action_size :].tolist()
     #    #    ]
     #    # )
@@ -694,7 +688,7 @@ def predict_observation(
         use_instruct_tokens=True,
         is_prediction=True,
     )
-    attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+    attention_mask = (input_sequence != cfg.tokenizer.pad_token_id).long()
     prediction = cfg.causal_lm(
         input_sequence,
         attention_mask=attention_mask,
@@ -719,13 +713,13 @@ def predict_observation(
     #    plt.savefig("obs.png")
     token_loss_pairs = inspect_string(
         cfg.causal_lm,
-        cfg.causal_lm_tokenizer,
-        cfg.causal_lm_tokenizer.decode(input_sequence[0].tolist()),
+        cfg.tokenizer,
+        cfg.tokenizer.decode(input_sequence[0].tolist()),
     )
     targeted_pairs = [
         p
         for p in token_loss_pairs[-cfg.pure_ctxt_sizes.obs_size - 3 :]
-        if str(cfg.causal_lm_tokenizer.pad_token) != p[0]
+        if str(cfg.tokenizer.pad_token) != p[0]
     ]
 
     # slicing [:,1:] is a hack because of mistral number tokenization creating a leading space token!
@@ -758,7 +752,7 @@ def get_neg_log_probs(cfg, input_sequence):
     Returns:
         The computed loss tensor.
     """
-    attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+    attention_mask = (input_sequence != cfg.tokenizer.pad_token_id).long()
     logits = cfg.predictor_lm(input_sequence, attention_mask=attention_mask).logits[
         :, :-1, :
     ]

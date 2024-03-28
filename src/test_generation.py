@@ -59,10 +59,10 @@ def wrap_questions(begin, end, questions, answer):
 
 def check_strictly_decreasing(cfg, questions, answer):
     # this method assumes a tokenizer which splits a number into digits
-    tokenizer_out = cfg.causal_lm_tokenizer(
+    tokenizer_out = cfg.tokenizer(
         questions, return_tensors="pt", padding=True, add_special_tokens=True
     )
-    tokenizer_out_2 = cfg.causal_lm_tokenizer(
+    tokenizer_out_2 = cfg.tokenizer(
         questions, return_tensors="pt", padding=True, add_special_tokens=False
     )
     tokenized_questions = tokenizer_out["input_ids"].to(device=cfg.device)
@@ -141,18 +141,18 @@ def test_num_return_sequences():
     input_sequence = torch.randint(0, 10, (cfg.batch_size, cfg.tok_p_obs)).to(
         cfg.device
     )
-    attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
+    attention_mask = (input_sequence != cfg.tokenizer.pad_token_id).long()
     action_candidates = cfg.causal_lm.generate(
         inputs=input_sequence,
         attention_mask=attention_mask,
         num_beams=cfg.num_beams,
-        bad_words_ids=[[cfg.causal_lm_tokenizer.pad_token_id]],
+        bad_words_ids=[[cfg.tokenizer.pad_token_id]],
         output_scores=True,
         do_sample=True,
         temperature=1.0,
         min_new_tokens=cfg.pure_ctxt_sizes.action_size,
         max_new_tokens=cfg.pure_ctxt_sizes.action_size,
-        pad_token_id=cfg.causal_lm_tokenizer.pad_token_id,
+        pad_token_id=cfg.tokenizer.pad_token_id,
         num_return_sequences=cfg.inference_cfg.num_return_sequences,
     )[:, -cfg.pure_ctxt_sizes.action_size :]
 
