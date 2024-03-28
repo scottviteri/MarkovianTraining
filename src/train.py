@@ -45,13 +45,17 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                 step=batch_index,
             )
         else:
-            (action_losses, observation_losses, value_losses, negentropies, perturbed_losses) = (
-                losses
-            )
+            (
+                action_losses,
+                observation_losses,
+                value_losses,
+                negentropies,
+                perturbed_losses,
+            ) = losses
             wandb.log(
                 {
-                    "Batch Index": batch_index.mean(),
-                    "Aggregate Loss": aggregate_losses.mean(),
+                    "Batch Index": batch_index,
+                    "Aggregate Loss": aggregate_loss.item(),
                     "Perturbed Loss": perturbed_losses.mean(),
                     "Action Loss": action_losses.mean(),
                     "Observation Loss": observation_losses.mean(),
