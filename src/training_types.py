@@ -143,7 +143,6 @@ class InitialConfig:
     batch_size: int
     num_batches: int
     replay_buffer_size: Optional[int]
-    obs_to_action_ratio: float
     interval_save_weights: int
     interval_print: int
     use_mac: bool
@@ -179,7 +178,6 @@ class Config:
     batch_size: int
     num_batches: int
     replay_buffer_size: Optional[int]
-    obs_to_action_ratio: float
     interval_save_weights: int
     interval_print: int
     use_mac: bool
