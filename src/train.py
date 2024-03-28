@@ -268,12 +268,10 @@ def update_weights(
         clipped_ratios = torch.clamp(action_prob_ratios, 0.7, 1.3)
         value_losses = torch.abs(values - repeated_obs_losses).mean(dim=1)
         neg_advantages = (repeated_obs_losses - values.detach()).mean(dim=1)
-        aggregate_losses = (
-            torch.max(
-                action_prob_ratios * neg_advantages, clipped_ratios * neg_advantages
-            )
-            + value_losses
-        )
+        unclipped = action_prob_ratios * neg_advantages
+        clipped = clipped_ratios * neg_advantages
+        max_branch = torch.max(unclipped, clipped)
+        aggregate_losses = max_branch + value_losses 
         aggregate_loss = aggregate_losses.mean()
         if cfg.wandb and cfg.rank == 0 and action_is_generated:
             wandb.log(
@@ -283,6 +281,10 @@ def update_weights(
                     "Value Loss": value_losses.mean(),
                     "Old Critic Action Loss": old_critic_action_losses.mean(),
                     "Action Prob Ratio": action_prob_ratios.mean(),
+                    "Unclipped": unclipped.mean(),
+                    "Clipped": clipped.mean(),
+                    "Max Branch": max_branch.mean(),
+                    "First Is Clipped": 0.0 if unclipped[0].item() == max_branch[0].item() else 1.0
                 },
                 step=batch_index,
             )
@@ -297,9 +299,11 @@ def update_weights(
                 ].mlp.up_proj.weight
             )
 
-        if do_weight_update:
-            cfg.optimizer.zero_grad()
-            aggregate_loss.backward()
+        aggregate_loss.backward()
+        if do_weight_update and batch_index > 0 and batch_index % 10 == 0:
+            for param in cfg.causal_lm.module.parameters():
+                if param.grad is not None:
+                    param.grad /= 10.0
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
 
