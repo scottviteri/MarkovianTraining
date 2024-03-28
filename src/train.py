@@ -56,7 +56,6 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                 {
                     "Batch Index": batch_index,
                     "Aggregate Loss": aggregate_loss.item(),
-                    "Perturbed Loss": perturbed_losses.mean(),
                     "Action Loss": action_losses.mean(),
                     "Observation Loss": observation_losses.mean(),
                     "Value Loss": value_losses.mean(),
