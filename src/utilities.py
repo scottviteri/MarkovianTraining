@@ -18,6 +18,7 @@ import copy
 from contextlib import nullcontext
 from datetime import datetime, timezone, timedelta
 import os
+import glob
 
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -404,7 +405,12 @@ def get_model(
         padding_side = get_padding_side(model_name)
         if load_model:
             config = AutoConfig.from_pretrained(model_dict[model_name])
-            causal_lm = torch.load(path_2_model + ".pth").module
+            pth_files = glob.glob(os.path.join("saved_weights_and_losses", "*.pth"))
+            model_pth_files = list(filter(lambda x: model_name in x, pth_files))
+            assert len(model_pth_files) > 0
+            model_pth_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            latest_pth_file = model_pth_files[0]
+            causal_lm = torch.load(latest_pth_file).module
         else:
             config = AutoConfig.from_pretrained(model_dict[model_name])
             causal_lm = ModelWithQHead(model_dict[model_name], config)
