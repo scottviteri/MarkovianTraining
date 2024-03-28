@@ -92,10 +92,10 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
 
     def forward(
         self,
-        input_ids=None,
+        input_ids,
+        add_q_head,
+        get_v_head,
         attention_mask=None,
-        add_q_head=True,
-        get_v_head=False,
         **kwargs,
     ):
         model = self.qhead if add_q_head else self.transformer
@@ -271,40 +271,43 @@ def multi_print(string, f):
     print(string, file=f)
 
 
-def log_and_print_info(
+def log_print_oa(
     cfg,
     batch_index,
-    observation_index,
-    batch_loss,
-    aggregate_losses,
+    prev_action,
     prev_obs,
     action,
-    predicted_obs,
-    true_obs,
+    default_action,
+    obs,
+    is_first,
+    aggregate_loss,
 ):
-    if batch_index % cfg.interval_print == 0:
-        with open(cfg.path_2_log, "a") as f:
-            multi_print(f"\nBatch Number {batch_index}", f)
-            multi_print(f"Loss: {batch_loss[0][0]:.3f}", f)
-            if aggregate_losses:
-                multi_print(f"Aggregate Loss: {aggregate_losses[-1]}", f)
-            multi_print(
-                f"Previous Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(prev_obs)[0])}",
-                f,
-            )
-            multi_print(
-                f"StepByStep: {repr(cfg.causal_lm_tokenizer.batch_decode(action)[0])}",
-                f,
-            )
-            multi_print(
-                f"Predicted Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(predicted_obs)[0])}",
-                f,
-            )
-            multi_print(
-                f"True Obs: {repr(cfg.causal_lm_tokenizer.batch_decode(true_obs)[0])}",
-                f,
-            )
-            multi_print("___________________________________________", f)
+    if batch_index % cfg.interval_print == 0 and (cfg.use_mac or cfg.rank == 0):
+        if not is_first:
+            with open(cfg.path_2_log, "a", encoding="utf-8") as f:
+                multi_print(f"Batch Index: {batch_index}", f)
+                if aggregate_loss:
+                    multi_print(f"Aggregate Loss: {aggregate_loss}", f)
+                multi_print(
+                    f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0])) if prev_action is not None else None}",
+                    f,
+                )
+                if not is_first:
+                    multi_print(
+                        f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
+                        f,
+                    )
+                    multi_print(
+                        f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
+                        f,
+                    )
+                    multi_print(
+                        f"Default Action: {repr(cfg.causal_lm_tokenizer.decode(default_action[0]))}",
+                        f,
+                    )
+                multi_print(
+                    f"Observation: {repr(cfg.causal_lm_tokenizer.decode(obs[0]))}", f
+                )
 
 
 def get_prefixes(
@@ -633,9 +636,7 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=Fal
 def test_sequence(predictor, input_sequence):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     prediction = predictor(
-        input_sequence,
-        # add_q_head=False,
-        # get_v_head=False,
+        input_sequence, add_q_head=False, get_v_head=False, attention_mask=None
     )
     logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
     loss_tensor = loss_fn(

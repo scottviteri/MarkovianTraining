@@ -1,49 +1,24 @@
 # , pip install transformers datasets==2.14.6 torchtyping==0.1.4 && pip install peft einops apache_beam==2.51.0 matplotlib wandb && pip install -U flash-attn --no-build-isolation
 # huggingface-cli login
 import torch
-import torch.nn as nn
 from torch.cuda.amp import autocast
-import torch.distributed as dist
 
-import numpy as np
 from tqdm import tqdm
-import einops
 import wandb
 import json
-import random
-import os
-from datasets import load_dataset
-
-from openai import OpenAI
-from matplotlib import pyplot as plt
-import functools
 from contextlib import nullcontext
-import transformers
-from transformers.generation import beam_search
-from collections import UserDict
 
 from training_types import *
 from utilities import (
     extend_initial_config,
-    log_and_print_info,
+    log_print_oa,
     predict_action,
     predict_observation,
     get_neg_log_probs,
-    get_masked_mean,
-    create_run_name,
     multi_print,
     wrap_input_tokens,
 )
 from config_examples import configs
-from beam import BeamSearchScorer
-
-from transformers.models.gptj.modeling_gptj import GPTJBlock
-from transformers.models.gpt2.modeling_gpt2 import GPT2Block
-from transformers.models.mistral.modeling_mistral import MistralDecoderLayer
-from transformers.models.llama.modeling_llama import LlamaDecoderLayer
-
-from evaluate_via_gpt import evaluate_via_gpt
-import config_examples
 
 
 def save_weights(cfg, batch_index):
@@ -55,7 +30,6 @@ def save_weights(cfg, batch_index):
         print(f"Saving trained_{cfg.model_name} \n\n")
         cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
         torch.save(cfg.causal_lm, cfg.path_2_model + ".pth")
-        # cfg.causal_lm.save_pretrained(cfg.path_2_model)
 
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
@@ -128,45 +102,6 @@ def log_print_losses(cfg, batch_index, action_is_generated, aggregate_loss, loss
                     )
 
 
-def log_print_oa(
-    cfg,
-    batch_index,
-    prev_action,
-    prev_obs,
-    action,
-    default_action,
-    obs,
-    is_first,
-    aggregate_loss,
-):
-    if batch_index % cfg.interval_print == 0 and (cfg.use_mac or cfg.rank == 0):
-        if not is_first:
-            with open(cfg.path_2_log, "a", encoding="utf-8") as f:
-                multi_print(f"Batch Index: {batch_index}", f)
-                if aggregate_loss:
-                    multi_print(f"Aggregate Loss: {aggregate_loss}", f)
-                multi_print(
-                    f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0])) if prev_action is not None else None}",
-                    f,
-                )
-                if not is_first:
-                    multi_print(
-                        f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
-                        f,
-                    )
-                    multi_print(
-                        f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
-                        f,
-                    )
-                    multi_print(
-                        f"Default Action: {repr(cfg.causal_lm_tokenizer.decode(default_action[0]))}",
-                        f,
-                    )
-                multi_print(
-                    f"Observation: {repr(cfg.causal_lm_tokenizer.decode(obs[0]))}", f
-                )
-
-
 def append_traj_to_storage(traj_path, traj_data):
     """Append data for a training step to the JSON file."""
     # Load existing data
@@ -215,8 +150,6 @@ def save_trajectory(
 
 
 def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
-    inference_cfg = cfg.inference_cfg
-    # cfg.causal_lm.eval()
     with torch.inference_mode():
         with (
             nullcontext
@@ -230,9 +163,6 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
                 ),
             )
         ):
-            # input_ids = torch.cat(
-            #    [prev_action, prev_obs, cfg.prefix_tensors.action_prefix_tensor], dim=1
-            # )
             input_ids = wrap_input_tokens(
                 cfg,
                 [prev_action, prev_obs],
@@ -242,40 +172,7 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
                 is_prediction=False,
             )
             attention_mask = (input_ids != cfg.causal_lm_tokenizer.pad_token_id).long()
-
-            bad_words_ids = [
-                [
-                    cfg.causal_lm_tokenizer.bos_token_id,
-                    cfg.causal_lm_tokenizer.eos_token_id,
-                ]
-            ]
-
-            logits_warper = transformers.generation.LogitsProcessorList(
-                [
-                    transformers.generation.NoBadWordsLogitsProcessor(
-                        bad_words_ids,
-                        eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
-                    ),
-                    # transformers.generation.MinNewTokensLengthLogitsProcessor(
-                    #    prompt_length_to_skip=input_ids.shape[-1],
-                    #    min_new_tokens=cfg.pure_ctxt_sizes.action_size,
-                    #    eos_token_id=cfg.causal_lm_tokenizer.eos_token_id,
-                    # ),
-                    transformers.generation.TemperatureLogitsWarper(1.0),
-                    transformers.generation.InfNanRemoveLogitsProcessor(),
-                    transformers.LogitNormalization(),
-                ]
-            )
-            # stopping_criteria = transformers.generation.StoppingCriteriaList(
-            #    [
-            #        transformers.generation.MaxLengthCriteria(
-            #            max_length=input_ids.shape[-1] + cfg.pure_ctxt_sizes.action_size
-            #        )
-            #    ]
-            # )
-
             beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
-            beam_observations = observation.repeat_interleave(cfg.num_beams, dim=0)
             action_candidates = cfg.causal_lm.module.generate(
                 beam_input_ids,
                 add_q_head=add_q_head,
@@ -288,36 +185,6 @@ def sample(cfg, prev_action, prev_obs, observation, add_q_head=True):
                 # synced_gpus=False,
             )[:, -cfg.ctxt_sizes.action_size :]
             return action_candidates
-
-
-def get_neg_log_probs(cfg, input_sequence):
-    """
-    Computes the loss tensor for a given input sequence.
-
-    Args:
-        cfg: Configuration object containing model and tokenizer information.
-        input_sequence: The input sequence tensor for which the loss is to be computed.
-
-    Returns:
-        The computed loss tensor.
-    """
-    attention_mask = (input_sequence != cfg.causal_lm_tokenizer.pad_token_id).long()
-    logits = cfg.causal_lm(input_sequence, attention_mask=attention_mask).logits[
-        :, :-1, :
-    ]
-    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    loss_tensor = loss_fn(
-        input=einops.rearrange(
-            logits,
-            "batch seq_length vocab_size -> batch vocab_size seq_length",
-        ),
-        target=input_sequence[:, 1:],
-    )
-    return loss_tensor
-
-
-def get_masked_mean(arr, mask):
-    return (arr * mask).sum() / mask.sum()
 
 
 def log_manual_observations(cfg, obs):
@@ -486,6 +353,28 @@ def update_weights(
         return aggregate_loss, losses
 
 
+def handle_perturbation(cfg, state, action_is_generated, action, datapt):
+    if (
+        cfg.perturbation_cfg is not None
+        and state.batch_index % cfg.perturbation_cfg.eval_every == 0
+    ):
+        perturbed_action = perturb_action(action, cfg)
+        aggregate_loss0, losses0 = update_weights(
+            cfg,
+            state.batch_index,
+            state.action,
+            state.obs,
+            action_is_generated,  # we could pass True if needed
+            perturbed_action,
+            datapt.obs,
+            do_weight_update=False,
+        )
+        perturbed_loss = losses0[-1]
+    else:
+        perturbed_loss = None
+    return perturbed_loss
+
+
 def log_and_save(
     cfg,
     batch_index,
@@ -499,14 +388,6 @@ def log_and_save(
     aggregate_loss,
     losses,
 ):
-
-    # if cfg.training_predictor_mode:
-    #    # Save trajectories for post-training eval to .json
-    #    save_trajectory(cfg, batch_index, prev_action, prev_obs, action, obs, losses)
-    #    save_weights(cfg, batch_index)
-    #    log_wandb(cfg, batch_index, aggregate_loss, losses)
-    #    log_print_losses(cfg, batch_index, aggregate_loss, losses)
-    # else:
 
     save_weights(cfg, batch_index)
     # if action_is_generated:
@@ -633,25 +514,9 @@ def trainer(cfg):
                 do_weight_update=not isinstance(cfg.debug, NoWeightUpdates),
             )
 
-            # not currently using this functionality, assume None
-            if (
-                cfg.perturbation_cfg is not None
-                and state.batch_index % cfg.perturbation_cfg.eval_every == 0
-            ):
-                perturbed_action = perturb_action(action, cfg)
-                aggregate_loss0, losses0 = update_weights(
-                    cfg,
-                    state.batch_index,
-                    state.action,
-                    state.obs,
-                    action_is_generated,  # we could pass True if needed
-                    perturbed_action,
-                    datapt.obs,
-                    do_weight_update=False,
-                )
-                perturbed_loss = losses0[-1]
-            else:
-                perturbed_loss = None
+            perturbed_loss = handle_perturbation(
+                cfg, state, action_is_generated, action, datapt
+            )
             losses.append(perturbed_loss)
 
             log_and_save(
@@ -725,8 +590,6 @@ def train_model(init_cfg):
     if cfg.wandb and (cfg.use_mac or cfg.rank == 0):
         wandb.finish()
 
-
-()
 
 if __name__ == "__main__":
     for init_cfg in configs:

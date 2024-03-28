@@ -7,7 +7,6 @@ from openai import OpenAI
 import time
 
 from training_types import *
-from utilities import log_and_print_info
 
 
 def evaluate_via_gpt(cfg: Config):
