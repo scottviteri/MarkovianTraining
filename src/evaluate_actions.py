@@ -235,10 +235,10 @@ def main():
     assert init_cfg.model_name == "mistral"  # data["model"]
     # init_cfg.use_mac = False  # data["model"]
     assert init_cfg.perturbation_cfg is None
-    if not init_cfg.use_mac:
-        dist.init_process_group(backend="nccl")
-        torch.cuda.set_device(dist.get_rank())
-        print("rank", dist.get_rank())
+    # if not init_cfg.use_mac:
+    #    dist.init_process_group(backend="nccl")
+    #    torch.cuda.set_device(dist.get_rank())
+    #    print("rank", dist.get_rank())
 
     cfg = extend_initial_config(configs[0])
 

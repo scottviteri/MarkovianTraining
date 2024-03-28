@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 from torch.cuda.amp import autocast
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
 
 import numpy as np
 from tqdm import tqdm
@@ -19,7 +18,6 @@ from openai import OpenAI
 from matplotlib import pyplot as plt
 import functools
 from contextlib import nullcontext
-import bitsandbytes
 import transformers
 from transformers.generation import beam_search
 from collections import UserDict
@@ -52,7 +50,7 @@ def save_weights(cfg, batch_index):
     if (
         batch_index > 0
         and batch_index % cfg.interval_save_weights == 0
-        and (cfg.use_mac or dist.get_rank() == 0)
+        and (cfg.use_mac or cfg.rank == 0)
     ):
         print(f"Saving trained_{cfg.model_name} \n\n")
         cfg.causal_lm_tokenizer.save_pretrained(cfg.path_2_tokenizer)
@@ -61,7 +59,7 @@ def save_weights(cfg, batch_index):
 
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
-    if cfg.wandb and (cfg.use_mac or dist.get_rank() == 0):
+    if cfg.wandb and (cfg.use_mac or cfg.rank == 0):
         if cfg.prediction_cfg.train_O_given_prev_O:
             observation_loss = losses[0]
             wandb.log(
@@ -101,7 +99,7 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
 
 def log_print_losses(cfg, batch_index, action_is_generated, aggregate_loss, losses):
 
-    if batch_index % cfg.interval_print == 0 and (cfg.use_mac or dist.get_rank() == 0):
+    if batch_index % cfg.interval_print == 0 and (cfg.use_mac or cfg.rank == 0):
         if cfg.prediction_cfg.train_O_given_prev_O:
             observation_loss = losses[0]
             with open(cfg.path_2_log, "a") as f:
@@ -141,33 +139,32 @@ def log_print_oa(
     is_first,
     aggregate_loss,
 ):
-    if batch_index % cfg.interval_print == 0 and (cfg.use_mac or dist.get_rank() == 0):
-        with open(cfg.path_2_log, "a", encoding="utf-8") as f:
-            multi_print(f"Batch Index: {batch_index}", f)
-            if aggregate_loss:
-                multi_print(f"Aggregate Loss: {aggregate_loss}", f)
-            multi_print(f"Training predictor mode: {cfg.training_predictor_mode}", f)
-            multi_print(f"Is First: {is_first}", f)
-            multi_print(
-                f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0])) if prev_action is not None else None}",
-                f,
-            )
-            if not is_first:
+    if batch_index % cfg.interval_print == 0 and (cfg.use_mac or cfg.rank == 0):
+        if not is_first:
+            with open(cfg.path_2_log, "a", encoding="utf-8") as f:
+                multi_print(f"Batch Index: {batch_index}", f)
+                if aggregate_loss:
+                    multi_print(f"Aggregate Loss: {aggregate_loss}", f)
                 multi_print(
-                    f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
+                    f"Prev Action: {repr(cfg.causal_lm_tokenizer.decode(prev_action[0])) if prev_action is not None else None}",
                     f,
                 )
+                if not is_first:
+                    multi_print(
+                        f"Prev Observation: {repr(cfg.causal_lm_tokenizer.decode(prev_obs[0]))}",
+                        f,
+                    )
+                    multi_print(
+                        f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
+                        f,
+                    )
+                    multi_print(
+                        f"Default Action: {repr(cfg.causal_lm_tokenizer.decode(default_action[0]))}",
+                        f,
+                    )
                 multi_print(
-                    f"Action: {repr(cfg.causal_lm_tokenizer.decode(action[0]))}",
-                    f,
+                    f"Observation: {repr(cfg.causal_lm_tokenizer.decode(obs[0]))}", f
                 )
-                multi_print(
-                    f"Default Action: {repr(cfg.causal_lm_tokenizer.decode(default_action[0]))}",
-                    f,
-                )
-            multi_print(
-                f"Observation: {repr(cfg.causal_lm_tokenizer.decode(obs[0]))}", f
-            )
 
 
 def init_traj_storage(traj_path, initial_config):
@@ -196,7 +193,7 @@ def append_traj_to_storage(traj_path, traj_data):
 def save_trajectory(
     cfg, batch_index, prev_action, prev_obs, action, obs, losses, aggregate_loss
 ):
-    if cfg.use_mac or dist.get_rank() == 0:
+    if cfg.use_mac or cfg.rank == 0:
 
         # Does nothing if file already exists
         init_traj_storage(
@@ -470,7 +467,7 @@ def update_weights(
             torch.max(action_prob_ratio * neg_advantage, clipped_ratio * neg_advantage)
             + value_loss
         )
-        if cfg.wandb and dist.get_rank() == 0 and action_is_generated:
+        if cfg.wandb and cfg.rank == 0 and action_is_generated:
             wandb.log(
                 {
                     "Values": values.mean(),
@@ -663,6 +660,7 @@ def trainer(cfg):
                 do_weight_update=not isinstance(cfg.debug, NoWeightUpdates),
             )
 
+            # not currently using this functionality, assume None
             if (
                 cfg.perturbation_cfg is not None
                 and state.batch_index % cfg.perturbation_cfg.eval_every == 0
@@ -751,51 +749,16 @@ def train_via_update(cfg):
 
 
 def train_model(init_cfg):
-    if not init_cfg.use_mac:
-        dist.init_process_group(backend="nccl")
-        torch.cuda.set_device(dist.get_rank())
-        print("rank", dist.get_rank())
-
     cfg = extend_initial_config(init_cfg)
-    cfg.causal_lm.to(dist.get_rank())
 
-    if not cfg.load_model:
-        with open(cfg.path_2_log, "w") as f:
-            print("")
-    with open(cfg.path_2_log, "a") as f:
-        f.write("")
-
-    if cfg.wandb and (cfg.use_mac or dist.get_rank() == 0):
+    if cfg.wandb and (cfg.use_mac or cfg.rank == 0):
         wandb.init(
             project="collaborative-training-many-per-context-window",
             name=create_run_name(cfg),
         )
-    print("Causal LM: ", cfg.causal_lm)
-    if cfg.optimizer == "sgd":
-        optimizer = torch.optim.SGD if cfg.use_mac else bitsandbytes.optim.SGD8bit
-        cfg.optimizer = optimizer(
-            cfg.causal_lm.parameters(), lr=cfg.lr
-        )  # , momentum=0.01)
-    elif cfg.optimizer == "adam":
-        optimizer = torch.optim.AdamW if cfg.use_mac else bitsandbytes.optim.AdamW8bit
-        cfg.optimizer = optimizer(  # torch.optim.Adam(  #
-            list(cfg.causal_lm.qhead.parameters())
-            + list(cfg.causal_lm.v_head_group.parameters()),
-            lr=cfg.lr,
-        )
-    elif cfg.optimizer == "rmsprop":
-        cfg.optimizer = torch.optim.RMSprop(cfg.causal_lm.parameters(), lr=cfg.lr)
-    else:
-        raise ValueError(
-            f"Unsupported optimizer: {cfg.optimizer}. Please choose 'sgd', 'adam', or 'rmsprop'."
-        )
-    cfg.causal_lm = DDP(
-        cfg.causal_lm,
-        device_ids=[dist.get_rank()],
-        find_unused_parameters=True,
-    )
+
     train_via_update(cfg)
-    if cfg.wandb and (cfg.use_mac or dist.get_rank() == 0):
+    if cfg.wandb and (cfg.use_mac or cfg.rank == 0):
         wandb.finish()
 
 

@@ -147,14 +147,14 @@ class PrefixTensors:
     obs_prefix_tensor: torch.Tensor
 
 
-@dataclass
+@dataclass(frozen=True)
 class Config:
     model_name: str
     causal_lm: PreTrainedModel
     causal_lm_tokenizer: Optional[PreTrainedTokenizer]
+    rank: int
     lr: float
     optimizer: torch.optim.Optimizer
-    qhead_optimizer: torch.optim.Optimizer
     batch_size: int
     num_batches: int
     replay_buffer_size: Optional[int]
@@ -178,6 +178,5 @@ class Config:
     inference_cfg: InferenceConfig
     prediction_cfg: PredictionConfig
     trainer_cfg: TrainerConfig
-    training_predictor_mode: bool
     perturbation_cfg: Optional[PerturbationConfig]
     debug: Optional[DebugType]

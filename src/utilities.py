@@ -8,6 +8,7 @@ from transformers import (
     PreTrainedTokenizer,
 )
 from peft import LoraConfig, get_peft_model, TaskType
+import bitsandbytes
 import wandb
 from dataclasses import dataclass
 import einops
@@ -18,6 +19,7 @@ from contextlib import nullcontext
 from datetime import datetime, timezone, timedelta
 
 import torch.nn as nn
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 from training_types import *
 from prepare_dataset import prepare_dataset
@@ -166,6 +168,47 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     causal_lm.generation_config.min_new_tokens = pure_ctxt_sizes.action_size
     causal_lm.generation_config.max_new_tokens = pure_ctxt_sizes.action_size
 
+    if not init_cfg.use_mac:
+        dist.init_process_group(backend="nccl")
+        torch.cuda.set_device(dist.get_rank())
+
+    rank = dist.get_rank()
+    print("rank", rank)
+
+    causal_lm.to(rank)
+    causal_lm = DDP(
+        causal_lm,
+        device_ids=[rank],
+        find_unused_parameters=True,
+    )
+
+    if not init_cfg.load_model:
+        with open(path_2_log, "w") as f:
+            print("")
+    with open(path_2_log, "a") as f:
+        f.write("")
+
+    if rank == 0:
+        print("Causal LM: ", causal_lm)
+
+    parameters = list(
+        param
+        for name, param in causal_lm.module.qhead.named_parameters()
+        if ".lora" in name
+    ) + list(causal_lm.module.v_head_group.parameters())
+
+    if init_cfg.optimizer == "sgd":
+        optimizer = torch.optim.SGD if init_cfg.use_mac else bitsandbytes.optim.SGD8bit
+    elif init_cfg.optimizer == "adam":
+        optimizer = (
+            torch.optim.AdamW if init_cfg.use_mac else bitsandbytes.optim.AdamW8bit
+        )
+    else:
+        raise ValueError(
+            f"Unsupported optimizer: {optimizer}. Please choose 'sgd' or 'adam'."
+        )
+    optimizer = optimizer(parameters, lr=init_cfg.lr)
+
     dataset = prepare_dataset(
         init_cfg,
         causal_lm_tokenizer,
@@ -176,9 +219,9 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
 
     return Config(
         model_name=init_cfg.model_name,
+        rank=rank,
         lr=init_cfg.lr,
-        optimizer=init_cfg.optimizer,
-        qhead_optimizer=init_cfg.optimizer,
+        optimizer=optimizer,
         batch_size=init_cfg.batch_size,
         num_batches=init_cfg.num_batches,
         replay_buffer_size=init_cfg.replay_buffer_size,
@@ -208,7 +251,6 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         inference_cfg=init_cfg.inference_cfg,
         prediction_cfg=init_cfg.prediction_cfg,
         trainer_cfg=init_cfg.trainer_cfg,
-        training_predictor_mode=True,
         perturbation_cfg=init_cfg.perturbation_cfg,
         debug=init_cfg.debug,
     )
@@ -434,7 +476,7 @@ def create_run_name(cfg: Config) -> str:
     inference_cfg = cfg.inference_cfg
     run_name = ""
     run_name += f"{cfg.model_name[:4]}_"
-    run_name += f"{cfg.optimizer[:3]}_"
+    run_name += f"{cfg.optimizer.optimizer_name}_"
     run_name += f"pu{cfg.trainer_cfg.prediction_training_length}_gu{cfg.trainer_cfg.inference_training_length}_"
     if isinstance(cfg.dataset.task, ArithmeticTask):
         run_name += (
@@ -682,7 +724,7 @@ def predict_observation(
     batch_obs_losses = masked_losses[:, 1:].sum(dim=1) / pure_obs_attention_mask[
         :, 1:
     ].sum(dim=1)
-    if dist.get_rank() == 0:
+    if cfg.rank == 0:
         print(
             "Default:" if is_default_action else "Updated:",
             batch_obs_losses[0].item(),
