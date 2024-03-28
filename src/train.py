@@ -297,9 +297,11 @@ def update_weights(
                 ].mlp.up_proj.weight
             )
 
-        if do_weight_update:
-            cfg.optimizer.zero_grad()
-            aggregate_loss.backward()
+        aggregate_loss.backward()
+        if do_weight_update and batch_index > 0 and batch_index % 10 == 0:
+            for param in cfg.causal_lm.module.parameters():
+                if param.grad is not None:
+                    param.grad /= 10.0
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
 
