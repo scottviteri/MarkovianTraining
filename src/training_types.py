@@ -78,6 +78,7 @@ class PerturbationConfig:
     eval_every: int
     frac_of_tokens_to_pad: float
     frac_of_tokens_to_randomize: float
+    p_digit_change: float
 
 
 @dataclass(frozen=True)

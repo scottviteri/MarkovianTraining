@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import copy
 import numpy as np
 import tqdm
+import random
 
 from utilities import extend_initial_config, predict_observation
 from config_examples import configs
@@ -38,8 +39,31 @@ def perturb_action(action, cfg):
         token_id_space
     )
 
+    # PERTURBATION 3
+    # For probability p_digit_change, flip each individual digit
+    p_digit_change = cfg.perturbation_cfg.p_digit_change
+    assert 1.0 >= p_digit_change >= 0.0, f"p_digit_change is {p_digit_change}"
+    action_out_detok = cfg.causal_lm_tokenizer.batch_decode(action_out)
+    new = []
+    for act in action_out_detok:
+        new_act = randomize_numbers_with_probability(act, p_digit_change)
+        new.append(cfg.tokenizer.encode(new_act))
+
+    action_out = torch.tensor(new).to(cfg.device)
+
     return action_out
 
+def randomize_numbers_with_probability(input_string, probability=0.5):
+    output_string = ""
+    for char in input_string:
+        if char.isdigit():
+            if random.random() < probability:
+                output_string += str(random.randint(0, 9))
+            else:
+                output_string += char
+        else:
+            output_string += char
+    return output_string
 
 class ActionEvaluator:
     """Class to evaluate training trajectories (json files)"""
