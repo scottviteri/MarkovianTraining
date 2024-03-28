@@ -406,9 +406,10 @@ def get_model(
         if load_model:
             config = AutoConfig.from_pretrained(model_dict[model_name])
             pth_files = glob.glob(os.path.join("saved_weights_and_losses", "*.pth"))
-            assert len(pth_files) > 0
-            pth_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-            latest_pth_file = pth_files[0]
+            model_pth_files = list(filter(lambda x: model_name in x, pth_files))
+            assert len(model_pth_files) > 0
+            model_pth_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            latest_pth_file = model_pth_files[0]
             causal_lm = torch.load(latest_pth_file).module
         else:
             config = AutoConfig.from_pretrained(model_dict[model_name])
