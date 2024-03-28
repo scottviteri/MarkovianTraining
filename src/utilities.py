@@ -15,6 +15,7 @@ from datasets import load_dataset
 import json
 import copy
 from contextlib import nullcontext
+from datetime import datetime, timezone, timedelta
 
 import torch.nn as nn
 
@@ -140,7 +141,9 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     path_2_log = f"saved_weights_and_losses/{init_cfg.model_name}_log.txt"
-    traj_path = f"saved_weights_and_losses/{init_cfg.model_name}_traj"
+    current_time = datetime.now(timezone(timedelta(hours=-7)))
+    timestamp = current_time.strftime("%Y%m%d_%H%M%S")
+    traj_path = f"saved_weights_and_losses/{init_cfg.model_name}_traj_{timestamp}.json"
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 

@@ -14,7 +14,6 @@ import json
 import random
 import os
 from datasets import load_dataset
-from datetime import datetime, timezone, timedelta
 
 from openai import OpenAI
 from matplotlib import pyplot as plt
@@ -198,14 +197,6 @@ def save_trajectory(
     cfg, batch_index, prev_action, prev_obs, action, obs, losses, aggregate_loss
 ):
     if cfg.use_mac or dist.get_rank() == 0:
-        if batch_index == 0:
-            # Get the current date and time in PDT
-            current_time = datetime.now(timezone(timedelta(hours=-7)))
-            # Format the timestamp in a human-readable format
-            timestamp = current_time.strftime("%Y%m%d_%H%M%S")
-            # Append the formatted timestamp to the file path
-            cfg.traj_path += f"_{timestamp}.json"
-            # cfg.traj_path += f"_{datetime.now(timezone.utc).timestamp():0.0f}.json"
 
         # Does nothing if file already exists
         init_traj_storage(
@@ -548,11 +539,11 @@ def log_and_save(
     # else:
 
     save_weights(cfg, batch_index)
-    if action_is_generated:
-        save_trajectory(
-            cfg, batch_index, prev_action, prev_obs, action, obs, losses, aggregate_loss
-        )
-        log_wandb(cfg, batch_index, aggregate_loss, losses)
+    # if action_is_generated:
+    save_trajectory(
+        cfg, batch_index, prev_action, prev_obs, action, obs, losses, aggregate_loss
+    )
+    log_wandb(cfg, batch_index, aggregate_loss, losses)
     log_print_losses(cfg, batch_index, action_is_generated, aggregate_loss, losses)
 
     log_print_oa(

@@ -187,7 +187,7 @@ class ActionEvaluator:
         return eval_results
 
     @staticmethod
-    def plot_results(results, model_name, train_model):
+    def plot_results(results, model_name, train_model, file_name):
         """"""
 
         fig, axs = plt.subplots(1, 2, figsize=(12, 4))
@@ -222,6 +222,7 @@ class ActionEvaluator:
             axs[i].set_xlim(x_min - x_max * 0.1, x_max * 1.5)
 
         # plt.tight_layout()
+        plt.savefig(f"results/{file_name[:-5]}.png")
         plt.show()
 
 
@@ -245,7 +246,10 @@ def main():
     res = eval_class.evaluate()
     print(res)
     eval_class.plot_results(
-        res[cfg.model_name], model_name="mistral7b", train_model="mistral7b"
+        res[cfg.model_name],
+        model_name="mistral7b",
+        train_model="mistral7b",
+        file_name=file_name,
     )
 
 
