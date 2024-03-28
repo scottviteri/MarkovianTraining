@@ -45,34 +45,21 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                 step=batch_index,
             )
         else:
-            (action_loss, observation_loss, value_loss, negentropy, perturbed_loss) = (
+            (action_losses, observation_losses, value_losses, negentropies, perturbed_losses) = (
                 losses
             )
-            if value_loss:
-                wandb.log(
-                    {
-                        "Batch Index": batch_index,
-                        "Aggregate Loss": aggregate_loss,
-                        "Perturbed Loss": perturbed_loss,
-                        "Action Loss": action_loss,
-                        "Observation Loss": observation_loss.mean(),
-                        "Value Loss": value_loss,
-                        "Negentropy": negentropy,
-                    },
-                    step=batch_index,
-                )
-            else:
-                wandb.log(
-                    {
-                        "Batch Index": batch_index,
-                        "Aggregate Loss": aggregate_loss,
-                        "Perturbed Loss": perturbed_loss,
-                        "Action Loss": action_loss,
-                        "Observation Loss": observation_loss.mean(),
-                        "Negentropy": negentropy,
-                    },
-                    step=batch_index,
-                )
+            wandb.log(
+                {
+                    "Batch Index": batch_index.mean(),
+                    "Aggregate Loss": aggregate_losses.mean(),
+                    "Perturbed Loss": perturbed_losses.mean(),
+                    "Action Loss": action_losses.mean(),
+                    "Observation Loss": observation_losses.mean(),
+                    "Value Loss": value_losses.mean(),
+                    "Negentropy": negentropies.mean(),
+                },
+                step=batch_index,
+            )
 
 
 def log_print_losses(cfg, batch_index, action_is_generated, aggregate_loss, losses):
