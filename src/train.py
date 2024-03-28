@@ -167,13 +167,6 @@ def log_print_oa(
                 )
 
 
-def init_traj_storage(traj_path, initial_config):
-    """Initialize the JSON file with general config values if it doesn't exist."""
-    if not os.path.exists(traj_path):
-        with open(traj_path, "w") as file:
-            json.dump(initial_config, file, indent=4)
-
-
 def append_traj_to_storage(traj_path, traj_data):
     """Append data for a training step to the JSON file."""
     # Load existing data
@@ -194,26 +187,6 @@ def save_trajectory(
     cfg, batch_index, prev_action, prev_obs, action, obs, losses, aggregate_loss
 ):
     if cfg.use_mac or cfg.rank == 0:
-
-        # Does nothing if file already exists
-        init_traj_storage(
-            cfg.traj_path,
-            {
-                "model": cfg.model_name,
-                "lr": cfg.lr,
-                "batch_size": cfg.batch_size,
-                "num_batches": cfg.num_batches,
-                "num_beams": cfg.num_beams,
-                "optimizer": repr(cfg.optimizer),
-                "dataset": repr(cfg.dataset),
-                "perturbation": repr(cfg.perturbation_cfg),
-                "trainer": repr(cfg.trainer_cfg),
-                "inference": repr(cfg.inference_cfg),
-                "prediction": repr(cfg.prediction_cfg),
-                "wandb_run_id": wandb.run.id if cfg.wandb else False,
-                "wandb_run_name": wandb.run.name if cfg.wandb else False,
-            },
-        )
 
         (
             action_loss,
@@ -723,44 +696,37 @@ def trainer(cfg):
 
     return update, pi
 
-
-def train_via_update(cfg):
-    # aggregate_losses = []
-    update, pi = trainer(cfg)
-    for datapt in tqdm(cfg.dataset.dataloader, total=cfg.num_batches):
-        state = pi()
-        # batch index will still increase on a replay buffer sample
-        if (
-            cfg.replay_buffer_size is not None
-            and state.batch_index % cfg.replay_buffer_size == 0
-            and len(state.replay_buffer) >= cfg.replay_buffer_size
-            and datapt.is_first
-        ):
-            top_trajectories = sorted(state.replay_buffer, key=lambda x: x.loss)[
-                : cfg.replay_buffer_size // 10
-            ]
-            for trajectory in top_trajectories:
-                update(trajectory.prev_datapt)
-                update(trajectory.datapt)
-        # if aggregate_loss is not None:
-        #    aggregate_losses.append(state.aggregate_loss)
-        update(datapt)
     # return aggregate_losses
+
+
+def process_replay_buffer(cfg, state, update):
+    if (
+        cfg.replay_buffer_size is not None
+        and state.batch_index % cfg.replay_buffer_size == 0
+        and len(state.replay_buffer) >= cfg.replay_buffer_size
+    ):
+        top_trajectories = sorted(state.replay_buffer, key=lambda x: x.loss)[
+            : cfg.replay_buffer_size // 10
+        ]
+        for trajectory in top_trajectories:
+            update(trajectory.prev_datapt)
+            update(trajectory.datapt)
 
 
 def train_model(init_cfg):
     cfg = extend_initial_config(init_cfg)
+    update, pi = trainer(cfg)
+    for datapt in tqdm(cfg.dataset.dataloader, total=cfg.num_batches):
+        state = pi()
+        if datapt.is_first:
+            process_replay_buffer(cfg, state, update)
+        update(datapt)
 
-    if cfg.wandb and (cfg.use_mac or cfg.rank == 0):
-        wandb.init(
-            project="collaborative-training-many-per-context-window",
-            name=create_run_name(cfg),
-        )
-
-    train_via_update(cfg)
     if cfg.wandb and (cfg.use_mac or cfg.rank == 0):
         wandb.finish()
 
+
+()
 
 if __name__ == "__main__":
     for init_cfg in configs:

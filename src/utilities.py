@@ -10,13 +10,14 @@ from transformers import (
 from peft import LoraConfig, get_peft_model, TaskType
 import bitsandbytes
 import wandb
-from dataclasses import dataclass
+import dataclasses
 import einops
 from datasets import load_dataset
 import json
 import copy
 from contextlib import nullcontext
 from datetime import datetime, timezone, timedelta
+import os
 
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -187,6 +188,15 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
             print("")
     with open(path_2_log, "a") as f:
         f.write("")
+
+    if init_cfg.wandb and (init_cfg.use_mac or rank == 0):
+        wandb.init(
+            project="collaborative-training-many-per-context-window",
+            name=create_run_name(init_cfg),
+        )
+
+    with open(traj_path, "w") as file:
+        json.dump(dataclasses.asdict(init_cfg), file, indent=4)
 
     if rank == 0:
         print("Causal LM: ", causal_lm)
@@ -471,49 +481,46 @@ def get_mlp_modules(model):
     return list(set(modules))
 
 
-def create_run_name(cfg: Config) -> str:
-    prediction_cfg = cfg.prediction_cfg
-    inference_cfg = cfg.inference_cfg
+def create_run_name(init_cfg: InitialConfig) -> str:
+    prediction_cfg = init_cfg.prediction_cfg
     run_name = ""
-    run_name += f"{cfg.model_name[:4]}_"
-    run_name += f"{cfg.optimizer.optimizer_name}_"
-    run_name += f"pu{cfg.trainer_cfg.prediction_training_length}_gu{cfg.trainer_cfg.inference_training_length}_"
-    if isinstance(cfg.dataset.task, ArithmeticTask):
-        run_name += (
-            f"ari_nt={cfg.dataset.task.num_terms}_nd={cfg.dataset.task.num_digits}_"
-        )
+    run_name += f"{init_cfg.model_name[:4]}_"
+    run_name += f"{init_cfg.optimizer}_"
+    run_name += f"pu{init_cfg.trainer_cfg.prediction_training_length}_gu{init_cfg.trainer_cfg.inference_training_length}_"
+    if isinstance(init_cfg.dataset.task, ArithmeticTask):
+        run_name += f"ari_nt={init_cfg.dataset.task.num_terms}_nd={init_cfg.dataset.task.num_digits}_"
     else:
         run_name += "wiki_"
-    if cfg.lr != 1e-4:
-        run_name += f"lr{cfg.lr}_"
+    if init_cfg.lr != 1e-4:
+        run_name += f"lr{init_cfg.lr}_"
     if prediction_cfg.train_O_given_prev_O:
         run_name += f"AR_"
     if prediction_cfg.train_O_given_A:
         run_name += f"M_"
-    if cfg.dataset.peek_every is not None:
-        run_name += f"pe{cfg.dataset.peek_every}_"
+    if init_cfg.dataset.peek_every is not None:
+        run_name += f"pe{init_cfg.dataset.peek_every}_"
 
-    if isinstance(cfg.debug, RepeatNPoints):
-        run_name += f"r{cfg.debug.num_points}_"
-    elif isinstance(cfg.debug, RepeatPointNTimes):
-        run_name += f"re{cfg.debug.num_times}_"
-    elif isinstance(cfg.debug, ReplaceWithRandomTokens):
+    if isinstance(init_cfg.debug, RepeatNPoints):
+        run_name += f"r{init_cfg.debug.num_points}_"
+    elif isinstance(init_cfg.debug, RepeatPointNTimes):
+        run_name += f"re{init_cfg.debug.num_times}_"
+    elif isinstance(init_cfg.debug, ReplaceWithRandomTokens):
         run_name += "rd_"
-    elif isinstance(cfg.debug, NoWeightUpdates):
+    elif isinstance(init_cfg.debug, NoWeightUpdates):
         run_name += "nwu_"
 
-    if cfg.batch_size != 1:
-        run_name += f"bs{cfg.batch_size}_"
-    run_name += f"nb{cfg.num_batches}_"
-    if cfg.obs_to_action_ratio != 1:
-        run_name += f"o:a={cfg.obs_to_action_ratio}:1_"
-    if cfg.load_model:
+    if init_cfg.batch_size != 1:
+        run_name += f"bs{init_cfg.batch_size}_"
+    run_name += f"nb{init_cfg.num_batches}_"
+    if init_cfg.obs_to_action_ratio != 1:
+        run_name += f"o:a={init_cfg.obs_to_action_ratio}:1_"
+    if init_cfg.load_model:
         run_name += f"load_"
-    if cfg.do_lora:
+    if init_cfg.do_lora:
         run_name += "lra_"
-    if cfg.num_beams:
-        run_name += f"nbe{cfg.num_beams}_"
-    run_name += f"cs{cfg.ctxt_sizes}"
+    if init_cfg.num_beams:
+        run_name += f"nbe{init_cfg.num_beams}_"
+    run_name += f"cs{init_cfg.ctxt_sizes}"
     return run_name
 
 
