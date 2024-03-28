@@ -10,21 +10,21 @@ import torch
 from enum import Enum
 
 
-@dataclass
+@dataclass(frozen=True)
 class QADatapt:
     question: str
     explanation: Optional[str]
     answer: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class Datapt:
     action: Optional[torch.tensor]
     obs: torch.tensor
     is_first: bool
 
 
-@dataclass
+@dataclass(frozen=True)
 class ContextSizes:
     first_action_size: int
     first_obs_size: int
@@ -32,14 +32,14 @@ class ContextSizes:
     obs_size: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class ScoredTrajectory:
     prev_datapt: Datapt
     datapt: Datapt
     loss: float
 
 
-@dataclass
+@dataclass(frozen=True)
 class TrainerState:
     action: Optional[torch.tensor]
     obs: Optional[torch.tensor]
@@ -48,73 +48,93 @@ class TrainerState:
     replay_buffer: List[ScoredTrajectory]
 
 
-GptEval = NamedTuple("GptEval", [("num_evals", int), ("use_gptj", bool)])
-PredictionConfig = NamedTuple(
-    "PredictionConfig",
-    [
-        ("train_O_given_A", bool),
-        ("train_O_given_prev_O", bool),
-    ],
-)
-InferenceConfig = NamedTuple(
-    "InferenceConfig",
-    [
-        ("num_return_sequences", int),
-        # ("update_every", Optional[int]),
-        # ("fraction_to_update", Optional[float]),
-    ],
-)
-TrainerConfig = NamedTuple(
-    "TrainerConfig",
-    [
-        ("prediction_training_length", Optional[int]),
-        ("inference_training_length", Optional[int]),
-    ],
-)
-PerturbationConfig = NamedTuple(
-    "PerturbationConfig",
-    [
-        ("eval_every", int),
-        ("frac_of_tokens_to_pad", float),
-        ("frac_of_tokens_to_randomize", float),
-    ],
-)
+@dataclass(frozen=True)
+class GptEval:
+    num_evals: int
+    use_gptj: bool
 
-RepeatNPoints = NamedTuple("RepeatNPoints", [("num_points", int)])
-RepeatPointNTimes = NamedTuple("RepeatPointNTimes", [("num_times", int)])
-ReplaceWithRandomTokens = NamedTuple("ReplaceWithRandomTokens", [])
-NoWeightUpdates = NamedTuple("NoWeightUpdates", [])
 
-ArithmeticTask = NamedTuple(
-    "ArithmeticTask",
-    [
-        ("num_digits", int),
-        ("num_terms", int),
-        ("operations", Optional[list]),
-        ("probs", Optional[list]),
-    ],
-)
-WikipediaTask = NamedTuple("WikipediaTask", [])
+@dataclass(frozen=True)
+class PredictionConfig:
+    train_O_given_A: bool
+    train_O_given_prev_O: bool
+
+
+@dataclass(frozen=True)
+class InferenceConfig:
+    num_return_sequences: int
+    # update_every: Optional[int]
+    # fraction_to_update: Optional[float]
+
+
+@dataclass(frozen=True)
+class TrainerConfig:
+    prediction_training_length: Optional[int]
+    inference_training_length: Optional[int]
+
+
+@dataclass(frozen=True)
+class PerturbationConfig:
+    eval_every: int
+    frac_of_tokens_to_pad: float
+    frac_of_tokens_to_randomize: float
+
+
+@dataclass(frozen=True)
+class RepeatNPoints:
+    num_points: int
+
+
+@dataclass(frozen=True)
+class RepeatPointNTimes:
+    num_times: int
+
+
+@dataclass(frozen=True)
+class ReplaceWithRandomTokens:
+    pass
+
+
+@dataclass(frozen=True)
+class NoWeightUpdates:
+    pass
+
+
+@dataclass(frozen=True)
+class ArithmeticTask:
+    num_digits: int
+    num_terms: int
+    operations: Optional[list]
+    probs: Optional[list]
+
+
+@dataclass(frozen=True)
+class WikipediaTask:
+    pass
+
+
 TaskType = Union[ArithmeticTask, WikipediaTask]
-InitDatasetType = NamedTuple(
-    "InitDatasetType", [("task", TaskType), ("peek_every", Optional[int])]
-)
 
-DatasetType = NamedTuple(
-    "DatasetType",
-    [
-        ("task", TaskType),
-        ("peek_every", Optional[int]),
-        ("dataloader", Iterable[Dict[str, torch.Tensor]]),
-    ],
-)
+
+@dataclass(frozen=True)
+class InitDatasetType:
+    task: TaskType
+    peek_every: Optional[int]
+
+
+@dataclass(frozen=True)
+class DatasetType:
+    task: TaskType
+    peek_every: Optional[int]
+    dataloader: Iterable[Dict[str, torch.Tensor]]
+
 
 DebugType = Union[
     RepeatNPoints, RepeatPointNTimes, ReplaceWithRandomTokens, NoWeightUpdates
 ]
 
 
-@dataclass
+@dataclass(frozen=True)
 class InitialConfig:
     model_name: str
     lr: float
@@ -139,7 +159,7 @@ class InitialConfig:
     debug: Optional[DebugType]
 
 
-@dataclass
+@dataclass(frozen=True)
 class PrefixTensors:
     first_action_prefix_tensor: torch.Tensor
     first_obs_prefix_tensor: torch.Tensor
