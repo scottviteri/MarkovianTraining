@@ -13,7 +13,6 @@ test_config = InitialConfig(
     optimizer="adam",
     batch_size=2,
     num_batches=300,
-    obs_to_action_ratio=0.5,
     interval_save_weights=3000,
     interval_print=1,
     wandb=False,

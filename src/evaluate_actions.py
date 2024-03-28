@@ -53,6 +53,7 @@ def perturb_action(action, cfg):
 
     return action_out
 
+
 def randomize_numbers_with_probability(input_string, probability=0.5):
     output_string = ""
     for char in input_string:
@@ -64,6 +65,7 @@ def randomize_numbers_with_probability(input_string, probability=0.5):
         else:
             output_string += char
     return output_string
+
 
 class ActionEvaluator:
     """Class to evaluate training trajectories (json files)"""
@@ -136,9 +138,7 @@ class ActionEvaluator:
         cfg.inference_lm = cfg.causal_lm
         # Probably unnecessary
         cfg.inference_lm.eval()
-
-        obs_loss = predict_observation(cfg, action, obs, add_q_head=False)
-
+        obs_loss = predict_observation(cfg, action, obs, add_q_head=False).mean()
         return obs_loss
 
     def evaluate(self):

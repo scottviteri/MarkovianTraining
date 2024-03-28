@@ -235,7 +235,6 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         batch_size=init_cfg.batch_size,
         num_batches=init_cfg.num_batches,
         replay_buffer_size=init_cfg.replay_buffer_size,
-        obs_to_action_ratio=init_cfg.obs_to_action_ratio,
         interval_save_weights=init_cfg.interval_save_weights,
         interval_print=init_cfg.interval_print,
         use_mac=init_cfg.use_mac,
@@ -279,33 +278,30 @@ def log_print_oa(
     action,
     default_action,
     obs,
-    is_first,
     aggregate_loss,
 ):
     if batch_index % cfg.interval_print == 0 and (cfg.use_mac or cfg.rank == 0):
-        if not is_first:
-            with open(cfg.path_2_log, "a", encoding="utf-8") as f:
-                multi_print(f"Batch Index: {batch_index}", f)
-                if aggregate_loss:
-                    multi_print(f"Aggregate Loss: {aggregate_loss}", f)
-                multi_print(
-                    f"Prev Action: {repr(cfg.tokenizer.decode(prev_action[0])) if prev_action is not None else None}",
-                    f,
-                )
-                if not is_first:
-                    multi_print(
-                        f"Prev Observation: {repr(cfg.tokenizer.decode(prev_obs[0]))}",
-                        f,
-                    )
-                    multi_print(
-                        f"Action: {repr(cfg.tokenizer.decode(action[0]))}",
-                        f,
-                    )
-                    multi_print(
-                        f"Default Action: {repr(cfg.tokenizer.decode(default_action[0]))}",
-                        f,
-                    )
-                multi_print(f"Observation: {repr(cfg.tokenizer.decode(obs[0]))}", f)
+        with open(cfg.path_2_log, "a", encoding="utf-8") as f:
+            multi_print(f"Batch Index: {batch_index}", f)
+            if aggregate_loss:
+                multi_print(f"Aggregate Loss: {aggregate_loss}", f)
+            multi_print(
+                f"Prev Action: {repr(cfg.tokenizer.decode(prev_action[0])) if prev_action is not None else None}",
+                f,
+            )
+            multi_print(
+                f"Prev Observation: {repr(cfg.tokenizer.decode(prev_obs[0]))}",
+                f,
+            )
+            multi_print(
+                f"Action: {repr(cfg.tokenizer.decode(action[0]))}",
+                f,
+            )
+            multi_print(
+                f"Default Action: {repr(cfg.tokenizer.decode(default_action[0]))}",
+                f,
+            )
+            multi_print(f"Observation: {repr(cfg.tokenizer.decode(obs[0]))}", f)
 
 
 def get_prefixes(
@@ -511,8 +507,6 @@ def create_run_name(init_cfg: InitialConfig) -> str:
     if init_cfg.batch_size != 1:
         run_name += f"bs{init_cfg.batch_size}_"
     run_name += f"nb{init_cfg.num_batches}_"
-    if init_cfg.obs_to_action_ratio != 1:
-        run_name += f"o:a={init_cfg.obs_to_action_ratio}:1_"
     if init_cfg.load_model:
         run_name += f"load_"
     if init_cfg.do_lora:
@@ -581,7 +575,7 @@ def wrap_input_tokens(
     return final_input_sequence
 
 
-def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=False):
+def predict_action(cfg, prev_action, prev_obs, action, add_q_head):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     input_sequence = wrap_input_tokens(
         cfg,
@@ -606,25 +600,12 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, per_batch=Fal
         ),
         target=input_sequence[:, 1:],
     )[:, -cfg.pure_ctxt_sizes.action_size :]
-    negentropy = -entropy_from_logits(action_logits).mean()
+    negentropies = -entropy_from_logits(action_logits).mean(dim=1)
     pure_action_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.action_size :]
     masked_losses = action_loss_tensor * pure_action_attention_mask
-    # if True:
-    #    plt.figure()
-    #    plt.plot(masked_losses[0].tolist())
-    #    plt.savefig("action.png")
-    #    # print(
-    #    #    [
-    #    #        cfg.tokenizer.decode([x])
-    #    #        for x in input_sequence[0, -cfg.pure_ctxt_sizes.action_size :].tolist()
-    #    #    ]
-    #    # )
-    #    plt.clf()
-    if per_batch:
-        action_loss = masked_losses.sum(dim=1) / pure_action_attention_mask.sum(dim=1)
-    else:
-        action_loss = masked_losses.sum() / pure_action_attention_mask.sum()
-    return action_loss, values, negentropy
+    # plt.figure(); plt.plot(masked_losses[0].tolist()); plt.savefig("action.png"); plt.clf()
+    action_losses = masked_losses.sum(dim=1) / pure_action_attention_mask.sum(dim=1)
+    return action_losses, values, negentropies
 
 
 def test_sequence(predictor, input_sequence):
@@ -676,9 +657,7 @@ def translate_single_tokens(tokenizer, string):
 # ['Answer', ':', '', '1', '2', '3']
 
 
-def predict_observation(
-    cfg, action, obs, add_q_head, per_batch=False, is_default_action=False
-):
+def predict_observation(cfg, action, obs, add_q_head, is_default_action=False):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     input_sequence = wrap_input_tokens(
         cfg,
@@ -705,12 +684,7 @@ def predict_observation(
     )[:, -cfg.pure_ctxt_sizes.obs_size :]
     pure_obs_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.obs_size :]
     masked_losses = loss_tensor * pure_obs_attention_mask
-    # plt.figure()
-    # plt.plot(masked_losses[0, 1:].tolist())  # also sliced to remove space
-    # if is_default_action:
-    #    plt.savefig("obs_default.png")
-    # else:
-    #    plt.savefig("obs.png")
+    # plt.figure(); plt.plot(masked_losses[0, 1:].tolist()); plt.savefig("obs_default.png"); plt.clf()
     token_loss_pairs = inspect_string(
         cfg.causal_lm,
         cfg.tokenizer,
@@ -721,24 +695,17 @@ def predict_observation(
         for p in token_loss_pairs[-cfg.pure_ctxt_sizes.obs_size - 3 :]
         if str(cfg.tokenizer.pad_token) != p[0]
     ]
-
-    # slicing [:,1:] is a hack because of mistral number tokenization creating a leading space token!
-    batch_obs_losses = masked_losses[:, 1:].sum(dim=1) / pure_obs_attention_mask[
-        :, 1:
-    ].sum(dim=1)
+    # slicing [:,1:] is a hack because of mistral and llama number tokenization create a leading space token!
+    obs_losses = masked_losses[:, 1:].sum(dim=1) / pure_obs_attention_mask[:, 1:].sum(
+        dim=1
+    )
     if cfg.rank == 0:
         print(
             "Default:" if is_default_action else "Updated:",
-            batch_obs_losses[0].item(),
+            obs_losses[0].item(),
             targeted_pairs,
         )
-    return batch_obs_losses if per_batch else batch_obs_losses.mean()
-
-    # obs_tensor = (loss_tensor * attention_mask[:, 1:])[:, -cfg.pure_ctxt_sizes.obs_size :]
-    # obs_losses = obs_tensor.sum(dim=-1) / attention_mask[:, 1:][
-    #    :, -cfg.pure_ctxt_sizes.obs_size :
-    # ].sum(dim=-1)
-    # return obs_losses, obs_tensor
+    return obs_losses
 
 
 def get_neg_log_probs(cfg, input_sequence):
