@@ -169,6 +169,8 @@ def sample(cfg, prev_action, prev_obs, add_q_head=True):
                 beam_input_ids,
                 add_q_head=add_q_head,
                 get_v_head=False,
+                min_new_tokens=cfg.pure_ctxt_sizes.action_size,
+                max_new_tokens=cfg.pure_ctxt_sizes.action_size,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
                 pad_token_id=cfg.causal_lm.module.generation_config.pad_token_id,
                 eos_token_id=cfg.causal_lm.module.generation_config.eos_token_id,
