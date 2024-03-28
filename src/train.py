@@ -7,6 +7,7 @@ from tqdm import tqdm
 import wandb
 import json
 from contextlib import nullcontext
+from datetime import datetime, timezone, timedelta
 
 from training_types import *
 from utilities import (
@@ -30,7 +31,9 @@ def save_weights(cfg, batch_index):
     ):
         print(f"Saving trained_{cfg.model_name} \n\n")
         cfg.tokenizer.save_pretrained(cfg.path_2_tokenizer)
-        torch.save(cfg.causal_lm, cfg.path_2_model + ".pth")
+        current_time = datetime.now(timezone(timedelta(hours=-7)))
+        timestamp = current_time.strftime("%Y%m%d_%H%M%S")
+        torch.save(cfg.causal_lm, f"{cfg.path_2_model}_{timestamp}.pth")
 
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
