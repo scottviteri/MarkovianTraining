@@ -192,10 +192,7 @@ def init_arithmetic_dataset(
         return qa_tokenized_itr_ds
 
     itr_ds = arithmetic_generator(
-        task.num_terms,
-        task.num_digits,
-        task.operations,
-        task.probs,
+        task.num_terms, task.num_digits, task.operations, task.probs, task.cumulative
     )
     # itr_ds = debug(itr_ds)
     itr_ds = to_qa_traj_itr(itr_ds)
@@ -335,7 +332,7 @@ def finalize_dataset(dict_ds, init_cfg):
     return take(init_cfg.num_batches, dict_ds)
 
 
-def arithmetic_generator(num_terms, num_digits, operations, probs):
+def arithmetic_generator(num_terms, num_digits, operations, probs, cumulative):
     # If not specified, use simple addition
     if operations is None:
         operations = ["+"]
@@ -353,10 +350,13 @@ def arithmetic_generator(num_terms, num_digits, operations, probs):
     while 1:
         question = ""
         total = 0.0
-        nums = torch.randint(0, 10**num_digits - 1, (num_terms,))
-        ops_rand = np.random.choice(operations, num_terms - 1, p=probs)
+        current_num_terms = (
+            num_terms if not cumulative else np.random.randint(2, num_terms + 1)
+        )
+        nums = torch.randint(0, 10**num_digits - 1, (current_num_terms,))
+        ops_rand = np.random.choice(operations, current_num_terms - 1, p=probs)
 
-        for i in range(num_terms):
+        for i in range(current_num_terms):
             num = nums[i]
             if i == 0:
                 total = nums[0].item()

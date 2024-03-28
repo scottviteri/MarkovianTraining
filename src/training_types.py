@@ -107,7 +107,7 @@ class ArithmeticTask:
     num_terms: int
     operations: Optional[list]
     probs: Optional[list]
-
+    cumulative: bool
 
 @dataclass(frozen=True)
 class WikipediaTask:

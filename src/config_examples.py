@@ -23,6 +23,7 @@ g2 = InitialConfig(
             num_digits=2,
             operations=["+", "-", "*"],
             probs=[1.0, 0.0, 0.0],
+            cumulative=True,
         ),
         peek_every=None,
     ),
@@ -60,10 +61,7 @@ g2_ar = InitialConfig(
     ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
-            num_terms=2,
-            num_digits=3,
-            operations=None,
-            probs=None,
+            num_terms=2, num_digits=3, operations=None, probs=None, cumulative=True
         ),
         peek_every=None,
     ),
@@ -96,10 +94,7 @@ g2_ei = InitialConfig(
     ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
-            num_terms=2,
-            num_digits=3,
-            operations=None,
-            probs=None,
+            num_terms=2, num_digits=3, operations=None, probs=None, cumulative=True
         ),
         peek_every=None,
     ),
@@ -133,10 +128,7 @@ g2_p2 = InitialConfig(
     ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
-            num_terms=2,
-            num_digits=3,
-            operations=None,
-            probs=None,
+            num_terms=2, num_digits=3, operations=None, probs=None, cumulative=True
         ),
         peek_every=2,
     ),
@@ -169,10 +161,7 @@ gj = InitialConfig(
     ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
-            num_terms=2,
-            num_digits=3,
-            operations=None,
-            probs=None,
+            num_terms=2, num_digits=3, operations=None, probs=None, cumulative=True
         ),
         peek_every=None,
     ),
@@ -205,10 +194,7 @@ lma = InitialConfig(
     ctxt_sizes=ContextSizes(50, 50, 100, 50),
     dataset=InitDatasetType(
         task=ArithmeticTask(
-            num_terms=2,
-            num_digits=3,
-            operations=None,
-            probs=None,
+            num_terms=2, num_digits=3, operations=None, probs=None, cumulative=True
         ),
         peek_every=None,
     ),
@@ -245,6 +231,7 @@ phi2 = InitialConfig(
             num_digits=3,
             operations=["+", "-", "*"],
             probs=[0.0, 0.0, 1.0],
+            cumulative=True,
         ),
         peek_every=None,
     ),
@@ -262,12 +249,12 @@ phi2 = InitialConfig(
 
 mst = InitialConfig(
     model_name="mistral",
-    lr=1e-5,
+    lr=1e-4,
     optimizer="adam",
     batch_size=8,
-    num_batches=5001,
+    num_batches=501,
     replay_buffer_size=None,
-    interval_save_weights=1000,
+    interval_save_weights=50,
     use_mac=False,
     interval_print=1,
     wandb=True,
@@ -277,10 +264,11 @@ mst = InitialConfig(
     ctxt_sizes=ContextSizes(40, 70, 400, 20),
     dataset=InitDatasetType(
         task=ArithmeticTask(
-            num_terms=10,
+            num_terms=15,
             num_digits=2,
             operations=["+", "-", "*"],
-            probs=[0.5, 0.5, 0.0],
+            probs=[1.0, 0.0, 0.0],
+            cumulative=True,
         ),
         peek_every=None,
     ),
