@@ -152,6 +152,12 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
 
     assert init_cfg.num_beams == 1, "Only supporting num_beams = 1 currently"
 
+    if not init_cfg.use_mac:
+        dist.init_process_group(backend="nccl")
+        torch.cuda.set_device(dist.get_rank())
+    rank = dist.get_rank()
+    print("rank", rank)
+
     causal_lm, tokenizer = get_model(
         device,
         init_cfg.load_model,
@@ -168,13 +174,6 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     )
     causal_lm.generation_config.min_new_tokens = pure_ctxt_sizes.action_size
     causal_lm.generation_config.max_new_tokens = pure_ctxt_sizes.action_size
-
-    if not init_cfg.use_mac:
-        dist.init_process_group(backend="nccl")
-        torch.cuda.set_device(dist.get_rank())
-
-    rank = dist.get_rank()
-    print("rank", rank)
 
     causal_lm.to(rank)
     causal_lm = DDP(
