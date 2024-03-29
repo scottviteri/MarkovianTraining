@@ -12,12 +12,12 @@ from config_examples import configs
 from training_types import PerturbationConfig
 
 
-def perturb_action(action, cfg):
+def perturb_action(action, cfg, perturbation_cfg):
     action_out = copy.deepcopy(action).to(cfg.device)
     offset = cfg.prefix_tensors.action_prefix_tensor.shape[-1]
     # PERTURBATION 1
     # Given n <= cfg.pure_ctxt_sizes.action_size, change token through randomization
-    frac_randomize = cfg.perturbation_cfg.frac_of_tokens_to_randomize
+    frac_randomize = perturbation_cfg.frac_of_tokens_to_randomize
     assert 1.0 >= frac_randomize >= 0.0, f"frac_randomize is {frac_randomize}"
     perturb_target_inds = torch.randint(
         low=offset,
@@ -32,7 +32,7 @@ def perturb_action(action, cfg):
 
     # PERTURBATION 2
     # Given a fraction of cfg.pure_ctxt_sizes.action_size, replace with spaces/padding
-    frac_spaces = cfg.perturbation_cfg.frac_of_tokens_to_pad
+    frac_spaces = perturbation_cfg.frac_of_tokens_to_pad
     assert 1.0 >= frac_spaces >= 0.0, f"frac_randomize is {frac_spaces}"
     token_id_space = cfg.tokenizer.encode(" ")[-1]
     action_out[:, offset + int((1.0 - frac_spaces) * (action.shape[-1] - offset)) :] = (
@@ -41,15 +41,40 @@ def perturb_action(action, cfg):
 
     # PERTURBATION 3
     # For probability p_digit_change, flip each individual digit
-    p_digit_change = cfg.perturbation_cfg.p_digit_change
+    p_digit_change = perturbation_cfg.p_digit_change
     assert 1.0 >= p_digit_change >= 0.0, f"p_digit_change is {p_digit_change}"
-    action_out_detok = cfg.causal_lm_tokenizer.batch_decode(action_out)
-    new = []
-    for act in action_out_detok:
-        new_act = randomize_numbers_with_probability(act, p_digit_change)
-        new.append(cfg.tokenizer.encode(new_act))
+    digit_tokens = cfg.tokenizer("0123456789", add_special_tokens=False)["input_ids"]
+    for i in range(action_out.shape[0]):  # Loop over batch dimension
+        for j in range(action_out.shape[1]):  # Loop over sequence dimension
+            if action_out[i, j] in digit_tokens:
+                if random.random() < p_digit_change:
+                    action_out[i, j] = torch.tensor(
+                        random.choice(digit_tokens), device=cfg.device
+                    )
 
-    action_out = torch.tensor(new).to(cfg.device)
+    # p_digit_change = perturbation_cfg.p_digit_change
+    # assert 1.0 >= p_digit_change >= 0.0, f"p_digit_change is {p_digit_change}"
+    # digit_tokens = cfg.tokenizer("0123456789", add_special_tokens=False)["input_ids"]
+    ## Create a mask for digit tokens
+    # is_digit_mask = torch.isin(
+    #    action_out, torch.tensor(digit_tokens, device=cfg.device)
+    # )
+    ## Generate a random mask for digit tokens to be changed
+    # change_mask = torch.rand_like(action_out, dtype=torch.float32) < p_digit_change
+    ## Combine the masks to get the final mask for digit tokens to be changed
+    # change_digit_mask = is_digit_mask & change_mask
+    ## Generate random digit tokens for the selected positions
+    # random_digits = torch.tensor(
+    #    random.choices(digit_tokens, k=change_digit_mask.sum().item()),
+    #    device=cfg.device,
+    # )
+    ## Update the action_out tensor with the random digit tokens
+    # action_out[change_digit_mask] = random_digits
+    # new = []
+    # for act in action_out_detok:
+    #    new_act = randomize_numbers_with_probability(act, p_digit_change)
+    #    new.append(cfg.tokenizer.encode(new_act))
+    # action_out = torch.tensor(new).to(cfg.device)
 
     return action_out
 
@@ -99,47 +124,63 @@ class ActionEvaluator:
     def _set_default_perturbations(self):
         """"""
 
+        self.eval_every = 1
         self._perts = {
             "50%Rand": PerturbationConfig(
-                eval_every=10,
+                eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.5,
                 frac_of_tokens_to_pad=0.0,
+                p_digit_change=0.0,
             ),
             "25%Rand": PerturbationConfig(
-                eval_every=10,
+                eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.25,
                 frac_of_tokens_to_pad=0.0,
+                p_digit_change=0.0,
             ),
             "10%Rand": PerturbationConfig(
-                eval_every=10,
+                eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.1,
                 frac_of_tokens_to_pad=0.0,
+                p_digit_change=0.0,
             ),
             "50%Spaces": PerturbationConfig(
-                eval_every=10,
+                eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.0,
                 frac_of_tokens_to_pad=0.5,
+                p_digit_change=0.0,
             ),
             "25%Spaces": PerturbationConfig(
-                eval_every=10,
+                eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.0,
                 frac_of_tokens_to_pad=0.25,
+                p_digit_change=0.0,
             ),
             "10%Spaces": PerturbationConfig(
-                eval_every=10,
+                eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.0,
-                frac_of_tokens_to_pad=0.1,
+                frac_of_tokens_to_pad=0.0,
+                p_digit_change=0.0,
+            ),
+            "50%Digits": PerturbationConfig(
+                eval_every=self.eval_every,
+                frac_of_tokens_to_randomize=0.0,
+                frac_of_tokens_to_pad=0.0,
+                p_digit_change=0.5,
+            ),
+            "25%Digits": PerturbationConfig(
+                eval_every=self.eval_every,
+                frac_of_tokens_to_randomize=0.0,
+                frac_of_tokens_to_pad=0.0,
+                p_digit_change=0.25,
+            ),
+            "10%Digits": PerturbationConfig(
+                eval_every=self.eval_every,
+                frac_of_tokens_to_randomize=0.0,
+                frac_of_tokens_to_pad=0.0,
+                p_digit_change=0.1,
             ),
         }
-
-    @staticmethod
-    def calculate_loss(cfg, action, obs):
-        cfg.causal_lm.eval()
-        cfg.inference_lm = cfg.causal_lm
-        # Probably unnecessary
-        cfg.inference_lm.eval()
-        obs_loss = predict_observation(cfg, action, obs, add_q_head=False).mean()
-        return obs_loss
 
     def evaluate(self):
         """"""
@@ -167,17 +208,24 @@ class ActionEvaluator:
 
                 action_str = step["action"]
                 obs_str = step["obs"]
-                action_tok = torch.tensor(tok.encode(action_str))
-                obs_tok = torch.tensor(tok.encode(obs_str))
 
-                # Introduce a Batch Dimension
-                action_tok = action_tok.view(1, -1).to(cfg.device)
-                obs_tok = obs_tok.view(1, -1).to(cfg.device)
+                action_tok = tok(
+                    action_str,
+                    return_tensors="pt",
+                    add_special_tokens=False,
+                    padding=True,
+                )["input_ids"].to(cfg.device)
+
+                obs_tok = tok(
+                    obs_str,
+                    return_tensors="pt",
+                    add_special_tokens=False,
+                    padding=True,
+                )["input_ids"].to(cfg.device)
 
                 actions_tok_pert = {}
-                for key, p in self._perts.items():
-                    cfg.perturbation_cfg = p
-                    action_tok_pert = perturb_action(action_tok, cfg)
+                for key, perturbation_cfg in self._perts.items():
+                    action_tok_pert = perturb_action(action_tok, cfg, perturbation_cfg)
                     actions_tok_pert[key] = action_tok_pert
                     # ToDo: Send to cuda?
                     # print(tok.batch_decode(action_tok_pert))
@@ -185,21 +233,23 @@ class ActionEvaluator:
 
                 # Evaluate --> STEAL CODE
                 with torch.no_grad():
-                    # loss_pure = calculate_loss(cfg, action_tok, obs_tok)
-                    # loss_pert = calculate_loss(cfg, action_tok_pert, obs_tok)
-
-                    # print(tok.batch_decode(action_tok))
-                    eval_loss["Pure"].append(
-                        [step_i, self.calculate_loss(cfg, action_tok, obs_tok).item()]
+                    unperturbed_loss = (
+                        predict_observation(cfg, action_tok, obs_tok, add_q_head=False)
+                        .mean()
+                        .item()
+                    )
+                    eval_loss["Pure"].append([step_i, unperturbed_loss])
+                    eval_loss["Training"].append(
+                        [step_i, torch.tensor(step["observation_losses"]).mean().item()]
                     )
 
-                    eval_loss["Training"].append([step_i, step["observation_loss"]])
-
                     for key, act in actions_tok_pert.items():
-                        # print(tok.batch_decode(act))
-                        eval_loss[key].append(
-                            [step_i, self.calculate_loss(cfg, act, obs_tok).item()]
+                        perturbed_loss = (
+                            predict_observation(cfg, act, obs_tok, add_q_head=False)
+                            .mean()
+                            .item()
                         )
+                        eval_loss[key].append([step_i, perturbed_loss])
 
             eval_results[cfg.model_name] = eval_loss
 
@@ -221,16 +271,16 @@ class ActionEvaluator:
             x_min = np.min([x_min, np.min(x)])
 
             if "Spaces" in keys:
-                axs[0].plot(x, y, ".", label=keys)
+                axs[0].plot(x, y, "-", label=keys)
             elif "Rand" in keys:
-                axs[1].plot(x, y, ".", label=keys)
+                axs[1].plot(x, y, "-", label=keys)
             elif "Training" in keys:
-                axs[0].plot(x, y, "", label=keys)
-                axs[1].plot(x, y, "", label=keys)
+                axs[0].plot(x, y, "-", label=keys)
+                axs[1].plot(x, y, "-", label=keys)
             else:
                 # This case includes the "Pure" action results
-                axs[0].plot(x, y, ".", label=keys)
-                axs[1].plot(x, y, ".", label=keys)
+                axs[0].plot(x, y, "-", label=keys)
+                axs[1].plot(x, y, "-", label=keys)
 
         axs[0].set_title("Replacing with Spaces")
         axs[1].set_title("Swapping with Random Token")
@@ -244,10 +294,49 @@ class ActionEvaluator:
         plt.savefig(f"results/{file_name[:-5]}.png")
         plt.show()
 
+    # @staticmethod
+    # def plot_results(results, model_name, train_model, file_name):
+    #    """"""
+
+    #    fig, axs = plt.subplots(1, 2, figsize=(12, 4))
+
+    #    fig.suptitle(f"Eval: {model_name}, Train: {train_model}")
+    #    x_max = 0.0
+    #    x_min = -1.0
+
+    #    for keys in results:
+    #        x, y = np.array(results[keys]).T
+    #        x_max = np.max([x_max, np.max(x)])
+    #        x_min = np.min([x_min, np.min(x)])
+
+    #        if "Spaces" in keys:
+    #            axs[0].plot(x, y, ".", label=keys)
+    #        elif "Rand" in keys:
+    #            axs[1].plot(x, y, ".", label=keys)
+    #        elif "Training" in keys:
+    #            axs[0].plot(x, y, "", label=keys)
+    #            axs[1].plot(x, y, "", label=keys)
+    #        else:
+    #            # This case includes the "Pure" action results
+    #            axs[0].plot(x, y, ".", label=keys)
+    #            axs[1].plot(x, y, ".", label=keys)
+
+    #    axs[0].set_title("Replacing with Spaces")
+    #    axs[1].set_title("Swapping with Random Token")
+    #    for i in [0, 1]:
+    #        axs[i].set_xlabel("Training Steps [ ]")
+    #        axs[i].set_ylabel("Average Prediction Loss [a.u.]")
+    #        axs[i].legend(loc="upper right")
+    #        axs[i].set_xlim(x_min - x_max * 0.1, x_max * 1.5)
+
+    #    # plt.tight_layout()
+    #    plt.savefig(f"results/{file_name[:-5]}.png")
+    #    plt.show()
+
 
 def main():
     # file_name = "gpt2_traj_1709608868.json"
-    file_name = "mistral_traj_1711522015_corrected.json"
+    file_name = "mistral_traj_20240329_051532.json"
 
     # Set model
     init_cfg = configs[0]

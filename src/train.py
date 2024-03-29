@@ -300,10 +300,10 @@ def update_weights(
             )
 
         aggregate_loss.backward()
-        if do_weight_update and batch_index > 0 and batch_index % 10 == 0:
+        if do_weight_update and batch_index > 0 and batch_index % 15 == 0:
             for param in cfg.causal_lm.module.parameters():
                 if param.grad is not None:
-                    param.grad /= 10.0
+                    param.grad /= 15.0
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
 
