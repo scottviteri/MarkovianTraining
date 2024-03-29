@@ -265,7 +265,7 @@ def update_weights(
         action_log_probs = -action_losses
         old_critic_action_log_probs = -old_critic_action_losses
         action_prob_ratios = torch.exp(action_log_probs - old_critic_action_log_probs)
-        clipped_ratios = torch.clamp(action_prob_ratios, 0.7, 1.3)
+        clipped_ratios = torch.clamp(action_prob_ratios, 0.9, 1.1)
         value_losses = torch.abs(values - repeated_obs_losses).mean(dim=1)
         neg_advantages = (repeated_obs_losses - values.detach()).mean(dim=1)
         unclipped = action_prob_ratios * neg_advantages
@@ -284,7 +284,7 @@ def update_weights(
                     "Unclipped": unclipped.mean(),
                     "Clipped": clipped.mean(),
                     "Max Branch": max_branch.mean(),
-                    "First Is Clipped": 0.0 if unclipped[0].item() == max_branch[0].item() else 1.0
+                    "ClipFrac": (unclipped != max_branch).float().mean()
                 },
                 step=batch_index,
             )
@@ -300,10 +300,10 @@ def update_weights(
             )
 
         aggregate_loss.backward()
-        if do_weight_update and batch_index > 0 and batch_index % 10 == 0:
+        if do_weight_update and batch_index > 0 and batch_index % 15 == 0:
             for param in cfg.causal_lm.module.parameters():
                 if param.grad is not None:
-                    param.grad /= 10.0
+                    param.grad /= 15.0
             cfg.optimizer.step()
             cfg.optimizer.zero_grad()
 
