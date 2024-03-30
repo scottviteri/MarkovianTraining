@@ -367,7 +367,6 @@ def load_latest_model_head(model_name: str, head_type: str) -> torch.nn.Module:
         "qhead",
         "vhead",
     ], "head_type must be either 'qhead' or 'vhead'"
-    config = AutoConfig.from_pretrained(model_dict[model_name])
     pth_files = glob.glob(
         os.path.join("saved_weights_and_losses", f"*{head_type}*.pth")
     )
@@ -377,7 +376,7 @@ def load_latest_model_head(model_name: str, head_type: str) -> torch.nn.Module:
     ), f"No {head_type} files found for model {model_name}"
     model_pth_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
     latest_pth_file = model_pth_files[0]
-    return torch.load(latest_pth_file).module
+    return torch.load(latest_pth_file)
 
 
 def get_model(
@@ -408,7 +407,7 @@ def get_model(
     with device:
         padding_side = get_padding_side(model_name)
         if load_model:
-            causal_lm = load_latest_model_head(model_name, "qhead")
+            causal_lm = load_latest_model_head(model_name, "qhead").module
             v_head = load_latest_model_head(model_name, "vhead")
         else:
             config = AutoConfig.from_pretrained(model_dict[model_name])

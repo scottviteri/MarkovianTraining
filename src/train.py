@@ -33,7 +33,8 @@ def save_weights(cfg, batch_index):
         cfg.tokenizer.save_pretrained(cfg.path_2_tokenizer)
         current_time = datetime.now(timezone(timedelta(hours=-7)))
         timestamp = current_time.strftime("%Y%m%d_%H%M%S")
-        torch.save(cfg.causal_lm, f"{cfg.path_2_model}_{timestamp}.pth")
+        torch.save(cfg.causal_lm, f"{cfg.path_2_model}_qhead_{timestamp}.pth")
+        torch.save(cfg.v_head, f"{cfg.path_2_model}_vhead_{timestamp}.pth")
 
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
