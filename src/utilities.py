@@ -46,9 +46,9 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         self.transformer = AutoModelForCausalLM.from_pretrained(
             model_name_or_path, config=config
         )
-        self.qhead = copy.deepcopy(self.transformer)
+        qhead = copy.deepcopy(self.transformer)
 
-        mlp_modules = get_mlp_modules(self.qhead)
+        mlp_modules = get_mlp_modules(qhead)
         peft_config = LoraConfig(
             task_type="CAUSAL_LM",
             inference_mode=False,
@@ -58,7 +58,7 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             target_modules=mlp_modules,
         )
         ## print("Num Linear Layers: ", len(linear_layers))
-        self.qhead = get_peft_model(self.qhead, peft_config)
+        self.qhead = get_peft_model(qhead, peft_config)
         self.qhead.print_trainable_parameters()
 
     def forward(
@@ -467,6 +467,8 @@ def get_model(
         return_dict_in_generate=False,
     )
     causal_lm.generation_config = generation_config
+    causal_lm.qhead.generation_config = generation_config
+    causal_lm.transformer.generation_config = generation_config
     return causal_lm, v_head, tokenizer
 
 
