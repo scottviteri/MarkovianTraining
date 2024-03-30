@@ -79,6 +79,54 @@ def perturb_action(action, cfg, perturbation_cfg):
     return action_out
 
 
+def perturb_action_str(action, cfg, perturbation_cfg):
+    action_out = copy.deepcopy(action)
+    offset = len(cfg.tokenizer.decode(cfg.prefix_tensors.action_prefix_tensor[0]))
+
+    # PERTURBATION 1
+    # Given n <= cfg.pure_ctxt_sizes.action_size, change token through randomization
+    frac_randomize = perturbation_cfg.frac_of_tokens_to_randomize
+    assert 1.0 >= frac_randomize >= 0.0, f"frac_randomize is {frac_randomize}"
+    char_lib = [
+        "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p",
+        "q", "r", "s", "t", "u", "v", "w", "x", "y", "z",
+        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+        "+", " ", "-", "*", "/", ",", ".", "(", ")",
+    ]
+    new = []
+    for i, c in enumerate(action_out):
+        # Should be equivalent (randomizing every char with prob p instead of randomizing fraction p of chars)
+        if random.random() < frac_randomize:
+            new.append(random.choice(char_lib))
+        else:
+            new.append(c)
+    action_out = "".join(new)
+
+    # PERTURBATION 2
+    # Given a fraction of cfg.pure_ctxt_sizes.action_size, replace with spaces/padding
+    frac_spaces = perturbation_cfg.frac_of_tokens_to_pad
+    assert 1.0 >= frac_spaces >= 0.0, f"frac_randomize is {frac_spaces}"
+    new = []
+    for i, c in enumerate(action_out):
+        if i > offset + int((1.0 - frac_spaces) * (len(action_out) - offset)):
+            new.append(" ")
+        else:
+            new.append(c)
+    action_out = "".join(new)
+
+    # PERTURBATION 3
+    # For probability p_digit_change, flip each individual digit
+    p_digit_change = perturbation_cfg.p_digit_change
+    assert 1.0 >= p_digit_change >= 0.0, f"p_digit_change is {p_digit_change}"
+    new = []
+    for act in action_out:
+        new_act = randomize_numbers_with_probability(act, p_digit_change)
+        new.append(new_act)
+    action_out = "".join(new)
+
+    return action_out
+
+
 def randomize_numbers_with_probability(input_string, probability=0.5):
     output_string = ""
     for char in input_string:
@@ -96,13 +144,13 @@ class ActionEvaluator:
     """Class to evaluate training trajectories (json files)"""
 
     def __init__(
-        self,
-        f_name: str,
-        configs: list,
-        perturbations: dict = None,
-        n_max: int = None,
-        n_step: int = None,
-        path_to_dir: str = "saved_weights_and_losses/",
+            self,
+            f_name: str,
+            configs: list,
+            perturbations: dict = None,
+            n_max: int = None,
+            n_step: int = None,
+            path_to_dir: str = "saved_weights_and_losses/",
     ):
         self._f_name = f_name
         self._configs = configs
@@ -126,22 +174,28 @@ class ActionEvaluator:
 
         self.eval_every = 1
         self._perts = {
-            "50%Rand": PerturbationConfig(
+            "15%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
-                frac_of_tokens_to_randomize=0.5,
-                frac_of_tokens_to_pad=0.0,
-                p_digit_change=0.0,
-            ),
-            "25%Rand": PerturbationConfig(
-                eval_every=self.eval_every,
-                frac_of_tokens_to_randomize=0.25,
+                frac_of_tokens_to_randomize=0.15,
                 frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
             "10%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
-                frac_of_tokens_to_randomize=0.1,
+                frac_of_tokens_to_randomize=0.10,
                 frac_of_tokens_to_pad=0.0,
+                p_digit_change=0.0,
+            ),
+            "5%Rand": PerturbationConfig(
+                eval_every=self.eval_every,
+                frac_of_tokens_to_randomize=0.05,
+                frac_of_tokens_to_pad=0.0,
+                p_digit_change=0.0,
+            ),
+            "50%Spaces": PerturbationConfig(
+                eval_every=self.eval_every,
+                frac_of_tokens_to_randomize=0.0,
+                frac_of_tokens_to_pad=0.75,
                 p_digit_change=0.0,
             ),
             "50%Spaces": PerturbationConfig(
@@ -154,12 +208,6 @@ class ActionEvaluator:
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.0,
                 frac_of_tokens_to_pad=0.25,
-                p_digit_change=0.0,
-            ),
-            "10%Spaces": PerturbationConfig(
-                eval_every=self.eval_every,
-                frac_of_tokens_to_randomize=0.0,
-                frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
             "50%Digits": PerturbationConfig(
@@ -209,6 +257,23 @@ class ActionEvaluator:
                 action_str = step["action"]
                 obs_str = step["obs"]
 
+                # Do perturbations here
+                actions_tok_pert = {}
+                actions_str_pert = {}
+                for key, perturbation_cfg in self._perts.items():
+                    action_str_pert = [perturb_action_str(a, cfg, perturbation_cfg) for
+                                       a in action_str]
+                    actions_str_pert[key] = action_str_pert
+
+                    # Tokenize
+                    action_tok_pert = tok(
+                        action_str_pert,
+                        return_tensors="pt",
+                        add_special_tokens=False,
+                        padding=True,
+                    )["input_ids"].to(cfg.device)
+                    actions_tok_pert[key] = action_tok_pert
+
                 action_tok = tok(
                     action_str,
                     return_tensors="pt",
@@ -223,15 +288,6 @@ class ActionEvaluator:
                     padding=True,
                 )["input_ids"].to(cfg.device)
 
-                actions_tok_pert = {}
-                for key, perturbation_cfg in self._perts.items():
-                    action_tok_pert = perturb_action(action_tok, cfg, perturbation_cfg)
-                    actions_tok_pert[key] = action_tok_pert
-                    # ToDo: Send to cuda?
-                    # print(tok.batch_decode(action_tok_pert))
-                    # print()
-
-                # Evaluate --> STEAL CODE
                 with torch.no_grad():
                     unperturbed_loss = (
                         predict_observation(cfg, action_tok, obs_tok, add_q_head=False)
@@ -259,9 +315,13 @@ class ActionEvaluator:
     def plot_results(results, model_name, train_model, file_name):
         """"""
 
-        fig, axs = plt.subplots(1, 2, figsize=(12, 4))
+        fig, axs = plt.subplots(1, 1, figsize=(12, 4))
+        fig2, axs2 = plt.subplots(1, 1, figsize=(12, 4))
+        fig3, axs3 = plt.subplots(1, 1, figsize=(12, 4))
 
         fig.suptitle(f"Eval: {model_name}, Train: {train_model}")
+        fig2.suptitle(f"Eval: {model_name}, Train: {train_model}")
+        fig3.suptitle(f"Eval: {model_name}, Train: {train_model}")
         x_max = 0.0
         x_min = -1.0
 
@@ -271,28 +331,26 @@ class ActionEvaluator:
             x_min = np.min([x_min, np.min(x)])
 
             if "Spaces" in keys:
-                axs[0].plot(x, y, "-", label=keys)
+                axs.plot(x, y, "-", label=keys)
+            elif "Digit" in keys:
+                axs2.plot(x, y, "-", label=keys)
             elif "Rand" in keys:
-                axs[1].plot(x, y, "-", label=keys)
-            elif "Training" in keys:
-                axs[0].plot(x, y, "-", label=keys)
-                axs[1].plot(x, y, "-", label=keys)
-            else:
-                # This case includes the "Pure" action results
-                axs[0].plot(x, y, "-", label=keys)
-                axs[1].plot(x, y, "-", label=keys)
+                axs3.plot(x, y, "-", label=keys)
+            else:  # "Training and Pure"
+                axs.plot(x, y, "-", label=keys)
+                axs2.plot(x, y, "-", label=keys)
+                axs3.plot(x, y, "-", label=keys)
 
-        axs[0].set_title("Replacing with Spaces")
-        axs[1].set_title("Swapping with Random Token")
-        for i in [0, 1]:
-            axs[i].set_xlabel("Training Steps [ ]")
-            axs[i].set_ylabel("Average Prediction Loss [a.u.]")
-            axs[i].legend(loc="upper right")
-            axs[i].set_xlim(x_min - x_max * 0.1, x_max * 1.5)
+        for a in [axs, axs2, axs3]:
+            a.set_xlabel("Training Steps [ ]")
+            a.set_ylabel("Average Prediction Loss [a.u.]")
+            a.legend(loc="upper right")
+            a.set_xlim(x_min - x_max * 0.1, x_max * 1.5)
 
         # plt.tight_layout()
-        plt.savefig(f"results/{file_name[:-5]}.png")
-        plt.show()
+        fig.savefig(f"results/{file_name[:-5]}_1.pdf")
+        fig2.savefig(f"results/{file_name[:-5]}_2.pdf")
+        fig3.savefig(f"results/{file_name[:-5]}_3.pdf")
 
     # @staticmethod
     # def plot_results(results, model_name, train_model, file_name):
@@ -356,7 +414,7 @@ def main():
         file_name=file_name,
     )
 
-    with open('eval_result.json', 'w') as fp:
+    with open('result.json', 'w') as fp:
         json.dump(res, fp)
 
 
