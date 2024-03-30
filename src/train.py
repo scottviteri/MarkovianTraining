@@ -156,10 +156,13 @@ def sample(cfg, prev_action, prev_obs, add_q_head=True):
             )
             attention_mask = (input_ids != cfg.tokenizer.pad_token_id).long()
             beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
-            action_candidates = cfg.causal_lm.module.qhead.generate(
+            model = (
+                cfg.causal_lm.module.qhead
+                if add_q_head
+                else cfg.causal_lm.module.transformer
+            )
+            action_candidates = model.generate(
                 beam_input_ids,
-                # add_q_head=add_q_head,
-                # get_v_head=False,
                 min_new_tokens=cfg.pure_ctxt_sizes.action_size,
                 max_new_tokens=cfg.pure_ctxt_sizes.action_size,
                 attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
