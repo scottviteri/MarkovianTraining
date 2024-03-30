@@ -175,40 +175,40 @@ class ActionEvaluator:
 
         self.eval_every = 1
         self._perts = {
-            "15%Rand": PerturbationConfig(
+            "30%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
-                frac_of_tokens_to_randomize=0.15,
+                frac_of_tokens_to_randomize=0.30,
                 frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
-            "10%Rand": PerturbationConfig(
+            "25%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
-                frac_of_tokens_to_randomize=0.10,
+                frac_of_tokens_to_randomize=0.25,
                 frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
-            "5%Rand": PerturbationConfig(
+            "20%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
-                frac_of_tokens_to_randomize=0.05,
+                frac_of_tokens_to_randomize=0.20,
                 frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
-            "75%Spaces": PerturbationConfig(
+            "80%Spaces": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.0,
-                frac_of_tokens_to_pad=0.75,
+                frac_of_tokens_to_pad=0.8,
+                p_digit_change=0.0,
+            ),
+            "65%Spaces": PerturbationConfig(
+                eval_every=self.eval_every,
+                frac_of_tokens_to_randomize=0.0,
+                frac_of_tokens_to_pad=0.65,
                 p_digit_change=0.0,
             ),
             "50%Spaces": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.0,
                 frac_of_tokens_to_pad=0.5,
-                p_digit_change=0.0,
-            ),
-            "25%Spaces": PerturbationConfig(
-                eval_every=self.eval_every,
-                frac_of_tokens_to_randomize=0.0,
-                frac_of_tokens_to_pad=0.25,
                 p_digit_change=0.0,
             ),
             "50%Digits": PerturbationConfig(
