@@ -40,24 +40,6 @@ import torch.nn as nn
 from matplotlib import pyplot as plt
 
 
-class VHead(nn.Module):
-    def __init__(self, input_dim):
-        super(VHead, self).__init__()
-        # Assuming the last layer's output dimension is used as input_dim
-        gpt2_config = AutoConfig.from_pretrained(
-            "gpt2", n_head=1, n_embd=1, hidden_size=input_dim
-        )
-        self.gpt2_block = GPT2Block(gpt2_config)
-        self.v_head = nn.Linear(input_dim, 1, bias=True)
-
-    def forward(self, hidden_states, attention_mask=None):
-        pre_values = self.gpt2_block(
-            hidden_states=hidden_states, attention_mask=attention_mask
-        )[0]
-        values = self.v_head(pre_values).squeeze(-1)
-        return values
-
-
 class ModelWithQHead(PreTrainedModel, GenerationMixin):
     def __init__(self, model_name_or_path, config):
         super().__init__(config)
@@ -94,14 +76,6 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             output_hidden_states=get_v_head,
             **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
         )
-        # if get_v_head:
-        #    # pre_values = self.v_head_group["v_head_block"](
-        #    #    outputs.hidden_states[-1].detach()
-        #    # )[0]
-        #    # values = self.v_head_group["v_head"](pre_values).squeeze(-1)
-        #    hidden_states = outputs.hidden_states[-1].detach()
-        #    values = self.v_head_group["v_head"](hidden_states).squeeze(-1)
-        #    return outputs, values
         return outputs
 
     def prepare_inputs_for_generation(self, input_ids, **kwargs):
@@ -115,6 +89,29 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
 
     def _reorder_cache(self, past_key_values, beam_idx):
         return self.transformer._reorder_cache(past_key_values, beam_idx)
+
+
+class VHead(nn.Module):
+    def __init__(self, lm):
+        super(VHead, self).__init__()
+        # Assuming the last layer's output dimension is used as input_dim
+        # gpt2_config = AutoConfig.from_pretrained(
+        #    "gpt2", n_head=1, n_embd=1, hidden_size=input_dim
+        # )
+        # self.gpt2_block = GPT2Block(gpt2_config)
+        self.lm_block = copy.deepcopy(lm.model.layers[-1])
+        hidden_size = self.lm_block.mlp.gate_proj.in_features
+        self.v_head = nn.Linear(hidden_size, 1, bias=True)
+        # Zero-initialize the weights and bias
+        nn.init.constant_(self.v_head.weight, 0)
+        nn.init.constant_(self.v_head.bias, 0)
+
+    def forward(self, hidden_states, attention_mask=None):
+        pre_values = self.lm_block(
+            hidden_states=hidden_states, attention_mask=attention_mask
+        )[0]
+        values = self.v_head(pre_values).squeeze(-1)
+        return values
 
 
 def load_cfg_from_file(file_location: str) -> InitialConfig:
@@ -412,7 +409,7 @@ def get_model(
         else:
             config = AutoConfig.from_pretrained(model_dict[model_name])
             causal_lm = ModelWithQHead(model_dict[model_name], config)
-            v_head = VHead(input_dim=4096)
+            v_head = VHead(causal_lm.transformer)
 
         if not use_mac:
             causal_lm.bfloat16()
@@ -613,7 +610,8 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, add_v_head):
     # plt.figure(); plt.plot(masked_losses[0].tolist()); plt.savefig("action.png"); plt.clf()
     action_losses = masked_losses.sum(dim=1) / pure_action_attention_mask.sum(dim=1)
     if add_v_head:
-        hidden_states = prediction.hidden_states[-1].detach()
+        # default to the last layer of predictor in the v_head
+        hidden_states = prediction.hidden_states[-2].detach()
         values = cfg.v_head(hidden_states)
         return (
             action_losses,
