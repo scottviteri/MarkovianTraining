@@ -326,6 +326,13 @@ class ActionEvaluator:
         x_max = 0.0
         x_min = -1.0
 
+        colors = {
+            "darkblue": (0., 0., 0.5),
+            "Training": (0.05, 0.03, 0.53),
+            "Pure": (0.99, 0.2, 0.36),
+            "plasmagreen": (0.14, 0.92, 0.14),
+            "plasmaorange": (0.97, 0.58, 0.25),
+        }
         f_sp = 1.
         f_dig = 1.
         f_rand = 1.
