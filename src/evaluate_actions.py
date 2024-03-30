@@ -6,6 +6,7 @@ import copy
 import numpy as np
 import tqdm
 import random
+from scipy.ndimage.filters import gaussian_filter1d
 
 from utilities import extend_initial_config, predict_observation
 from config_examples import configs
@@ -192,7 +193,7 @@ class ActionEvaluator:
                 frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
-            "50%Spaces": PerturbationConfig(
+            "75%Spaces": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.0,
                 frac_of_tokens_to_pad=0.75,
@@ -312,45 +313,73 @@ class ActionEvaluator:
         return eval_results
 
     @staticmethod
-    def plot_results(results, model_name, train_model, file_name):
+    def plot_results(results, model_name, train_model, file_name, x_max_data=None):
         """"""
 
-        fig, axs = plt.subplots(1, 1, figsize=(12, 4))
-        fig2, axs2 = plt.subplots(1, 1, figsize=(12, 4))
-        fig3, axs3 = plt.subplots(1, 1, figsize=(12, 4))
+        fig, axs = plt.subplots(1, 1, figsize=(9, 4))
+        fig2, axs2 = plt.subplots(1, 1, figsize=(9, 4))
+        fig3, axs3 = plt.subplots(1, 1, figsize=(9, 4))
 
-        fig.suptitle(f"Eval: {model_name}, Train: {train_model}")
-        fig2.suptitle(f"Eval: {model_name}, Train: {train_model}")
-        fig3.suptitle(f"Eval: {model_name}, Train: {train_model}")
+        # fig.suptitle(f"Eval: {model_name}, Train: {train_model}")
+        # fig2.suptitle(f"Eval: {model_name}, Train: {train_model}")
+        # fig3.suptitle(f"Eval: {model_name}, Train: {train_model}")
         x_max = 0.0
         x_min = -1.0
 
+        f_sp = 1.
+        f_dig = 1.
+        f_rand = 1.
+
         for keys in results:
-            x, y = np.array(results[keys]).T
-            x_max = np.max([x_max, np.max(x)])
+            if x_max_data:
+                mask = np.array(results[keys])[:, 0] <= x_max_data
+                x, y = np.array(results[keys])[mask].T
+                x_max = x_max_data
+            else:
+                x, y = np.array(results[keys]).T
+                x_max = np.max([x_max, np.max(x)])
             x_min = np.min([x_min, np.min(x)])
 
             if "Spaces" in keys:
-                axs.plot(x, y, "-", label=keys)
+                axs.plot(x, y, ".", label=None, alpha=0.15,
+                         color=(0.3 * f_sp, 0.3 * f_sp, 0.3 * f_sp))
+                y_smoothed = gaussian_filter1d(y, sigma=2)
+                axs.plot(x, y_smoothed, "-", label=keys,
+                         color=(0.3 * f_sp, 0.3 * f_sp, 0.3 * f_sp))
+                f_sp = f_sp * 1.5
             elif "Digit" in keys:
-                axs2.plot(x, y, "-", label=keys)
+                axs2.plot(x, y, ".", label=None, alpha=0.15,
+                          color=(0.3 * f_dig, 0.3 * f_dig, 0.3 * f_dig))
+                y_smoothed = gaussian_filter1d(y, sigma=2)
+                axs2.plot(x, y_smoothed, "-", label=keys,
+                          color=(0.3 * f_dig, 0.3 * f_dig, 0.3 * f_dig))
+                f_dig = f_dig * 1.6
             elif "Rand" in keys:
-                axs3.plot(x, y, "-", label=keys)
+                axs3.plot(x, y, ".", label=None, alpha=0.15,
+                          color=(0.3 * f_rand, 0.3 * f_rand, 0.3 * f_rand))
+                y_smoothed = gaussian_filter1d(y, sigma=2)
+                axs3.plot(x, y_smoothed, "-", label=keys,
+                          color=(0.3 * f_rand, 0.3 * f_rand, 0.3 * f_rand))
+                f_rand = f_rand * 1.6
             else:  # "Training and Pure"
-                axs.plot(x, y, "-", label=keys)
-                axs2.plot(x, y, "-", label=keys)
-                axs3.plot(x, y, "-", label=keys)
+                axs.plot(x, y, ".", label=None, alpha=0.2, color=colors[keys])
+                y_smoothed = gaussian_filter1d(y, sigma=2)
+                axs.plot(x, y_smoothed, "-", label=keys, color=colors[keys])
+                axs2.plot(x, y, ".", label=None, alpha=0.2, color=colors[keys])
+                axs2.plot(x, y_smoothed, "-", label=keys, color=colors[keys])
+                axs3.plot(x, y, ".", label=None, alpha=0.2, color=colors[keys])
+                axs3.plot(x, y_smoothed, "-", label=keys, color=colors[keys])
 
         for a in [axs, axs2, axs3]:
             a.set_xlabel("Training Steps [ ]")
             a.set_ylabel("Average Prediction Loss [a.u.]")
             a.legend(loc="upper right")
-            a.set_xlim(x_min - x_max * 0.1, x_max * 1.5)
+            a.set_xlim(x_min - x_max * 0.05, x_max * 1.3)
 
         # plt.tight_layout()
-        fig.savefig(f"results/{file_name[:-5]}_1.pdf")
-        fig2.savefig(f"results/{file_name[:-5]}_2.pdf")
-        fig3.savefig(f"results/{file_name[:-5]}_3.pdf")
+        fig.savefig(f"{file_name[:-5]}_1.pdf", dpi=300)
+        fig2.savefig(f"{file_name[:-5]}_2.pdf", dpi=300)
+        fig3.savefig(f"{file_name[:-5]}_3.pdf", dpi=300)
 
     # @staticmethod
     # def plot_results(results, model_name, train_model, file_name):
