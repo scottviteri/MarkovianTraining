@@ -176,38 +176,38 @@ class ActionEvaluator:
         self._perts = {
             "50%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
-                frac_of_tokens_to_randomize=0.5,
+                frac_of_tokens_to_randomize=0.15,
                 frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
             "25%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
-                frac_of_tokens_to_randomize=0.25,
+                frac_of_tokens_to_randomize=0.10,
                 frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
             "10%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
-                frac_of_tokens_to_randomize=0.1,
+                frac_of_tokens_to_randomize=0.05,
                 frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
             "50%Spaces": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.0,
-                frac_of_tokens_to_pad=0.5,
+                frac_of_tokens_to_pad=0.75,
                 p_digit_change=0.0,
             ),
             "25%Spaces": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.0,
-                frac_of_tokens_to_pad=0.25,
+                frac_of_tokens_to_pad=0.5,
                 p_digit_change=0.0,
             ),
             "10%Spaces": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.0,
-                frac_of_tokens_to_pad=0.0,
+                frac_of_tokens_to_pad=0.25,
                 p_digit_change=0.0,
             ),
             "50%Digits": PerturbationConfig(
