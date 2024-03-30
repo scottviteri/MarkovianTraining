@@ -356,6 +356,9 @@ def main():
         file_name=file_name,
     )
 
+    with open('eval_result.json', 'w') as fp:
+        json.dump(res, fp)
+
 
 if __name__ == "__main__":
     main()
