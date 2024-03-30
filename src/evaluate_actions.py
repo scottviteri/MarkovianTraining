@@ -174,19 +174,19 @@ class ActionEvaluator:
 
         self.eval_every = 1
         self._perts = {
-            "50%Rand": PerturbationConfig(
+            "15%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.15,
                 frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
-            "25%Rand": PerturbationConfig(
+            "10%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.10,
                 frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
-            "10%Rand": PerturbationConfig(
+            "5%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.05,
                 frac_of_tokens_to_pad=0.0,
@@ -198,13 +198,13 @@ class ActionEvaluator:
                 frac_of_tokens_to_pad=0.75,
                 p_digit_change=0.0,
             ),
-            "25%Spaces": PerturbationConfig(
+            "50%Spaces": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.0,
                 frac_of_tokens_to_pad=0.5,
                 p_digit_change=0.0,
             ),
-            "10%Spaces": PerturbationConfig(
+            "25%Spaces": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.0,
                 frac_of_tokens_to_pad=0.25,
@@ -348,9 +348,9 @@ class ActionEvaluator:
             a.set_xlim(x_min - x_max * 0.1, x_max * 1.5)
 
         # plt.tight_layout()
-        fig.savefig(f"results/{file_name[:-5]}_1.png")
-        fig2.savefig(f"results/{file_name[:-5]}_2.png")
-        fig3.savefig(f"results/{file_name[:-5]}_3.png")
+        fig.savefig(f"results/{file_name[:-5]}_1.pdf")
+        fig2.savefig(f"results/{file_name[:-5]}_2.pdf")
+        fig3.savefig(f"results/{file_name[:-5]}_3.pdf")
 
     # @staticmethod
     # def plot_results(results, model_name, train_model, file_name):
