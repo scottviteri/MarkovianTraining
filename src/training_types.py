@@ -109,6 +109,7 @@ class ArithmeticTask:
     probs: Optional[list]
     cumulative: bool
 
+
 @dataclass(frozen=True)
 class WikipediaTask:
     pass
@@ -171,6 +172,7 @@ class PrefixTensors:
 class Config:
     model_name: str
     causal_lm: PreTrainedModel
+    v_head: torch.nn.Module
     tokenizer: Optional[PreTrainedTokenizer]
     rank: int
     lr: float

@@ -238,11 +238,11 @@ def update_weights(
         )
         obs = obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
         action_losses, values, negentropies = predict_action(
-            cfg, prev_action, prev_obs, action, add_q_head=True
+            cfg, prev_action, prev_obs, action, add_q_head=True, add_v_head=True
         )
         with torch.no_grad():  # just to be sure
-            old_critic_action_losses, _, _ = predict_action(
-                cfg, prev_action, prev_obs, action, add_q_head=False
+            old_critic_action_losses, _ = predict_action(
+                cfg, prev_action, prev_obs, action, add_q_head=False, add_v_head=False
             )
             obs_losses = predict_observation(
                 cfg,
@@ -271,7 +271,7 @@ def update_weights(
         unclipped = action_prob_ratios * neg_advantages
         clipped = clipped_ratios * neg_advantages
         max_branch = torch.max(unclipped, clipped)
-        aggregate_losses = max_branch + value_losses 
+        aggregate_losses = max_branch + value_losses
         aggregate_loss = aggregate_losses.mean()
         if cfg.wandb and cfg.rank == 0 and action_is_generated:
             wandb.log(
@@ -284,7 +284,7 @@ def update_weights(
                     "Unclipped": unclipped.mean(),
                     "Clipped": clipped.mean(),
                     "Max Branch": max_branch.mean(),
-                    "ClipFrac": (unclipped != max_branch).float().mean()
+                    "ClipFrac": (unclipped != max_branch).float().mean(),
                 },
                 step=batch_index,
             )

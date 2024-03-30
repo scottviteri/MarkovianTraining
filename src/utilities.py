@@ -32,11 +32,30 @@ from transformers import (
     AutoModelForCausalLM,
     AutoConfig,
     GenerationMixin,
-    GPT2LMHeadModel,
+    GPT2Model,
 )
+from transformers.models.gpt2.modeling_gpt2 import GPT2Block
 import torch
 import torch.nn as nn
 from matplotlib import pyplot as plt
+
+
+class VHead(nn.Module):
+    def __init__(self, input_dim):
+        super(VHead, self).__init__()
+        # Assuming the last layer's output dimension is used as input_dim
+        gpt2_config = AutoConfig.from_pretrained(
+            "gpt2", n_head=1, n_embd=1, hidden_size=input_dim
+        )
+        self.gpt2_block = GPT2Block(gpt2_config)
+        self.v_head = nn.Linear(input_dim, 1, bias=True)
+
+    def forward(self, hidden_states, attention_mask=None):
+        pre_values = self.gpt2_block(
+            hidden_states=hidden_states, attention_mask=attention_mask
+        )[0]
+        values = self.v_head(pre_values).squeeze(-1)
+        return values
 
 
 class ModelWithQHead(PreTrainedModel, GenerationMixin):
@@ -59,37 +78,6 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         ## print("Num Linear Layers: ", len(linear_layers))
         self.qhead = get_peft_model(self.qhead, peft_config)
         self.qhead.print_trainable_parameters()
-        ## Grouping q_head and q_head_block together for easier parameter management
-        last_layer = (
-            self.transformer.transformer.h[-1]
-            if "gpt2" in model_name_or_path
-            else self.transformer.model.layers[-1]
-        )
-        self.v_head_group = nn.ModuleDict(
-            {
-                "v_head_block": copy.deepcopy(last_layer),
-                "v_head": nn.Linear(
-                    self.transformer.lm_head.weight.shape[1], 1, bias=True
-                ),
-            }
-        )
-        if "llama" in model_name_or_path or "mistral" in model_name_or_path:
-            assert (
-                self.qhead.base_model.model.model.layers[
-                    -3
-                ].mlp.up_proj.base_layer.weight
-                == self.transformer.model.layers[-3].mlp.up_proj.weight
-            ).all(), "Should be same weights"
-
-        ## Zero-initialize weights in q_head_block and q_head
-        # for name, param in self.q_head_group["q_head_block"].named_parameters():
-        #    if "weight" in name:
-        #        torch.nn.init.zeros_(param)
-        # torch.nn.init.zeros_(self.q_head_group["q_head"].weight)
-
-        # To set q_head and q_head_block parameters to require_grad=True, use:
-        # for param in self.q_head_group.parameters():
-        #     param.requires_grad = True
 
     def forward(
         self,
@@ -106,14 +94,14 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             output_hidden_states=get_v_head,
             **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
         )
-        if get_v_head:
-            # pre_values = self.v_head_group["v_head_block"](
-            #    outputs.hidden_states[-1].detach()
-            # )[0]
-            # values = self.v_head_group["v_head"](pre_values).squeeze(-1)
-            hidden_states = outputs.hidden_states[-1].detach()
-            values = self.v_head_group["v_head"](hidden_states).squeeze(-1)
-            return outputs, values
+        # if get_v_head:
+        #    # pre_values = self.v_head_group["v_head_block"](
+        #    #    outputs.hidden_states[-1].detach()
+        #    # )[0]
+        #    # values = self.v_head_group["v_head"](pre_values).squeeze(-1)
+        #    hidden_states = outputs.hidden_states[-1].detach()
+        #    values = self.v_head_group["v_head"](hidden_states).squeeze(-1)
+        #    return outputs, values
         return outputs
 
     def prepare_inputs_for_generation(self, input_ids, **kwargs):
@@ -140,10 +128,6 @@ def load_cfg_from_file(file_location: str) -> InitialConfig:
 
 
 def extend_initial_config(init_cfg: InitialConfig) -> Config:
-    if init_cfg.use_mac:
-        device = torch.device("mps")
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     path_2_log = f"saved_weights_and_losses/{init_cfg.model_name}_log.txt"
     current_time = datetime.now(timezone(timedelta(hours=-7)))
     timestamp = current_time.strftime("%Y%m%d_%H%M%S")
@@ -156,10 +140,11 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     if not init_cfg.use_mac:
         dist.init_process_group(backend="nccl")
         torch.cuda.set_device(dist.get_rank())
+        device = torch.device(dist.get_rank())
     rank = dist.get_rank()
     print("rank", rank)
 
-    causal_lm, tokenizer = get_model(
+    causal_lm, v_head, tokenizer = get_model(
         device,
         init_cfg.load_model,
         init_cfg.model_name,
@@ -176,11 +161,11 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     causal_lm.generation_config.min_new_tokens = pure_ctxt_sizes.action_size
     causal_lm.generation_config.max_new_tokens = pure_ctxt_sizes.action_size
 
-    causal_lm.to(rank)
+    # vhead = DDP(vhead, device_ids=[rank])
     causal_lm = DDP(
         causal_lm,
         device_ids=[rank],
-        find_unused_parameters=True,
+        # find_unused_parameters=True,
     )
 
     if not init_cfg.load_model:
@@ -205,7 +190,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         param
         for name, param in causal_lm.module.qhead.named_parameters()
         if ".lora" in name
-    ) + list(causal_lm.module.v_head_group.parameters())
+    ) + list(v_head.parameters())
 
     if init_cfg.optimizer == "sgd":
         optimizer = torch.optim.SGD if init_cfg.use_mac else bitsandbytes.optim.SGD8bit
@@ -256,6 +241,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         ctxt_sizes=init_cfg.ctxt_sizes,
         prefix_tensors=prefix_tensors,
         causal_lm=causal_lm,  # predictor_lm,
+        v_head=v_head,
         tokenizer=tokenizer,
         inference_cfg=init_cfg.inference_cfg,
         prediction_cfg=init_cfg.prediction_cfg,
@@ -376,6 +362,24 @@ def get_padding_side(model_name):
     return "left"
 
 
+def load_latest_model_head(model_name: str, head_type: str) -> torch.nn.Module:
+    assert head_type in [
+        "qhead",
+        "vhead",
+    ], "head_type must be either 'qhead' or 'vhead'"
+    config = AutoConfig.from_pretrained(model_dict[model_name])
+    pth_files = glob.glob(
+        os.path.join("saved_weights_and_losses", f"*{head_type}*.pth")
+    )
+    model_pth_files = list(filter(lambda x: model_name in x, pth_files))
+    assert (
+        len(model_pth_files) > 0
+    ), f"No {head_type} files found for model {model_name}"
+    model_pth_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+    latest_pth_file = model_pth_files[0]
+    return torch.load(latest_pth_file).module
+
+
 def get_model(
     device,
     load_model,
@@ -404,19 +408,16 @@ def get_model(
     with device:
         padding_side = get_padding_side(model_name)
         if load_model:
-            config = AutoConfig.from_pretrained(model_dict[model_name])
-            pth_files = glob.glob(os.path.join("saved_weights_and_losses", "*.pth"))
-            model_pth_files = list(filter(lambda x: model_name in x, pth_files))
-            assert len(model_pth_files) > 0
-            model_pth_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-            latest_pth_file = model_pth_files[0]
-            causal_lm = torch.load(latest_pth_file).module
+            causal_lm = load_latest_model_head(model_name, "qhead")
+            v_head = load_latest_model_head(model_name, "vhead")
         else:
             config = AutoConfig.from_pretrained(model_dict[model_name])
             causal_lm = ModelWithQHead(model_dict[model_name], config)
+            v_head = VHead(input_dim=4096)
 
         if not use_mac:
             causal_lm.bfloat16()
+            v_head.bfloat16()
         tokenizer = AutoTokenizer.from_pretrained(
             model_dict[model_name], padding_side=padding_side
         )
@@ -425,7 +426,9 @@ def get_model(
             param.requires_grad = False
         for name, param in causal_lm.qhead.named_parameters():
             param.requires_grad = ".lora" in name
-        for name, param in causal_lm.v_head_group.named_parameters():
+        # for name, param in causal_lm.v_head_group.named_parameters():
+        #    param.requires_grad = True
+        for name, param in v_head.named_parameters():
             param.requires_grad = True
 
     causal_lm.tokenizer = tokenizer
@@ -468,7 +471,7 @@ def get_model(
         return_dict_in_generate=False,
     )
     causal_lm.generation_config = generation_config
-    return causal_lm, tokenizer
+    return causal_lm, v_head, tokenizer
 
 
 def get_mlp_modules(model):
@@ -580,7 +583,7 @@ def wrap_input_tokens(
     return final_input_sequence
 
 
-def predict_action(cfg, prev_action, prev_obs, action, add_q_head):
+def predict_action(cfg, prev_action, prev_obs, action, add_q_head, add_v_head):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     input_sequence = wrap_input_tokens(
         cfg,
@@ -591,7 +594,7 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head):
         is_prediction=False,
     )
     attention_mask = (input_sequence != cfg.tokenizer.pad_token_id).long()
-    prediction, values = cfg.causal_lm(
+    prediction = cfg.causal_lm(
         input_sequence,
         attention_mask=attention_mask,
         add_q_head=add_q_head,
@@ -610,7 +613,15 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head):
     masked_losses = action_loss_tensor * pure_action_attention_mask
     # plt.figure(); plt.plot(masked_losses[0].tolist()); plt.savefig("action.png"); plt.clf()
     action_losses = masked_losses.sum(dim=1) / pure_action_attention_mask.sum(dim=1)
-    return action_losses, values, negentropies
+    if add_v_head:
+        hidden_states = prediction.hidden_states[-1].detach()
+        values = cfg.v_head(hidden_states)
+        return (
+            action_losses,
+            values[:, : -cfg.pure_ctxt_sizes.action_size],
+            negentropies,
+        )
+    return action_losses, negentropies
 
 
 def test_sequence(predictor, input_sequence):
