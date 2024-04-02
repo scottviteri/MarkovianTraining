@@ -141,7 +141,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     rank = dist.get_rank()
     print("rank", rank)
 
-    causal_lm, v_head, tokenizer = get_model(
+    causal_lm, v_head, v_head_base, tokenizer = get_model(
         device,
         init_cfg.load_model,
         init_cfg.model_name,
@@ -187,7 +187,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         param
         for name, param in causal_lm.module.qhead.named_parameters()
         if ".lora" in name
-    ) + list(v_head.parameters())
+    ) + list(v_head.parameters()) + list(v_head_base.parameters())
 
     if init_cfg.optimizer == "sgd":
         optimizer = torch.optim.SGD if init_cfg.use_mac else bitsandbytes.optim.SGD8bit
@@ -239,6 +239,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         prefix_tensors=prefix_tensors,
         causal_lm=causal_lm,  # predictor_lm,
         v_head=v_head,
+        v_head_base=v_head_base,
         tokenizer=tokenizer,
         inference_cfg=init_cfg.inference_cfg,
         prediction_cfg=init_cfg.prediction_cfg,
@@ -410,10 +411,12 @@ def get_model(
             config = AutoConfig.from_pretrained(model_dict[model_name])
             causal_lm = ModelWithQHead(model_dict[model_name], config)
             v_head = VHead(causal_lm.transformer)
+        v_head_base = copy.deepcopy(v_head)
 
         if not use_mac:
             causal_lm.bfloat16()
             v_head.bfloat16()
+            v_head_base.bfloat16()
         tokenizer = AutoTokenizer.from_pretrained(
             model_dict[model_name], padding_side=padding_side
         )
@@ -426,6 +429,9 @@ def get_model(
         #    param.requires_grad = True
         for name, param in v_head.named_parameters():
             param.requires_grad = True
+        for name, param in v_head_base.named_parameters():
+            param.requires_grad = True
+
 
     causal_lm.tokenizer = tokenizer
     bad_words_ids = [
@@ -469,7 +475,7 @@ def get_model(
     causal_lm.generation_config = generation_config
     causal_lm.qhead.generation_config = generation_config
     causal_lm.transformer.generation_config = generation_config
-    return causal_lm, v_head, tokenizer
+    return causal_lm, v_head, v_head_base, tokenizer
 
 
 def get_mlp_modules(model):
@@ -614,7 +620,10 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, add_v_head):
     if add_v_head:
         # default to the last layer of predictor in the v_head
         hidden_states = prediction.hidden_states[-2].detach()
-        values = cfg.v_head(hidden_states)
+        if add_q_head:
+            values = cfg.v_head(hidden_states)
+        else:
+            values = cfg.v_head_base(hidden_states)
         return (
             action_losses,
             values[:, : -cfg.pure_ctxt_sizes.action_size],

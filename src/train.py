@@ -244,10 +244,10 @@ def update_weights(
         action_losses, values, negentropies = predict_action(
             cfg, prev_action, prev_obs, action, add_q_head=True, add_v_head=True
         )
-        with torch.no_grad():  # just to be sure
-            old_critic_action_losses, _ = predict_action(
-                cfg, prev_action, prev_obs, action, add_q_head=False, add_v_head=False
-            )
+        old_critic_action_losses, base_values, _ = predict_action(
+            cfg, prev_action, prev_obs, action, add_q_head=False, add_v_head=True
+        )
+        with torch.no_grad():
             obs_losses = predict_observation(
                 cfg,
                 action,
@@ -263,26 +263,37 @@ def update_weights(
                 is_default_action=True,
             )
         normalized_obs_losses = obs_losses - default_obs_losses
-        repeated_obs_losses = normalized_obs_losses.unsqueeze(1).repeat(
+        repeated_obs_losses = obs_losses.unsqueeze(1).repeat(1, values.shape[1])
+        repeated_default_obs_losses = default_obs_losses.unsqueeze(1).repeat(
             1, values.shape[1]
+        )
+        repeated_normalized_obs_losses = (
+            repeated_obs_losses - repeated_default_obs_losses
         )
         action_log_probs = -action_losses
         old_critic_action_log_probs = -old_critic_action_losses
         action_prob_ratios = torch.exp(action_log_probs - old_critic_action_log_probs)
         clipped_ratios = torch.clamp(action_prob_ratios, 0.9, 1.1)
-        value_losses = torch.abs(values - repeated_obs_losses).mean(dim=1)
-        neg_advantages = (repeated_obs_losses - values.detach()).mean(dim=1)
+        value_losses = torch.abs(values - repeated_obs_losses.detach()).mean(dim=1)
+        base_value_losses = torch.abs(
+            base_values - repeated_default_obs_losses.detach()
+        ).mean(dim=1)
+        neg_advantages = (
+            repeated_normalized_obs_losses - (values - base_values).detach()
+        ).mean(dim=1)
         unclipped = action_prob_ratios * neg_advantages
         clipped = clipped_ratios * neg_advantages
         max_branch = torch.max(unclipped, clipped)
-        aggregate_losses = max_branch + value_losses
+        aggregate_losses = max_branch + value_losses + base_value_losses
         aggregate_loss = aggregate_losses.mean()
         if cfg.wandb and cfg.rank == 0 and action_is_generated:
             wandb.log(
                 {
                     "Values": values.mean(),
+                    "Base Values": base_values.mean(),
                     "Normalized Obs Loss": normalized_obs_losses.mean(),
                     "Value Loss": value_losses.mean(),
+                    "Default Value Loss": base_value_losses.mean(),
                     "Old Critic Action Loss": old_critic_action_losses.mean(),
                     "Action Prob Ratio": action_prob_ratios.mean(),
                     "Unclipped": unclipped.mean(),

@@ -173,6 +173,7 @@ class Config:
     model_name: str
     causal_lm: PreTrainedModel
     v_head: torch.nn.Module
+    v_head_base : torch.nn.Module
     tokenizer: Optional[PreTrainedTokenizer]
     rank: int
     lr: float
