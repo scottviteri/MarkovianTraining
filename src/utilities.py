@@ -697,7 +697,7 @@ def predict_observation(cfg, action, obs, add_q_head, is_default_action=False):
         ),
         target=input_sequence[:, 1:],
     )[:, -cfg.pure_ctxt_sizes.obs_size :]
-    print("hello!", obs[:, : -cfg.pure_ctxt_sizes.obs_size :][0])
+    # print("hello!", cfg.tokenizer.decode(obs[:, -cfg.pure_ctxt_sizes.obs_size :][0]))
     pure_obs_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.obs_size :]
     masked_losses = loss_tensor * pure_obs_attention_mask
     # plt.figure(); plt.plot(masked_losses[0, 1:].tolist()); plt.savefig("obs_default.png"); plt.clf()

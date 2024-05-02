@@ -275,7 +275,7 @@ def update_weights(
         unclipped = action_prob_ratios * neg_advantages
         clipped = clipped_ratios * neg_advantages
         max_branch = torch.max(unclipped, clipped)
-        aggregate_losses = max_branch + value_losses + (obs_losses - default_obs_losses)
+        aggregate_losses = max_branch + value_losses + obs_losses
         aggregate_loss = aggregate_losses.mean()
         if cfg.wandb and cfg.rank == 0 and action_is_generated:
             wandb.log(
