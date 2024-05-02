@@ -248,20 +248,20 @@ def update_weights(
             old_critic_action_losses, _ = predict_action(
                 cfg, prev_action, prev_obs, action, add_q_head=False, add_v_head=False
             )
-            default_obs_losses = predict_observation(
-                cfg,
-                default_action,
-                obs,
-                add_q_head=False,
-                is_default_action=True,
-            )
+        default_obs_losses = predict_observation(
+            cfg,
+            default_action,
+            obs,
+            add_q_head=True,
+            is_default_action=True,
+        )
         obs_losses = predict_observation(
-                cfg,
-                action,
-                obs,
-                add_q_head=True,
-                is_default_action=False,
-            )
+            cfg,
+            action,
+            obs,
+            add_q_head=True,
+            is_default_action=False,
+        )
         normalized_obs_losses = obs_losses - default_obs_losses
         repeated_obs_losses = normalized_obs_losses.unsqueeze(1).repeat(
             1, values.shape[1]
@@ -275,7 +275,7 @@ def update_weights(
         unclipped = action_prob_ratios * neg_advantages
         clipped = clipped_ratios * neg_advantages
         max_branch = torch.max(unclipped, clipped)
-        aggregate_losses = max_branch + value_losses + obs_losses
+        aggregate_losses = max_branch + value_losses + (obs_losses - default_obs_losses)
         aggregate_loss = aggregate_losses.mean()
         if cfg.wandb and cfg.rank == 0 and action_is_generated:
             wandb.log(
