@@ -149,8 +149,6 @@ class InitialConfig:
     use_mac: bool
     wandb: bool
     load_model: bool
-    do_lora: bool
-    num_beams: int
     inference_cfg: InferenceConfig
     prediction_cfg: PredictionConfig
     trainer_cfg: TrainerConfig
@@ -172,7 +170,6 @@ class PrefixTensors:
 class Config:
     model_name: str
     causal_lm: PreTrainedModel
-    v_head: torch.nn.Module
     tokenizer: Optional[PreTrainedTokenizer]
     rank: int
     lr: float
@@ -185,8 +182,6 @@ class Config:
     use_mac: bool
     wandb: bool
     load_model: bool
-    do_lora: bool
-    num_beams: int
     device: str
     path_2_log: str
     traj_path: str

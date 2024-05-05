@@ -17,8 +17,6 @@ test_config = InitialConfig(
     interval_print=1,
     wandb=False,
     load_model=False,
-    do_lora=True,
-    num_beams=3,
     ctxt_sizes = Datapt(first_action_size=50, first_obs_size=80, action_size=100, obs_size=20)
     dataset=InitDatasetType(
         task=ArithmeticTask(
@@ -144,7 +142,7 @@ def test_num_return_sequences():
     action_candidates = cfg.causal_lm.generate(
         inputs=input_sequence,
         attention_mask=attention_mask,
-        num_beams=cfg.num_beams,
+        num_beams=1,
         bad_words_ids=[[cfg.tokenizer.pad_token_id]],
         output_scores=True,
         do_sample=True,

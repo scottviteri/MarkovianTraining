@@ -34,7 +34,6 @@ def save_weights(cfg, batch_index):
         current_time = datetime.now(timezone(timedelta(hours=-7)))
         timestamp = current_time.strftime("%Y%m%d_%H%M%S")
         torch.save(cfg.causal_lm, f"{cfg.path_2_model}_qhead_{timestamp}.pth")
-        torch.save(cfg.v_head, f"{cfg.path_2_model}_vhead_{timestamp}.pth")
 
 
 def log_wandb(cfg, batch_index, aggregate_loss, losses):
@@ -49,7 +48,6 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
             (
                 action_losses,
                 observation_losses,
-                value_losses,
                 negentropies,
                 perturbed_losses,
             ) = losses
@@ -59,7 +57,6 @@ def log_wandb(cfg, batch_index, aggregate_loss, losses):
                     "Aggregate Loss": aggregate_loss.item(),
                     "Action Loss": action_losses.mean(),
                     "Observation Loss": observation_losses.mean(),
-                    "Value Loss": value_losses.mean(),
                     "Negentropy": negentropies.mean(),
                 },
                 step=batch_index,
@@ -77,7 +74,6 @@ def log_print_losses(cfg, batch_index, action_is_generated, aggregate_loss, loss
             (
                 action_losses,
                 observation_losses,
-                value_losses,
                 negentropies,
                 perturbed_losses,
             ) = losses
@@ -86,7 +82,7 @@ def log_print_losses(cfg, batch_index, action_is_generated, aggregate_loss, loss
                     multi_print(f"Pre-Generated Action", f)
                 multi_print(f"Aggregate loss: {aggregate_loss}", f)
                 multi_print(
-                    f"Action/Obs/Value/NegEnt loss: {action_losses.mean():0.4f}/{observation_losses.mean():0.4f}/{value_losses.mean():0.4f}/{negentropies.mean():0.4f}",
+                    f"Action/Obs/NegEnt loss: {action_losses.mean():0.4f}/{observation_losses.mean():0.4f}/{negentropies.mean():0.4f}",
                     f,
                 )
 
@@ -99,7 +95,6 @@ def save_trajectory(
         (
             action_losses,
             observation_losses,
-            value_losses,
             negentropies,
             perturbed_losses,
         ) = losses
@@ -113,7 +108,6 @@ def save_trajectory(
             "aggregate_loss": aggregate_loss.item(),
             "action_loss": action_losses.tolist(),
             "observation_losses": observation_losses.tolist(),
-            "value_loss": value_losses.tolist() if value_losses is not None else 0.0,
             "negentropy": negentropies.tolist() if negentropies is not None else 0.0,
             "perturbed_loss": (
                 perturbed_losses.tolist() if perturbed_losses is not None else 0.0
@@ -154,8 +148,9 @@ def sample(cfg, prev_action, prev_obs, add_q_head=True):
                 use_instruct_tokens=True,
                 is_prediction=False,
             )
+            num_beams = 1
             attention_mask = (input_ids != cfg.tokenizer.pad_token_id).long()
-            beam_input_ids = input_ids.repeat_interleave(cfg.num_beams, dim=0)
+            beam_input_ids = input_ids.repeat_interleave(num_beams, dim=0)
             model = (
                 cfg.causal_lm.module.qhead
                 if add_q_head
@@ -165,7 +160,7 @@ def sample(cfg, prev_action, prev_obs, add_q_head=True):
                 beam_input_ids,
                 min_new_tokens=cfg.pure_ctxt_sizes.action_size,
                 max_new_tokens=cfg.pure_ctxt_sizes.action_size,
-                attention_mask=attention_mask.repeat_interleave(cfg.num_beams, dim=0),
+                attention_mask=attention_mask.repeat_interleave(num_beams, dim=0),
                 pad_token_id=cfg.causal_lm.module.generation_config.pad_token_id,
                 eos_token_id=cfg.causal_lm.module.generation_config.eos_token_id,
                 output_scores=cfg.causal_lm.module.generation_config.output_scores,
@@ -241,12 +236,12 @@ def update_weights(
             cfg.inference_cfg.num_return_sequences, dim=0
         )
         obs = obs.repeat_interleave(cfg.inference_cfg.num_return_sequences, dim=0)
-        action_losses, values, negentropies = predict_action(
-            cfg, prev_action, prev_obs, action, add_q_head=True, add_v_head=True
+        action_losses, negentropies = predict_action(
+            cfg, prev_action, prev_obs, action, add_q_head=True
         )
         with torch.no_grad():  # just to be sure
             old_critic_action_losses, _ = predict_action(
-                cfg, prev_action, prev_obs, action, add_q_head=False, add_v_head=False
+                cfg, prev_action, prev_obs, action, add_q_head=False
             )
             obs_losses = predict_observation(
                 cfg,
@@ -263,32 +258,23 @@ def update_weights(
                 is_default_action=True,
             )
         normalized_obs_losses = obs_losses - default_obs_losses
-        repeated_obs_losses = normalized_obs_losses.unsqueeze(1).repeat(
-            1, values.shape[1]
-        )
         action_log_probs = -action_losses
         old_critic_action_log_probs = -old_critic_action_losses
         action_prob_ratios = torch.exp(action_log_probs - old_critic_action_log_probs)
         clipped_ratios = torch.clamp(action_prob_ratios, 0.9, 1.1)
-        value_losses = torch.abs(values - repeated_obs_losses).mean(dim=1)
-        neg_advantages = (repeated_obs_losses - values.detach()).mean(dim=1)
-        unclipped = action_prob_ratios * neg_advantages
-        clipped = clipped_ratios * neg_advantages
-        max_branch = torch.max(unclipped, clipped)
-        aggregate_losses = max_branch + value_losses
+        unclipped = action_prob_ratios * normalized_obs_losses
+        clipped = clipped_ratios * normalized_obs_losses
+        aggregate_losses = torch.max(unclipped, clipped)
         aggregate_loss = aggregate_losses.mean()
         if cfg.wandb and cfg.rank == 0 and action_is_generated:
             wandb.log(
                 {
-                    "Values": values.mean(),
                     "Normalized Obs Loss": normalized_obs_losses.mean(),
-                    "Value Loss": value_losses.mean(),
                     "Old Critic Action Loss": old_critic_action_losses.mean(),
                     "Action Prob Ratio": action_prob_ratios.mean(),
                     "Unclipped": unclipped.mean(),
                     "Clipped": clipped.mean(),
-                    "Max Branch": max_branch.mean(),
-                    "ClipFrac": (unclipped != max_branch).float().mean(),
+                    "ClipFrac": (unclipped != aggregate_losses).float().mean(),
                 },
                 step=batch_index,
             )
@@ -326,7 +312,7 @@ def update_weights(
                 non_qhead_weights_before == non_qhead_weights_after
             ).all(), "Should be frozen"
 
-        losses = [action_losses, obs_losses, value_losses, negentropies]
+        losses = [action_losses, obs_losses, negentropies]
         return aggregate_loss, losses
 
 
@@ -507,5 +493,6 @@ def train_model(init_cfg):
 
 
 if __name__ == "__main__":
+    # torch.autograd.set_detect_anomaly = True
     for init_cfg in configs:
         train_model(init_cfg)

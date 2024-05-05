@@ -65,7 +65,6 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         self,
         input_ids,
         add_q_head,
-        get_v_head,
         attention_mask=None,
         **kwargs,
     ):
@@ -73,7 +72,6 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         outputs = model(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            output_hidden_states=get_v_head,
             **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
         )
         return outputs
@@ -82,36 +80,11 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         generation_inputs = self.transformer.prepare_inputs_for_generation(
             input_ids, **kwargs
         )
-        generation_inputs.update(
-            {"add_q_head": kwargs["add_q_head"], "get_v_head": kwargs["get_v_head"]}
-        )
+        generation_inputs.update({"add_q_head": kwargs["add_q_head"]})
         return generation_inputs
 
     def _reorder_cache(self, past_key_values, beam_idx):
         return self.transformer._reorder_cache(past_key_values, beam_idx)
-
-
-class VHead(nn.Module):
-    def __init__(self, lm):
-        super(VHead, self).__init__()
-        # Assuming the last layer's output dimension is used as input_dim
-        # gpt2_config = AutoConfig.from_pretrained(
-        #    "gpt2", n_head=1, n_embd=1, hidden_size=input_dim
-        # )
-        # self.gpt2_block = GPT2Block(gpt2_config)
-        self.lm_block = copy.deepcopy(lm.model.layers[-1])
-        hidden_size = self.lm_block.mlp.gate_proj.in_features
-        self.v_head = nn.Linear(hidden_size, 1, bias=True)
-        # Zero-initialize the weights and bias
-        nn.init.constant_(self.v_head.weight, 0)
-        nn.init.constant_(self.v_head.bias, 0)
-
-    def forward(self, hidden_states, attention_mask=None):
-        pre_values = self.lm_block(
-            hidden_states=hidden_states, attention_mask=attention_mask
-        )[0]
-        values = self.v_head(pre_values).squeeze(-1)
-        return values
 
 
 def load_cfg_from_file(file_location: str) -> InitialConfig:
@@ -132,8 +105,6 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
 
-    assert init_cfg.num_beams == 1, "Only supporting num_beams = 1 currently"
-
     if not init_cfg.use_mac:
         dist.init_process_group(backend="nccl")
         torch.cuda.set_device(dist.get_rank())
@@ -141,14 +112,13 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     rank = dist.get_rank()
     print("rank", rank)
 
-    causal_lm, v_head, tokenizer = get_model(
+    causal_lm, tokenizer = get_model(
         device,
         init_cfg.load_model,
         init_cfg.model_name,
         path_2_tokenizer,
         path_2_model,
         init_cfg.inference_cfg.num_return_sequences,
-        init_cfg.do_lora,
         use_mac=init_cfg.use_mac,
     )
 
@@ -187,7 +157,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         param
         for name, param in causal_lm.module.qhead.named_parameters()
         if ".lora" in name
-    ) + list(v_head.parameters())
+    )
 
     if init_cfg.optimizer == "sgd":
         optimizer = torch.optim.SGD if init_cfg.use_mac else bitsandbytes.optim.SGD8bit
@@ -222,8 +192,6 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         use_mac=init_cfg.use_mac,
         wandb=init_cfg.wandb,
         load_model=init_cfg.load_model,
-        do_lora=init_cfg.do_lora,
-        num_beams=init_cfg.num_beams,
         device=device,
         dataset=DatasetType(
             task=init_cfg.dataset.task,
@@ -238,7 +206,6 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
         ctxt_sizes=init_cfg.ctxt_sizes,
         prefix_tensors=prefix_tensors,
         causal_lm=causal_lm,  # predictor_lm,
-        v_head=v_head,
         tokenizer=tokenizer,
         inference_cfg=init_cfg.inference_cfg,
         prediction_cfg=init_cfg.prediction_cfg,
@@ -383,7 +350,6 @@ def get_model(
     path_2_tokenizer,
     path_2_model,
     num_return_sequences,
-    do_lora=None,
     use_mac=False,
 ):
     """Load model"""
@@ -405,15 +371,12 @@ def get_model(
         padding_side = get_padding_side(model_name)
         if load_model:
             causal_lm = load_latest_model_head(model_name, "qhead").module
-            v_head = load_latest_model_head(model_name, "vhead")
         else:
             config = AutoConfig.from_pretrained(model_dict[model_name])
             causal_lm = ModelWithQHead(model_dict[model_name], config)
-            v_head = VHead(causal_lm.transformer)
 
         if not use_mac:
             causal_lm.bfloat16()
-            v_head.bfloat16()
         tokenizer = AutoTokenizer.from_pretrained(
             model_dict[model_name], padding_side=padding_side
         )
@@ -422,10 +385,6 @@ def get_model(
             param.requires_grad = False
         for name, param in causal_lm.qhead.named_parameters():
             param.requires_grad = ".lora" in name
-        # for name, param in causal_lm.v_head_group.named_parameters():
-        #    param.requires_grad = True
-        for name, param in v_head.named_parameters():
-            param.requires_grad = True
 
     causal_lm.tokenizer = tokenizer
     bad_words_ids = [
@@ -469,7 +428,7 @@ def get_model(
     causal_lm.generation_config = generation_config
     causal_lm.qhead.generation_config = generation_config
     causal_lm.transformer.generation_config = generation_config
-    return causal_lm, v_head, tokenizer
+    return causal_lm, tokenizer
 
 
 def get_mlp_modules(model):
@@ -515,10 +474,6 @@ def create_run_name(init_cfg: InitialConfig) -> str:
     run_name += f"nb{init_cfg.num_batches}_"
     if init_cfg.load_model:
         run_name += f"load_"
-    if init_cfg.do_lora:
-        run_name += "lra_"
-    if init_cfg.num_beams:
-        run_name += f"nbe{init_cfg.num_beams}_"
     run_name += f"cs{init_cfg.ctxt_sizes}"
     return run_name
 
@@ -581,22 +536,22 @@ def wrap_input_tokens(
     return final_input_sequence
 
 
-def predict_action(cfg, prev_action, prev_obs, action, add_q_head, add_v_head):
+def predict_action(cfg, prev_action, prev_obs, action, add_q_head):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     input_sequence = wrap_input_tokens(
         cfg,
         [prev_action, prev_obs],
         [action],
-        use_start_token=True,
+        use_start_token=cfg.model_name in ["mistral", "llama"],
         use_instruct_tokens=True,
         is_prediction=False,
     )
     attention_mask = (input_sequence != cfg.tokenizer.pad_token_id).long()
+    assert attention_mask[0][0].item() == 1.0
     prediction = cfg.causal_lm(
         input_sequence,
         attention_mask=attention_mask,
         add_q_head=add_q_head,
-        get_v_head=True,
     )
     action_logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
     action_loss_tensor = loss_fn(
@@ -611,65 +566,7 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head, add_v_head):
     masked_losses = action_loss_tensor * pure_action_attention_mask
     # plt.figure(); plt.plot(masked_losses[0].tolist()); plt.savefig("action.png"); plt.clf()
     action_losses = masked_losses.sum(dim=1) / pure_action_attention_mask.sum(dim=1)
-    if add_v_head:
-        # default to the last layer of predictor in the v_head
-        hidden_states = prediction.hidden_states[-2].detach()
-        values = cfg.v_head(hidden_states)
-        return (
-            action_losses,
-            values[:, : -cfg.pure_ctxt_sizes.action_size],
-            negentropies,
-        )
     return action_losses, negentropies
-
-
-def test_sequence(predictor, input_sequence):
-    loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
-    prediction = predictor(
-        input_sequence, add_q_head=False, get_v_head=False, attention_mask=None
-    )
-    logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
-    loss_tensor = loss_fn(
-        input=einops.rearrange(
-            logits,
-            "batch seq_length vocab_size -> batch vocab_size seq_length",
-        ),
-        target=input_sequence[:, 1:],
-    )
-    return loss_tensor
-
-
-def test_string(predictor, tokenizer, s, add_bos=False):
-    encoding = tokenizer.encode(s, add_special_tokens=add_bos)
-    neg_log_probs = test_sequence(
-        predictor,
-        torch.tensor(
-            [encoding],
-            device=predictor.device,
-        ),
-    )[0].tolist()
-    rounded_nll = list(map(lambda x: round(x, 3), neg_log_probs))
-    # print(encoding)
-    # print(rounded_nll)
-    return encoding, rounded_nll
-
-
-def inspect_string(predictor, tokenizer, s, add_bos=False):
-    encoding, losses = test_string(predictor, tokenizer, s, add_bos=add_bos)
-    c = list(zip(encoding[1:], losses))
-    return [(tokenizer.decode([x]), y) for x, y in c]
-
-
-def translate_single_tokens(tokenizer, string):
-    encoded = tokenizer.encode(string, add_special_tokens=False)
-    return [tokenizer.decode([x]) for x in encoded]
-
-
-# test_string(cfg, "Answer: 123")
-# tensor([[12.2443,  0.0759,  3.6301,  0.9889,  2.1633,  3.1531]],
-#       device='cuda:0')
-# translate_single_tokens(cfg, "Answer: 123")
-# ['Answer', ':', '', '1', '2', '3']
 
 
 def predict_observation(cfg, action, obs, add_q_head, is_default_action=False):
@@ -678,16 +575,16 @@ def predict_observation(cfg, action, obs, add_q_head, is_default_action=False):
         cfg,
         [action],
         [obs],
-        use_start_token=True,
+        use_start_token=cfg.model_name in ["mistral", "llama"],
         use_instruct_tokens=True,
         is_prediction=True,
     )
     attention_mask = (input_sequence != cfg.tokenizer.pad_token_id).long()
+    assert attention_mask[0][0].item() == 1.0
     prediction = cfg.causal_lm(
         input_sequence,
         attention_mask=attention_mask,
         add_q_head=add_q_head,
-        get_v_head=False,
     )
     logits = prediction.logits[:, :-1, :].log_softmax(dim=-1)
     loss_tensor = loss_fn(
@@ -696,29 +593,29 @@ def predict_observation(cfg, action, obs, add_q_head, is_default_action=False):
             "batch seq_length vocab_size -> batch vocab_size seq_length",
         ),
         target=input_sequence[:, 1:],
-    )[:, -cfg.pure_ctxt_sizes.obs_size :]
+    )
+    pure_obs_loss_tensor = loss_tensor[:, -cfg.pure_ctxt_sizes.obs_size :]
     pure_obs_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.obs_size :]
-    masked_losses = loss_tensor * pure_obs_attention_mask
+    masked_losses = pure_obs_loss_tensor * pure_obs_attention_mask
     # plt.figure(); plt.plot(masked_losses[0, 1:].tolist()); plt.savefig("obs_default.png"); plt.clf()
-    token_loss_pairs = inspect_string(
-        cfg.causal_lm,
-        cfg.tokenizer,
-        cfg.tokenizer.decode(input_sequence[0].tolist()),
-    )
-    targeted_pairs = [
-        p
-        for p in token_loss_pairs[-cfg.pure_ctxt_sizes.obs_size - 3 :]
-        if str(cfg.tokenizer.pad_token) != p[0]
-    ]
-    # slicing [:,1:] is a hack because of mistral and llama number tokenization create a leading space token!
-    obs_losses = masked_losses[:, 1:].sum(dim=1) / pure_obs_attention_mask[:, 1:].sum(
-        dim=1
-    )
+    if cfg.model_name in ["mistral", "llama"]:
+        # slicing [:,1:] is a hack because of mistral and llama number tokenization create a leading space token!
+        num_nonpad_obs_tokens = pure_obs_attention_mask[:, 1:].sum(1)
+        obs_losses = masked_losses[:, 1:].sum(1) / num_nonpad_obs_tokens
+    else:
+        num_nonpad_obs_tokens = pure_obs_attention_mask.sum(1)
+        obs_losses = masked_losses.sum(1) / num_nonpad_obs_tokens
     if cfg.rank == 0:
         print(
             "Default:" if is_default_action else "Updated:",
-            obs_losses[0].item(),
-            targeted_pairs,
+            obs_losses[0],
+            [
+                (cfg.tokenizer.decode(obs[0, i]), loss_tensor[0, i])
+                for i in range(
+                    -cfg.ctxt_sizes.obs_size,
+                    -cfg.pure_ctxt_sizes.obs_size + num_nonpad_obs_tokens[0],
+                )
+            ],
         )
     return obs_losses
 
