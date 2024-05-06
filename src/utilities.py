@@ -104,7 +104,6 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     traj_path = f"saved_weights_and_losses/{init_cfg.model_name}_traj_{timestamp}.json"
     path_2_model = f"saved_weights_and_losses/{init_cfg.model_name}_weights"
     path_2_tokenizer = f"saved_weights_and_losses/{init_cfg.model_name}_tokenizer"
-
     if not init_cfg.use_mac:
         dist.init_process_group(backend="nccl")
         torch.cuda.set_device(dist.get_rank())
@@ -542,12 +541,11 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head):
         cfg,
         [prev_action, prev_obs],
         [action],
-        use_start_token=cfg.model_name in ["mistral", "llama"],
+        use_start_token=True,
         use_instruct_tokens=True,
         is_prediction=False,
     )
     attention_mask = (input_sequence != cfg.tokenizer.pad_token_id).long()
-    assert attention_mask[0][0].item() == 1.0
     prediction = cfg.causal_lm(
         input_sequence,
         attention_mask=attention_mask,
@@ -569,13 +567,25 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head):
     return action_losses, negentropies
 
 
+def translate_single_tokens(tokenizer, string):
+    encoded = tokenizer.encode(string, add_special_tokens=False)
+    return [tokenizer.decode([x]) for x in encoded]
+
+
+# test_string(cfg, "Answer: 123")
+# tensor([[12.2443,  0.0759,  3.6301,  0.9889,  2.1633,  3.1531]],
+#       device='cuda:0')
+# translate_single_tokens(cfg, "Answer: 123")
+# ['Answer', ':', '', '1', '2', '3']
+
+
 def predict_observation(cfg, action, obs, add_q_head, is_default_action=False):
     loss_fn = torch.nn.CrossEntropyLoss(reduction="none")
     input_sequence = wrap_input_tokens(
         cfg,
         [action],
         [obs],
-        use_start_token=cfg.model_name in ["mistral", "llama"],
+        use_start_token=cfg.model_name in ["llama", "mistral"],
         use_instruct_tokens=True,
         is_prediction=True,
     )
@@ -593,30 +603,23 @@ def predict_observation(cfg, action, obs, add_q_head, is_default_action=False):
             "batch seq_length vocab_size -> batch vocab_size seq_length",
         ),
         target=input_sequence[:, 1:],
-    )
-    pure_obs_loss_tensor = loss_tensor[:, -cfg.pure_ctxt_sizes.obs_size :]
+    )[:, -cfg.pure_ctxt_sizes.obs_size :]
     pure_obs_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.obs_size :]
-    masked_losses = pure_obs_loss_tensor * pure_obs_attention_mask
+    masked_losses = loss_tensor * pure_obs_attention_mask
     # plt.figure(); plt.plot(masked_losses[0, 1:].tolist()); plt.savefig("obs_default.png"); plt.clf()
-    if cfg.model_name in ["mistral", "llama"]:
+    if cfg.model_name in ["llama", "mistral"]:
         # slicing [:,1:] is a hack because of mistral and llama number tokenization create a leading space token!
-        num_nonpad_obs_tokens = pure_obs_attention_mask[:, 1:].sum(1)
-        obs_losses = masked_losses[:, 1:].sum(1) / num_nonpad_obs_tokens
+        nonpad_count = pure_obs_attention_mask[:, 1:].sum(1) / nonpad_count
+        obs_losses = masked_losses[:, 1:].sum(1) / nonpad_count
     else:
-        num_nonpad_obs_tokens = pure_obs_attention_mask.sum(1)
-        obs_losses = masked_losses.sum(1) / num_nonpad_obs_tokens
-    if cfg.rank == 0:
-        print(
-            "Default:" if is_default_action else "Updated:",
-            obs_losses[0],
-            [
-                (cfg.tokenizer.decode(obs[0, i]), loss_tensor[0, i])
-                for i in range(
-                    -cfg.ctxt_sizes.obs_size,
-                    -cfg.pure_ctxt_sizes.obs_size + num_nonpad_obs_tokens[0],
-                )
-            ],
-        )
+        nonpad_count = pure_obs_attention_mask.sum(1)
+        obs_losses = masked_losses.sum(1) / nonpad_count
+    # if cfg.rank == 0:
+    #    print(
+    #        "Default:" if is_default_action else "Updated:",
+    #        obs_losses[0].item(),
+    #        targeted_pairs,
+    #    )
     return obs_losses
 
 

@@ -493,6 +493,6 @@ def train_model(init_cfg):
 
 
 if __name__ == "__main__":
-    # torch.autograd.set_detect_anomaly = True
+    torch.autograd.set_detect_anomaly = True
     for init_cfg in configs:
         train_model(init_cfg)
