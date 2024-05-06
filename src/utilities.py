@@ -609,7 +609,7 @@ def predict_observation(cfg, action, obs, add_q_head, is_default_action=False):
     # plt.figure(); plt.plot(masked_losses[0, 1:].tolist()); plt.savefig("obs_default.png"); plt.clf()
     if cfg.model_name in ["llama", "mistral"]:
         # slicing [:,1:] is a hack because of mistral and llama number tokenization create a leading space token!
-        nonpad_count = pure_obs_attention_mask[:, 1:].sum(1) / nonpad_count
+        nonpad_count = pure_obs_attention_mask[:, 1:].sum(1)
         obs_losses = masked_losses[:, 1:].sum(1) / nonpad_count
     else:
         nonpad_count = pure_obs_attention_mask.sum(1)

@@ -143,4 +143,4 @@ mst = InitialConfig(
     debug=None,
 )
 
-configs = [g2]
+configs = [mst]
