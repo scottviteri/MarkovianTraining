@@ -48,7 +48,7 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         )
         # qhead = copy.deepcopy(self.transformer)
         mlp_modules = get_mlp_modules(self.transformer)
-        peft_config = LoraConfig(
+        self.peft_config = LoraConfig(
             task_type="CAUSAL_LM",
             inference_mode=False,
             r=8,
@@ -58,7 +58,7 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             init_lora_weights="gaussian",
         )
         ## print("Num Linear Layers: ", len(linear_layers))
-        self.transformer = get_peft_model(self.transformer, peft_config)
+        self.transformer = get_peft_model(self.transformer, self.peft_config)
         self.transformer.print_trainable_parameters()
         self.transformer.disable_adapter_layers()
 
@@ -70,9 +70,11 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         **kwargs,
     ):
         if add_q_head:
-            self.transformer.enable_adapter_layers()
+            self.transformer.add_adapter(self.peft_config, adapter_name="adapter_1")
+            # self.transformer.enable_adapter_layers()
         else:
-            self.transformer.disable_adapter_layers()
+            self.transformer.unload()
+            # self.transformer.disable_adapter_layers()
         # with nullcontext() if add_q_head else self.transformer.disable_adapter():
         outputs = self.transformer(
             input_ids=input_ids,
