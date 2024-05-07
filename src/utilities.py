@@ -47,7 +47,6 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             model_name_or_path, config=config
         )
         # qhead = copy.deepcopy(self.transformer)
-
         mlp_modules = get_mlp_modules(self.transformer)
         peft_config = LoraConfig(
             task_type="CAUSAL_LM",
