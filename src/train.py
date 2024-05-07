@@ -209,7 +209,9 @@ def update_weights(
             cfg.causal_lm.module.transformer.base_model.model.model.layers[
                 -3
             ].mlp.up_proj.base_layer.weight
-            - cfg.causal_lm.module.transformer.model.model.layers[-3].mlp.up_proj.weight
+            - cfg.causal_lm.module.transformer.base_model.model.model.layers[
+                -3
+            ].mlp.up_proj.weight
         ).abs().sum().item() == 0, "Frozen weight copies should be equal"
 
     with (
@@ -493,6 +495,6 @@ def train_model(init_cfg):
 
 
 if __name__ == "__main__":
-    torch.autograd.set_detect_anomaly = True
+    # torch.autograd.set_detect_anomaly = True
     for init_cfg in configs:
         train_model(init_cfg)

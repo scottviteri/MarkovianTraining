@@ -67,12 +67,16 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         attention_mask=None,
         **kwargs,
     ):
-        with nullcontext() if add_q_head else self.transformer.disable_adapter():
-            outputs = self.transformer(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
-            )
+        if add_q_head:
+            self.transformer.enable_adapter_layers()
+        else:
+            self.transformer.disable_adapter_layers()
+        # with nullcontext() if add_q_head else self.transformer.disable_adapter():
+        outputs = self.transformer(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
+        )
         return outputs
 
     def prepare_inputs_for_generation(self, input_ids, **kwargs):
@@ -381,8 +385,8 @@ def get_model(
         tokenizer.pad_token_id = tokenizer.eos_token_id
         # for name, param in causal_lm.transformer.named_parameters():
         #    param.requires_grad = False
-        # for name, param in causal_lm.transformer.named_parameters():
-        #    param.requires_grad = ".lora" in name
+        for name, param in causal_lm.transformer.named_parameters():
+            param.requires_grad = ".lora" in name
 
     causal_lm.tokenizer = tokenizer
     bad_words_ids = [
@@ -429,6 +433,7 @@ def get_model(
     return causal_lm, tokenizer
 
 
+# this is not including proj!
 def get_mlp_modules(model):
     modules = []
     for x in model.named_parameters():
