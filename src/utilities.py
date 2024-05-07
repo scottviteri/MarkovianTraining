@@ -46,9 +46,9 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         self.transformer = AutoModelForCausalLM.from_pretrained(
             model_name_or_path, config=config
         )
-        qhead = copy.deepcopy(self.transformer)
+        # qhead = copy.deepcopy(self.transformer)
 
-        mlp_modules = get_mlp_modules(qhead)
+        mlp_modules = get_mlp_modules(self.transformer)
         peft_config = LoraConfig(
             task_type="CAUSAL_LM",
             inference_mode=False,
@@ -58,8 +58,8 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             target_modules=mlp_modules,
         )
         ## print("Num Linear Layers: ", len(linear_layers))
-        self.qhead = get_peft_model(qhead, peft_config)
-        self.qhead.print_trainable_parameters()
+        self.transformer = get_peft_model(self.transformer, peft_config)
+        self.transformer.print_trainable_parameters()
 
     def forward(
         self,
@@ -68,12 +68,12 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         attention_mask=None,
         **kwargs,
     ):
-        model = self.qhead if add_q_head else self.transformer
-        outputs = model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
-        )
+        with nullcontext() if add_q_head else self.transformer.disable_adapter():
+            outputs = self.transformer(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                **{k: v for k, v in kwargs.items() if k != "output_hidden_states"},
+            )
         return outputs
 
     def prepare_inputs_for_generation(self, input_ids, **kwargs):
@@ -154,7 +154,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
 
     parameters = list(
         param
-        for name, param in causal_lm.module.qhead.named_parameters()
+        for name, param in causal_lm.module.transformer.named_parameters()
         if ".lora" in name
     )
 
@@ -380,10 +380,10 @@ def get_model(
             model_dict[model_name], padding_side=padding_side
         )
         tokenizer.pad_token_id = tokenizer.eos_token_id
-        for name, param in causal_lm.transformer.named_parameters():
-            param.requires_grad = False
-        for name, param in causal_lm.qhead.named_parameters():
-            param.requires_grad = ".lora" in name
+        # for name, param in causal_lm.transformer.named_parameters():
+        #    param.requires_grad = False
+        # for name, param in causal_lm.transformer.named_parameters():
+        #    param.requires_grad = ".lora" in name
 
     causal_lm.tokenizer = tokenizer
     bad_words_ids = [
@@ -425,7 +425,7 @@ def get_model(
         return_dict_in_generate=False,
     )
     causal_lm.generation_config = generation_config
-    causal_lm.qhead.generation_config = generation_config
+    # causal_lm.qhead.generation_config = generation_config
     causal_lm.transformer.generation_config = generation_config
     return causal_lm, tokenizer
 
@@ -563,20 +563,13 @@ def predict_action(cfg, prev_action, prev_obs, action, add_q_head):
     pure_action_attention_mask = attention_mask[:, -cfg.pure_ctxt_sizes.action_size :]
     masked_losses = action_loss_tensor * pure_action_attention_mask
     # plt.figure(); plt.plot(masked_losses[0].tolist()); plt.savefig("action.png"); plt.clf()
-    action_losses = masked_losses.sum(dim=1) / pure_action_attention_mask.sum(dim=1)
+    if cfg.model_name in ["llama", "mistral"]:
+        action_losses = masked_losses[:, 1:].sum(1) / pure_action_attention_mask[
+            :, 1:
+        ].sum(1)
+    else:
+        action_losses = masked_losses.sum(1) / pure_action_attention_mask.sum(1)
     return action_losses, negentropies
-
-
-def translate_single_tokens(tokenizer, string):
-    encoded = tokenizer.encode(string, add_special_tokens=False)
-    return [tokenizer.decode([x]) for x in encoded]
-
-
-# test_string(cfg, "Answer: 123")
-# tensor([[12.2443,  0.0759,  3.6301,  0.9889,  2.1633,  3.1531]],
-#       device='cuda:0')
-# translate_single_tokens(cfg, "Answer: 123")
-# ['Answer', ':', '', '1', '2', '3']
 
 
 def predict_observation(cfg, action, obs, add_q_head, is_default_action=False):

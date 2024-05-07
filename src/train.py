@@ -151,12 +151,12 @@ def sample(cfg, prev_action, prev_obs, add_q_head=True):
             num_beams = 1
             attention_mask = (input_ids != cfg.tokenizer.pad_token_id).long()
             beam_input_ids = input_ids.repeat_interleave(num_beams, dim=0)
-            model = (
-                cfg.causal_lm.module.qhead
-                if add_q_head
-                else cfg.causal_lm.module.transformer
-            )
-            action_candidates = model.generate(
+            # model = (
+            #    cfg.causal_lm.module.qhead
+            #    if add_q_head
+            #    else cfg.causal_lm.module.transformer
+            # )
+            action_candidates = cfg.causal_lm.module.transformer.generate(
                 beam_input_ids,
                 min_new_tokens=cfg.pure_ctxt_sizes.action_size,
                 max_new_tokens=cfg.pure_ctxt_sizes.action_size,
@@ -206,10 +206,10 @@ def update_weights(
 
     if "llama" in cfg.model_name or "mistral" in cfg.model_name:
         assert (
-            cfg.causal_lm.module.qhead.base_model.model.model.layers[
+            cfg.causal_lm.module.transformer.base_model.model.model.layers[
                 -3
             ].mlp.up_proj.base_layer.weight
-            - cfg.causal_lm.module.transformer.model.layers[-3].mlp.up_proj.weight
+            - cfg.causal_lm.module.transformer.model.model.layers[-3].mlp.up_proj.weight
         ).abs().sum().item() == 0, "Frozen weight copies should be equal"
 
     with (
@@ -280,11 +280,11 @@ def update_weights(
             )
 
         if "llama" in cfg.model_name or "mistral" in cfg.model_name:
-            weights_before = cfg.causal_lm.module.transformer.model.layers[
+            weights_before = cfg.causal_lm.module.transformer.model.model.layers[
                 -3
             ].mlp.up_proj.weight
             non_qhead_weights_before = (
-                cfg.causal_lm.module.qhead.base_model.model.model.layers[
+                cfg.causal_lm.module.transformer.base_model.model.model.layers[
                     -3
                 ].mlp.up_proj.weight
             )
@@ -299,11 +299,11 @@ def update_weights(
             cfg.optimizer.zero_grad()
 
         if "llama" in cfg.model_name or "mistral" in cfg.model_name:
-            weights_after = cfg.causal_lm.module.transformer.model.layers[
+            weights_after = cfg.causal_lm.module.transformer.model.model.layers[
                 -3
             ].mlp.up_proj.weight
             non_qhead_weights_after = (
-                cfg.causal_lm.module.qhead.base_model.model.model.layers[
+                cfg.causal_lm.module.transformer.base_model.model.model.layers[
                     -3
                 ].mlp.up_proj.weight
             )
