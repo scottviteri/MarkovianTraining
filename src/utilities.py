@@ -65,7 +65,9 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             if "lora_B" in name or "lora_embedding_B" in name:
                 if isinstance(module, torch.nn.Linear):
                     module.weight.normal_(mean=0.0, std=0.02)
-                else:
+                elif isinstance(module, torch.nn.ModuleDict) and not isinstance(
+                    module, torch.nn.ParameterDict
+                ):
                     module.qhead.weight.normal_(mean=0.0, std=0.02)
         # self.transformer.print_trainable_parameters()
         # self.transformer.disable_adapter_layers()

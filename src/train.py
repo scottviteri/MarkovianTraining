@@ -209,9 +209,7 @@ def update_weights(
             cfg.causal_lm.module.transformer.model.layers[
                 -3
             ].mlp.up_proj.base_layer.weight
-            - cfg.causal_lm.module.transformer.model.layers[
-                -3
-            ].mlp.up_proj.weight
+            - cfg.causal_lm.module.transformer.model.layers[-3].mlp.up_proj.weight
         ).abs().sum().item() == 0, "Frozen weight copies should be equal"
 
     with (
@@ -285,11 +283,9 @@ def update_weights(
             weights_before = cfg.causal_lm.module.transformer.model.layers[
                 -3
             ].mlp.up_proj.weight
-            non_qhead_weights_before = (
-                cfg.causal_lm.module.transformer.model.layers[
-                    -3
-                ].mlp.up_proj.weight
-            )
+            non_qhead_weights_before = cfg.causal_lm.module.transformer.model.layers[
+                -3
+            ].mlp.up_proj.weight
 
         aggregate_loss.backward()
         accumulate_steps = 1
@@ -304,11 +300,9 @@ def update_weights(
             weights_after = cfg.causal_lm.module.transformer.model.layers[
                 -3
             ].mlp.up_proj.weight
-            non_qhead_weights_after = (
-                cfg.causal_lm.module.transformer.model.layers[
-                    -3
-                ].mlp.up_proj.weight
-            )
+            non_qhead_weights_after = cfg.causal_lm.module.transformer.model.layers[
+                -3
+            ].mlp.up_proj.weight
             assert (weights_before == weights_after).all(), "Should be frozen"
             assert (
                 non_qhead_weights_before == non_qhead_weights_after
