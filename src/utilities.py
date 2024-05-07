@@ -175,7 +175,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
     parameters = list(
         param
         for name, param in causal_lm.module.transformer.named_parameters()
-        if ".lora" in name
+        if "lora" in name
     )
 
     if init_cfg.optimizer == "sgd":
