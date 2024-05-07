@@ -54,11 +54,13 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             r=8,
             lora_alpha=16,
             lora_dropout=0.1,
-            target_modules=mlp_modules,
+            target_modules="all-linear",
+            init_lora_weights="gaussian",
         )
         ## print("Num Linear Layers: ", len(linear_layers))
         self.transformer = get_peft_model(self.transformer, peft_config)
         self.transformer.print_trainable_parameters()
+        self.transformer.disable_adapter_layers()
 
     def forward(
         self,
