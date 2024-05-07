@@ -55,12 +55,20 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             lora_alpha=16,
             lora_dropout=0.1,
             target_modules="all-linear",
-            init_lora_weights="gaussian",
+            # init_lora_weights="gaussian",
         )
         ## print("Num Linear Layers: ", len(linear_layers))
-        self.transformer = get_peft_model(self.transformer, self.peft_config)
-        self.transformer.print_trainable_parameters()
-        self.transformer.disable_adapter_layers()
+        # self.transformer = get_peft_model(self.transformer, self.peft_config)
+        self.transformer.add_adapter(self.peft_config, adapter_name="qhead")
+        self.transformer.disable_adapters()
+        for name, module in self.transformer.named_modules():
+            if "lora_B" in name or "lora_embedding_B" in name:
+                if isinstance(module, torch.nn.Linear):
+                    module.weight.normal_(mean=0.0, std=0.02)
+                else:
+                    module.qhead.weight.normal_(mean=0.0, std=0.02)
+        # self.transformer.print_trainable_parameters()
+        # self.transformer.disable_adapter_layers()
 
     def forward(
         self,
@@ -70,10 +78,13 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
         **kwargs,
     ):
         if add_q_head:
-            self.transformer.add_adapter(self.peft_config, adapter_name="adapter_1")
+            # self.transformer.add_adapter(self.peft_config, adapter_name="adapter_1")
             # self.transformer.enable_adapter_layers()
+            self.transformer.enable_adapters()
         else:
-            self.transformer.unload()
+            # self.transformer.unload()
+            self.transformer.disable_adapters()
+            # self.transformer.disable_adapter_layers()
             # self.transformer.disable_adapter_layers()
         # with nullcontext() if add_q_head else self.transformer.disable_adapter():
         outputs = self.transformer(
