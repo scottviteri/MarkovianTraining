@@ -7,9 +7,12 @@ import numpy as np
 import tqdm
 import random
 from scipy.ndimage.filters import gaussian_filter1d
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import RBF, Matern, WhiteKernel, ConstantKernel
+from sklearn.preprocessing import StandardScaler
 
 from utilities import extend_initial_config, predict_observation
-from config_examples import configs
+from config_examples import configs, lma
 from training_types import PerturbationConfig
 
 
@@ -36,7 +39,7 @@ def perturb_action(action, cfg, perturbation_cfg):
     frac_spaces = perturbation_cfg.frac_of_tokens_to_pad
     assert 1.0 >= frac_spaces >= 0.0, f"frac_randomize is {frac_spaces}"
     token_id_space = cfg.tokenizer.encode(" ")[-1]
-    action_out[:, offset + int((1.0 - frac_spaces) * (action.shape[-1] - offset)) :] = (
+    action_out[:, offset + int((1.0 - frac_spaces) * (action.shape[-1] - offset)):] = (
         token_id_space
     )
 
@@ -181,13 +184,13 @@ class ActionEvaluator:
                 frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
-            "25%Rand": PerturbationConfig(
+            "20%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.25,
                 frac_of_tokens_to_pad=0.0,
                 p_digit_change=0.0,
             ),
-            "20%Rand": PerturbationConfig(
+            "10%Rand": PerturbationConfig(
                 eval_every=self.eval_every,
                 frac_of_tokens_to_randomize=0.20,
                 frac_of_tokens_to_pad=0.0,
@@ -312,32 +315,121 @@ class ActionEvaluator:
 
         return eval_results
 
-    @staticmethod
-    def plot_results(results, model_name, train_model, file_name, x_max_data=None):
-        """"""
+colors = {
+    "darkblue": (0., 0., 0.5),
+    "Training": (0.05, 0.03, 0.53),
+    "Pure": (0.99, 0.2, 0.36),
+    "plasmagreen": (0.14, 0.92, 0.14),
+    "plasmaorange": (0.97, 0.58, 0.25),
+}
 
-        fig, axs = plt.subplots(1, 1, figsize=(9, 4))
-        fig2, axs2 = plt.subplots(1, 1, figsize=(9, 4))
-        fig3, axs3 = plt.subplots(1, 1, figsize=(9, 4))
+def plot_results(results, model_name, train_model, file_name, x_max_data=None):
+    """"""
 
-        # fig.suptitle(f"Eval: {model_name}, Train: {train_model}")
-        # fig2.suptitle(f"Eval: {model_name}, Train: {train_model}")
-        # fig3.suptitle(f"Eval: {model_name}, Train: {train_model}")
-        x_max = 0.0
-        x_min = -1.0
+    fig, axs = plt.subplots(1, 1, figsize=(8, 5))
+    fig2, axs2 = plt.subplots(1, 1, figsize=(8, 5))
+    fig3, axs3 = plt.subplots(1, 1, figsize=(8, 5))
+    fig4, axs4 = plt.subplots(1, 1, figsize=(8, 5))
 
-        colors = {
-            "darkblue": (0., 0., 0.5),
-            "Training": (0.05, 0.03, 0.53),
-            "Pure": (0.99, 0.2, 0.36),
-            "plasmagreen": (0.14, 0.92, 0.14),
-            "plasmaorange": (0.97, 0.58, 0.25),
-        }
-        f_sp = 1.
-        f_dig = 1.
-        f_rand = 1.
+    # fig.suptitle(f"Eval: {model_name}, Train: {train_model}")
+    # fig2.suptitle(f"Eval: {model_name}, Train: {train_model}")
+    # fig3.suptitle(f"Eval: {model_name}, Train: {train_model}")
+    x_max = 0.0
+    x_min = -1.0
 
-        for keys in results:
+    f_sp = 1.
+    f_dig = 1.
+    f_rand = 1.
+
+    for keys in results:
+        if x_max_data:
+            mask = np.array(results[keys])[:, 0] <= x_max_data
+            x, y = np.array(results[keys])[mask].T
+            x_max = x_max_data
+        else:
+            x, y = np.array(results[keys]).T
+            x_max = np.max([x_max, np.max(x)])
+        x_min = np.min([x_min, np.min(x)])
+
+        if "Spaces" in keys:
+            axs.plot(x, y, ".", label=None, alpha=0.12,
+                     color=(0.3 * f_sp, 0.3 * f_sp, 0.3 * f_sp))
+            y_smoothed = gaussian_filter1d(y, sigma=3)
+            axs.plot(x, y_smoothed, "-", label=keys,
+                     color=(0.3 * f_sp, 0.3 * f_sp, 0.3 * f_sp), lw=2)
+            f_sp = f_sp * 1.45
+        elif "Digit" in keys:
+            axs2.plot(x, y, ".", label=None, alpha=0.12,
+                      color=(0.3 * f_dig, 0.3 * f_dig, 0.3 * f_dig))
+            y_smoothed = gaussian_filter1d(y, sigma=3)
+            axs2.plot(x, y_smoothed, "-", label=keys,
+                      color=(0.3 * f_dig, 0.3 * f_dig, 0.3 * f_dig), lw=2)
+            f_dig = f_dig * 1.45
+        elif "Rand" in keys:
+            axs3.plot(x, y, ".", label=None, alpha=0.12,
+                      color=(0.3 * f_rand, 0.3 * f_rand, 0.3 * f_rand))
+            y_smoothed = gaussian_filter1d(y, sigma=3)
+            axs3.plot(x, y_smoothed, "-", label=keys,
+                      color=(0.3 * f_rand, 0.3 * f_rand, 0.3 * f_rand), lw=2)
+            f_rand = f_rand * 1.45
+        elif "Pure" in keys:
+            axs.plot(x, y, ".", label=None, alpha=0.12, color=colors[keys])
+            y_smoothed = gaussian_filter1d(y, sigma=3)
+            axs.plot(x, y_smoothed, "-", label="Unperturbed", color=colors[keys], lw=2)
+            axs2.plot(x, y, ".", label=None, alpha=0.12, color=colors[keys])
+            axs2.plot(x, y_smoothed, "-", label="Unperturbed", color=colors[keys], lw=2)
+            axs3.plot(x, y, ".", label=None, alpha=0.12, color=colors[keys])
+            axs3.plot(x, y_smoothed, "-", label="Unperturbed", color=colors[keys], lw=2)
+
+        else:
+            y_smoothed = gaussian_filter1d(y, sigma=3)
+            axs4.plot(x, y, ".", label=None, alpha=0.12, color=colors[keys])
+            axs4.plot(x, y_smoothed, "-", label=keys, color=colors[keys], lw=2)
+
+    for a in [axs, axs2, axs3, axs4]:
+        a.set_xlabel("Training Steps [ ]", fontsize=18)
+        a.set_ylabel("Prediction Loss [a.u.]", fontsize=18)
+        a.legend(loc="upper right")
+        a.set_xlim(x_min - x_max * 0.05, x_max * 1.3)
+        a.tick_params(axis='both', which='major', labelsize=18)
+
+    fig.tight_layout()
+    fig2.tight_layout()
+    fig3.tight_layout()
+    fig4.tight_layout()
+    fig.savefig(f"{file_name[:-5]}_1.pdf", dpi=300)
+    fig2.savefig(f"{file_name[:-5]}_2.pdf", dpi=300)
+    fig3.savefig(f"{file_name[:-5]}_3.pdf", dpi=300)
+    fig4.savefig(f"{file_name[:-5]}_4.pdf", dpi=300)
+
+
+def plot_result_differences(results, model_name, train_model, file_name, tar_key, x_max_data=None):
+    """"""
+
+    val_keys = ["Digit", "Spaces"]
+    assert tar_key in val_keys, f"{tar_key} not in {val_keys}"
+
+    fig, axs = plt.subplots(1, 1, figsize=(8, 5))
+    fig2, axs2 = plt.subplots(1, 1, figsize=(8, 5))
+    fig3, axs3 = plt.subplots(1, 1, figsize=(8, 5))
+    x_max = 0.0
+    x_min = -1.0
+
+    f_sp = 1.
+    f_dig = 1.
+    f_rand = 1.
+
+    # do max x val for Pure
+    x_pure, y_pure = np.array(results["Pure"]).T
+    x_max = np.max([x_max, np.max(x_pure)])
+    x_min = np.min([x_min, np.min(y_pure)])
+
+    a_list = [axs, axs2, axs3]
+
+    for keys in results:
+        if "Pure" in keys:
+            continue
+        if tar_key in keys:
             if x_max_data:
                 mask = np.array(results[keys])[:, 0] <= x_max_data
                 x, y = np.array(results[keys])[mask].T
@@ -347,111 +439,113 @@ class ActionEvaluator:
                 x_max = np.max([x_max, np.max(x)])
             x_min = np.min([x_min, np.min(x)])
 
-            if "Spaces" in keys:
-                axs.plot(x, y, ".", label=None, alpha=0.15,
-                         color=(0.3 * f_sp, 0.3 * f_sp, 0.3 * f_sp))
-                y_smoothed = gaussian_filter1d(y, sigma=2)
-                axs.plot(x, y_smoothed, "-", label=keys,
-                         color=(0.3 * f_sp, 0.3 * f_sp, 0.3 * f_sp))
-                f_sp = f_sp * 1.5
-            elif "Digit" in keys:
-                axs2.plot(x, y, ".", label=None, alpha=0.15,
-                          color=(0.3 * f_dig, 0.3 * f_dig, 0.3 * f_dig))
-                y_smoothed = gaussian_filter1d(y, sigma=2)
-                axs2.plot(x, y_smoothed, "-", label=keys,
-                          color=(0.3 * f_dig, 0.3 * f_dig, 0.3 * f_dig))
-                f_dig = f_dig * 1.6
-            elif "Rand" in keys:
-                axs3.plot(x, y, ".", label=None, alpha=0.15,
-                          color=(0.3 * f_rand, 0.3 * f_rand, 0.3 * f_rand))
-                y_smoothed = gaussian_filter1d(y, sigma=2)
-                axs3.plot(x, y_smoothed, "-", label=keys,
-                          color=(0.3 * f_rand, 0.3 * f_rand, 0.3 * f_rand))
-                f_rand = f_rand * 1.6
-            else:  # "Training and Pure"
-                axs.plot(x, y, ".", label=None, alpha=0.2, color=colors[keys])
-                y_smoothed = gaussian_filter1d(y, sigma=2)
-                axs.plot(x, y_smoothed, "-", label=keys, color=colors[keys])
-                axs2.plot(x, y, ".", label=None, alpha=0.2, color=colors[keys])
-                axs2.plot(x, y_smoothed, "-", label=keys, color=colors[keys])
-                axs3.plot(x, y, ".", label=None, alpha=0.2, color=colors[keys])
-                axs3.plot(x, y_smoothed, "-", label=keys, color=colors[keys])
+            a = a_list.pop()
 
-        for a in [axs, axs2, axs3]:
-            a.set_xlabel("Training Steps [ ]")
-            a.set_ylabel("Average Prediction Loss [a.u.]")
-            a.legend(loc="upper right")
-            a.set_xlim(x_min - x_max * 0.05, x_max * 1.3)
+            scaler = StandardScaler()
+            x_loss_gp = x_pure
+            loss_gp = y_pure - y
+            X_normalized = scaler.fit_transform(x_loss_gp.reshape(-1, 1))
+            # kernel = Matern(nu=1.5) + ConstantKernel(1.0) * RBF(length_scale=50.0)
+            kernel = Matern(nu=1.5) + WhiteKernel(noise_level=2., noise_level_bounds=[0.7, 5.])
+            gp_signal = GaussianProcessRegressor(kernel=kernel, alpha=0.7,
+                                                 n_restarts_optimizer=10)
+            gp_signal.fit(X_normalized, loss_gp)
+            y_pred, sigma = gp_signal.predict(X_normalized, return_std=True)
 
-        # plt.tight_layout()
-        fig.savefig(f"{file_name[:-5]}_1.pdf", dpi=300)
-        fig2.savefig(f"{file_name[:-5]}_2.pdf", dpi=300)
-        fig3.savefig(f"{file_name[:-5]}_3.pdf", dpi=300)
+            a.plot(x_loss_gp, y_pred, label=f"Unperturbed - {keys} (Predicted)",
+                     color=colors["Pure"], lw=2)
+            a.fill_between(
+                x_loss_gp,
+                y_pred - 1.96 * sigma,
+                y_pred + 1.96 * sigma,
+                color=colors["Pure"],
+                alpha=0.5,
+                label=r"95% Conf.",
+            )
+            a.plot(x_pure, [0.] * x_pure.shape[-1], "--", color="k", alpha=0.5)
 
-    # @staticmethod
-    # def plot_results(results, model_name, train_model, file_name):
-    #    """"""
+            a.plot(x_pure, y_pure - y, ".", label=None, alpha=0.12, color=colors["Training"])
+                     # color=(0.3 * f_sp, 0.3 * f_sp, 0.3 * f_sp))
+            y_smoothed = gaussian_filter1d(y_pure - y, sigma=3)
+            a.plot(x, y_smoothed, "-", label=f"Unperturbed - {keys} (Smoothed)", color=colors["Training"])
+                     # color=(0.3 * f_sp, 0.3 * f_sp, 0.3 * f_sp), lw=2)
+            # f_sp = f_sp * 1.45
 
-    #    fig, axs = plt.subplots(1, 2, figsize=(12, 4))
 
-    #    fig.suptitle(f"Eval: {model_name}, Train: {train_model}")
-    #    x_max = 0.0
-    #    x_min = -1.0
+    for a in [axs, axs2, axs3]:
+        a.set_xlabel("Training Steps [ ]", fontsize=18)
+        a.set_ylabel("Loss Difference [a.u.]", fontsize=18)
+        a.legend(loc="upper right", prop={'size': 12})
+        a.set_xlim(x_min - x_max * 0.05, x_max * 1.1)
+        a.tick_params(axis='both', which='major', labelsize=18)
 
-    #    for keys in results:
-    #        x, y = np.array(results[keys]).T
-    #        x_max = np.max([x_max, np.max(x)])
-    #        x_min = np.min([x_min, np.min(x)])
-
-    #        if "Spaces" in keys:
-    #            axs[0].plot(x, y, ".", label=keys)
-    #        elif "Rand" in keys:
-    #            axs[1].plot(x, y, ".", label=keys)
-    #        elif "Training" in keys:
-    #            axs[0].plot(x, y, "", label=keys)
-    #            axs[1].plot(x, y, "", label=keys)
-    #        else:
-    #            # This case includes the "Pure" action results
-    #            axs[0].plot(x, y, ".", label=keys)
-    #            axs[1].plot(x, y, ".", label=keys)
-
-    #    axs[0].set_title("Replacing with Spaces")
-    #    axs[1].set_title("Swapping with Random Token")
-    #    for i in [0, 1]:
-    #        axs[i].set_xlabel("Training Steps [ ]")
-    #        axs[i].set_ylabel("Average Prediction Loss [a.u.]")
-    #        axs[i].legend(loc="upper right")
-    #        axs[i].set_xlim(x_min - x_max * 0.1, x_max * 1.5)
-
-    #    # plt.tight_layout()
-    #    plt.savefig(f"results/{file_name[:-5]}.png")
-    #    plt.show()
-
+    fig.tight_layout()
+    fig2.tight_layout()
+    fig3.tight_layout()
+    fig.savefig(f"{file_name[:-5]}_diff{tar_key}_1.pdf", dpi=300)
+    fig2.savefig(f"{file_name[:-5]}_diff{tar_key}_2.pdf", dpi=300)
+    fig3.savefig(f"{file_name[:-5]}_diff{tar_key}_3.pdf", dpi=300)
 
 def main():
-    # file_name = "gpt2_traj_1709608868.json"
-    file_name = "mistral_traj_20240329_051532.json"
+    re_evaluate = False
+    do_diffs = True
+    if re_evaluate:
+        # file_name = "gpt2_traj_1709608868.json"
+        file_name = "mistral_traj_20240329_234001.json"
 
-    # Set model
-    init_cfg = configs[0]
-    assert init_cfg.model_name == "mistral"  # data["model"]
-    # init_cfg.use_mac = False  # data["model"]
-    assert init_cfg.perturbation_cfg is None
+        # Set model
+        # init_cfg = configs[0]
+        init_cfg = lma
+        print(init_cfg.model_name)
+        assert init_cfg.model_name == "llama"  # data["model"]
+        # init_cfg.use_mac = False  # data["model"]
+        assert init_cfg.perturbation_cfg is None
 
-    cfg = extend_initial_config(configs[0])
+        cfg = extend_initial_config(init_cfg)
 
-    eval_class = ActionEvaluator(configs=[cfg], f_name=file_name, n_step=50)
-    res = eval_class.evaluate()
-    print(res)
-    eval_class.plot_results(
-        res[cfg.model_name],
-        model_name="mistral7b",
-        train_model="mistral7b",
-        file_name=file_name,
-    )
+        eval_class = ActionEvaluator(configs=[cfg], f_name=file_name, n_step=1)
+        res = eval_class.evaluate()
+        print(res)
+        plot_results(
+            res[cfg.model_name],
+            model_name="mistral7b",
+            train_model="mistral7b",
+            file_name=file_name,
+        )
 
-    with open('result.json', 'w') as fp:
-        json.dump(res, fp)
+        with open('result.json', 'w') as fp:
+            json.dump(res, fp)
+
+    elif not do_diffs:
+        file_name = "mistral_traj_20240329_234001.json"
+        with open('result_mistralfinal.json', 'r') as fp:
+            res = json.load(fp)
+
+        plot_results(
+            res["mistral"],
+            model_name="mistral7b",
+            train_model="mistral7b",
+            file_name=file_name,
+        )
+    else:
+        file_name = "mistral_traj_20240329_234001.json"
+        with open('result_mistralfinal.json', 'r') as fp:
+            res = json.load(fp)
+
+        plot_result_differences(
+            res["mistral"],
+            model_name="mistral7b",
+            train_model="mistral7b",
+            file_name=file_name,
+            tar_key="Spaces",
+        )
+        plot_result_differences(
+            res["mistral"],
+            model_name="mistral7b",
+            train_model="mistral7b",
+            file_name=file_name,
+            tar_key="Digit",
+        )
 
 
 if __name__ == "__main__":
