@@ -446,7 +446,14 @@ def plot_result_differences(results, model_name, train_model, file_name, tar_key
             loss_gp = y_pure - y
             X_normalized = scaler.fit_transform(x_loss_gp.reshape(-1, 1))
             # kernel = Matern(nu=1.5) + ConstantKernel(1.0) * RBF(length_scale=50.0)
-            kernel = Matern(nu=1.5) + WhiteKernel(noise_level=2., noise_level_bounds=[0.7, 5.])
+            if tar_key == "Spaces":
+                kernel = Matern(nu=1.5, length_scale = 0.5) + WhiteKernel(noise_level=2., noise_level_bounds=[0.4, 3.])
+                if keys == "80%Spaces":
+                    kernel = Matern(nu=1.5, length_scale=0.5) + WhiteKernel(
+                        noise_level=2., noise_level_bounds=[0.7, 3.])
+            else:
+                kernel = Matern(nu=1.5, length_scale = 0.5, length_scale_bounds=[1e-3, 1e0]) + WhiteKernel(noise_level=2.,
+                                                      noise_level_bounds=[0.01, 0.5])
             gp_signal = GaussianProcessRegressor(kernel=kernel, alpha=0.7,
                                                  n_restarts_optimizer=10)
             gp_signal.fit(X_normalized, loss_gp)
@@ -482,9 +489,9 @@ def plot_result_differences(results, model_name, train_model, file_name, tar_key
     fig.tight_layout()
     fig2.tight_layout()
     fig3.tight_layout()
-    fig.savefig(f"{file_name[:-5]}_diff{tar_key}_1.pdf", dpi=300)
-    fig2.savefig(f"{file_name[:-5]}_diff{tar_key}_2.pdf", dpi=300)
-    fig3.savefig(f"{file_name[:-5]}_diff{tar_key}_3.pdf", dpi=300)
+    fig.savefig(f"{file_name[:-5]}_{model_name}_diff{tar_key}_1.pdf", dpi=300)
+    fig2.savefig(f"{file_name[:-5]}_{model_name}_diff{tar_key}_2.pdf", dpi=300)
+    fig3.savefig(f"{file_name[:-5]}_{model_name}_diff{tar_key}_3.pdf", dpi=300)
 
 def main():
     re_evaluate = False

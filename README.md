@@ -18,3 +18,4 @@ If you are not running on a machine with >= 80GB VRAM, then you will want to cha
 * `src/prepare_dataset.py` generates a dataset in the form of an iter of dicts with keys "Action" and "Observation". Conceptually, it outputs just observations, but having an optional "Action" allows us to supply fake CoTs to the model, which is useful for debugging.
 * `src/evaluate_via_gpt.py` is disconnected from the main loop, and can generate `arithmetic_explanations.json`, a gold standard (gpt4-generated) table of (question, CoT, answer) triples. 
 * `src/evaluate_actions.py` generates plots (the ones in the paper) from the full output log of a training run in the form of a json file such as `mistral_traj_20240329_051521.json`.
+* * `src/plot_lss.py` generates the loss plot (the one in the paper) from the full output log of a training run in the form of a csv file.
