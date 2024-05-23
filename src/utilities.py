@@ -553,7 +553,7 @@ def wrap_input_tokens(
     begin_instruct_tokens = (
         cfg.tokenizer.encode(
             (
-                "[INST] Use the following possibly mistaken reasoning to help predict the true numerical answer, which will come immediately after the 'Answer:' tag. Try to spot flaws in the provided reasoning to guide your prediction."
+                "[INST] Use the following possibly mistaken reasoning to help predict the true answer, which will come immediately after the 'Answer:' tag. Try to spot flaws in the provided reasoning to guide your prediction."
                 if is_prediction
                 else "[INST]"
             ),
