@@ -116,7 +116,7 @@ phi2 = InitialConfig(
 
 mst = InitialConfig(
     model_name="mistral",
-    lr=5e-5,
+    lr=1e-4,
     optimizer="adam",
     batch_size=3,
     num_batches=501,
@@ -153,7 +153,7 @@ mst = InitialConfig(
 
 q_mst = InitialConfig(
     model_name="mistral",
-    lr=5e-5,
+    lr=1e-4,
     optimizer="adam",
     batch_size=3,
     num_batches=501,
