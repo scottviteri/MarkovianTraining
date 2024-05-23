@@ -47,15 +47,13 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             model_name_or_path, config=config
         )
         qhead = copy.deepcopy(self.transformer)
-
-        mlp_modules = get_mlp_modules(qhead)
         peft_config = LoraConfig(
             task_type="CAUSAL_LM",
             inference_mode=False,
             r=8,
             lora_alpha=16,
             lora_dropout=0.1,
-            target_modules=mlp_modules,
+            target_modules="all_linear",
         )
         ## print("Num Linear Layers: ", len(linear_layers))
         self.qhead = get_peft_model(qhead, peft_config)
