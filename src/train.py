@@ -341,7 +341,7 @@ def update_weights(
                 non_qhead_weights_before == non_qhead_weights_after
             ).all(), "Should be frozen"
 
-        losses = [action_losses, trained_send_receiver_obs_losses, value_losses, negentropies]
+        losses = [action_losses, trained_sender_receiver_obs_losses, value_losses, negentropies]
         return aggregate_loss, losses
 
 
