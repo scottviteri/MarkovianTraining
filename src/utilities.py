@@ -173,7 +173,7 @@ def extend_initial_config(init_cfg: InitialConfig) -> Config:
 
     if init_cfg.wandb and (init_cfg.use_mac or rank == 0):
         wandb.init(
-            project="collaborative-training-many-per-context-window",
+            project="markovian-training",
             name=create_run_name(init_cfg),
         )
 
