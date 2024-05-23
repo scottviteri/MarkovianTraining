@@ -153,7 +153,7 @@ mst = InitialConfig(
 
 q_mst = InitialConfig(
     model_name="mistral",
-    lr=1e-4,
+    lr=5e-5,
     optimizer="adam",
     batch_size=4,
     num_batches=501,
