@@ -151,4 +151,41 @@ mst = InitialConfig(
     debug=None,
 )
 
-configs = [mst]
+q_mst = InitialConfig(
+    model_name="mistral",
+    lr=1e-4,
+    optimizer="adam",
+    batch_size=4,
+    num_batches=501,
+    replay_buffer_size=None,
+    interval_save_weights=500,
+    use_mac=False,
+    interval_print=1,
+    wandb=True,
+    load_model=False,
+    do_lora=False,
+    num_beams=1,
+    ctxt_sizes=ContextSizes(40, 70, 400, 100),
+    dataset=InitDatasetType(
+        task=QuestionTask(
+            num_terms=15,
+            num_digits=2,
+            operations=["+", "-", "*"],
+            probs=[1.0, 0.0, 0.0],
+            cumulative=True,
+        ),
+        peek_every=None,
+    ),
+    inference_cfg=InferenceConfig(num_return_sequences=1),
+    prediction_cfg=PredictionConfig(
+        train_O_given_A=True,
+        train_O_given_prev_O=False,
+    ),
+    trainer_cfg=TrainerConfig(
+        prediction_training_length=1, inference_training_length=1000
+    ),
+    perturbation_cfg=None,
+    debug=None,
+)
+
+configs = [q_mst]

@@ -75,6 +75,16 @@ def initialize_dataset(
         )
     elif isinstance(task, WikipediaTask):
         return init_wikipedia_dataset()
+    
+    elif isinstance(task, QuestionTask):
+        return init_question_dataset(
+            task,
+            prefix_tensors,
+            pure_ctxt_sizes,
+            init_cfg,
+            tokenizer,
+            device,
+        )
     else:
         raise ValueError("Unknown dataset")
 
@@ -202,6 +212,132 @@ def init_arithmetic_dataset(
     itr_ds = tokenize_batches(itr_ds)
     # itr_ds = debug(itr_ds)
     return itr_ds
+
+
+def init_question_dataset(
+    task,
+    prefix_tensors,
+    pure_ctxt_sizes,
+    init_cfg,
+    tokenizer,
+    device,
+):
+
+    def to_qa_traj_itr(itr):
+        while 1:
+            qa = next(itr)
+            yield iter(
+                [
+                    Datapt(
+                        action="Generate an explanation of the question that is sufficient to reconstruct the question without looking at the question.",
+                        obs=qa.question,
+                        is_first=True,
+                    ),
+                    Datapt(action=qa.explanation, obs=qa.answer, is_first=False),
+                ]
+            )
+
+    def tokenize_and_pad(
+        device,
+        tokenizer,
+        prefix_tensors,
+        pure_ctxt_sizes,
+        datapt,
+    ):
+        obs_tok = tokenizer(datapt.obs, add_special_tokens=False, return_tensors="pt")[
+            "input_ids"
+        ][0].to(device)
+        tok_per_pure_action = (
+            pure_ctxt_sizes.first_action_size
+            if datapt.is_first
+            else pure_ctxt_sizes.action_size
+        )
+        tok_per_pure_obs = (
+            pure_ctxt_sizes.first_obs_size
+            if datapt.is_first
+            else pure_ctxt_sizes.obs_size
+        )
+        assert len(obs_tok) < tok_per_pure_obs
+        obs_pad_tok = torch.full(
+            (tok_per_pure_obs - len(obs_tok),),
+            tokenizer.pad_token_id,
+            dtype=torch.int64,
+            device=device,
+        )
+        action_prefix_tensor = (
+            prefix_tensors.first_action_prefix_tensor
+            if datapt.is_first
+            else prefix_tensors.action_prefix_tensor
+        )
+        obs_prefix_tensor = (
+            prefix_tensors.first_obs_prefix_tensor
+            if datapt.is_first
+            else prefix_tensors.obs_prefix_tensor
+        )
+        if datapt.action:
+            action_tok = tokenizer(
+                datapt.action, add_special_tokens=False, return_tensors="pt"
+            )["input_ids"][0].to(device)
+            assert len(action_tok) < tok_per_pure_action
+            action_pad_tok = torch.full(
+                (tok_per_pure_action - len(action_tok),),
+                tokenizer.pad_token_id,
+                dtype=torch.int64,
+                device=device,
+            )
+            return Datapt(
+                obs=torch.cat([obs_prefix_tensor[0], obs_tok, obs_pad_tok]),
+                action=torch.cat([action_prefix_tensor[0], action_tok, action_pad_tok]),
+                is_first=datapt.is_first,
+            )
+        else:
+            return Datapt(
+                obs=torch.cat([obs_prefix_tensor[0], obs_tok, obs_pad_tok]),
+                action=None,
+                is_first=datapt.is_first,
+            )
+
+    def traj_itr_to_batch_lst(batch_size, traj_itr):
+        batch_itrs = [next(traj_itr) for _ in range(batch_size)]
+        while 1:
+            out_lst = []
+            for i in range(batch_size):
+                try:
+                    next_item = next(batch_itrs[i])
+                except StopIteration:
+                    batch_itrs[i] = next(traj_itr)
+                    next_item = next(batch_itrs[i])
+                out_lst.append(next_item)
+            yield out_lst
+
+    def tokenize_batches(qa_batch_lst_itr):
+        qa_tokenized_itr_ds = map(
+            lambda batch_lst: [
+                tokenize_and_pad(
+                    device,
+                    tokenizer,
+                    prefix_tensors,
+                    pure_ctxt_sizes,
+                    b,
+                )
+                for b in batch_lst
+            ],
+            qa_batch_lst_itr,
+        )
+        return qa_tokenized_itr_ds
+
+    itr_ds = question_generator(
+        task.num_terms, task.num_digits, task.operations, task.probs, task.cumulative
+    )
+    # itr_ds = debug(itr_ds)
+    itr_ds = to_qa_traj_itr(itr_ds)
+    # itr_ds = debug(itr_ds)
+    itr_ds = traj_itr_to_batch_lst(init_cfg.batch_size, itr_ds)
+    # itr_ds = debug(itr_ds)
+    itr_ds = tokenize_batches(itr_ds)
+    # itr_ds = debug(itr_ds)
+    return itr_ds
+
 
 
 def init_wikipedia_dataset(init_cfg, tokenizer, device):
@@ -371,6 +507,47 @@ def arithmetic_generator(num_terms, num_digits, operations, probs, cumulative):
         question = question[:-1] + "."
 
         answer = f"{total}"
+        yield QADatapt(question=question, explanation=None, answer=answer)
+
+def question_generator(num_terms, num_digits, operations, probs, cumulative):
+    # If not specified, use simple addition
+    if operations is None:
+        operations = ["+"]
+    # Use uniform distribution for operators if not set
+    if probs is None:
+        probs = [(1.0 / len(operations)) for _ in range(len(operations))]
+    # Check for valid operations
+    valid_ops = {"+": operator.add, "-": operator.sub, "*": operator.mul}
+    for op in operations:
+        assert (
+            op in valid_ops.keys()
+        ), f"Invalid operation {op} not in {valid_ops.keys()}"
+    assert len(probs) == len(operations), "len(Operations) != len(probs)"
+
+    while 1:
+        question = ""
+        total = 0.0
+        current_num_terms = (
+            num_terms if not cumulative else np.random.randint(2, num_terms + 1)
+        )
+        nums = torch.randint(0, 10**num_digits - 1, (current_num_terms,))
+        ops_rand = np.random.choice(operations, current_num_terms - 1, p=probs)
+
+        for i in range(current_num_terms):
+            num = nums[i]
+            if i == 0:
+                total = nums[0].item()
+                question += f"{num} "
+            else:
+                op_rand = ops_rand[i - 1]
+                total = valid_ops[op_rand](total, num)
+                if op_rand == "-":
+                    question += f"+ (-{num}) "
+                else:
+                    question += f"{op_rand} {num} "
+        question = question[:-1] + "."
+
+        answer = question[:-1] + "."
         yield QADatapt(question=question, explanation=None, answer=answer)
 
 

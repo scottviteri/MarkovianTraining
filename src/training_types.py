@@ -109,6 +109,14 @@ class ArithmeticTask:
     probs: Optional[list]
     cumulative: bool
 
+@dataclass(frozen=True)
+class QuestionTask:
+    num_digits: int
+    num_terms: int
+    operations: Optional[list]
+    probs: Optional[list]
+    cumulative: bool
+
 
 @dataclass(frozen=True)
 class WikipediaTask:

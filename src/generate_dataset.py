@@ -22,6 +22,14 @@ def generate_arithmetic_question():
     answer = str(eval(question))
     return {"Question": "Q: " + question, "Answer": "A: " + answer}
 
+def generate_question_question():
+    num1 = random.randint(100, 999)
+    num2 = random.randint(100, 999)
+    operation = random.choice(["+"])
+    question = f"{num1} {operation} {num2}"
+    answer = str(eval(question))
+    return {"Question": "Q: " + question, "Answer": "A: " + question}
+
 
 # arithmetic_questions = [generate_arithmetic_question() for _ in range(100000)]
 # print(arithmetic_questions)
