@@ -295,8 +295,8 @@ def update_weights(
                 {
                     "Values": values.mean(),
                     "Normalized Obs Loss": normalized_obs_losses.mean(),
-                    "Normalized Sender Score": trained_sender_obs_losses.mean()-obs_losses.mean(),
-                    "Normalized Receiver Score": trained_receiver_obs_losses.mean()-obs_losses.mean(), 
+                    "Normalized Sender Loss": trained_sender_obs_losses.mean()-obs_losses.mean(),
+                    "Normalized Receiver Loss": trained_receiver_obs_losses.mean()-obs_losses.mean(), 
                     "Value Loss": value_losses.mean(),
                     "Old Critic Action Loss": old_critic_action_losses.mean(),
                     "Action Prob Ratio": action_prob_ratios.mean(),
