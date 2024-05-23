@@ -53,7 +53,7 @@ class ModelWithQHead(PreTrainedModel, GenerationMixin):
             r=8,
             lora_alpha=16,
             lora_dropout=0.1,
-            target_modules="all_linear",
+            target_modules="all-linear",
         )
         ## print("Num Linear Layers: ", len(linear_layers))
         self.qhead = get_peft_model(qhead, peft_config)

@@ -165,7 +165,7 @@ q_mst = InitialConfig(
     load_model=False,
     do_lora=False,
     num_beams=1,
-    ctxt_sizes=ContextSizes(40, 70, 400, 100),
+    ctxt_sizes=ContextSizes(40, 70, 300, 100),
     dataset=InitDatasetType(
         task=QuestionTask(
             num_terms=15,
@@ -188,4 +188,4 @@ q_mst = InitialConfig(
     debug=None,
 )
 
-configs = [q_mst]
+configs = [mst]
