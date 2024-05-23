@@ -274,7 +274,7 @@ def update_weights(
             add_q_head=True,
             is_default_action=False,
         )
-        normalized_obs_losses = trained_sender_receiver_obs_losses- trained_receiver_obs_losses
+        normalized_obs_losses = trained_sender_receiver_obs_losses - trained_receiver_obs_losses
         repeated_obs_losses = normalized_obs_losses.unsqueeze(1).repeat(
             1, values.shape[1]
         )
@@ -341,7 +341,7 @@ def update_weights(
                 non_qhead_weights_before == non_qhead_weights_after
             ).all(), "Should be frozen"
 
-        losses = [action_losses, obs_losses, value_losses, negentropies]
+        losses = [action_losses, trained_send_receiver_obs_losses, value_losses, negentropies]
         return aggregate_loss, losses
 
 
