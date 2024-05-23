@@ -318,7 +318,7 @@ def update_weights(
             )
 
         aggregate_loss.backward()
-        accumulate_steps = 1
+        accumulate_steps = 10
         if do_weight_update and batch_index > 0 and batch_index % accumulate_steps == 0:
             for param in cfg.causal_lm.module.parameters():
                 if param.grad is not None:
