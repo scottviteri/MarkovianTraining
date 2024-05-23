@@ -246,21 +246,35 @@ def update_weights(
             old_critic_action_losses, _ = predict_action(
                 cfg, prev_action, prev_obs, action, add_q_head=False, add_v_head=False
             )
-            obs_losses = predict_observation(
+            frozen_receiver_obs_losses = predict_observation(
                 cfg,
                 action,
                 obs,
                 add_q_head=False,
                 is_default_action=False,
             )
-            default_obs_losses = predict_observation(
+            frozen_sender_receiver_obs_losses = predict_observation(
                 cfg,
                 default_action,
                 obs,
                 add_q_head=False,
                 is_default_action=True,
             )
-        normalized_obs_losses = obs_losses - default_obs_losses
+            frozen_sender_obs_losses = predict_observation(
+                cfg,
+                default_action,
+                obs,
+                add_q_head=True,
+                is_default_action=False,
+            )
+        obs_losses = predict_observation(
+            cfg,
+            action,
+            obs,
+            add_q_head=True,
+            is_default_action=False,
+        )
+        normalized_obs_losses = obs_losses - frozen_sender_obs_losses
         repeated_obs_losses = normalized_obs_losses.unsqueeze(1).repeat(
             1, values.shape[1]
         )
@@ -274,14 +288,14 @@ def update_weights(
         clipped = clipped_ratios * neg_advantages
         max_branch = torch.max(unclipped, clipped)
         aggregate_losses = max_branch + value_losses
-        aggregate_loss = aggregate_losses.mean()
-        aggregate_losses = obs_losses * action_log_probs
-        # aggregate_loss = aggregate_losses.mean()
+        aggregate_loss = (obs_losses.detach() * action_log_probs + obs_losses).mean()
+        #aggregate_losses = obs_losses * action_log_probs
         if cfg.wandb and cfg.rank == 0 and action_is_generated:
             wandb.log(
                 {
                     "Values": values.mean(),
                     "Normalized Obs Loss": normalized_obs_losses.mean(),
+                    "Frozen Receiver Normalized Obs Loss": frozen_receiver_obs_losses.mean()-frozen_sender_receiver_obs_losses.mean(), 
                     "Value Loss": value_losses.mean(),
                     "Old Critic Action Loss": old_critic_action_losses.mean(),
                     "Action Prob Ratio": action_prob_ratios.mean(),
