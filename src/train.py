@@ -242,6 +242,14 @@ def update_weights(
         action_losses, values, negentropies = predict_action(
             cfg, prev_action, prev_obs, action, add_q_head=True, add_v_head=True
         )
+        trained_sender_obs_losses_empty_action = predict_observation(
+            cfg,
+            torch.zeros((action.shape[0], 0), dtype=action.dtype, device=action.device),
+            obs,
+            add_q_head=False,
+            is_default_action=False,
+        )
+ 
         with torch.no_grad():  # just to be sure
             old_critic_action_losses, _ = predict_action(
                 cfg, prev_action, prev_obs, action, add_q_head=False, add_v_head=False
@@ -289,6 +297,7 @@ def update_weights(
         max_branch = torch.max(unclipped, clipped)
         aggregate_losses = max_branch + value_losses
         aggregate_loss = (trained_sender_receiver_obs_losses.detach() * action_log_probs + trained_sender_receiver_obs_losses).mean()
+        #aggregate_loss = (action_log_probs * ((trained_sender_obs_losses_empty_action - trained_sender_obs_losses)**2).detach()).mean()
         #aggregate_losses = trained_sender_receiver_obs_losses* action_log_probs
         if cfg.wandb and cfg.rank == 0 and action_is_generated:
             wandb.log(
