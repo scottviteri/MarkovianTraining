@@ -286,7 +286,8 @@ def update_weights(
         action_prob_ratios = torch.exp(action_log_probs - old_critic_action_log_probs)
         clipped_ratios = torch.clamp(action_prob_ratios, 0.9, 1.1)
         value_losses = torch.abs(values - repeated_obs_losses).mean(dim=1)
-        neg_advantages = (repeated_obs_losses - values.detach()).mean(dim=1)
+        neg_advantages = obs_losses
+        #neg_advantages = (repeated_obs_losses - values.detach()).mean(dim=1)
         unclipped = action_prob_ratios * neg_advantages
         clipped = clipped_ratios * neg_advantages
         max_branch = torch.max(unclipped, clipped)
