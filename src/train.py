@@ -242,13 +242,12 @@ def update_weights(
         action_losses, values, negentropies = predict_action(
             cfg, prev_action, prev_obs, action, add_q_head=True, add_v_head=True
         )
-        trained_sender_obs_losses_empty_action = predict_observation(
-            cfg,
-            torch.zeros((action.shape[0], 0), dtype=action.dtype, device=action.device),
-            obs,
-            add_q_head=False,
-            is_default_action=False,
-        )
+        #trained_sender_obs_losses_empty_action = predict_observation(
+        #    cfg,
+        #    torch.zeros((action.shape[0], 0), dtype=action.dtype, device=action.device),
+        #    obs,
+        #    add_q_head=False,
+        #)
  
         with torch.no_grad():  # just to be sure
             old_critic_action_losses, _ = predict_action(
@@ -259,30 +258,26 @@ def update_weights(
                 action,
                 obs,
                 add_q_head=False,
-                is_default_action=False,
             )
             obs_losses = predict_observation(
                 cfg,
                 default_action,
                 obs,
                 add_q_head=False,
-                is_default_action=True,
             )
             trained_receiver_obs_losses = predict_observation(
                 cfg,
                 default_action,
                 obs,
                 add_q_head=True,
-                is_default_action=False,
             )
-        trained_sender_receiver_obs_losses= predict_observation(
+        trained_sender_receiver_obs_losses = predict_observation(
             cfg,
             action,
             obs,
             add_q_head=True,
-            is_default_action=False,
         )
-        normalized_obs_losses = trained_sender_receiver_obs_losses - trained_receiver_obs_losses
+        normalized_obs_losses = trained_sender_obs_losses - obs_losses 
         repeated_obs_losses = normalized_obs_losses.unsqueeze(1).repeat(
             1, values.shape[1]
         )
@@ -296,7 +291,8 @@ def update_weights(
         clipped = clipped_ratios * neg_advantages
         max_branch = torch.max(unclipped, clipped)
         aggregate_losses = max_branch + value_losses
-        aggregate_loss = (trained_sender_receiver_obs_losses.detach() * action_log_probs + trained_sender_receiver_obs_losses).mean()
+        aggregate_loss = aggregate_losses.mean()
+        #aggregate_loss = (trained_sender_receiver_obs_losses.detach() * action_log_probs + trained_sender_receiver_obs_losses).mean()
         #aggregate_loss = (action_log_probs * ((trained_sender_obs_losses_empty_action - trained_sender_obs_losses)**2).detach()).mean()
         #aggregate_losses = trained_sender_receiver_obs_losses* action_log_probs
         if cfg.wandb and cfg.rank == 0 and action_is_generated:
@@ -328,7 +324,7 @@ def update_weights(
             )
 
         aggregate_loss.backward()
-        accumulate_steps = 1
+        accumulate_steps = 15
         if do_weight_update and batch_index > 0 and batch_index % accumulate_steps == 0:
             for param in cfg.causal_lm.module.parameters():
                 if param.grad is not None:
