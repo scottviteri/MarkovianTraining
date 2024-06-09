@@ -283,17 +283,20 @@ def update_weights(
         )
         action_log_probs = -action_losses
         old_critic_action_log_probs = -old_critic_action_losses
-        action_prob_ratios = torch.exp(action_log_probs - old_critic_action_log_probs)
+        kl_estimate = action_log_probs - old_critic_action_log_probs
+        action_prob_ratios = torch.exp(kl_estimate)
         clipped_ratios = torch.clamp(action_prob_ratios, 0.9, 1.1)
         value_losses = torch.abs(values - repeated_obs_losses).mean(dim=1)
         neg_advantages = obs_losses
-        #neg_advantages = (repeated_obs_losses - values.detach()).mean(dim=1)
+        neg_advantages = (repeated_obs_losses - values.detach()).mean(dim=1)
         unclipped = action_prob_ratios * neg_advantages
         clipped = clipped_ratios * neg_advantages
         max_branch = torch.max(unclipped, clipped)
+        alpha = 0.1
+        loss = trained_sender_receiver_obs_losses + alpha * kl_estimate
         aggregate_losses = max_branch + value_losses
         aggregate_loss = aggregate_losses.mean()
-        #aggregate_loss = (trained_sender_receiver_obs_losses.detach() * action_log_probs + trained_sender_receiver_obs_losses).mean()
+        aggregate_loss = (loss.detach() * action_log_probs + loss).mean()
         #aggregate_loss = (action_log_probs * ((trained_sender_obs_losses_empty_action - trained_sender_obs_losses)**2).detach()).mean()
         #aggregate_losses = trained_sender_receiver_obs_losses* action_log_probs
         if cfg.wandb and cfg.rank == 0 and action_is_generated:
