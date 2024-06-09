@@ -296,7 +296,8 @@ def update_weights(
         loss = trained_sender_receiver_obs_losses + alpha * kl_estimate
         aggregate_losses = max_branch + value_losses
         aggregate_loss = aggregate_losses.mean()
-        aggregate_loss = (loss.detach() * action_log_probs + loss).mean()
+        beta = 0
+        aggregate_loss = (loss.detach() * action_log_probs + beta*loss).mean()
         #aggregate_loss = (action_log_probs * ((trained_sender_obs_losses_empty_action - trained_sender_obs_losses)**2).detach()).mean()
         #aggregate_losses = trained_sender_receiver_obs_losses* action_log_probs
         if cfg.wandb and cfg.rank == 0 and action_is_generated:
