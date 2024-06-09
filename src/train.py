@@ -303,6 +303,8 @@ def update_weights(
             wandb.log(
                 {
                     "Values": values.mean(),
+                    "Kl Estimate": kl_estimate.mean(),
+                    "Loss": loss.mean(),
                     "Normalized Obs Loss": normalized_obs_losses.mean(),
                     "Normalized Sender Loss": trained_sender_obs_losses.mean()-obs_losses.mean(),
                     "Normalized Receiver Loss": trained_receiver_obs_losses.mean()-obs_losses.mean(), 
