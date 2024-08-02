@@ -106,6 +106,10 @@ if __name__ == "__main__":
         print(
             f"Answer: {ans} Threshold Loss: {threshold:.2f}, Current Loss: {nll_loss:.2f}"
         )
+        # Initialize gradient accumulation variables
+        accumulation_steps = 4  # Adjust this value as needed
+        accumulated_loss = 0
+        step_count = 0
 
         if nll_loss < threshold:
             model.train()
@@ -131,10 +135,25 @@ if __name__ == "__main__":
                 2, target_tokens.unsqueeze(2)
             ).squeeze(2)
             loss = -gathered_log_probs.mean()
+
+            # Normalize the loss
+            loss = loss / accumulation_steps
+
+            # Backward pass
             loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-            print(f"Training loss: {loss.item()}")
+
+            # Accumulate the loss
+            accumulated_loss += loss.item()
+            step_count += 1
+
+            # Perform optimization step and reset gradients after accumulation_steps
+            if step_count % accumulation_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+                print(f"Training loss: {accumulated_loss}")
+                accumulated_loss = 0
+                step_count = 0
+
             model.eval()
 
         # Write progress to a file iteratively
