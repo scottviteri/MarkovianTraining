@@ -53,7 +53,8 @@ def smooth_data(data, window_size):
 
 
 # Determine the maximum window size
-max_window_size = 4
+max_window_size = 4  # Using the larger of the two original window sizes
+
 # Smooth the reasoning contains answer data
 padded_data_reasoning = np.pad(
     reasoning_contains_answer,
