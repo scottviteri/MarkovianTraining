@@ -41,7 +41,7 @@ if __name__ == "__main__":
     for param in frozen_model.parameters():
         param.requires_grad = False
     # Train the model to make q_cot_stub more likely
-    optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=1e-7)
+    optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=1e-6)
     dataset = list(generate_question_answer_pairs(10000))
     previous_losses = []
 
@@ -98,9 +98,9 @@ if __name__ == "__main__":
         nll_loss = -avg_log_prob
 
         if len(previous_losses) > 0:
-            threshold = min(5.0, np.mean(previous_losses) - np.std(previous_losses))
+            threshold = min(3.0, np.mean(previous_losses) - 2 * np.std(previous_losses))
         else:
-            threshold = 5.0
+            threshold = 3.0
         print(q_cot_ans)
         print("Token losses: ", -answer_log_probs)
         print(
@@ -144,7 +144,7 @@ if __name__ == "__main__":
 
             # Accumulate the loss
             accumulated_loss += loss.item()
-            step_count += 1
+            step_count += 4
 
             # Perform optimization step and reset gradients after accumulation_steps
             if step_count % accumulation_steps == 0:
