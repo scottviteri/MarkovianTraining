@@ -1,9 +1,9 @@
 import re
 from typing import List, Dict
 import matplotlib.pyplot as plt
-from typing import List
 from torchtyping import TensorType
 import numpy as np
+import json
 
 
 def parse_markovian_run_log(file_path: str) -> List[Dict]:
@@ -131,23 +131,23 @@ def calculate_smoothed_fractions(parsed_data, n):
     return smoothed_answer.tolist(), smoothed_default.tolist(), batch_indices
 
 
-# Example usage
-log_data = parse_markovian_run_log("MarkovianCleaned.log")
-print(f"Parsed {len(log_data)} entries from the log file.")
-print("First entry:", log_data[0])
-
-# Example usage
-n = 20  # You can adjust this parameter as needed
-smoothed_fractions, smoothed_default_fractions, batch_indices = (
-    calculate_smoothed_fractions(log_data, n)
-)
-print(f"Smoothed fractions (n={n}):")
-for i, (fraction, default_fraction, batch_index) in enumerate(
-    zip(smoothed_fractions, smoothed_default_fractions, batch_indices)
-):
-    print(
-        f"Batch {batch_index}: Fraction = {fraction:.2f}, Default Action Fraction = {default_fraction:.2f}"
-    )
+## Example usage
+# log_data = parse_markovian_run_log("MarkovianCleaned.log")
+# print(f"Parsed {len(log_data)} entries from the log file.")
+# print("First entry:", log_data[0])
+#
+## Example usage
+# n = 20  # You can adjust this parameter as needed
+# smoothed_fractions, smoothed_default_fractions, batch_indices = (
+#    calculate_smoothed_fractions(log_data, n)
+# )
+# print(f"Smoothed fractions (n={n}):")
+# for i, (fraction, default_fraction, batch_index) in enumerate(
+#    zip(smoothed_fractions, smoothed_default_fractions, batch_indices)
+# ):
+#    print(
+#        f"Batch {batch_index}: Fraction = {fraction:.2f}, Default Action Fraction = {default_fraction:.2f}"
+#    )
 
 
 # Update the plotting function
@@ -177,11 +177,11 @@ def plot_smoothed_fractions(
     print(f"Smoothed plot saved to {output_file}")
 
 
-# Plot the smoothed fractions
-plot_smoothed_fractions(
-    smoothed_fractions, smoothed_default_fractions, batch_indices, n
-)
-print()
+## Plot the smoothed fractions
+# plot_smoothed_fractions(
+#    smoothed_fractions, smoothed_default_fractions, batch_indices, n
+# )
+# print()
 
 
 ## Example usage
@@ -239,3 +239,53 @@ print()
 #        output_file (str): Path to the output cleaned log file (MarkovianCleaned.log)
 #    """
 #    with open(input_file, "r") as infile, open(output_file, "w") as outfile:
+
+
+def parse_markovian_run_log_to_dictionary(file_path: str) -> List[Dict]:
+    with open(file_path, "r") as file:
+        content = file.read()
+    entries = content.split("\n\n")
+    parsed_data = []
+    for entry in entries:
+        current_dict = {}
+        for line in entry.split("\n"):
+            line = line.replace("\\n", "\n")
+            key, value = list(map(lambda x: x.strip(), line.split(": ", 1)))
+            if key == "Action/Obs/Value/NegEnt loss":
+                value = tuple(map(float, value.split("/")))
+            else:
+                try:
+                    # Try to convert to int first
+                    value = int(value)
+                except ValueError:
+                    try:
+                        # If int fails, try float
+                        value = float(value)
+                    except ValueError:
+                        # If both fail, keep it as a string
+                        value = value[1:-1]
+            current_dict[key] = value
+            # Check if "Action" and "Observation" are in the entry
+        if "Action" in current_dict and "Observation" in current_dict:
+            answer_in_action = check_answer_in_action(current_dict)
+            current_dict["answer_in_action"] = answer_in_action
+
+        # Check if "Default Action" and "Observation" are in the entry
+        if "Default Action" in current_dict and "Observation" in current_dict:
+            default_answer_in_action = check_answer_in_action(
+                current_dict, default_action=True
+            )
+            current_dict["default_answer_in_action"] = default_answer_in_action
+
+        parsed_data.append(current_dict)
+    return parsed_data
+
+
+## Parse the MarkovianCleaned.log file
+# parsed_data = parse_markovian_run_log_to_dictionary("src/AnalyzeResults/MarkovianCleaned.log")
+#
+## Dump the parsed data to MarkovianDictionary.log in JSON format
+# with open("src/AnalyzeResults/MarkovianDictionary.log", "w") as outfile:
+#    json.dump(parsed_data, outfile, indent=2)
+#
+# print("Parsed data has been written to MarkovianDictionary.log")

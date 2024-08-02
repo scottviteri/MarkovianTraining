@@ -4,7 +4,8 @@ import json
 from typing import Iterator, Dict
 from prepare_dataset import *
 import json
-from openai import OpenAI
+
+# from openai import OpenAI
 from tqdm import tqdm
 
 
@@ -21,6 +22,7 @@ def generate_arithmetic_question():
     question = f"{num1} {operation} {num2}"
     answer = str(eval(question))
     return {"Question": "Q: " + question, "Answer": "A: " + answer}
+
 
 def generate_question_question():
     num1 = random.randint(100, 999)
@@ -68,46 +70,46 @@ def generate_pure_obs(batch_size, tokenizer):
     return itr
 
 
-client = OpenAI()
+# client = OpenAI()
+#
+#
+# def generate_explanation(d):
+#    response = client.chat.completions.create(
+#        model="gpt-4-0125-preview",
+#        messages=[
+#            {
+#                "role": "system",
+#                "content": """
+# Decompose the addition into intermediate steps as concisely as possible.
+# Only use numbers and the operations +, without using words.
+# Do not say the final answer.
+# For example:
+# Question: 446 + 372, Answer: 818,
+# Explanation: 400 + 300 = 700\n46 + 70 = 116\n700 + 116 = 816\n816 + 2
+# """,
+#            },
+#            {
+#                "role": "user",
+#                "content": f"""
+#    <Question> {d["Question"][3:]} </Question>
+#    <Answer> {d["Answer"][3:]} </Answer>
+# """,
+#            },
+#        ],
+#        max_tokens=40,
+#    )
+#    return response.choices[0].message.content
 
 
-def generate_explanation(d):
-    response = client.chat.completions.create(
-        model="gpt-4-0125-preview",
-        messages=[
-            {
-                "role": "system",
-                "content": """
-Decompose the addition into intermediate steps as concisely as possible. 
-Only use numbers and the operations +, without using words.
-Do not say the final answer.
-For example: 
- Question: 446 + 372, Answer: 818,
- Explanation: 400 + 300 = 700\n46 + 70 = 116\n700 + 116 = 816\n816 + 2 
-""",
-            },
-            {
-                "role": "user",
-                "content": f"""
-    <Question> {d["Question"][3:]} </Question>
-    <Answer> {d["Answer"][3:]} </Answer>
-""",
-            },
-        ],
-        max_tokens=40,
-    )
-    return response.choices[0].message.content
-
-
-def add_explanations_to_file(n):
-    # itr = jsonl_to_dict_iterator("arithmetic_explanations.jsonl")
-    for _ in tqdm(range(n)):
-        arith_question = generate_arithmetic_question()
-        explanation = {
-            **arith_question,
-            "Explanation": generate_explanation(arith_question),
-        }
-        save_to_jsonl([explanation], "arithmetic_explanations.jsonl")
-
-
-add_explanations_to_file(10000)
+# def add_explanations_to_file(n):
+#    # itr = jsonl_to_dict_iterator("arithmetic_explanations.jsonl")
+#    for _ in tqdm(range(n)):
+#        arith_question = generate_arithmetic_question()
+#        explanation = {
+#            **arith_question,
+#            "Explanation": generate_explanation(arith_question),
+#        }
+#        save_to_jsonl([explanation], "arithmetic_explanations.jsonl")
+#
+#
+# add_explanations_to_file(10000)
