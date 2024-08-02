@@ -41,7 +41,7 @@ if __name__ == "__main__":
     for param in frozen_model.parameters():
         param.requires_grad = False
     # Train the model to make q_cot_stub more likely
-    optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=1e-6)
+    optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=1e-7)
     dataset = list(generate_question_answer_pairs(10000))
     previous_losses = []
 
