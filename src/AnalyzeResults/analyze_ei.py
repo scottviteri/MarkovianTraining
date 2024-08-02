@@ -52,26 +52,23 @@ def smooth_data(data, window_size):
     return (cumsum[window_size:] - cumsum[:-window_size]) / window_size
 
 
+# Determine the maximum window size
+max_window_size = max(8, 20)  # Using the larger of the two original window sizes
+
 # Smooth the reasoning contains answer data
-window_size_reasoning = 8  # Adjust this value to change the smoothing level
-half_window_reasoning = window_size_reasoning // 2
 padded_data_reasoning = np.pad(
     reasoning_contains_answer,
-    (half_window_reasoning, half_window_reasoning),
+    (max_window_size // 2, max_window_size // 2),
     mode="edge",
 )
-smoothed_data_reasoning = smooth_data(padded_data_reasoning, window_size_reasoning)[:-1]
+smoothed_data_reasoning = smooth_data(padded_data_reasoning, max_window_size)[:-1]
 
 # Extract and smooth the average log prob data (negated aggregate loss)
 average_log_prob = [-entry["Aggregate loss"] for entry in expert_iteration_data]
-window_size_log_prob = (
-    20  # Adjust this value to change the smoothing level for average log prob
-)
-half_window_log_prob = window_size_log_prob // 2
 padded_data_log_prob = np.pad(
-    average_log_prob, (half_window_log_prob, half_window_log_prob), mode="edge"
+    average_log_prob, (max_window_size // 2, max_window_size // 2), mode="edge"
 )
-smoothed_data_log_prob = smooth_data(padded_data_log_prob, window_size_log_prob)[:-1]
+smoothed_data_log_prob = smooth_data(padded_data_log_prob, max_window_size)[:-1]
 
 # Extract training example data
 training_example = [
@@ -82,27 +79,40 @@ training_example = [
 fig, ax1 = plt.subplots(figsize=(12, 6))
 
 # Plot reasoning contains answer data
+# Calculate the number of padded points to exclude
+exclude_points = max_window_size // 2
+
+# Plot raw data excluding padded points
 ax1.plot(
-    batch_indices,
-    reasoning_contains_answer,
+    batch_indices[exclude_points:-exclude_points],
+    reasoning_contains_answer[exclude_points:-exclude_points],
     marker="o",
     linestyle="",
     markersize=2,
     alpha=0.3,
     label="Raw Data",
 )
+
+# Plot smoothed data excluding padded points
 ax1.plot(
-    batch_indices,
-    smoothed_data_reasoning,
+    batch_indices[exclude_points:-exclude_points],
+    smoothed_data_reasoning[exclude_points:-exclude_points],
     color="red",
     linewidth=2,
     label="Smoothed Data",
 )
 
-# Plot training example indicators
+# Plot training example indicators excluding padded points
 ax1.scatter(
-    [batch_indices[i] for i, te in enumerate(training_example) if te == 1],
-    [1.05] * sum(training_example),  # Slightly above the top of the plot
+    [
+        batch_indices[i]
+        for i in range(exclude_points, len(batch_indices) - exclude_points)
+        if training_example[i] == 1
+    ],
+    [1.05]
+    * sum(
+        training_example[exclude_points:-exclude_points]
+    ),  # Slightly above the top of the plot
     marker="^",
     color="green",
     s=20,
@@ -118,8 +128,8 @@ ax1.set_ylim(
 # Create a second y-axis for average log prob
 ax2 = ax1.twinx()
 ax2.plot(
-    batch_indices,
-    smoothed_data_log_prob,
+    batch_indices[exclude_points:-exclude_points],
+    smoothed_data_log_prob[exclude_points:-exclude_points],
     color="purple",
     linewidth=2,
     label="Smoothed Average Log Prob",
@@ -132,7 +142,7 @@ lines2, labels2 = ax2.get_legend_handles_labels()
 ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
 
 plt.title(
-    f"Reasoning Contains Answer and Average Log Prob vs Batch Index\n(Window Sizes: {window_size_reasoning}, {window_size_log_prob})"
+    f"Reasoning Contains Answer and Average Log Prob vs Batch Index\n(Window Size: {max_window_size})"
 )
 plt.grid(True, linestyle="--", alpha=0.7)
 
