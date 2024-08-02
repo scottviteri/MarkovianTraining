@@ -52,20 +52,37 @@ def smooth_data(data, window_size):
     return (cumsum[window_size:] - cumsum[:-window_size]) / window_size
 
 
-# Smooth the data
-window_size = 8  # Adjust this value to change the smoothing level
-half_window = window_size // 2
-padded_data = np.pad(reasoning_contains_answer, (half_window, half_window), mode="edge")
-smoothed_data = smooth_data(padded_data, window_size)[:-1]
+# Smooth the reasoning contains answer data
+window_size_reasoning = 8  # Adjust this value to change the smoothing level
+half_window_reasoning = window_size_reasoning // 2
+padded_data_reasoning = np.pad(
+    reasoning_contains_answer,
+    (half_window_reasoning, half_window_reasoning),
+    mode="edge",
+)
+smoothed_data_reasoning = smooth_data(padded_data_reasoning, window_size_reasoning)[:-1]
+
+# Extract and smooth the average log prob data (negated aggregate loss)
+average_log_prob = [-entry["Aggregate loss"] for entry in expert_iteration_data]
+window_size_log_prob = (
+    20  # Adjust this value to change the smoothing level for average log prob
+)
+half_window_log_prob = window_size_log_prob // 2
+padded_data_log_prob = np.pad(
+    average_log_prob, (half_window_log_prob, half_window_log_prob), mode="edge"
+)
+smoothed_data_log_prob = smooth_data(padded_data_log_prob, window_size_log_prob)[:-1]
 
 # Extract training example data
 training_example = [
     1 if entry["Training Example"] == "True" else 0 for entry in expert_iteration_data
 ]
 
-# Create a new plot with raw data, smoothed data, and training example indicators
-plt.figure(figsize=(12, 6))
-plt.plot(
+# Create a new plot with raw data, smoothed data, training example indicators, and average log prob
+fig, ax1 = plt.subplots(figsize=(12, 6))
+
+# Plot reasoning contains answer data
+ax1.plot(
     batch_indices,
     reasoning_contains_answer,
     marker="o",
@@ -74,10 +91,16 @@ plt.plot(
     alpha=0.3,
     label="Raw Data",
 )
-plt.plot(batch_indices, smoothed_data, color="red", linewidth=2, label="Smoothed Data")
+ax1.plot(
+    batch_indices,
+    smoothed_data_reasoning,
+    color="red",
+    linewidth=2,
+    label="Smoothed Data",
+)
 
 # Plot training example indicators
-plt.scatter(
+ax1.scatter(
     [batch_indices[i] for i, te in enumerate(training_example) if te == 1],
     [1.05] * sum(training_example),  # Slightly above the top of the plot
     marker="^",
@@ -86,17 +109,37 @@ plt.scatter(
     label="Training Example",
 )
 
-plt.title(f"Reasoning Contains Answer vs Batch Index (Window Size: {window_size})")
-plt.xlabel("Batch Index")
-plt.ylabel("Reasoning Contains Answer (1: True, 0: False)")
-plt.ylim(-0.1, 1.15)  # Increased upper limit to accommodate training example indicators
+ax1.set_xlabel("Batch Index")
+ax1.set_ylabel("Reasoning Contains Answer (1: True, 0: False)")
+ax1.set_ylim(
+    -0.1, 1.15
+)  # Increased upper limit to accommodate training example indicators
+
+# Create a second y-axis for average log prob
+ax2 = ax1.twinx()
+ax2.plot(
+    batch_indices,
+    smoothed_data_log_prob,
+    color="purple",
+    linewidth=2,
+    label="Smoothed Average Log Prob",
+)
+ax2.set_ylabel("Average Log Prob")
+
+# Combine legends
+lines1, labels1 = ax1.get_legend_handles_labels()
+lines2, labels2 = ax2.get_legend_handles_labels()
+ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
+
+plt.title(
+    f"Reasoning Contains Answer and Average Log Prob vs Batch Index\n(Window Sizes: {window_size_reasoning}, {window_size_log_prob})"
+)
 plt.grid(True, linestyle="--", alpha=0.7)
-plt.legend()
 
 # Save the new plot
-plt.savefig("src/AnalyzeResults/smoothed_reasoning_contains_answer_plot.png")
+plt.savefig("src/AnalyzeResults/smoothed_reasoning_and_log_prob_plot.png")
 plt.close()
 
 print(
-    "Smoothed plot with training example indicators saved as smoothed_reasoning_contains_answer_plot.png"
+    "Smoothed plot with training example indicators and average log prob saved as smoothed_reasoning_and_log_prob_plot.png"
 )
