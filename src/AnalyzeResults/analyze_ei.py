@@ -53,12 +53,17 @@ def smooth_data(data, window_size):
 
 
 # Smooth the data
-window_size = 4  # Adjust this value to change the smoothing level
+window_size = 8  # Adjust this value to change the smoothing level
 half_window = window_size // 2
 padded_data = np.pad(reasoning_contains_answer, (half_window, half_window), mode="edge")
 smoothed_data = smooth_data(padded_data, window_size)[:-1]
 
-# Create a new plot with both raw and smoothed data
+# Extract training example data
+training_example = [
+    1 if entry["Training Example"] == "True" else 0 for entry in expert_iteration_data
+]
+
+# Create a new plot with raw data, smoothed data, and training example indicators
 plt.figure(figsize=(12, 6))
 plt.plot(
     batch_indices,
@@ -70,10 +75,21 @@ plt.plot(
     label="Raw Data",
 )
 plt.plot(batch_indices, smoothed_data, color="red", linewidth=2, label="Smoothed Data")
+
+# Plot training example indicators
+plt.scatter(
+    [batch_indices[i] for i, te in enumerate(training_example) if te == 1],
+    [1.05] * sum(training_example),  # Slightly above the top of the plot
+    marker="^",
+    color="green",
+    s=20,
+    label="Training Example",
+)
+
 plt.title(f"Reasoning Contains Answer vs Batch Index (Window Size: {window_size})")
 plt.xlabel("Batch Index")
 plt.ylabel("Reasoning Contains Answer (1: True, 0: False)")
-plt.ylim(-0.1, 1.1)
+plt.ylim(-0.1, 1.15)  # Increased upper limit to accommodate training example indicators
 plt.grid(True, linestyle="--", alpha=0.7)
 plt.legend()
 
@@ -81,4 +97,6 @@ plt.legend()
 plt.savefig("src/AnalyzeResults/smoothed_reasoning_contains_answer_plot.png")
 plt.close()
 
-print("Smoothed plot saved as smoothed_reasoning_contains_answer_plot.png")
+print(
+    "Smoothed plot with training example indicators saved as smoothed_reasoning_contains_answer_plot.png"
+)
