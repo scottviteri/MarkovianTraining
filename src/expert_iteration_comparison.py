@@ -41,7 +41,7 @@ if __name__ == "__main__":
     for param in frozen_model.parameters():
         param.requires_grad = False
     # Train the model to make q_cot_stub more likely
-    optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=1e-5)
+    optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=1e-4)
     dataset = list(generate_question_answer_pairs(10000))
     previous_losses = []
 
@@ -98,7 +98,7 @@ if __name__ == "__main__":
         nll_loss = -avg_log_prob
 
         if len(previous_losses) > 0:
-            threshold = min(3.0, np.mean(previous_losses) - np.std(previous_losses))
+            threshold = min(3.0, np.mean(previous_losses) - 1.3 * np.std(previous_losses))
         else:
             threshold = 3.0
         print(q_cot_ans)

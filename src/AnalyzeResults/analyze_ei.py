@@ -53,7 +53,11 @@ def smooth_data(data, window_size):
 
 
 # Determine the maximum window size
+<<<<<<< Updated upstream
 max_window_size = 4  # Using the larger of the two original window sizes
+=======
+max_window_size = 8  # Using the larger of the two original window sizes
+>>>>>>> Stashed changes
 
 # Smooth the reasoning contains answer data
 padded_data_reasoning = np.pad(
@@ -106,12 +110,12 @@ ax1.plot(
 ax1.scatter(
     [
         batch_indices[i]
-        for i in range(exclude_points, len(batch_indices) - exclude_points)
+        for i in range(len(batch_indices) - exclude_points)
         if training_example[i] == 1
     ],
     [1.05]
     * sum(
-        training_example[exclude_points:-exclude_points]
+        training_example[:-exclude_points]
     ),  # Slightly above the top of the plot
     marker="^",
     color="green",
@@ -139,7 +143,7 @@ ax2.set_ylabel("Average Log Prob")
 # Combine legends
 lines1, labels1 = ax1.get_legend_handles_labels()
 lines2, labels2 = ax2.get_legend_handles_labels()
-ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper center", bbox_to_anchor=(0.12, 0.9))
+ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper center", bbox_to_anchor=(0.15, 0.9))
 
 plt.title(
     f"Reasoning Contains Answer and Average Log Prob vs Batch Index\n(Window Size: {max_window_size})"
