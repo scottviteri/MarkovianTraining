@@ -41,8 +41,8 @@ if __name__ == "__main__":
     for param in frozen_model.parameters():
         param.requires_grad = False
     # Train the model to make q_cot_stub more likely
-    optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=1e-5)
-    dataset = list(generate_question_answer_pairs(1000))
+    optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=1e-6)
+    dataset = list(generate_question_answer_pairs(10000))
     previous_losses = []
 
     for i, qa in enumerate(dataset):
@@ -146,7 +146,7 @@ if __name__ == "__main__":
                 "Action": f"Reasoning: {reasoning}",
                 "Observation": f"Answer: {ans}",
                 "Reasoning Contains Answer": str(ans) in reasoning,
-                "Training Example": nll_loss < threshold,
+                "Training Example": str(nll_loss < threshold),
             }
             json.dump(log_entry, log_file)
             log_file.write("\n")  # Add a newline for each entry
