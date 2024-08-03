@@ -46,7 +46,7 @@ def generate_question_answer_batches(num_batches: int, batch_size: int):
 
 def calculate_threshold(previous_losses):
     if len(previous_losses) > 0:
-        return min(2.0, np.mean(previous_losses) - np.std(previous_losses))
+        return min(2.0, np.mean(previous_losses) - 1.2 * np.std(previous_losses))
     return 2.0
 
 
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     # Train the model to make q_cot_stub more likely
     optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=1e-5)
     num_batches = 10000
-    batch_size = 8
+    batch_size = 6 
     qa_batches = list(
         generate_question_answer_batches(num_batches=num_batches, batch_size=batch_size)
     )
@@ -166,7 +166,7 @@ if __name__ == "__main__":
                 2, tokenized_q_cot.input_ids[:, -400:].unsqueeze(-1)
             ).squeeze(-1)
             print("cot ave log prob: ", cot_log_probs[0].mean())
-            loss = cot_log_probs.mean()
+            loss = -cot_log_probs.mean()
             loss.backward()
             optimizer.step()
 
