@@ -7,6 +7,7 @@ import bitsandbytes
 import json
 import datetime
 
+
 def load_mistral_model():
     model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     #model_name = "distilgpt2"
@@ -43,11 +44,13 @@ def generate_question_answer_batches(num_batches: int, batch_size: int):
     return [generate_question_answer_batch(batch_size) for _ in range(num_batches)]
 
 
-def generate_and_calculate_log_probs(model, frozen_model, tokenizer, device, questions, answers, reasoning_text=None):
+def generate_and_calculate_log_probs(
+    model, frozen_model, tokenizer, device, questions, answers, reasoning_text=None
+):
     if reasoning_text is None:
         # Generate reasoning using the provided model (which could be trained or frozen)
         prompts = [
-            f"[INST] Work through the following question step by step, concisely decomposing problems into subproblems.[/INST] Question: {q}\nStepByStep:"
+            f"[INST] Work through the following question step by step, concisely decomposing problems into subproblems.[/INST]\nQuestion: {q}\nStepByStep:"
             for q in questions
         ]
         tokenized_inputs = tokenizer(
@@ -55,7 +58,7 @@ def generate_and_calculate_log_probs(model, frozen_model, tokenizer, device, que
             padding=True,
             return_tensors="pt",
         ).to(device)
-        
+
         with torch.no_grad():
             outputs = model.generate(
                 tokenized_inputs.input_ids,
@@ -66,8 +69,8 @@ def generate_and_calculate_log_probs(model, frozen_model, tokenizer, device, que
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
             )
-        
-        reasoning = outputs[:, tokenized_inputs.input_ids.shape[1]:]
+
+        reasoning = outputs[:, tokenized_inputs.input_ids.shape[1] :]
         reasoning_text = tokenizer.batch_decode(reasoning, skip_special_tokens=True)
 
     # Calculate log probs using the frozen model
@@ -76,7 +79,7 @@ def generate_and_calculate_log_probs(model, frozen_model, tokenizer, device, que
     ).to(device)
     tokenized_cot_ans = tokenizer(
         [
-            f"[INST] Use the following possibly mistaken reasoning to help predict the true answer, which will come immediately after the 'Answer:' tag. Try to spot flaws in the provided reasoning to guide your prediction.[/INST] \nStepByStep:: {r} \nAnswer: {a}"
+            f"[INST] Use the following possibly mistaken reasoning to help predict the true answer, which will come immediately after the 'Answer:' tag. Try to spot flaws in the provided reasoning to guide your prediction.[/INST]\nStepByStep:: {r} \nAnswer: {a}"
             for r, a in zip(reasoning_text, answers)
         ],
         padding=True,
@@ -108,6 +111,13 @@ def calculate_baseline(previous_advantages, window_size=100):
     return np.mean(previous_advantages[-window_size:])
 
 
+def calculate_ppo_loss(current_log_probs, old_log_probs, advantages, epsilon=0.2):
+    ratio = torch.exp(current_log_probs - old_log_probs)
+    clipped_ratio = torch.clamp(ratio, 1 - epsilon, 1 + epsilon)
+    loss = -torch.min(ratio * advantages, clipped_ratio * advantages)
+    return loss.mean()
+
+
 if __name__ == "__main__":
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -126,6 +136,8 @@ if __name__ == "__main__":
     gradient_accumulation_steps = 8  # Adjust this value as needed
     use_baseline = True
     baseline_window_size = 100
+    use_ppo = True
+    ppo_epsilon = 0.2
 
     optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=learning_rate)
     num_batches = 10000
@@ -144,6 +156,8 @@ if __name__ == "__main__":
             "num_batches": num_batches,
             "use_baseline": use_baseline,
             "baseline_window_size": baseline_window_size,
+            "use_ppo": use_ppo,
+            "ppo_epsilon": ppo_epsilon,
         }
         json.dump({"hyperparameters": hyperparameters}, log_file)
         log_file.write("\n")  # Add a newline after the hyperparameters
@@ -154,43 +168,82 @@ if __name__ == "__main__":
         questions, answers = zip(*qa_batch)
 
         # Generate reasoning using the trained model, but calculate log probs using the frozen model
-        reasoning_text, avg_log_probs = generate_and_calculate_log_probs(model, frozen_model, tokenizer, device, questions, answers)
+        reasoning_text, avg_log_probs = generate_and_calculate_log_probs(
+            model, frozen_model, tokenizer, device, questions, answers
+        )
 
         # Generate baseline reasoning using the frozen model, and calculate log probs using the frozen model
-        baseline_reasoning_text, baseline_avg_log_probs = generate_and_calculate_log_probs(frozen_model, frozen_model, tokenizer, device, questions, answers)
+        baseline_reasoning_text, baseline_avg_log_probs = (
+            generate_and_calculate_log_probs(
+                frozen_model, frozen_model, tokenizer, device, questions, answers
+            )
+        )
 
         # Calculate the initial advantage (reward - baseline)
         initial_advantage = avg_log_probs - baseline_avg_log_probs
 
         # Calculate the moving average baseline
         if use_baseline:
-            moving_avg_baseline = calculate_baseline(previous_advantages, baseline_window_size)
+            moving_avg_baseline = calculate_baseline(
+                previous_advantages, baseline_window_size
+            )
             # Subtract the moving average baseline from the initial advantage
             advantage = initial_advantage - moving_avg_baseline
         else:
             advantage = initial_advantage
 
-        # Calculate loss for all examples in the batch
+        # Tokenize questions and reasoning together
         tokenized_q_cot = tokenizer(
             [
-                f"[INST] Use the following possibly mistaken reasoning to help predict the true answer, which will come immediately after the 'Answer:' tag. Try to spot flaws in the provided reasoning to guide your prediction.[/INST] \nStepByStep:: {reasoning_text[i]}"
-                for i in range(batch_size)
+                f"[INST] Work through the following question step by step, concisely decomposing problems into subproblems.[/INST]\nQuestion: {q}\nStepByStep: {r}"
+                for q, r in zip(questions, reasoning_text)
             ],
             padding=True,
             return_tensors="pt",
         ).to(device)
-        q_cot_outputs = model(
-            tokenized_q_cot.input_ids, tokenized_q_cot.attention_mask
-        )
+
+        # Calculate old log probabilities
+        with torch.no_grad():
+            old_q_cot_outputs = frozen_model(
+                tokenized_q_cot.input_ids, tokenized_q_cot.attention_mask
+            )
+            old_q_cot_log_probs = torch.nn.functional.log_softmax(
+                old_q_cot_outputs.logits[:, -401:-1, :], dim=-1
+            )
+            old_cot_log_probs = old_q_cot_log_probs.gather(
+                2, tokenized_q_cot.input_ids[:, -400:].unsqueeze(-1)
+            ).squeeze(-1)
+
+        # Calculate current log probabilities
+        q_cot_outputs = model(tokenized_q_cot.input_ids, tokenized_q_cot.attention_mask)
         q_cot_log_probs = torch.nn.functional.log_softmax(
             q_cot_outputs.logits[:, -401:-1, :], dim=-1
         )
-        cot_log_probs = q_cot_log_probs.gather(
+        current_cot_log_probs = q_cot_log_probs.gather(
             2, tokenized_q_cot.input_ids[:, -400:].unsqueeze(-1)
         ).squeeze(-1)
-        
-        # Use advantage for policy gradient
-        loss = (cot_log_probs.mean(dim=1) * -advantage).mean() / gradient_accumulation_steps
+
+        if use_ppo:
+            # Use PPO loss
+            ppo_ratio = torch.exp(
+                current_cot_log_probs.mean(dim=1) - old_cot_log_probs.mean(dim=1)
+            )
+            clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
+            loss = (
+                calculate_ppo_loss(
+                    current_cot_log_probs.mean(dim=1),
+                    old_cot_log_probs.mean(dim=1),
+                    advantage,
+                    epsilon=ppo_epsilon,
+                )
+                / gradient_accumulation_steps
+            )
+        else:
+            # Use original policy gradient loss
+            loss = (
+                current_cot_log_probs.mean(dim=1) * -advantage
+            ).mean() / gradient_accumulation_steps
+
         loss.backward()
 
         # Only update weights after accumulating gradients
@@ -211,22 +264,32 @@ if __name__ == "__main__":
         advantage_value = advantage[0].item()
         print(reasoning_text_first)
         print("Ans: ", ans, "Avg Log Prob: ", avg_log_prob)
-        
+
+        # Update log entry
+        log_entry = {
+            "Aggregate loss": loss.item() * gradient_accumulation_steps,
+            "Batch Index": batch_index,
+            "Prev Observation": f"Question: {q}",
+            "Action": f"StepByStep: {reasoning_text_first}",
+            "Observation": f"Answer: {ans}",
+            "Reasoning Contains Answer": str(ans) in reasoning_text_first,
+            "Avg Log Prob": avg_log_prob,
+            "Baseline Avg Log Prob": baseline_avg_log_prob,
+            "Initial Advantage": initial_advantage_value,
+            "Moving Avg Baseline": moving_avg_baseline if use_baseline else None,
+            "Advantage": advantage_value,
+        }
+
+        if use_ppo:
+            log_entry.update(
+                {
+                    "PPO Ratio": ppo_ratio[0].item(),
+                    "PPO Clipped Ratio": clipped_ratio[0].item(),
+                }
+            )
+
         # Write progress to a file iteratively
         with open(filename, "a") as log_file:
-            log_entry = {
-                "Aggregate loss": loss.item() * gradient_accumulation_steps,
-                "Batch Index": batch_index,
-                "Prev Observation": f"Question: {q}",
-                "Action": f"StepByStep: {reasoning_text_first}",
-                "Observation": f"Answer: {ans}",
-                "Reasoning Contains Answer": str(ans) in reasoning_text_first,
-                "Avg Log Prob": avg_log_prob,
-                "Baseline Avg Log Prob": baseline_avg_log_prob,
-                "Initial Advantage": initial_advantage_value,
-                "Moving Avg Baseline": moving_avg_baseline if use_baseline else None,
-                "Final Advantage": advantage_value,
-            }
             json.dump(log_entry, log_file)
             log_file.write("\n")  # Add a newline for each entry
 

@@ -26,6 +26,8 @@ with open(
     expert_iteration_data = [json.loads(line) for line in file if line.strip()]
 
 print(f"Loaded hyperparameters: {hyperparameters}")
+print(f"Using PPO: {hyperparameters.get('use_ppo', False)}")
+print(f"PPO Epsilon: {hyperparameters.get('ppo_epsilon', 'N/A')}")
 print(f"Loaded {len(expert_iteration_data)} entries from the log file.")
 print("First data entry:", expert_iteration_data[0])
 
@@ -35,9 +37,11 @@ reasoning_contains_answer = [
     1 if entry["Reasoning Contains Answer"] else 0 for entry in expert_iteration_data
 ]
 
+
 def smooth_data(data, window_size):
     cumsum = np.cumsum(np.insert(data, 0, 0))
     return (cumsum[window_size:] - cumsum[:-window_size]) / window_size
+
 
 # Smooth the reasoning contains answer data
 padded_data_reasoning = np.pad(
@@ -49,9 +53,17 @@ smoothed_data_reasoning = smooth_data(padded_data_reasoning, max_window_size)[:-
 
 # Extract and smooth the average log prob data, baseline log prob data, and advantage data
 avg_log_probs = [entry["Avg Log Prob"] for entry in expert_iteration_data]
-baseline_avg_log_probs = [entry["Baseline Avg Log Prob"] for entry in expert_iteration_data]
-initial_advantages = [entry["Initial Advantage"] for entry in expert_iteration_data]
-final_advantages = [entry["Final Advantage"] for entry in expert_iteration_data]
+baseline_avg_log_probs = [
+    entry["Baseline Avg Log Prob"] for entry in expert_iteration_data
+]
+advantages = [entry["Advantage"] for entry in expert_iteration_data]
+
+# Add these lines to extract PPO-specific data if available
+if hyperparameters.get("use_ppo", False):
+    ratios = [entry.get("PPO Ratio", 1.0) for entry in expert_iteration_data]
+    clipped_ratios = [
+        entry.get("PPO Clipped Ratio", 1.0) for entry in expert_iteration_data
+    ]
 
 padded_data_log_prob = np.pad(
     avg_log_probs, (max_window_size // 2, max_window_size // 2), mode="edge"
@@ -61,17 +73,28 @@ smoothed_data_log_prob = smooth_data(padded_data_log_prob, max_window_size)[:-1]
 padded_data_baseline_log_prob = np.pad(
     baseline_avg_log_probs, (max_window_size // 2, max_window_size // 2), mode="edge"
 )
-smoothed_data_baseline_log_prob = smooth_data(padded_data_baseline_log_prob, max_window_size)[:-1]
+smoothed_data_baseline_log_prob = smooth_data(
+    padded_data_baseline_log_prob, max_window_size
+)[:-1]
 
-padded_data_initial_advantage = np.pad(
-    initial_advantages, (max_window_size // 2, max_window_size // 2), mode="edge"
+padded_data_advantage = np.pad(
+    advantages, (max_window_size // 2, max_window_size // 2), mode="edge"
 )
-smoothed_data_initial_advantage = smooth_data(padded_data_initial_advantage, max_window_size)[:-1]
+smoothed_data_advantage = smooth_data(padded_data_advantage, max_window_size)[:-1]
 
-padded_data_final_advantage = np.pad(
-    final_advantages, (max_window_size // 2, max_window_size // 2), mode="edge"
-)
-smoothed_data_final_advantage = smooth_data(padded_data_final_advantage, max_window_size)[:-1]
+# Add these lines for PPO data smoothing
+if hyperparameters.get("use_ppo", False):
+    padded_data_ratio = np.pad(
+        ratios, (max_window_size // 2, max_window_size // 2), mode="edge"
+    )
+    smoothed_data_ratio = smooth_data(padded_data_ratio, max_window_size)[:-1]
+
+    padded_data_clipped_ratio = np.pad(
+        clipped_ratios, (max_window_size // 2, max_window_size // 2), mode="edge"
+    )
+    smoothed_data_clipped_ratio = smooth_data(
+        padded_data_clipped_ratio, max_window_size
+    )[:-1]
 
 # Create a new plot with raw data, smoothed data, log prob series, and advantage
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 12), sharex=True)
@@ -119,26 +142,40 @@ ax2.plot(
 )
 ax2.plot(
     batch_indices[exclude_points:-exclude_points],
-    smoothed_data_initial_advantage[exclude_points:-exclude_points],
+    smoothed_data_advantage[exclude_points:-exclude_points],
     color="orange",
     linewidth=2,
-    label="Smoothed Initial Advantage",
+    label="Smoothed Advantage",
 )
-ax2.plot(
-    batch_indices[exclude_points:-exclude_points],
-    smoothed_data_final_advantage[exclude_points:-exclude_points],
-    color="red",
-    linewidth=2,
-    label="Smoothed Final Advantage",
-)
+
+# Update the second subplot (ax2) to include PPO data if available
+if hyperparameters.get("use_ppo", False):
+    ax2.plot(
+        batch_indices[exclude_points:-exclude_points],
+        smoothed_data_ratio[exclude_points:-exclude_points],
+        color="blue",
+        linewidth=2,
+        label="Smoothed PPO Ratio",
+    )
+    ax2.plot(
+        batch_indices[exclude_points:-exclude_points],
+        smoothed_data_clipped_ratio[exclude_points:-exclude_points],
+        color="cyan",
+        linewidth=2,
+        label="Smoothed PPO Clipped Ratio",
+    )
 
 ax2.set_xlabel("Batch Index")
 ax2.set_ylabel("Log Prob / Advantage")
 ax2.legend(loc="upper left")
 
+# Update the plot title
+algorithm_name = "PPO" if hyperparameters.get("use_ppo", False) else "Policy Gradient"
 plt.suptitle(
-    f"Reasoning Contains Answer, Log Probs, and Advantage vs Batch Index\n(Window Size: {max_window_size})"
+    f"{algorithm_name}: Reasoning Contains Answer, Log Probs, and Advantage vs Batch Index\n"
+    f"(Window Size: {max_window_size})"
 )
+
 plt.grid(True, linestyle="--", alpha=0.7)
 
 # Adjust the layout to make room for the legend
@@ -148,5 +185,5 @@ plt.savefig("src/AnalyzeResults/pg_plot.png")
 plt.close()
 
 print(
-    "Smoothed plot with average log prob, baseline log prob, and advantage saved as pg_plot.png"
+    f"Smoothed plot for {algorithm_name} with average log prob, baseline log prob, and advantage saved as pg_plot.png"
 )
