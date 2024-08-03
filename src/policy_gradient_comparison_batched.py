@@ -44,9 +44,9 @@ def generate_question_answer_batches(num_batches: int, batch_size: int):
     return [generate_question_answer_batch(batch_size) for _ in range(num_batches)]
 
 
-def generate_and_calculate_log_probs(model, tokenizer, device, questions, answers, reasoning_text=None):
+def generate_and_calculate_log_probs(model, frozen_model, tokenizer, device, questions, answers, reasoning_text=None):
     if reasoning_text is None:
-        # Generate reasoning
+        # Generate reasoning using the provided model (which could be trained or frozen)
         prompts = [
             f"[INST] Work through the following question step by step, concisely decomposing problems into subproblems.[/INST] Question: {q}\nStepByStep:"
             for q in questions
@@ -71,7 +71,7 @@ def generate_and_calculate_log_probs(model, tokenizer, device, questions, answer
         reasoning = outputs[:, tokenized_inputs.input_ids.shape[1]:]
         reasoning_text = tokenizer.batch_decode(reasoning, skip_special_tokens=True)
 
-    # Calculate log probs
+    # Calculate log probs using the frozen model
     tokenized_answers = tokenizer(
         answers, padding=True, return_tensors="pt", add_special_tokens=False
     ).to(device)
@@ -85,7 +85,7 @@ def generate_and_calculate_log_probs(model, tokenizer, device, questions, answer
     ).to(device)
 
     with torch.no_grad():
-        outputs = model(
+        outputs = frozen_model(
             tokenized_cot_ans.input_ids,
             attention_mask=tokenized_cot_ans.attention_mask,
         )
@@ -100,18 +100,13 @@ def generate_and_calculate_log_probs(model, tokenizer, device, questions, answer
         dim=1
     ) / tokenized_answers.attention_mask.sum(dim=1)
 
-    # Print log probabilities of non-masked answer tokens for the first batch element
-    first_element_mask = tokenized_answers.attention_mask[0]
-    first_element_log_probs = answer_log_probs[0][first_element_mask.bool()]
-    print("Log probabilities of non-masked answer tokens (first batch element):")
-    print(first_element_log_probs)
     return reasoning_text, avg_log_probs
 
 
 if __name__ == "__main__":
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"src/AnalyzeResults/ExpertIterationDictionary_{timestamp}.log"
+    filename = f"src/AnalyzeResults/PolicyGradientDictionary_{timestamp}.log"
 
     with open(filename, "w") as log_file:
         pass  # Empty file created
@@ -149,11 +144,11 @@ if __name__ == "__main__":
     for batch_index, qa_batch in enumerate(qa_batches):
         questions, answers = zip(*qa_batch)
 
-        # Generate reasoning and calculate log probs for the trained model
-        reasoning_text, avg_log_probs = generate_and_calculate_log_probs(model, tokenizer, device, questions, answers)
+        # Generate reasoning using the trained model, but calculate log probs using the frozen model
+        reasoning_text, avg_log_probs = generate_and_calculate_log_probs(model, frozen_model, tokenizer, device, questions, answers)
 
-        # Generate reasoning and calculate log probs for the frozen model (baseline)
-        _, baseline_avg_log_probs = generate_and_calculate_log_probs(frozen_model, tokenizer, device, questions, answers)
+        # Generate baseline reasoning using the frozen model, and calculate log probs using the frozen model
+        baseline_reasoning_text, baseline_avg_log_probs = generate_and_calculate_log_probs(frozen_model, frozen_model, tokenizer, device, questions, answers)
 
         # Calculate the advantage (reward - baseline)
         advantage = avg_log_probs - baseline_avg_log_probs
@@ -178,7 +173,7 @@ if __name__ == "__main__":
         ).squeeze(-1)
         
         # Use advantage for policy gradient
-        loss = (-cot_log_probs.mean(dim=1) * advantage).mean() / gradient_accumulation_steps
+        loss = (cot_log_probs.mean(dim=1) * -advantage).mean() / gradient_accumulation_steps
         loss.backward()
 
         # Only update weights after accumulating gradients
@@ -196,7 +191,7 @@ if __name__ == "__main__":
         avg_log_prob = avg_log_probs[0].item()
         baseline_avg_log_prob = baseline_avg_log_probs[0].item()
         advantage = advantage[0].item()
-        print(reasoning_text[0])
+        print(reasoning_text)
         print("Ans: ", ans, "Avg Log Prob: ", avg_log_prob)
         # Write progress to a file iteratively
         with open(filename, "a") as log_file:

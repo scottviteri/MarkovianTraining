@@ -9,8 +9,6 @@ import os
 {"Aggregate loss": 2.581582546234131, "Batch Index": 1, "Prev Observation": "Question: 22 + 98 + 43 + 93 + 36 + 84 + 33 + 76 + 48 + 45 + 33 + 10 + 24 + 39 + 4", "Action": "Reasoning: \n\n1. Addition of two numbers: 22 + 98\n2. Carry the sum to the next column if necessary and add the next numbers: 11 + 43\n3. Carry the sum to the next column if necessary and add the next numbers: 111 + 93\n4. Carry the sum to the next column if necessary and add the next numbers: 127 + 36\n5. Carry the sum to the next column if necessary and add the next numbers: 163 + 84\n6. Carry the sum to the next column if necessary and add the next numbers: 247 + 33\n7. Carry the sum to the next column if necessary and add the next numbers: 280 + 76\n8. Carry the sum to the next column if necessary and add the next numbers: 356 + 48\n9. Carry the sum to the next column if necessary and add the next numbers: 404 + 45\n10. Carry the sum to the next column if necessary and add the next numbers: 449 + 33\n11. Carry the sum to the next column if necessary and add the next numbers: 482 + 10\n12. Carry the sum to the next column if necessary and add the next numbers: 492 + 24\n13. Carry the sum to the next column if necessary and add the last numbers: 516 + 39\n\nSo, 22 + 98 + 43 + 93 + 36 + 84 + 33 + 76 + 48 + 45 + 33 + 10 + 24 +", "Observation": "Answer: 688", "Reasoning Contains Answer": false, "Training Example": "True"}
 ...
 """
-max_window_size = 4
-
 # Load the log file into a list of dictionaries
 with open(
     max(
@@ -33,18 +31,6 @@ batch_indices = [entry["Batch Index"] for entry in expert_iteration_data]
 reasoning_contains_answer = [
     1 if entry["Reasoning Contains Answer"] else 0 for entry in expert_iteration_data
 ]
-
-def smooth_data(data, window_size):
-    cumsum = np.cumsum(np.insert(data, 0, 0))
-    return (cumsum[window_size:] - cumsum[:-window_size]) / window_size
-
-# Smooth the reasoning contains answer data
-padded_data_reasoning = np.pad(
-    reasoning_contains_answer,
-    (max_window_size // 2, max_window_size // 2),
-    mode="edge",
-)
-smoothed_data_reasoning = smooth_data(padded_data_reasoning, max_window_size)[:-1]
 
 # Extract and smooth the average log prob data (negated aggregate loss)
 average_log_prob = [-entry["Aggregate loss"] for entry in expert_iteration_data]
