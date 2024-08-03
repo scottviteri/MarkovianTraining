@@ -1,5 +1,6 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from peft import LoraConfig, get_peft_model
 import random
 import numpy as np
 import bitsandbytes
@@ -14,11 +15,21 @@ def load_mistral_model():
     tokenizer.pad_token_id = tokenizer.eos_token_id
     model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
 
+    peft_config = LoraConfig(
+        task_type="CAUSAL_LM",
+        inference_mode=False,
+        r=8,
+        lora_alpha=16,
+        lora_dropout=0.1,
+        target_modules="all-linear",
+    )
+    model = get_peft_model(model, peft_config)
+    model.print_trainable_parameters()
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
     return model, tokenizer, device
-
 
 def generate_question_answer_pairs(num_pairs: int):
     for _ in range(num_pairs):
