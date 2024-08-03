@@ -159,7 +159,7 @@ if __name__ == "__main__":
             "use_ppo": use_ppo,
             "ppo_epsilon": ppo_epsilon,
         }
-        json.dump({"hyperparameters": hyperparameters}, log_file)
+        json.dump(hyperparameters, log_file)
         log_file.write("\n")  # Add a newline after the hyperparameters
 
     optimizer.zero_grad()  # Move this outside the loop
