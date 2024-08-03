@@ -46,8 +46,8 @@ def generate_question_answer_batches(num_batches: int, batch_size: int):
 
 def calculate_threshold(previous_losses):
     if len(previous_losses) > 0:
-        return min(3.0, np.mean(previous_losses) - np.std(previous_losses))
-    return 3.0
+        return min(2.0, np.mean(previous_losses) - np.std(previous_losses))
+    return 2.0
 
 
 if __name__ == "__main__":
