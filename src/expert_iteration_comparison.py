@@ -52,7 +52,7 @@ if __name__ == "__main__":
     for param in frozen_model.parameters():
         param.requires_grad = False
     # Train the model to make q_cot_stub more likely
-    optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=1e-4)
+    optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=1e-5)
     dataset = list(generate_question_answer_pairs(10000))
     previous_losses = []
 
@@ -118,7 +118,7 @@ if __name__ == "__main__":
             f"Answer: {ans} Threshold Loss: {threshold:.2f}, Current Loss: {nll_loss:.2f}"
         )
         # Initialize gradient accumulation variables
-        accumulation_steps = 15  # Adjust this value as needed
+        accumulation_steps = 1  # Adjust this value as needed
         accumulated_loss = 0
         step_count = 0
 
@@ -137,10 +137,10 @@ if __name__ == "__main__":
                 )
             )
             log_probs = torch.nn.functional.log_softmax(
-                logits[:, start_pos:-1, :], dim=-1
+                logits[:, start_pos-1: start_pos+399, :], dim=-1
             )
             target_tokens = input_ids[
-                :, start_pos + 1 :
+                :, start_pos : start_pos + 400
             ]  # +1 to shift by one for next token prediction
             gathered_log_probs = log_probs.gather(
                 2, target_tokens.unsqueeze(2)
