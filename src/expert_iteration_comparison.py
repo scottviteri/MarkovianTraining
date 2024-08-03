@@ -109,7 +109,7 @@ if __name__ == "__main__":
         nll_loss = -avg_log_prob
 
         if len(previous_losses) > 0:
-            threshold = min(3.0, np.mean(previous_losses) - 1.3 * np.std(previous_losses))
+            threshold = min(3.0, np.mean(previous_losses) - np.std(previous_losses))
         else:
             threshold = 3.0
         print(q_cot_ans)
