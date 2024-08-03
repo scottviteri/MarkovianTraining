@@ -10,7 +10,7 @@ import os
 {"Aggregate loss": -0.28632110357284546, "Batch Index": 1, "Prev Observation": "Question: 13 + 33 + 99 + 42 + 97 + 71 + 21 + 59 + 77 + 26 + 3 + 58 + 52 + 73 + 45", "Action": "StepByStep: \n1. Add the first two numbers: 13 + 33 = 46\n2. Add the next number to the result: 46 + 99 = 145\n3. Repeat this process for the remaining numbers: 145 + 42 = 187, 187 + 97 = 284, 284 + 71 = 355, 355 + 21 = 376, 376 + 59 = 435, 435 + 77 = 512, 512 + 26 = 538, 538 + 3 = 541, 541 + 58 = 609, 609 + 52 = 661, 661 + 73 = 734, 734 + 45 = 779\n\nSo, the sum of all the given numbers is 779.\nAnswer: \u27a2 The sum of all given numbers is 779. \ud83c\udf89\nLet me know if you need help with anything else! \ud83d\ude0a#MathProblems #StepByStepSolutions #Addition #SumOfNumbers #MathHelp #Education #Learning #StudentLife #StudyTips #MathTutor #Numbers #Sum #Decomposition #CrispCommunication #EffectiveStudy #LearnMathEasy #MentalMath #Skills #MathIsFun #TeachingMath #BrainPower #CriticalThinking #ProblemSolving #QuickMath #OnlineMathHelp #MathFacts #LearnMathFast #MathMaster #N", "Observation": "Answer: 769", "Reasoning Contains Answer": false, "Avg Log Prob": -6.650873184204102, "Baseline Avg Log Prob": -3.574218273162842, "Advantage": -3.0766549110412598}
 ...
 """
-max_window_size = 4
+max_window_size = 8
 
 # Load the log file into a list of dictionaries
 with open(
@@ -47,9 +47,11 @@ padded_data_reasoning = np.pad(
 )
 smoothed_data_reasoning = smooth_data(padded_data_reasoning, max_window_size)[:-1]
 
-# Extract and smooth the average log prob data and baseline log prob data
+# Extract and smooth the average log prob data, baseline log prob data, and advantage data
 avg_log_probs = [entry["Avg Log Prob"] for entry in expert_iteration_data]
 baseline_avg_log_probs = [entry["Baseline Avg Log Prob"] for entry in expert_iteration_data]
+initial_advantages = [entry["Initial Advantage"] for entry in expert_iteration_data]
+final_advantages = [entry["Final Advantage"] for entry in expert_iteration_data]
 
 padded_data_log_prob = np.pad(
     avg_log_probs, (max_window_size // 2, max_window_size // 2), mode="edge"
@@ -61,13 +63,23 @@ padded_data_baseline_log_prob = np.pad(
 )
 smoothed_data_baseline_log_prob = smooth_data(padded_data_baseline_log_prob, max_window_size)[:-1]
 
-# Create a new plot with raw data, smoothed data, and both log prob series
-fig, ax1 = plt.subplots(figsize=(12, 6))
+padded_data_initial_advantage = np.pad(
+    initial_advantages, (max_window_size // 2, max_window_size // 2), mode="edge"
+)
+smoothed_data_initial_advantage = smooth_data(padded_data_initial_advantage, max_window_size)[:-1]
+
+padded_data_final_advantage = np.pad(
+    final_advantages, (max_window_size // 2, max_window_size // 2), mode="edge"
+)
+smoothed_data_final_advantage = smooth_data(padded_data_final_advantage, max_window_size)[:-1]
+
+# Create a new plot with raw data, smoothed data, log prob series, and advantage
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 12), sharex=True)
 
 # Calculate the number of padded points to exclude
 exclude_points = max_window_size // 2
 
-# Plot raw data excluding padded points
+# Plot on the first subplot (ax1)
 ax1.plot(
     batch_indices[exclude_points:-exclude_points],
     reasoning_contains_answer[exclude_points:-exclude_points],
@@ -78,7 +90,6 @@ ax1.plot(
     label="Raw Data",
 )
 
-# Plot smoothed data excluding padded points
 ax1.plot(
     batch_indices[exclude_points:-exclude_points],
     smoothed_data_reasoning[exclude_points:-exclude_points],
@@ -87,12 +98,11 @@ ax1.plot(
     label="Smoothed Data",
 )
 
-ax1.set_xlabel("Batch Index")
 ax1.set_ylabel("Reasoning Contains Answer (1: True, 0: False)")
 ax1.set_ylim(-0.1, 1.15)
+ax1.legend(loc="upper left")
 
-# Create a second y-axis for log probs
-ax2 = ax1.twinx()
+# Plot on the second subplot (ax2)
 ax2.plot(
     batch_indices[exclude_points:-exclude_points],
     smoothed_data_log_prob[exclude_points:-exclude_points],
@@ -107,25 +117,36 @@ ax2.plot(
     linewidth=2,
     label="Smoothed Baseline Avg Log Prob",
 )
-ax2.set_ylabel("Log Prob")
+ax2.plot(
+    batch_indices[exclude_points:-exclude_points],
+    smoothed_data_initial_advantage[exclude_points:-exclude_points],
+    color="orange",
+    linewidth=2,
+    label="Smoothed Initial Advantage",
+)
+ax2.plot(
+    batch_indices[exclude_points:-exclude_points],
+    smoothed_data_final_advantage[exclude_points:-exclude_points],
+    color="red",
+    linewidth=2,
+    label="Smoothed Final Advantage",
+)
 
-# Combine legends
-lines1, labels1 = ax1.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left", bbox_to_anchor=(0.05, 1))
+ax2.set_xlabel("Batch Index")
+ax2.set_ylabel("Log Prob / Advantage")
+ax2.legend(loc="upper left")
 
-plt.title(
-    f"Reasoning Contains Answer and Log Probs vs Batch Index\n(Window Size: {max_window_size})"
+plt.suptitle(
+    f"Reasoning Contains Answer, Log Probs, and Advantage vs Batch Index\n(Window Size: {max_window_size})"
 )
 plt.grid(True, linestyle="--", alpha=0.7)
 
 # Adjust the layout to make room for the legend
 plt.tight_layout()
-plt.subplots_adjust(right=0.85)
 # Save the new plot
 plt.savefig("src/AnalyzeResults/pg_plot.png")
 plt.close()
 
 print(
-    "Smoothed plot with average log prob and baseline log prob saved as pg_plot.png"
+    "Smoothed plot with average log prob, baseline log prob, and advantage saved as pg_plot.png"
 )

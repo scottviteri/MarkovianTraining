@@ -7,7 +7,6 @@ import bitsandbytes
 import json
 import datetime
 
-
 def load_mistral_model():
     model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     #model_name = "distilgpt2"
@@ -103,6 +102,12 @@ def generate_and_calculate_log_probs(model, frozen_model, tokenizer, device, que
     return reasoning_text, avg_log_probs
 
 
+def calculate_baseline(previous_advantages, window_size=100):
+    if len(previous_advantages) < window_size:
+        return np.mean(previous_advantages) if previous_advantages else 0
+    return np.mean(previous_advantages[-window_size:])
+
+
 if __name__ == "__main__":
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -119,13 +124,15 @@ if __name__ == "__main__":
     learning_rate = 1e-4
     batch_size = 6
     gradient_accumulation_steps = 8  # Adjust this value as needed
+    use_baseline = True
+    baseline_window_size = 100
 
     optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=learning_rate)
     num_batches = 10000
     qa_batches = list(
         generate_question_answer_batches(num_batches=num_batches, batch_size=batch_size)
     )
-    previous_losses = []
+    previous_advantages = []
 
     # Log hyperparameters before starting the training loop
     with open(filename, "w") as log_file:
@@ -135,6 +142,8 @@ if __name__ == "__main__":
             "gradient_accumulation_steps": gradient_accumulation_steps,
             "effective_batch_size": batch_size * gradient_accumulation_steps,
             "num_batches": num_batches,
+            "use_baseline": use_baseline,
+            "baseline_window_size": baseline_window_size,
         }
         json.dump({"hyperparameters": hyperparameters}, log_file)
         log_file.write("\n")  # Add a newline after the hyperparameters
@@ -150,8 +159,16 @@ if __name__ == "__main__":
         # Generate baseline reasoning using the frozen model, and calculate log probs using the frozen model
         baseline_reasoning_text, baseline_avg_log_probs = generate_and_calculate_log_probs(frozen_model, frozen_model, tokenizer, device, questions, answers)
 
-        # Calculate the advantage (reward - baseline)
-        advantage = avg_log_probs - baseline_avg_log_probs
+        # Calculate the initial advantage (reward - baseline)
+        initial_advantage = avg_log_probs - baseline_avg_log_probs
+
+        # Calculate the moving average baseline
+        if use_baseline:
+            moving_avg_baseline = calculate_baseline(previous_advantages, baseline_window_size)
+            # Subtract the moving average baseline from the initial advantage
+            advantage = initial_advantage - moving_avg_baseline
+        else:
+            advantage = initial_advantage
 
         # Calculate loss for all examples in the batch
         tokenized_q_cot = tokenizer(
@@ -181,30 +198,34 @@ if __name__ == "__main__":
             optimizer.step()
             optimizer.zero_grad()
 
-        # Update previous_losses and log results
-        previous_losses.append(avg_log_probs.tolist())
+        # Update previous_advantages and log results
+        previous_advantages.extend(initial_advantage.tolist())
 
         # Log only the first element of the batch
         q = questions[0]
         ans = answers[0]
-        reasoning_text = reasoning_text[0]
+        reasoning_text_first = reasoning_text[0]
         avg_log_prob = avg_log_probs[0].item()
         baseline_avg_log_prob = baseline_avg_log_probs[0].item()
-        advantage = advantage[0].item()
-        print(reasoning_text)
+        initial_advantage_value = initial_advantage[0].item()
+        advantage_value = advantage[0].item()
+        print(reasoning_text_first)
         print("Ans: ", ans, "Avg Log Prob: ", avg_log_prob)
+        
         # Write progress to a file iteratively
         with open(filename, "a") as log_file:
             log_entry = {
                 "Aggregate loss": loss.item() * gradient_accumulation_steps,
                 "Batch Index": batch_index,
                 "Prev Observation": f"Question: {q}",
-                "Action": f"StepByStep: {reasoning_text}",
+                "Action": f"StepByStep: {reasoning_text_first}",
                 "Observation": f"Answer: {ans}",
-                "Reasoning Contains Answer": str(ans) in reasoning_text,
+                "Reasoning Contains Answer": str(ans) in reasoning_text_first,
                 "Avg Log Prob": avg_log_prob,
                 "Baseline Avg Log Prob": baseline_avg_log_prob,
-                "Advantage": advantage,
+                "Initial Advantage": initial_advantage_value,
+                "Moving Avg Baseline": moving_avg_baseline if use_baseline else None,
+                "Final Advantage": advantage_value,
             }
             json.dump(log_entry, log_file)
             log_file.write("\n")  # Add a newline for each entry
