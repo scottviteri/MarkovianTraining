@@ -63,13 +63,30 @@ if __name__ == "__main__":
     for param in frozen_model.parameters():
         param.requires_grad = False
     # Train the model to make q_cot_stub more likely
-    optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=1e-5)
+    learning_rate = 1e-4
+    batch_size = 6
+    gradient_accumulation_steps = 8  # Adjust this value as needed
+
+    optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=learning_rate)
     num_batches = 10000
-    batch_size = 6 
     qa_batches = list(
         generate_question_answer_batches(num_batches=num_batches, batch_size=batch_size)
     )
     previous_losses = []
+
+    # Log hyperparameters before starting the training loop
+    with open(filename, "w") as log_file:
+        hyperparameters = {
+            "learning_rate": learning_rate,
+            "batch_size": batch_size,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "effective_batch_size": batch_size * gradient_accumulation_steps,
+            "num_batches": num_batches,
+        }
+        json.dump({"hyperparameters": hyperparameters}, log_file)
+        log_file.write("\n")  # Add a newline after the hyperparameters
+
+    optimizer.zero_grad()  # Move this outside the loop
 
     for batch_index, qa_batch in enumerate(qa_batches):
         questions, answers = zip(*qa_batch)
@@ -155,7 +172,6 @@ if __name__ == "__main__":
                 padding=True,
                 return_tensors="pt",
             ).to(device)
-            optimizer.zero_grad()
             q_cot_outputs = model(
                 tokenized_q_cot.input_ids, tokenized_q_cot.attention_mask
             )
@@ -166,9 +182,13 @@ if __name__ == "__main__":
                 2, tokenized_q_cot.input_ids[:, -400:].unsqueeze(-1)
             ).squeeze(-1)
             print("cot ave log prob: ", cot_log_probs[0].mean())
-            loss = -cot_log_probs.mean()
+            loss = -cot_log_probs.mean() / gradient_accumulation_steps
             loss.backward()
-            optimizer.step()
+
+            # Only update weights after accumulating gradients
+            if (batch_index + 1) % gradient_accumulation_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
 
         # Update previous_losses and log results
         previous_losses.append(nll_losses.tolist())
@@ -192,3 +212,8 @@ if __name__ == "__main__":
             }
             json.dump(log_entry, log_file)
             log_file.write("\n")  # Add a newline for each entry
+
+    # Perform final optimization step for any remaining gradients
+    if (batch_index + 1) % gradient_accumulation_steps != 0:
+        optimizer.step()
+        optimizer.zero_grad()

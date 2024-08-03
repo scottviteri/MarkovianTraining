@@ -17,11 +17,14 @@ with open(
     ),
     "r",
 ) as file:
+    # Read the first line as hyperparameters
+    hyperparameters = json.loads(file.readline().strip())
+    # Read the rest of the lines as expert iteration data
     expert_iteration_data = [json.loads(line) for line in file if line.strip()]
 
+print(f"Loaded hyperparameters: {hyperparameters}")
 print(f"Loaded {len(expert_iteration_data)} entries from the log file.")
-print("First entry:", expert_iteration_data[0])
-
+print("First data entry:", expert_iteration_data[0])
 
 # Extract batch indices and reasoning contains answer values
 batch_indices = [entry["Batch Index"] for entry in expert_iteration_data]
@@ -53,7 +56,7 @@ def smooth_data(data, window_size):
 
 
 # Determine the maximum window size
-max_window_size = 8  # Using the larger of the two original window sizes
+max_window_size = 4  # Using the larger of the two original window sizes
 
 # Smooth the reasoning contains answer data
 padded_data_reasoning = np.pad(
