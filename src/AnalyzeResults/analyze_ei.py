@@ -9,6 +9,8 @@ import os
 {"Aggregate loss": 2.581582546234131, "Batch Index": 1, "Prev Observation": "Question: 22 + 98 + 43 + 93 + 36 + 84 + 33 + 76 + 48 + 45 + 33 + 10 + 24 + 39 + 4", "Action": "Reasoning: \n\n1. Addition of two numbers: 22 + 98\n2. Carry the sum to the next column if necessary and add the next numbers: 11 + 43\n3. Carry the sum to the next column if necessary and add the next numbers: 111 + 93\n4. Carry the sum to the next column if necessary and add the next numbers: 127 + 36\n5. Carry the sum to the next column if necessary and add the next numbers: 163 + 84\n6. Carry the sum to the next column if necessary and add the next numbers: 247 + 33\n7. Carry the sum to the next column if necessary and add the next numbers: 280 + 76\n8. Carry the sum to the next column if necessary and add the next numbers: 356 + 48\n9. Carry the sum to the next column if necessary and add the next numbers: 404 + 45\n10. Carry the sum to the next column if necessary and add the next numbers: 449 + 33\n11. Carry the sum to the next column if necessary and add the next numbers: 482 + 10\n12. Carry the sum to the next column if necessary and add the next numbers: 492 + 24\n13. Carry the sum to the next column if necessary and add the last numbers: 516 + 39\n\nSo, 22 + 98 + 43 + 93 + 36 + 84 + 33 + 76 + 48 + 45 + 33 + 10 + 24 +", "Observation": "Answer: 688", "Reasoning Contains Answer": false, "Training Example": "True"}
 ...
 """
+max_window_size = 4
+
 # Load the log file into a list of dictionaries
 with open(
     max(
@@ -32,31 +34,9 @@ reasoning_contains_answer = [
     1 if entry["Reasoning Contains Answer"] else 0 for entry in expert_iteration_data
 ]
 
-# Create the plot
-# plt.figure(figsize=(12, 6))
-# plt.plot(
-#    batch_indices, reasoning_contains_answer, marker="o", linestyle="", markersize=2
-# )
-# plt.title("Reasoning Contains Answer vs Batch Index")
-# plt.xlabel("Batch Index")
-# plt.ylabel("Reasoning Contains Answer (1: True, 0: False)")
-# plt.ylim(-0.1, 1.1)  # Set y-axis limits to show clear separation between 0 and 1
-# plt.grid(True, linestyle="--", alpha=0.7)
-#
-## Save the plot
-# plt.savefig("src/AnalyzeResults/reasoning_contains_answer_plot.png")
-# plt.close()
-#
-# print("Plot saved as reasoning_contains_answer_plot.png")
-
-
 def smooth_data(data, window_size):
     cumsum = np.cumsum(np.insert(data, 0, 0))
     return (cumsum[window_size:] - cumsum[:-window_size]) / window_size
-
-
-# Determine the maximum window size
-max_window_size = 4  # Using the larger of the two original window sizes
 
 # Smooth the reasoning contains answer data
 padded_data_reasoning = np.pad(
@@ -73,15 +53,14 @@ padded_data_log_prob = np.pad(
 )
 smoothed_data_log_prob = smooth_data(padded_data_log_prob, max_window_size)[:-1]
 
-# Extract training example data
+# Extract training example data if available
 training_example = [
-    1 if entry["Training Example"] == "True" else 0 for entry in expert_iteration_data
+    1 if entry.get("Training Example") == "True" else 0 for entry in expert_iteration_data
 ]
 
-# Create a new plot with raw data, smoothed data, training example indicators, and average log prob
+# Create a new plot with raw data, smoothed data, training example indicators (if available), and average log prob
 fig, ax1 = plt.subplots(figsize=(12, 6))
 
-# Plot reasoning contains answer data
 # Calculate the number of padded points to exclude
 exclude_points = max_window_size // 2
 
@@ -105,28 +84,24 @@ ax1.plot(
     label="Smoothed Data",
 )
 
-# Plot training example indicators excluding padded points
-ax1.scatter(
-    [
-        batch_indices[i]
-        for i in range(len(batch_indices) - exclude_points)
-        if training_example[i] == 1
-    ],
-    [1.05]
-    * sum(
-        training_example[:-exclude_points]
-    ),  # Slightly above the top of the plot
-    marker="^",
-    color="green",
-    s=20,
-    label="Training Example",
-)
+# Plot training example indicators if available
+if any(training_example):
+    ax1.scatter(
+        [
+            batch_indices[i]
+            for i in range(len(batch_indices) - exclude_points)
+            if training_example[i] == 1
+        ],
+        [1.05] * sum(training_example[:-exclude_points]),
+        marker="^",
+        color="green",
+        s=20,
+        label="Training Example",
+    )
 
 ax1.set_xlabel("Batch Index")
 ax1.set_ylabel("Reasoning Contains Answer (1: True, 0: False)")
-ax1.set_ylim(
-    -0.1, 1.15
-)  # Increased upper limit to accommodate training example indicators
+ax1.set_ylim(-0.1, 1.15)
 
 # Create a second y-axis for average log prob
 ax2 = ax1.twinx()
@@ -157,5 +132,5 @@ plt.savefig("src/AnalyzeResults/smoothed_reasoning_and_log_prob_plot.png")
 plt.close()
 
 print(
-    "Smoothed plot with training example indicators and average log prob saved as smoothed_reasoning_and_log_prob_plot.png"
+    "Smoothed plot with training example indicators (if available) and average log prob saved as smoothed_reasoning_and_log_prob_plot.png"
 )
