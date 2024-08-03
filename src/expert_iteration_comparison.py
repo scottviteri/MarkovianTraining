@@ -17,7 +17,7 @@ def load_mistral_model():
 
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",
-        inference_mode=False,
+        inference_mode=True,
         r=8,
         lora_alpha=16,
         lora_dropout=0.1,
