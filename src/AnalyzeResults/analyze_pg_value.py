@@ -4,7 +4,7 @@ import numpy as np
 import glob
 import os
 
-max_window_size = 8
+max_window_size = 4
 
 # Load the log file into a list of dictionaries
 with open(
