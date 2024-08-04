@@ -190,8 +190,6 @@ if __name__ == "__main__":
     learning_rate = 1e-4
     batch_size = 4
     gradient_accumulation_steps = 8  # Adjust this value as needed
-    use_baseline = True
-    baseline_window_size = 100
     use_ppo = True
     ppo_epsilon = 0.2
 
@@ -210,8 +208,6 @@ if __name__ == "__main__":
             "gradient_accumulation_steps": gradient_accumulation_steps,
             "effective_batch_size": batch_size * gradient_accumulation_steps,
             "num_batches": num_batches,
-            "use_baseline": use_baseline,
-            "baseline_window_size": baseline_window_size,
             "use_ppo": use_ppo,
             "ppo_epsilon": ppo_epsilon,
         }
