@@ -1,83 +1,69 @@
+import datetime
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from transformers.models.mistral.modeling_mistral import (
-    MistralConfig,
-    MistralDecoderLayer,
-)
+import copy
+import bitsandbytes
 import random
 import numpy as np
-import bitsandbytes
 import json
-import datetime
+from transformers.generation.utils import GenerationMixin
 
 
 class ValueHead(torch.nn.Module):
     def __init__(self, hidden_size, pretrained_layer):
         super().__init__()
 
-        config = MistralConfig(
-            hidden_size=hidden_size,
-            intermediate_size=14336,
-            num_attention_heads=32,
-            num_key_value_heads=8,
-            max_position_embeddings=4096,
-        )
+        # Deep copy the pretrained layer
+        self.attention = copy.deepcopy(pretrained_layer)
 
-        # Initialize with pretrained weights
-        self.attention = MistralDecoderLayer(config, layer_idx=-1)
-        self.attention.load_state_dict(pretrained_layer.state_dict(), strict=False)
-
-        # Convert attention layers to bfloat16
+        # Convert attention layer to bfloat16
         self.attention = self.attention.to(torch.bfloat16)
 
         # Linear layer for final value prediction
         self.linear = torch.nn.Linear(hidden_size, 1, dtype=torch.bfloat16)
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states, position_ids=None):
         if hidden_states.dim() == 2:
             hidden_states = hidden_states.unsqueeze(1)
 
         # Ensure hidden_states are in bfloat16
         hidden_states = hidden_states.to(torch.bfloat16)
 
-        # Generate position_ids
-        batch_size, seq_length, _ = hidden_states.shape
-        position_ids = (
-            torch.arange(seq_length, dtype=torch.long, device=hidden_states.device)
-            .unsqueeze(0)
-            .expand(batch_size, -1)
-        )
-
-        ## Generate attention mask (assuming all tokens are valid)
-        # attention_mask = torch.ones(
-        #    (batch_size, seq_length), dtype=torch.bool, device=hidden_states.device
-        # )
-
+        # Pass position_ids to the attention layer
         attention_output = self.attention(
-            hidden_states=hidden_states,
-            # attention_mask=attention_mask,
-            position_ids=position_ids,
+            hidden_states=hidden_states, position_ids=position_ids
         )[0]
 
         last_token_hidden = attention_output[:, -1, :]
         return self.linear(last_token_hidden).squeeze(-1)
 
 
+class ActivationCapturer:
+    def __init__(self):
+        self.activation = []
+
+    def hook(self, module, input, output):
+        self.activation = self.activation + [output[0]]
+
+
 def load_mistral_model():
     model_name = "mistralai/Mistral-7B-Instruct-v0.2"
-    # model_name = "distilgpt2"
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
 
-    # Add value head, initializing with the last pretrained layer
-    pretrained_last_layer = model.model.layers[-1]
-    model.value_head = ValueHead(4096, pretrained_last_layer)
+    # Register the hook
+    activation_capturer = ActivationCapturer()
+    model.model.layers[-1].register_forward_hook(activation_capturer.hook)
+
+    # Add value head, initializing with a deep copy of the last pretrained layer
+    pretrained_last_layer = copy.deepcopy(model.model.layers[-1])
+    model.value_head = ValueHead(model.config.hidden_size, pretrained_last_layer)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    return model, tokenizer, device
+    return model, tokenizer, device, activation_capturer
 
 
 def generate_question_answer_batch(batch_size: int):
@@ -92,7 +78,7 @@ def generate_question_answer_batches(num_batches: int, batch_size: int):
     return [generate_question_answer_batch(batch_size) for _ in range(num_batches)]
 
 
-def generate_reasoning(model, tokenizer, device, questions):
+def generate_reasoning(model, tokenizer, device, questions, activation_capturer):
     prompts = [
         f"[INST] Work through the following question step by step, concisely decomposing problems into subproblems.[/INST]\nQuestion: {q}\nStepByStep:"
         for q in questions
@@ -112,20 +98,25 @@ def generate_reasoning(model, tokenizer, device, questions):
             do_sample=True,
             temperature=1.0,
             pad_token_id=tokenizer.pad_token_id,
-            output_hidden_states=True,
-            return_dict_in_generate=True,
         )
 
-    reasoning = outputs.sequences[:, tokenized_inputs.input_ids.shape[1] :]
+    reasoning = outputs[:, tokenized_inputs.input_ids.shape[1] :]
     reasoning_text = tokenizer.batch_decode(reasoning, skip_special_tokens=True)
 
-    # Return the second-to-last hidden state
-    # last_hidden_state = outputs.hidden_states[-2]
-    last_hidden_states = torch.cat(
-        [x[-2] for x in outputs.hidden_states], dim=1
-    ).detach()
+    # Get the activation from the last layer
+    last_hidden_state = torch.cat(activation_capturer.activation, dim=1)[
+        :, -400:, :
+    ].detach()
+    # Don't clear activations here
 
-    return reasoning_text, last_hidden_states
+    # Generate position IDs for the last 400 tokens
+    position_ids = (
+        torch.arange(400, device=device)
+        .unsqueeze(0)
+        .expand(last_hidden_state.size(0), -1)
+    )
+
+    return reasoning_text, last_hidden_state, position_ids
 
 
 def calculate_log_probs(model, tokenizer, device, reasoning_text, answers):
@@ -154,9 +145,9 @@ def calculate_log_probs(model, tokenizer, device, reasoning_text, answers):
         logits[:, -answer_ids.shape[1] - 1 : -1, :], dim=-1
     )
     answer_log_probs = log_probs.gather(2, answer_ids.unsqueeze(-1)).squeeze(-1)
-    avg_log_probs = (answer_log_probs * tokenized_answers.attention_mask).sum(
-        dim=1
-    ) / tokenized_answers.attention_mask.sum(dim=1)
+    avg_log_probs = (answer_log_probs * tokenized_answers.attention_mask).sum(dim=1) / (
+        tokenized_answers.attention_mask.sum(dim=1) + 1e-8
+    )
 
     return avg_log_probs
 
@@ -182,8 +173,8 @@ if __name__ == "__main__":
     with open(filename, "w") as log_file:
         pass  # Empty file created
 
-    model, tokenizer, device = load_mistral_model()
-    frozen_model, _, _ = load_mistral_model()
+    model, tokenizer, device, activation_capturer = load_mistral_model()
+    frozen_model, _, _, _ = load_mistral_model()
     for param in frozen_model.parameters():
         param.requires_grad = False
     # Train the model to make q_cot_stub more likely
@@ -220,12 +211,12 @@ if __name__ == "__main__":
         questions, answers = zip(*qa_batch)
 
         # Generate reasoning using the trained model
-        reasoning_text, last_hidden_state = generate_reasoning(
-            model, tokenizer, device, questions
+        reasoning_text, last_hidden_state, position_ids = generate_reasoning(
+            model, tokenizer, device, questions, activation_capturer
         )
 
-        # Calculate value prediction
-        value_prediction = model.value_head(last_hidden_state[:, -400:, :])
+        # Calculate value prediction with position IDs
+        value_prediction = model.value_head(last_hidden_state, position_ids)
 
         # Calculate log probs using the frozen model
         avg_log_probs = calculate_log_probs(
@@ -233,8 +224,8 @@ if __name__ == "__main__":
         )
 
         # Generate baseline reasoning using the frozen model
-        baseline_reasoning_text, baseline_last_hidden_state = generate_reasoning(
-            frozen_model, tokenizer, device, questions
+        baseline_reasoning_text, baseline_last_hidden_state, _ = generate_reasoning(
+            frozen_model, tokenizer, device, questions, activation_capturer
         )
 
         # Calculate baseline log probs
@@ -282,7 +273,9 @@ if __name__ == "__main__":
             ppo_ratio = torch.exp(
                 current_cot_log_probs.mean(dim=1) - old_cot_log_probs.mean(dim=1)
             )
-            clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
+            clipped_ratio = torch.clamp(
+                ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon
+            )  # keep for logging
             ppo_loss = (
                 calculate_ppo_loss(
                     current_cot_log_probs.mean(dim=1),
