@@ -189,7 +189,7 @@ def train():
 
     model_optimizer.zero_grad()
 
-   for batch_index, qa_batch in enumerate(qa_batches):
+    for batch_index, qa_batch in enumerate(qa_batches):
         questions, answers = zip(*qa_batch)
 
         prompts = [
