@@ -251,7 +251,7 @@ def train():
         pass  # Empty file created
 
     model, frozen_model, tokenizer, device, activation_capturer = load_mistral_model()
-    value_head_learning_rate = 3e-4
+    value_head_learning_rate = 1e-4
     model_learning_rate = 1e-4
     value_head_optimizer = torch.optim.AdamW(model.value_head.parameters(), lr=value_head_learning_rate)
     model_optimizer = bitsandbytes.optim.AdamW8bit(
@@ -260,7 +260,7 @@ def train():
     )
     # Train the model to make q_cot_stub more likely
     batch_size = 3
-    gradient_accumulation_steps = 2  # Only for the main model, not the value head
+    gradient_accumulation_steps = 8  # Only for the main model, not the value head
     use_ppo = True
     ppo_epsilon = 0.2
     previous_advantages = []
@@ -364,10 +364,10 @@ def train():
         print(f"Value head linear weight grad: {model.value_head.linear.weight.grad}")
         print(f"Value head linear bias grad: {model.value_head.linear.bias.grad}")
 
-        if batch_index == 4-gradient_accumulation_steps:
+        if batch_index == 32-gradient_accumulation_steps:
             model_optimizer.zero_grad()
         # Only update weights after accumulating gradients
-        if batch_index >= 4  and batch_index % gradient_accumulation_steps == 0:
+        if batch_index >= 32  and batch_index % gradient_accumulation_steps == 0:
             model_optimizer.step()
             model_optimizer.zero_grad()
         value_head_optimizer.step()
