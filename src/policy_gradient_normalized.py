@@ -167,7 +167,7 @@ def train():
 
     batch_size = 6
     gradient_accumulation_steps = 4 
-    use_ppo = False
+    use_ppo = True 
     ppo_epsilon = 0.2
     r = 0.9  # Set the ratio for exponentially weighted average (adjust as needed)
  
