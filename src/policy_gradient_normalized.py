@@ -9,6 +9,9 @@ import json
 import copy
 from torch.nn.utils import clip_grad_norm_
 
+# Initialize the global variable at the module level
+previous_normalized_rewards = []
+
 def load_mistral_model():
     model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     # model_name = "distilgpt2"
@@ -96,7 +99,14 @@ def calculate_ppo_loss(current_log_probs, old_log_probs, advantages, epsilon=0.2
     loss = -torch.min(ratio * advantages, clipped_ratio * advantages)
     return loss.mean()
 
-def calculate_advantages(model, frozen_model, tokenizer, device, tokenized_inputs, outputs, baseline_outputs, answers):
+def exponential_weighted_average(values, r):
+    weights = np.array([r**i for i in range(len(values))])
+    weights = weights / np.sum(weights)  # Normalize weights to sum to 1
+    return np.sum(weights * np.array(values))
+
+def calculate_advantages(model, frozen_model, tokenizer, device, tokenized_inputs, outputs, baseline_outputs, answers, r):
+    global previous_normalized_rewards
+
     reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1]:]
     baseline_reasoning_tokens = baseline_outputs[:, tokenized_inputs.input_ids.shape[1]:]
 
@@ -107,16 +117,31 @@ def calculate_advantages(model, frozen_model, tokenizer, device, tokenized_input
         frozen_model, tokenizer, device, baseline_reasoning_tokens, answers
     )
 
-    advantage = log_prob_ans_given_reasoning - log_prob_ans_given_default_reasoning
+    # Calculate normalized reward
+    normalized_reward = log_prob_ans_given_reasoning - log_prob_ans_given_default_reasoning
 
-    return advantage, reasoning_tokens, log_prob_ans_given_reasoning, log_prob_ans_given_default_reasoning
+    # Calculate advantage using exponentially weighted average of previous normalized rewards
+    if len(previous_normalized_rewards) > 0:
+        avg_previous_reward = exponential_weighted_average(previous_normalized_rewards, r)
+        advantage = normalized_reward - avg_previous_reward
+    else:
+        advantage = normalized_reward
+
+    # Update previous_normalized_rewards
+    previous_normalized_rewards.extend(normalized_reward.detach().cpu().numpy())
+    
+    # Keep only the last 1000 rewards to limit memory usage
+    if len(previous_normalized_rewards) > 1000:
+        previous_normalized_rewards = previous_normalized_rewards[-1000:]
+
+    return advantage, reasoning_tokens, log_prob_ans_given_reasoning, log_prob_ans_given_default_reasoning, normalized_reward
 
 def calculate_losses(unfrozen_avg_log_probs_reasoning_given_question, frozen_avg_log_probs_reasoning_given_question, advantage, use_ppo, ppo_epsilon):
     if use_ppo:
         ppo_ratio = torch.exp(
             unfrozen_avg_log_probs_reasoning_given_question - frozen_avg_log_probs_reasoning_given_question
         )
-        clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
+        clipped_ratio = torch.clamp(ppo_ratio, 1 - poo_epsilon, 1 + ppo_epsilon)
         policy_loss = calculate_ppo_loss(
             unfrozen_avg_log_probs_reasoning_given_question,
             frozen_avg_log_probs_reasoning_given_question,
@@ -163,6 +188,8 @@ def train():
 
     model_optimizer.zero_grad()
 
+    r = 0.9  # Set the ratio for exponentially weighted average (adjust as needed)
+
     for batch_index, qa_batch in enumerate(qa_batches):
         questions, answers = zip(*qa_batch)
 
@@ -196,8 +223,8 @@ def train():
                 pad_token_id=tokenizer.pad_token_id,
             )
 
-        advantage, reasoning_tokens, log_prob_ans_given_reasoning, log_prob_ans_given_default_reasoning = calculate_advantages(
-            model, frozen_model, tokenizer, device, tokenized_inputs, outputs, baseline_outputs, answers
+        advantage, reasoning_tokens, log_prob_ans_given_reasoning, log_prob_ans_given_default_reasoning, normalized_reward = calculate_advantages(
+            model, frozen_model, tokenizer, device, tokenized_inputs, outputs, baseline_outputs, answers, r
         )
 
         full_attention_mask = torch.cat([tokenized_inputs.attention_mask, torch.ones_like(reasoning_tokens)], dim=1)
@@ -257,7 +284,7 @@ def train():
             "Observation": f"Answer: {ans}",
             "Reasoning Contains Answer": str(ans) in reasoning_text_first,
             "Avg Log Prob": avg_log_prob,
-            "Baseline Avg Log Prob": baseline_avg_log_prob,
+            "Normalized Reward": normalized_reward[0].item(),
             "Advantage": advantage_value,
             "Policy Loss": policy_loss.item(),
             "Total Loss": total_loss.item(),

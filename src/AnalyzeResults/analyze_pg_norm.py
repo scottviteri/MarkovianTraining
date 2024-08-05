@@ -48,23 +48,23 @@ def plot_metrics(file_path, window_size=1, output_file='src/AnalyzeResults/pg_no
     axs[0, 1].set_xlabel('Batch')
     axs[0, 1].set_ylabel('Loss')
 
-    # Plot Average Log Prob
-    axs[1, 0].plot(moving_average(metrics['Avg Log Prob'], window_size))
-    axs[1, 0].set_title('Average Log Probability (Moving Average)')
+    # Plot Normalized Reward
+    axs[1, 0].plot(moving_average(metrics['Normalized Reward'], window_size))
+    axs[1, 0].set_title('Normalized Reward (Moving Average)')
     axs[1, 0].set_xlabel('Batch')
-    axs[1, 0].set_ylabel('Log Probability')
-
-    # Plot Baseline Average Log Prob
-    axs[1, 1].plot(moving_average(metrics['Baseline Avg Log Prob'], window_size))
-    axs[1, 1].set_title('Baseline Average Log Probability (Moving Average)')
-    axs[1, 1].set_xlabel('Batch')
-    axs[1, 1].set_ylabel('Log Probability')
+    axs[1, 0].set_ylabel('Reward')
 
     # Plot Advantage
-    axs[2, 0].plot(moving_average(metrics['Advantage'], window_size))
-    axs[2, 0].set_title('Advantage (Moving Average)')
+    axs[1, 1].plot(moving_average(metrics['Advantage'], window_size))
+    axs[1, 1].set_title('Advantage (Moving Average)')
+    axs[1, 1].set_xlabel('Batch')
+    axs[1, 1].set_ylabel('Advantage')
+
+    # Plot Average Log Prob
+    axs[2, 0].plot(moving_average(metrics['Avg Log Prob'], window_size))
+    axs[2, 0].set_title('Average Log Probability (Moving Average)')
     axs[2, 0].set_xlabel('Batch')
-    axs[2, 0].set_ylabel('Advantage')
+    axs[2, 0].set_ylabel('Log Probability')
 
     # Plot Reasoning Contains Answer
     contains_answer = [int(x) for x in metrics['Reasoning Contains Answer']]
