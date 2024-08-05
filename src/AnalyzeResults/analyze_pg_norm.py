@@ -33,7 +33,7 @@ def plot_metrics(file_path, window_size=1, output_file='src/AnalyzeResults/pg_no
                 metrics[key].append(value)
 
     # Plot the metrics
-    fig, axs = plt.subplots(4, 2, figsize=(15, 20))
+    fig, axs = plt.subplots(3, 2, figsize=(15, 15))
     fig.suptitle('Training Metrics')
 
     # Plot Aggregate Loss
@@ -73,32 +73,24 @@ def plot_metrics(file_path, window_size=1, output_file='src/AnalyzeResults/pg_no
     axs[2, 1].set_xlabel('Batch')
     axs[2, 1].set_ylabel('Proportion')
 
-    # Plot KL Divergence
-    axs[3, 0].plot(moving_average(metrics['KL Divergence'], window_size))
-    axs[3, 0].set_title('KL Divergence (Moving Average)')
-    axs[3, 0].set_xlabel('Batch')
-    axs[3, 0].set_ylabel('KL Divergence')
-
-    # Plot Total Loss
-    axs[3, 1].plot(moving_average(metrics['Total Loss'], window_size))
-    axs[3, 1].set_title('Total Loss (Moving Average)')
-    axs[3, 1].set_xlabel('Batch')
-    axs[3, 1].set_ylabel('Loss')
-
     # If PPO is used, plot PPO-specific metrics
-    #if 'PPO Ratio' in metrics:
-    #    fig_ppo, axs_ppo = plt.subplots(1, 2, figsize=(15, 5))
-    #    fig_ppo.suptitle('PPO Metrics')
+    if 'PPO Ratio' in metrics:
+        fig_ppo, axs_ppo = plt.subplots(1, 2, figsize=(15, 5))
+        fig_ppo.suptitle('PPO Metrics')
 
-    #    axs_ppo[0].plot(moving_average(metrics['PPO Ratio'], window_size))
-    #    axs_ppo[0].set_title('PPO Ratio (Moving Average)')
-    #    axs_ppo[0].set_xlabel('Batch')
-    #    axs_ppo[0].set_ylabel('Ratio')
+        axs_ppo[0].plot(moving_average(metrics['PPO Ratio'], window_size))
+        axs_ppo[0].set_title('PPO Ratio (Moving Average)')
+        axs_ppo[0].set_xlabel('Batch')
+        axs_ppo[0].set_ylabel('Ratio')
 
-    #    axs_ppo[1].plot(moving_average(metrics['PPO Clipped Ratio'], window_size))
-    #    axs_ppo[1].set_title('PPO Clipped Ratio (Moving Average)')
-    #    axs_ppo[1].set_xlabel('Batch')
-    #    axs_ppo[1].set_ylabel('Ratio')
+        axs_ppo[1].plot(moving_average(metrics['PPO Clipped Ratio'], window_size))
+        axs_ppo[1].set_title('PPO Clipped Ratio (Moving Average)')
+        axs_ppo[1].set_xlabel('Batch')
+        axs_ppo[1].set_ylabel('Ratio')
+
+        plt.tight_layout()
+        plt.savefig(output_file.replace('.png', '_ppo.png'))
+        print(f"PPO plot saved to {output_file.replace('.png', '_ppo.png')}")
 
     plt.tight_layout()
     plt.savefig(output_file)

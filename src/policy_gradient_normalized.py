@@ -111,12 +111,7 @@ def calculate_advantages(model, frozen_model, tokenizer, device, tokenized_input
 
     return advantage, reasoning_tokens, log_prob_ans_given_reasoning, log_prob_ans_given_default_reasoning
 
-def estimate_kl_divergence(unfrozen_log_probs, frozen_log_probs):
-    # Estimate KL divergence using the sampled tokens
-    kl_div = (unfrozen_log_probs - frozen_log_probs).mean()
-    return kl_div
-
-def calculate_losses(unfrozen_avg_log_probs_reasoning_given_question, frozen_avg_log_probs_reasoning_given_question, advantage, use_ppo, ppo_epsilon, unfrozen_log_probs, frozen_log_probs, kl_coeff):
+def calculate_losses(unfrozen_avg_log_probs_reasoning_given_question, frozen_avg_log_probs_reasoning_given_question, advantage, use_ppo, ppo_epsilon):
     if use_ppo:
         ppo_ratio = torch.exp(
             unfrozen_avg_log_probs_reasoning_given_question - frozen_avg_log_probs_reasoning_given_question
@@ -133,10 +128,9 @@ def calculate_losses(unfrozen_avg_log_probs_reasoning_given_question, frozen_avg
         ppo_ratio = None
         clipped_ratio = None
 
-    kl_div = estimate_kl_divergence(unfrozen_log_probs, frozen_log_probs)
-    total_loss = policy_loss + kl_coeff * kl_div
+    total_loss = policy_loss
 
-    return total_loss, policy_loss, kl_div, ppo_ratio, clipped_ratio
+    return total_loss, policy_loss, ppo_ratio, clipped_ratio
 
 def train():
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -148,9 +142,8 @@ def train():
 
     batch_size = 6
     gradient_accumulation_steps = 4 
-    use_ppo = True 
+    use_ppo = False 
     ppo_epsilon = 0.2
-    kl_coeff = 0.1  # Adjust this value to control the strength of the KL penalty
 
     num_batches = 10000
     qa_batches = list(generate_question_answer_batches(num_batches=num_batches, batch_size=batch_size))
@@ -164,7 +157,6 @@ def train():
             "num_batches": num_batches,
             "use_ppo": use_ppo,
             "ppo_epsilon": ppo_epsilon,
-            "kl_coeff": kl_coeff,
         }
         json.dump(hyperparameters, log_file)
         log_file.write("\n")
@@ -229,15 +221,12 @@ def train():
         unfrozen_avg_log_probs_reasoning_given_question = unfrozen_token_log_probs.mean(dim=1)
         frozen_avg_log_probs_reasoning_given_question = frozen_token_log_probs.mean(dim=1)
 
-        total_loss, policy_loss, kl_div, ppo_ratio, clipped_ratio = calculate_losses(
+        total_loss, policy_loss, ppo_ratio, clipped_ratio = calculate_losses(
             unfrozen_avg_log_probs_reasoning_given_question,
             frozen_avg_log_probs_reasoning_given_question,
             advantage,
             use_ppo,
             ppo_epsilon,
-            unfrozen_log_probs,
-            frozen_log_probs,
-            kl_coeff
         )
 
         loss = total_loss / gradient_accumulation_steps
@@ -271,7 +260,6 @@ def train():
             "Baseline Avg Log Prob": baseline_avg_log_prob,
             "Advantage": advantage_value,
             "Policy Loss": policy_loss.item(),
-            "KL Divergence": kl_div.item(),
             "Total Loss": total_loss.item(),
         }
 
