@@ -33,7 +33,7 @@ def plot_metrics(file_path, window_size=1, output_file='src/AnalyzeResults/pg_no
                 metrics[key].append(value)
 
     # Plot the metrics
-    fig, axs = plt.subplots(3, 2, figsize=(15, 15))
+    fig, axs = plt.subplots(4, 2, figsize=(15, 20))
     fig.suptitle('Training Metrics')
 
     # Plot Aggregate Loss
@@ -72,6 +72,18 @@ def plot_metrics(file_path, window_size=1, output_file='src/AnalyzeResults/pg_no
     axs[2, 1].set_title('Reasoning Contains Answer (Moving Average)')
     axs[2, 1].set_xlabel('Batch')
     axs[2, 1].set_ylabel('Proportion')
+
+    # Plot KL Divergence
+    axs[3, 0].plot(moving_average(metrics['KL Divergence'], window_size))
+    axs[3, 0].set_title('KL Divergence (Moving Average)')
+    axs[3, 0].set_xlabel('Batch')
+    axs[3, 0].set_ylabel('KL Divergence')
+
+    # Plot Total Loss
+    axs[3, 1].plot(moving_average(metrics['Total Loss'], window_size))
+    axs[3, 1].set_title('Total Loss (Moving Average)')
+    axs[3, 1].set_xlabel('Batch')
+    axs[3, 1].set_ylabel('Loss')
 
     # If PPO is used, plot PPO-specific metrics
     #if 'PPO Ratio' in metrics:
