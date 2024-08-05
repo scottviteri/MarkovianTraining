@@ -141,7 +141,7 @@ def calculate_losses(unfrozen_avg_log_probs_reasoning_given_question, frozen_avg
         ppo_ratio = torch.exp(
             unfrozen_avg_log_probs_reasoning_given_question - frozen_avg_log_probs_reasoning_given_question
         )
-        clipped_ratio = torch.clamp(ppo_ratio, 1 - poo_epsilon, 1 + ppo_epsilon)
+        clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
         policy_loss = calculate_ppo_loss(
             unfrozen_avg_log_probs_reasoning_given_question,
             frozen_avg_log_probs_reasoning_given_question,
@@ -167,7 +167,7 @@ def train():
 
     batch_size = 6
     gradient_accumulation_steps = 4 
-    use_ppo = True 
+    use_ppo = False
     ppo_epsilon = 0.2
     r = 0.9  # Set the ratio for exponentially weighted average (adjust as needed)
  
