@@ -167,9 +167,10 @@ def train():
 
     batch_size = 6
     gradient_accumulation_steps = 4 
-    use_ppo = False 
+    use_ppo = True 
     ppo_epsilon = 0.2
-
+    r = 0.9  # Set the ratio for exponentially weighted average (adjust as needed)
+ 
     num_batches = 10000
     qa_batches = list(generate_question_answer_batches(num_batches=num_batches, batch_size=batch_size))
 
@@ -188,9 +189,7 @@ def train():
 
     model_optimizer.zero_grad()
 
-    r = 0.9  # Set the ratio for exponentially weighted average (adjust as needed)
-
-    for batch_index, qa_batch in enumerate(qa_batches):
+   for batch_index, qa_batch in enumerate(qa_batches):
         questions, answers = zip(*qa_batch)
 
         prompts = [
