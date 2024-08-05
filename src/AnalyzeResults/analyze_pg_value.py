@@ -31,11 +31,9 @@ reasoning_contains_answer = [
     1 if entry["Reasoning Contains Answer"] else 0 for entry in expert_iteration_data
 ]
 
-
 def smooth_data(data, window_size):
     cumsum = np.cumsum(np.insert(data, 0, 0))
     return (cumsum[window_size:] - cumsum[:-window_size]) / window_size
-
 
 # Smooth the reasoning contains answer data
 padded_data_reasoning = np.pad(
@@ -98,8 +96,11 @@ if hyperparameters.get("use_ppo", False):
         max_window_size,
     )[:-1]
 
+# Calculate normalized log probs
+normalized_log_probs = (smoothed_data_log_prob - np.mean(smoothed_data_log_prob)) / (np.std(smoothed_data_log_prob) + 1e-8)
+
 # Create a new plot with raw data, smoothed data, log prob series, and advantage
-fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 24), sharex=True)
+fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(5, 1, figsize=(12, 30), sharex=True)
 
 # Calculate the number of padded points to exclude
 exclude_points = max_window_size // 2
@@ -188,9 +189,27 @@ if hyperparameters.get("use_ppo", False):
         label="Smoothed PPO Clipped Ratio",
     )
 
-ax4.set_xlabel("Batch Index")
 ax4.set_ylabel("Value Loss / PPO Ratios")
 ax4.legend(loc="upper left")
+
+# Plot on the fifth subplot (ax5)
+ax5.plot(
+    batch_indices[exclude_points:-exclude_points],
+    normalized_log_probs[exclude_points:-exclude_points],
+    color="blue",
+    linewidth=2,
+    label="Normalized Log Probs",
+)
+ax5.plot(
+    batch_indices[exclude_points:-exclude_points],
+    smoothed_data_value_pred[exclude_points:-exclude_points],
+    color="green",
+    linewidth=2,
+    label="Smoothed Value Prediction",
+)
+ax5.set_xlabel("Batch Index")
+ax5.set_ylabel("Normalized Log Probs / Value Prediction")
+ax5.legend(loc="upper left")
 
 # Update the plot title
 algorithm_name = "PPO" if hyperparameters.get("use_ppo", False) else "Policy Gradient"

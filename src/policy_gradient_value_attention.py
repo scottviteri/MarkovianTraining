@@ -36,8 +36,7 @@ class ValueHead(torch.nn.Module):
             batch_size = hidden_states.shape[0]
             position_ids = torch.arange(hidden_states.shape[1]).unsqueeze(0).repeat(batch_size, 1).to(hidden_states.device)
             output = self.last_layer(hidden_states, position_ids=position_ids)[0]
-        last_token_hidden = output[:, -1, :]
-        return self.linear(last_token_hidden).squeeze(-1)
+        return self.linear(output).squeeze(-1)
 
 
 class ActivationCapturer:
@@ -98,64 +97,49 @@ def generate_question_answer_batches(num_batches: int, batch_size: int):
     return [generate_question_answer_batch(batch_size) for _ in range(num_batches)]
 
 
-def generate_reasoning(model, tokenizer, device, questions):
-    prompts = [
-        f"[INST] Work through the following question step by step, concisely decomposing problems into subproblems.[/INST]\nQuestion: {q}\nStepByStep:"
-        for q in questions
-    ]
-    tokenized_inputs = tokenizer(
-        prompts,
-        padding=True,
-        return_tensors="pt",
-    ).to(device)
-
-    with torch.no_grad():
-        outputs = model.generate(
-            tokenized_inputs.input_ids,
-            attention_mask=tokenized_inputs.attention_mask,
-            max_new_tokens=400,
-            min_new_tokens=400,
-            do_sample=True,
-            temperature=1.0,
-            pad_token_id=tokenizer.pad_token_id,
-        )
-
-    reasoning = outputs[:, tokenized_inputs.input_ids.shape[1] :]
-    reasoning_text = tokenizer.batch_decode(reasoning, skip_special_tokens=True)
+def calculate_answer_log_probs(model, tokenizer, device, reasoning_tokens, answers):
+    # Decode reasoning tokens to text
+    reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
     
-    return reasoning_text
-
-
-def calculate_log_probs(model, tokenizer, device, reasoning_text, answers):
-    tokenized_cot_ans = tokenizer(
-        [
-            f"[INST] Use the following possibly mistaken reasoning to help predict the true answer, which will come immediately after the 'Answer:' tag. Try to spot flaws in the provided reasoning to guide your prediction.[/INST]\nStepByStep:: {r} \nAnswer: {a}"
-            for r, a in zip(reasoning_text, answers)
-        ],
+    # Prepare the full prompts with instruction, reasoning, and answer
+    full_prompts = [
+        f"Use the following possibly mistaken reasoning to help predict the true answer, which will come immediately after the 'Answer:' tag. Try to spot flaws in the provided reasoning to guide your prediction.\nStepByStep: {r} \nAnswer: {a}"
+        for r, a in zip(reasoning_text, answers)
+    ]
+    
+    # Tokenize the full prompts
+    tokenized_full_prompts = tokenizer(
+        full_prompts,
         padding=True,
         return_tensors="pt",
     ).to(device)
 
-    tokenized_answers = tokenizer(
-        answers, padding=True, return_tensors="pt", add_special_tokens=False
-    ).to(device)
+    # Find the position of "Answer:" in the tokenized input
+    # 28705 is space token, leading to the final space before the answer (which doesn't contain spaces)
+    answer_start_positions = [
+        (input_ids == 28705).nonzero(as_tuple=True)[0][-1].item() + 1
+        for input_ids in tokenized_full_prompts.input_ids
+    ]
 
     with torch.no_grad():
         outputs = model(
-            input_ids=tokenized_cot_ans.input_ids,
-            attention_mask=tokenized_cot_ans.attention_mask,
+            input_ids=tokenized_full_prompts.input_ids,
+            attention_mask=tokenized_full_prompts.attention_mask,
         )
         logits = outputs.logits
 
-    answer_ids = tokenized_answers.input_ids
-    log_probs = torch.nn.functional.log_softmax(
-        logits[:, -answer_ids.shape[1] - 1 : -1, :], dim=-1
-    )
-    answer_log_probs = log_probs.gather(2, answer_ids.unsqueeze(-1)).squeeze(-1)
-    avg_log_probs = (answer_log_probs * tokenized_answers.attention_mask).sum(dim=1) / (
-        tokenized_answers.attention_mask.sum(dim=1) + 1e-8
-    )
+    # Calculate log probabilities for the answer tokens
+    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+    answer_log_probs = [
+        log_probs[i, start-1:-1].gather(1, tokenized_full_prompts.input_ids[i, start:].unsqueeze(-1)).squeeze(-1)
+        for i, start in enumerate(answer_start_positions)
+    ]
 
+    # Calculate average log probability for each answer
+    avg_log_probs = torch.stack([
+        (probs * mask[start_idx:]).sum() / (mask[start_idx:].sum() + 1e-8)
+        for (mask, probs, start_idx) in zip(tokenized_full_prompts.input_ids, answer_log_probs, answer_start_positions)
+    ])
     return avg_log_probs
 
 
@@ -213,6 +197,52 @@ def test_value_head_gradient_isolation():
     
     print("Test passed: Value head gradients are isolated from the main model.")
 
+def calculate_advantages(model, frozen_model, tokenizer, device, tokenized_inputs, outputs, baseline_outputs, answers, activation_capturer):
+    last_hidden_state = torch.cat(activation_capturer.activation, dim=1)
+    assert last_hidden_state.shape[1] == 400, f"Expected last_hidden_state to have 400 tokens, but got {last_hidden_state.shape[1]}"
+    
+    value_prediction = model.value_head(last_hidden_state)
+    assert value_prediction.shape == (outputs.shape[0], 400), f"Expected value_prediction shape ({outputs.shape[0]}, 400), but got {value_prediction.shape}"
+
+    reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1]:]
+    baseline_reasoning_tokens = baseline_outputs[:, tokenized_inputs.input_ids.shape[1]:]
+
+    log_prob_ans_given_reasoning = calculate_answer_log_probs(
+        frozen_model, tokenizer, device, reasoning_tokens, answers
+    )
+    assert log_prob_ans_given_reasoning.shape == (outputs.shape[0],), f"Expected log_prob_ans_given_reasoning shape ({outputs.shape[0]},), but got {log_prob_ans_given_reasoning.shape}"
+
+    log_prob_ans_given_default_reasoning = calculate_answer_log_probs(
+        frozen_model, tokenizer, device, baseline_reasoning_tokens, answers
+    )
+    assert log_prob_ans_given_default_reasoning.shape == (outputs.shape[0],), f"Expected log_prob_ans_given_default_reasoning shape ({outputs.shape[0]},), but got {log_prob_ans_given_default_reasoning.shape}"
+
+    initial_advantage = log_prob_ans_given_reasoning - log_prob_ans_given_default_reasoning
+    advantage = initial_advantage - value_prediction.mean(dim=1)
+    assert advantage.shape == (outputs.shape[0],), f"Expected advantage shape ({outputs.shape[0]},), but got {advantage.shape}"
+
+    return value_prediction, initial_advantage, advantage, reasoning_tokens, log_prob_ans_given_reasoning, log_prob_ans_given_default_reasoning
+
+def calculate_losses(unfrozen_avg_log_probs_reasoning_given_question, frozen_avg_log_probs_reasoning_given_question, advantage, value_prediction, initial_advantage, use_ppo, ppo_epsilon):
+    if use_ppo:
+        ppo_ratio = torch.exp(
+            unfrozen_avg_log_probs_reasoning_given_question - frozen_avg_log_probs_reasoning_given_question
+        )
+        clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
+        policy_loss = calculate_ppo_loss(
+            unfrozen_avg_log_probs_reasoning_given_question,
+            frozen_avg_log_probs_reasoning_given_question,
+            advantage,
+            epsilon=ppo_epsilon,
+        )
+    else:
+        policy_loss = (unfrozen_avg_log_probs_reasoning_given_question * -advantage).mean()
+        ppo_ratio = None
+        clipped_ratio = None
+
+    value_loss = torch.abs(value_prediction.mean(dim=1) - initial_advantage).mean()
+    return policy_loss, value_loss, ppo_ratio, clipped_ratio
+
 def train():
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"src/AnalyzeResults/PolicyGradientDictionary_{timestamp}.log"
@@ -221,7 +251,7 @@ def train():
         pass  # Empty file created
 
     model, frozen_model, tokenizer, device, activation_capturer = load_mistral_model()
-    value_head_learning_rate = 1e-4
+    value_head_learning_rate = 3e-4
     model_learning_rate = 1e-4
     value_head_optimizer = torch.optim.AdamW(model.value_head.parameters(), lr=value_head_learning_rate)
     model_optimizer = bitsandbytes.optim.AdamW8bit(
@@ -229,8 +259,8 @@ def train():
         lr=model_learning_rate
     )
     # Train the model to make q_cot_stub more likely
-    batch_size = 4
-    gradient_accumulation_steps = 8  # Only for the main model, not the value head
+    batch_size = 3
+    gradient_accumulation_steps = 2  # Only for the main model, not the value head
     use_ppo = True
     ppo_epsilon = 0.2
     previous_advantages = []
@@ -259,93 +289,74 @@ def train():
     for batch_index, qa_batch in enumerate(qa_batches):
         questions, answers = zip(*qa_batch)
 
-        # Generate reasoning using the trained model
-        reasoning_text = generate_reasoning(
-            model, tokenizer, device, questions
-        )
-        last_hidden_state = torch.cat(activation_capturer.activation, dim=1)
-        assert last_hidden_state.shape[1] == 400
-        # Calculate value prediction
-        value_prediction = model.value_head(last_hidden_state)
-        # Calculate log probs using the frozen model
-        avg_log_probs = calculate_log_probs(
-            frozen_model, tokenizer, device, reasoning_text, answers
-        )
-
-        # Generate baseline reasoning using the frozen model
-        baseline_reasoning_text = generate_reasoning(
-            frozen_model, tokenizer, device, questions
-        )
-
-        # Calculate baseline log probs
-        baseline_avg_log_probs = calculate_log_probs(
-            frozen_model, tokenizer, device, baseline_reasoning_text, answers
-        )
-
-        # Calculate the initial advantage and final advantage
-        initial_advantage = avg_log_probs - baseline_avg_log_probs
-        advantage = initial_advantage - value_prediction.detach()
-
-        # Tokenize questions and reasoning together
-        tokenized_q_cot = tokenizer(
-            [
-                f"[INST] Work through the following question step by step, concisely decomposing problems into subproblems.[/INST]\nQuestion: {q}\nStepByStep: {r}"
-                for q, r in zip(questions, reasoning_text)
-            ],
+        prompts = [
+            f"Work through the following question step by step, concisely decomposing problems into subproblems.\nQuestion: {q}\nStepByStep:"
+            for q in questions
+        ]
+        tokenized_inputs = tokenizer(
+            prompts,
             padding=True,
             return_tensors="pt",
         ).to(device)
 
-        # Calculate old log probabilities
         with torch.no_grad():
-            old_q_cot_outputs = frozen_model(
-                input_ids=tokenized_q_cot.input_ids, attention_mask=tokenized_q_cot.attention_mask
+            outputs = model.generate(
+                tokenized_inputs.input_ids,
+                attention_mask=tokenized_inputs.attention_mask,
+                max_new_tokens=400,
+                min_new_tokens=400,
+                do_sample=True,
+                temperature=1.0,
+                pad_token_id=tokenizer.pad_token_id,
             )
-            old_q_cot_log_probs = torch.nn.functional.log_softmax(
-                old_q_cot_outputs.logits[:, -401:-1, :], dim=-1
+            baseline_outputs = frozen_model.generate(
+                tokenized_inputs.input_ids,
+                attention_mask=tokenized_inputs.attention_mask,
+                max_new_tokens=400,
+                min_new_tokens=400,
+                do_sample=True,
+                temperature=1.0,
+                pad_token_id=tokenizer.pad_token_id,
             )
-            old_cot_log_probs = old_q_cot_log_probs.gather(
-                2, tokenized_q_cot.input_ids[:, -400:].unsqueeze(-1)
-            ).squeeze(-1)
 
-        # Calculate current log probabilities
-        q_cot_outputs = model(input_ids=tokenized_q_cot.input_ids, attention_mask=tokenized_q_cot.attention_mask)
-        q_cot_log_probs = torch.nn.functional.log_softmax(
-            q_cot_outputs.logits[:, -401:-1, :], dim=-1
+        value_prediction, initial_advantage, advantage, reasoning_tokens, log_prob_ans_given_reasoning, log_prob_ans_given_default_reasoning = calculate_advantages(
+            model, frozen_model, tokenizer, device, tokenized_inputs, outputs, baseline_outputs, answers, activation_capturer
         )
-        current_cot_log_probs = q_cot_log_probs.gather(
-            2, tokenized_q_cot.input_ids[:, -400:].unsqueeze(-1)
-        ).squeeze(-1)
 
-        if use_ppo:
-            # Use PPO loss
-            ppo_ratio = torch.exp(
-                current_cot_log_probs.mean(dim=1) - old_cot_log_probs.mean(dim=1)
+        with torch.no_grad():
+            full_attention_mask = torch.cat([tokenized_inputs.attention_mask, torch.ones_like(reasoning_tokens)], dim=1)
+            unfrozen_outputs = model(
+                input_ids=outputs,
+                attention_mask=full_attention_mask
             )
-            clipped_ratio = torch.clamp(
-                ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon
-            )  # keep for logging
-            policy_loss = (
-                calculate_ppo_loss(
-                    current_cot_log_probs.mean(dim=1),
-                    old_cot_log_probs.mean(dim=1),
-                    advantage,
-                    epsilon=ppo_epsilon,
-                )
-                / gradient_accumulation_steps
+            frozen_outputs = frozen_model(
+                input_ids=outputs,
+                attention_mask=full_attention_mask
             )
-            value_loss = torch.abs(
-                initial_advantage - value_prediction
-            ).mean()  # or use torch.square()
-            loss = policy_loss + value_loss
-        else:
-            # Use original policy gradient loss
-            policy_loss = (current_cot_log_probs.mean(dim=1) * -advantage).mean()
-            value_loss = torch.abs(
-                initial_advantage - value_prediction
-            ).mean()  # or use torch.square()
-            loss = (policy_loss + value_loss) / gradient_accumulation_steps
+            unfrozen_logits = unfrozen_outputs.logits[:,tokenized_inputs.input_ids.shape[1]-1:-1,:]
+            frozen_logits = frozen_outputs.logits[:,tokenized_inputs.input_ids.shape[1]-1:-1,:]
+        
+        unfrozen_log_probs = torch.nn.functional.log_softmax(unfrozen_logits, dim=-1)
+        frozen_log_probs = torch.nn.functional.log_softmax(frozen_logits, dim=-1)
+        
+        unfrozen_token_log_probs = unfrozen_log_probs.gather(2, reasoning_tokens.unsqueeze(-1)).squeeze(-1)
+        frozen_token_log_probs = frozen_log_probs.gather(2, reasoning_tokens.unsqueeze(-1)).squeeze(-1)
+    
+        # Calculate average log probability for each generated sequence
+        unfrozen_avg_log_probs_reasoning_given_question = unfrozen_token_log_probs.mean(dim=1)
+        frozen_avg_log_probs_reasoning_given_question = frozen_token_log_probs.mean(dim=1)
 
+        policy_loss, value_loss, ppo_ratio, clipped_ratio = calculate_losses(
+            unfrozen_avg_log_probs_reasoning_given_question,
+            frozen_avg_log_probs_reasoning_given_question,
+            advantage,
+            value_prediction,
+            initial_advantage,
+            use_ppo,
+            ppo_epsilon
+        )
+
+        loss = (policy_loss + value_loss) / gradient_accumulation_steps
         loss.backward()
         
         # Debug prints
@@ -353,10 +364,10 @@ def train():
         print(f"Value head linear weight grad: {model.value_head.linear.weight.grad}")
         print(f"Value head linear bias grad: {model.value_head.linear.bias.grad}")
 
-        if batch_index == 128-gradient_accumulation_steps:
+        if batch_index == 4-gradient_accumulation_steps:
             model_optimizer.zero_grad()
         # Only update weights after accumulating gradients
-        if batch_index >= 128  and batch_index % gradient_accumulation_steps == 0:
+        if batch_index >= 4  and batch_index % gradient_accumulation_steps == 0:
             model_optimizer.step()
             model_optimizer.zero_grad()
         value_head_optimizer.step()
@@ -373,9 +384,9 @@ def train():
         # Log only the first element of the batch
         q = questions[0]
         ans = answers[0]
-        reasoning_text_first = reasoning_text[0]
-        avg_log_prob = avg_log_probs[0].item()
-        baseline_avg_log_prob = baseline_avg_log_probs[0].item()
+        reasoning_text_first = tokenizer.decode(reasoning_tokens[0], skip_special_tokens=True)
+        avg_log_prob = log_prob_ans_given_reasoning[0].item()
+        baseline_avg_log_prob = log_prob_ans_given_default_reasoning[0].item()
         initial_advantage_value = initial_advantage[0].item()
         advantage_value = advantage[0].item()
         print(reasoning_text_first)
@@ -393,12 +404,12 @@ def train():
             "Baseline Avg Log Prob": baseline_avg_log_prob,
             "Initial Advantage": initial_advantage_value,
             "Advantage": advantage_value,
-            "Value Prediction": value_prediction[0].item(),
+            "Value Prediction": value_prediction.mean().item(),
             "Value Loss": value_loss.item(),
             "Policy Loss": policy_loss.item(),
         }
 
-        if use_ppo:
+        if use_ppo and ppo_ratio is not None:
             log_entry.update(
                 {
                     "PPO Ratio": ppo_ratio[0].item(),
