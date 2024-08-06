@@ -171,7 +171,7 @@ plt.close()
 
 print(
     "Smoothed plot with training example indicators, average log prob, and gradient norm "
-    "saved as smoothed_reasoning_log_prob_and_grad_norm_plot.png"
+    "saved as ei_plot.png"
 )
 
 print(f"Plot length: {plot_length}")
