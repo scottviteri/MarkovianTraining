@@ -18,7 +18,7 @@ def get_latest_log_file():
 
 
 def plot_metrics(
-    file_path, window_size=16, output_file="src/AnalyzeResults/pg_norm_plot.png"
+    file_path, window_size=1, output_file="src/AnalyzeResults/pg_norm_plot.png"
 ):
     with open(file_path, "r") as f:
         lines = f.readlines()
@@ -78,6 +78,7 @@ def plot_metrics(
         axs[2, 0].set_title("Average Log Probability")
         axs[2, 0].set_xlabel("Batch")
         axs[2, 0].set_ylabel("Log Probability")
+        axs[2, 0].set_ylim(top=0)  # Set maximum to 0
 
         # Plot Reasoning Contains Answer
         contains_answer = [int(x) for x in metrics["Reasoning Contains Answer"]]
@@ -85,12 +86,14 @@ def plot_metrics(
         axs[2, 1].set_title("Reasoning Contains Answer")
         axs[2, 1].set_xlabel("Batch")
         axs[2, 1].set_ylabel("Proportion")
+        axs[2, 1].set_ylim(0, 1)  # Set range from 0 to 1
     else:
         # Plot Average Log Prob
         axs[1, 0].plot(moving_average(metrics["Avg Log Prob"], window_size))
         axs[1, 0].set_title("Average Log Probability")
         axs[1, 0].set_xlabel("Batch")
         axs[1, 0].set_ylabel("Log Probability")
+        axs[1, 0].set_ylim(top=0)  # Set maximum to 0
 
         # Plot Reasoning Contains Answer
         contains_answer = [int(x) for x in metrics["Reasoning Contains Answer"]]
@@ -98,6 +101,7 @@ def plot_metrics(
         axs[1, 1].set_title("Reasoning Contains Answer")
         axs[1, 1].set_xlabel("Batch")
         axs[1, 1].set_ylabel("Proportion")
+        axs[1, 1].set_ylim(0, 1)  # Set range from 0 to 1
 
     # If PPO is used, plot PPO-specific metrics
     if "PPO Ratio" in metrics:
@@ -111,6 +115,10 @@ def plot_metrics(
         axs[row, 1].set_title("PPO Clipped Ratio")
         axs[row, 1].set_xlabel("Batch")
         axs[row, 1].set_ylabel("Ratio")
+
+    plt.tight_layout()
+    plt.savefig(output_file)
+    print(f"Plot saved to {output_file}")
 
     plt.tight_layout()
     plt.savefig(output_file)
