@@ -239,7 +239,7 @@ def train():
     use_ppo = False
     ppo_epsilon = 0.2
     r = 0  # Set the ratio for exponentially weighted average (adjust as needed)
-    clip_grad_norm = False
+    clip_grad_norm = True 
 
     num_batches = 10000
     qa_batches = list(
