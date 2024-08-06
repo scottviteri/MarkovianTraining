@@ -124,7 +124,6 @@ ax1.set_ylabel("Reasoning Contains Answer (1: True, 0: False)")
 ax1.set_ylim(-0.1, 1.1)
 
 # Create a second y-axis for average log prob
-ax2 = ax1.twinx()
 ax2.plot(
     batch_indices[exclude_points:plot_length],
     smoothed_data_log_prob[: plot_length - exclude_points],
@@ -157,7 +156,7 @@ ax1.legend(
 
 plt.title(
     f"Reasoning Contains Answer, Average Log Prob, and Gradient Norm vs Batch Index\n"
-    f"(Window Size: {max_window_size}, Grad Clip: {hyperparameters.get('grad_clip_value', 'N/A')})"
+    f"(Window Size: {max_window_size})"
 )
 plt.grid(True, linestyle="--", alpha=0.7)
 
