@@ -84,7 +84,7 @@ if __name__ == "__main__":
             "effective_batch_size": batch_size * gradient_accumulation_steps,
             "num_batches": num_batches,
         }
-        json.dump({"hyperparameters": hyperparameters}, log_file)
+        json.dump(hyperparameters, log_file)
         log_file.write("\n")  # Add a newline after the hyperparameters
 
     optimizer.zero_grad()  # Move this outside the loop
