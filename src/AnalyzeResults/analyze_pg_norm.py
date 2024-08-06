@@ -4,6 +4,7 @@ import numpy as np
 from collections import defaultdict
 import os
 import glob
+import argparse
 
 
 def moving_average(data, window_size):
@@ -18,7 +19,7 @@ def get_latest_log_file():
 
 
 def plot_metrics(
-    file_path, window_size=1, output_file="src/AnalyzeResults/pg_norm_plot.png"
+    file_path, window_size=16, output_file="src/AnalyzeResults/pg_norm_plot.png"
 ):
     with open(file_path, "r") as f:
         lines = f.readlines()
@@ -101,7 +102,7 @@ def plot_metrics(
         axs[1, 1].set_title("Reasoning Contains Answer")
         axs[1, 1].set_xlabel("Batch")
         axs[1, 1].set_ylabel("Proportion")
-        axs[1, 1].set_ylim(-0.1, 1.1)  # Set range from 0 to 1
+        axs[1, 1].set_ylim(0, 1)  # Set range from 0 to 1
 
     # If PPO is used, plot PPO-specific metrics
     if "PPO Ratio" in metrics:
@@ -122,11 +123,17 @@ def plot_metrics(
 
 
 if __name__ == "__main__":
-    import sys
+    parser = argparse.ArgumentParser(
+        description="Analyze Policy Gradient Normalized results."
+    )
+    parser.add_argument(
+        "--window_size",
+        type=int,
+        default=16,
+        help="Window size for moving average (default: 16)",
+    )
+    args = parser.parse_args()
 
-    if len(sys.argv) > 1:
-        log_file_path = sys.argv[1]
-    else:
-        log_file_path = get_latest_log_file()
-
-    plot_metrics(log_file_path)
+    latest_log_file = get_latest_log_file()
+    plot_metrics(latest_log_file, window_size=args.window_size)
+    print(f"Plot saved as pg_norm_plot.png with window size {args.window_size}")
