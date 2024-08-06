@@ -44,6 +44,9 @@ reasoning_contains_answer = [
 # Extract and smooth the average log prob data (negated aggregate loss)
 average_log_prob = [-entry["Aggregate loss"] for entry in expert_iteration_data]
 
+# Extract gradient norm values
+gradient_norms = [entry.get("Gradient Norm", 0) for entry in expert_iteration_data]
+
 # Print debugging information
 print(f"Length of batch_indices: {len(batch_indices)}")
 print(f"Length of reasoning_contains_answer: {len(reasoning_contains_answer)}")
@@ -53,13 +56,15 @@ print(f"Length of average_log_prob: {len(average_log_prob)}")
 if len(batch_indices) >= max_window_size:
     smoothed_data_reasoning = smooth_data(reasoning_contains_answer, max_window_size)
     smoothed_data_log_prob = smooth_data(average_log_prob, max_window_size)
+    smoothed_data_grad_norm = smooth_data(gradient_norms, max_window_size)
 else:
     print(f"Warning: Not enough data points for smoothing. Using raw data.")
     smoothed_data_reasoning = reasoning_contains_answer
     smoothed_data_log_prob = average_log_prob
+    smoothed_data_grad_norm = gradient_norms
 
-# Create a new plot with raw data, smoothed data, training example indicators (if available), and average log prob
-fig, ax1 = plt.subplots(figsize=(12, 6))
+# Create a new plot with raw data, smoothed data, training example indicators, average log prob, and gradient norm
+fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(12, 18), sharex=True)
 
 # Calculate the number of padded points to exclude
 exclude_points = max_window_size // 2 if len(batch_indices) >= max_window_size else 0
@@ -70,6 +75,7 @@ plot_length = min(
     len(reasoning_contains_answer),
     len(smoothed_data_reasoning),
     len(smoothed_data_log_prob),
+    len(smoothed_data_grad_norm),
 )
 
 # Plot raw data
@@ -115,10 +121,9 @@ if any(training_example):
 
 ax1.set_xlabel("Batch Index")
 ax1.set_ylabel("Reasoning Contains Answer (1: True, 0: False)")
-ax1.set_ylim(-0.1, 1.15)
+ax1.set_ylim(-0.1, 1.1)
 
 # Create a second y-axis for average log prob
-ax2 = ax1.twinx()
 ax2.plot(
     batch_indices[exclude_points:plot_length],
     smoothed_data_log_prob[: plot_length - exclude_points],
@@ -126,7 +131,21 @@ ax2.plot(
     linewidth=2,
     label="Smoothed Average Log Prob",
 )
+ax1.set_xlabel("Batch Index")
 ax2.set_ylabel("Average Log Prob")
+ax2.set_ylim(top=0)
+
+# Plot gradient norm on ax3
+ax3.plot(
+    batch_indices[exclude_points:plot_length],
+    smoothed_data_grad_norm[: plot_length - exclude_points],
+    color="orange",
+    linewidth=2,
+    label="Smoothed Gradient Norm",
+)
+ax3.set_xlabel("Batch Index")
+ax3.set_ylabel("Gradient Norm")
+ax3.legend()
 
 # Combine legends
 lines1, labels1 = ax1.get_legend_handles_labels()
@@ -136,19 +155,22 @@ ax1.legend(
 )
 
 plt.title(
-    f"Reasoning Contains Answer and Average Log Prob vs Batch Index\n(Window Size: {max_window_size})"
+    f"Reasoning Contains Answer, Average Log Prob, and Gradient Norm vs Batch Index\n"
+    f"(Window Size: {max_window_size})"
 )
 plt.grid(True, linestyle="--", alpha=0.7)
 
 # Adjust the layout to make room for the legend
 plt.tight_layout()
-plt.subplots_adjust(bottom=0.2)
+plt.subplots_adjust(hspace=0.3)
+
 # Save the new plot
-plt.savefig("src/AnalyzeResults/smoothed_reasoning_and_log_prob_plot.png")
+plt.savefig("src/AnalyzeResults/ei_plot.png")
 plt.close()
 
 print(
-    "Smoothed plot with training example indicators (if available) and average log prob saved as smoothed_reasoning_and_log_prob_plot.png"
+    "Smoothed plot with training example indicators, average log prob, and gradient norm "
+    "saved as ei_plot.png"
 )
 
 print(f"Plot length: {plot_length}")
