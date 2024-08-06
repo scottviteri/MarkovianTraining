@@ -54,11 +54,11 @@ def plot_metrics(
     axs[0, 0].set_xlabel("Batch")
     axs[0, 0].set_ylabel("Loss")
 
-    # Plot Policy Loss
-    axs[0, 1].plot(moving_average(metrics["Policy Loss"], window_size))
-    axs[0, 1].set_title("Policy Loss")
+    # Plot Gradient Norm
+    axs[0, 1].plot(moving_average(metrics["Grad Norm"], window_size))
+    axs[0, 1].set_title("Gradient Norm")
     axs[0, 1].set_xlabel("Batch")
-    axs[0, 1].set_ylabel("Loss")
+    axs[0, 1].set_ylabel("Norm")
 
     if normalize_loss:
         # Plot Normalized Reward

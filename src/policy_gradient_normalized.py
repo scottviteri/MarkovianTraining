@@ -53,6 +53,15 @@ def generate_question_answer_batches(num_batches: int, batch_size: int):
     return [generate_question_answer_batch(batch_size) for _ in range(num_batches)]
 
 
+def get_grad_norm(parameters):
+    total_norm = 0
+    for p in parameters:
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            total_norm += param_norm.item() ** 2
+    return total_norm**0.5
+
+
 def calculate_answer_log_probs(model, tokenizer, device, reasoning_tokens, answers):
     reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
 
@@ -225,11 +234,12 @@ def train():
     )
 
     batch_size = 6
-    normalize_loss = True
+    normalize_loss = False
     gradient_accumulation_steps = 8
-    use_ppo = True
+    use_ppo = False
     ppo_epsilon = 0.2
-    r = 0.9  # Set the ratio for exponentially weighted average (adjust as needed)
+    r = 0  # Set the ratio for exponentially weighted average (adjust as needed)
+    clip_grad_norm = False
 
     num_batches = 10000
     qa_batches = list(
@@ -346,8 +356,12 @@ def train():
         loss = total_loss / gradient_accumulation_steps
         loss.backward()
 
+        # Usage
+        grad_norm = get_grad_norm(model.parameters())
+        print(f"Current gradient norm: {grad_norm}")
         # Clip gradients to prevent extreme updates
-        clip_grad_norm_(model.parameters(), 1.0)
+        if clip_grad_norm:
+            clip_grad_norm_(model.parameters(), 1.0)
 
         if (batch_index + 1) % gradient_accumulation_steps == 0:
             model_optimizer.step()
@@ -381,6 +395,7 @@ def train():
             "Advantage": advantage_value,
             "Policy Loss": policy_loss.item(),
             "Total Loss": total_loss.item(),
+            "Grad Norm": grad_norm,
         }
 
         if normalize_loss and baseline_avg_log_prob is not None:
