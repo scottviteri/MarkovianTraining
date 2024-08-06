@@ -234,9 +234,9 @@ def train():
     )
 
     batch_size = 6
-    normalize_loss = False
+    normalize_loss = True 
     gradient_accumulation_steps = 8
-    use_ppo = False
+    use_ppo = True 
     ppo_epsilon = 0.2
     r = 0  # Set the ratio for exponentially weighted average (adjust as needed)
     clip_grad_norm = True 
