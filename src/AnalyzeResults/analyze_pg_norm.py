@@ -120,10 +120,6 @@ def plot_metrics(
     plt.savefig(output_file)
     print(f"Plot saved to {output_file}")
 
-    plt.tight_layout()
-    plt.savefig(output_file)
-    print(f"Plot saved to {output_file}")
-
 
 if __name__ == "__main__":
     import sys
