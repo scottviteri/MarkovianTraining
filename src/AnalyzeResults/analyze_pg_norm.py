@@ -101,7 +101,7 @@ def plot_metrics(
         axs[1, 1].set_title("Reasoning Contains Answer")
         axs[1, 1].set_xlabel("Batch")
         axs[1, 1].set_ylabel("Proportion")
-        axs[1, 1].set_ylim(0, 1)  # Set range from 0 to 1
+        axs[1, 1].set_ylim(-0.1, 1.1)  # Set range from 0 to 1
 
     # If PPO is used, plot PPO-specific metrics
     if "PPO Ratio" in metrics:
