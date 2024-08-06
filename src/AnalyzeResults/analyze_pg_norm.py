@@ -46,56 +46,56 @@ def plot_metrics(
 
     # Create the figure and axes
     fig, axs = plt.subplots(num_rows, 2, figsize=(15, 5 * num_rows))
-    fig.suptitle("Training Metrics")
+    fig.suptitle(f"Training Metrics (Window Size: {window_size})")
 
     # Plot Aggregate Loss
     axs[0, 0].plot(moving_average(metrics["Aggregate loss"], window_size))
-    axs[0, 0].set_title("Aggregate Loss (Moving Average)")
+    axs[0, 0].set_title("Aggregate Loss")
     axs[0, 0].set_xlabel("Batch")
     axs[0, 0].set_ylabel("Loss")
 
     # Plot Policy Loss
     axs[0, 1].plot(moving_average(metrics["Policy Loss"], window_size))
-    axs[0, 1].set_title("Policy Loss (Moving Average)")
+    axs[0, 1].set_title("Policy Loss")
     axs[0, 1].set_xlabel("Batch")
     axs[0, 1].set_ylabel("Loss")
 
     if normalize_loss:
         # Plot Normalized Reward
         axs[1, 0].plot(moving_average(metrics["Normalized Reward"], window_size))
-        axs[1, 0].set_title("Normalized Reward (Moving Average)")
+        axs[1, 0].set_title("Normalized Reward")
         axs[1, 0].set_xlabel("Batch")
         axs[1, 0].set_ylabel("Reward")
 
         # Plot Advantage
         axs[1, 1].plot(moving_average(metrics["Advantage"], window_size))
-        axs[1, 1].set_title("Advantage (Moving Average)")
+        axs[1, 1].set_title("Advantage")
         axs[1, 1].set_xlabel("Batch")
         axs[1, 1].set_ylabel("Advantage")
 
         # Plot Average Log Prob
         axs[2, 0].plot(moving_average(metrics["Avg Log Prob"], window_size))
-        axs[2, 0].set_title("Average Log Probability (Moving Average)")
+        axs[2, 0].set_title("Average Log Probability")
         axs[2, 0].set_xlabel("Batch")
         axs[2, 0].set_ylabel("Log Probability")
 
         # Plot Reasoning Contains Answer
         contains_answer = [int(x) for x in metrics["Reasoning Contains Answer"]]
         axs[2, 1].plot(moving_average(contains_answer, window_size))
-        axs[2, 1].set_title("Reasoning Contains Answer (Moving Average)")
+        axs[2, 1].set_title("Reasoning Contains Answer")
         axs[2, 1].set_xlabel("Batch")
         axs[2, 1].set_ylabel("Proportion")
     else:
         # Plot Average Log Prob
         axs[1, 0].plot(moving_average(metrics["Avg Log Prob"], window_size))
-        axs[1, 0].set_title("Average Log Probability (Moving Average)")
+        axs[1, 0].set_title("Average Log Probability")
         axs[1, 0].set_xlabel("Batch")
         axs[1, 0].set_ylabel("Log Probability")
 
         # Plot Reasoning Contains Answer
         contains_answer = [int(x) for x in metrics["Reasoning Contains Answer"]]
         axs[1, 1].plot(moving_average(contains_answer, window_size))
-        axs[1, 1].set_title("Reasoning Contains Answer (Moving Average)")
+        axs[1, 1].set_title("Reasoning Contains Answer")
         axs[1, 1].set_xlabel("Batch")
         axs[1, 1].set_ylabel("Proportion")
 
@@ -103,12 +103,12 @@ def plot_metrics(
     if "PPO Ratio" in metrics:
         row = 3 if normalize_loss else 2
         axs[row, 0].plot(moving_average(metrics["PPO Ratio"], window_size))
-        axs[row, 0].set_title("PPO Ratio (Moving Average)")
+        axs[row, 0].set_title("PPO Ratio")
         axs[row, 0].set_xlabel("Batch")
         axs[row, 0].set_ylabel("Ratio")
 
         axs[row, 1].plot(moving_average(metrics["PPO Clipped Ratio"], window_size))
-        axs[row, 1].set_title("PPO Clipped Ratio (Moving Average)")
+        axs[row, 1].set_title("PPO Clipped Ratio")
         axs[row, 1].set_xlabel("Batch")
         axs[row, 1].set_ylabel("Ratio")
 
