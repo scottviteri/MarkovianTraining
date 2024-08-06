@@ -43,27 +43,39 @@ reasoning_contains_answer = [
 
 # Extract and smooth the average log prob data (negated aggregate loss)
 average_log_prob = [-entry["Aggregate loss"] for entry in expert_iteration_data]
-smoothed_data_log_prob = smooth_data(average_log_prob, max_window_size)
 
-# Extract training example data if available
-training_example = [
-    1 if entry.get("Training Example") == "True" else 0
-    for entry in expert_iteration_data
-]
+# Print debugging information
+print(f"Length of batch_indices: {len(batch_indices)}")
+print(f"Length of reasoning_contains_answer: {len(reasoning_contains_answer)}")
+print(f"Length of average_log_prob: {len(average_log_prob)}")
 
-# Smooth the reasoning contains answer data
-smoothed_data_reasoning = smooth_data(reasoning_contains_answer, max_window_size)
+# Only smooth if we have enough data points
+if len(batch_indices) >= max_window_size:
+    smoothed_data_reasoning = smooth_data(reasoning_contains_answer, max_window_size)
+    smoothed_data_log_prob = smooth_data(average_log_prob, max_window_size)
+else:
+    print(f"Warning: Not enough data points for smoothing. Using raw data.")
+    smoothed_data_reasoning = reasoning_contains_answer
+    smoothed_data_log_prob = average_log_prob
 
 # Create a new plot with raw data, smoothed data, training example indicators (if available), and average log prob
 fig, ax1 = plt.subplots(figsize=(12, 6))
 
 # Calculate the number of padded points to exclude
-exclude_points = max_window_size // 2
+exclude_points = max_window_size // 2 if len(batch_indices) >= max_window_size else 0
 
-# Plot raw data excluding padded points
+# Ensure all data arrays have the same length
+plot_length = min(
+    len(batch_indices),
+    len(reasoning_contains_answer),
+    len(smoothed_data_reasoning),
+    len(smoothed_data_log_prob),
+)
+
+# Plot raw data
 ax1.plot(
-    batch_indices[exclude_points:-exclude_points],
-    reasoning_contains_answer[exclude_points:-exclude_points],
+    batch_indices[:plot_length],
+    reasoning_contains_answer[:plot_length],
     marker="o",
     linestyle="",
     markersize=2,
@@ -71,14 +83,20 @@ ax1.plot(
     label="Raw Data",
 )
 
-# Plot smoothed data excluding padded points
+# Plot smoothed data
 ax1.plot(
-    batch_indices[exclude_points:-exclude_points],
-    smoothed_data_reasoning[:-exclude_points],
+    batch_indices[exclude_points:plot_length],
+    smoothed_data_reasoning[: plot_length - exclude_points],
     color="red",
     linewidth=2,
     label="Smoothed Data",
 )
+
+# Extract training example data if available
+training_example = [
+    1 if entry.get("Training Example") == "True" else 0
+    for entry in expert_iteration_data
+]
 
 # Plot training example indicators if available
 if any(training_example):
@@ -102,8 +120,8 @@ ax1.set_ylim(-0.1, 1.15)
 # Create a second y-axis for average log prob
 ax2 = ax1.twinx()
 ax2.plot(
-    batch_indices[exclude_points:-exclude_points],
-    smoothed_data_log_prob[:-exclude_points],
+    batch_indices[exclude_points:plot_length],
+    smoothed_data_log_prob[: plot_length - exclude_points],
     color="purple",
     linewidth=2,
     label="Smoothed Average Log Prob",
@@ -132,3 +150,6 @@ plt.close()
 print(
     "Smoothed plot with training example indicators (if available) and average log prob saved as smoothed_reasoning_and_log_prob_plot.png"
 )
+
+print(f"Plot length: {plot_length}")
+print(f"Exclude points: {exclude_points}")
