@@ -8,7 +8,6 @@ import json
 import datetime
 from torch.nn.utils import clip_grad_norm_
 
-
 def load_mistral_model():
     model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     # model_name = "distilgpt2"
@@ -44,6 +43,13 @@ def generate_question_answer_batch(batch_size: int):
 def generate_question_answer_batches(num_batches: int, batch_size: int):
     return [generate_question_answer_batch(batch_size) for _ in range(num_batches)]
 
+def get_grad_norm(parameters):
+    total_norm = 0
+    for p in parameters:
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            total_norm += param_norm.item() ** 2
+    return total_norm**0.5
 
 def calculate_threshold(previous_losses):
     if len(previous_losses) > 0:
@@ -67,6 +73,7 @@ if __name__ == "__main__":
     learning_rate = 1e-4
     batch_size = 6
     gradient_accumulation_steps = 8  # Adjust this value as needed
+    clip_grad_norm = True  # Add this line
 
     optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=learning_rate)
     num_batches = 10000
@@ -83,6 +90,7 @@ if __name__ == "__main__":
             "gradient_accumulation_steps": gradient_accumulation_steps,
             "effective_batch_size": batch_size * gradient_accumulation_steps,
             "num_batches": num_batches,
+            "clip_grad_norm": clip_grad_norm,  # Add this line
         }
         json.dump(hyperparameters, log_file)
         log_file.write("\n")  # Add a newline after the hyperparameters
@@ -185,12 +193,19 @@ if __name__ == "__main__":
             print("cot ave log prob: ", cot_log_probs[0].mean())
             loss = -cot_log_probs.mean() / gradient_accumulation_steps
             loss.backward()
-            clip_grad_norm_(model.parameters(), 1.0)
+            
+            # Apply gradient clipping if enabled
+            if clip_grad_norm:
+                grad_norm = clip_grad_norm_(model.parameters(), 1.0)
+            else:
+                grad_norm = get_grad_norm(model.parameters())
 
             # Only update weights after accumulating gradients
             if (batch_index + 1) % gradient_accumulation_steps == 0:
                 optimizer.step()
                 optimizer.zero_grad()
+        else:
+            grad_norm = 0.0  # Set to 0 if no training occurred
 
         # Update previous_losses and log results
         previous_losses.append(nll_losses.tolist())
@@ -211,6 +226,7 @@ if __name__ == "__main__":
                 "Observation": f"Answer: {ans}",
                 "Reasoning Contains Answer": str(ans) in reasoning_text,
                 "Training Example": bool(train_mask[0].item()),
+                "Gradient Norm": grad_norm.item() if isinstance(grad_norm, torch.Tensor) else grad_norm,
             }
             json.dump(log_entry, log_file)
             log_file.write("\n")  # Add a newline for each entry
