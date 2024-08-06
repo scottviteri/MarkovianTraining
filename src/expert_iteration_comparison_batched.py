@@ -6,6 +6,7 @@ import numpy as np
 import bitsandbytes
 import json
 import datetime
+from torch.nn.utils import clip_grad_norm_
 
 
 def load_mistral_model():
@@ -184,6 +185,7 @@ if __name__ == "__main__":
             print("cot ave log prob: ", cot_log_probs[0].mean())
             loss = -cot_log_probs.mean() / gradient_accumulation_steps
             loss.backward()
+            clip_grad_norm_(model.parameters(), 1.0)
 
             # Only update weights after accumulating gradients
             if (batch_index + 1) % gradient_accumulation_steps == 0:
