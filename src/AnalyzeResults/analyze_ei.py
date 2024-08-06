@@ -121,7 +121,7 @@ if any(training_example):
 
 ax1.set_xlabel("Batch Index")
 ax1.set_ylabel("Reasoning Contains Answer (1: True, 0: False)")
-ax1.set_ylim(-0.1, 1.15)
+ax1.set_ylim(-0.1, 1.1)
 
 # Create a second y-axis for average log prob
 ax2 = ax1.twinx()
@@ -132,7 +132,9 @@ ax2.plot(
     linewidth=2,
     label="Smoothed Average Log Prob",
 )
+ax1.set_xlabel("Batch Index")
 ax2.set_ylabel("Average Log Prob")
+ax2.set_ylim(top=0)
 
 # Plot gradient norm on ax3
 ax3.plot(
@@ -164,7 +166,7 @@ plt.tight_layout()
 plt.subplots_adjust(hspace=0.3)
 
 # Save the new plot
-plt.savefig("src/AnalyzeResults/smoothed_reasoning_log_prob_and_grad_norm_plot.png")
+plt.savefig("src/AnalyzeResults/ei_plot.png")
 plt.close()
 
 print(
