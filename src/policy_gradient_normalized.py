@@ -166,10 +166,10 @@ def train():
     model_optimizer = bitsandbytes.optim.AdamW8bit(model.parameters(), lr=model_learning_rate)
 
     batch_size = 6
-    gradient_accumulation_steps = 4 
+    gradient_accumulation_steps = 8 
     use_ppo = True 
     ppo_epsilon = 0.2
-    r = 0.9  # Set the ratio for exponentially weighted average (adjust as needed)
+    r = 0.7  # Set the ratio for exponentially weighted average (adjust as needed)
  
     num_batches = 10000
     qa_batches = list(generate_question_answer_batches(num_batches=num_batches, batch_size=batch_size))
