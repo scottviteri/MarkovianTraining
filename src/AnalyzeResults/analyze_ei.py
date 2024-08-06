@@ -4,19 +4,28 @@ import numpy as np
 import glob
 import os
 
-"""
-{"Aggregate loss": 5.644328594207764, "Batch Index": 0, "Prev Observation": "Question: 64 + 77 + 53 + 93 + 46 + 38 + 79 + 28 + 96 + 5 + 73 + 72 + 60 + 8 + 75", "Action": "Reasoning: \n\n1. Add the first two numbers: 64 + 77 = 141\n2. Add the next two numbers: 141 + 53 = 194\n3. Add the next two numbers: 194 + 93 = 287\n4. Add the next two numbers: 287 + 46 = 333\n5. Add the next two numbers: 333 + 38 = 371\n6. Add the next two numbers: 371 + 79 = 449\n7. Add the next two numbers: 449 + 28 = 477\n8. Add the next two numbers: 477 + 96 = 573\n9. Add the final two numbers: 573 + 5 = 578\n\nAnswer: The sum of all the given numbers is 578.\n\nIn total, the problem was broken down into 8 subproblems, each requiring a single addition operation. After solving each subproblem, we could add the result to the overall sum. This method simplified the original problem and made it easier to understand and solve. By decomposing problems into smaller parts and addressing each subproblem individually, complex problems can be effectively tackled.\n\nIn a nutshell, solve the problem as follows: \n\nStep 1: Add the first two numbers (64 and 77)\nStep 2: Find the sum of the result and the next two numbers\nStep 3: Repeat the process until we find the sum of all the given numbers.\n\nOverall, this process is known as the repeated subtraction method for addition, which is an efficient and streamlined approach towards solving complex addition problems. It enables", "Observation": "Answer: 867", "Reasoning Contains Answer": false, "Training Example": "False"}
-{"Aggregate loss": 2.581582546234131, "Batch Index": 1, "Prev Observation": "Question: 22 + 98 + 43 + 93 + 36 + 84 + 33 + 76 + 48 + 45 + 33 + 10 + 24 + 39 + 4", "Action": "Reasoning: \n\n1. Addition of two numbers: 22 + 98\n2. Carry the sum to the next column if necessary and add the next numbers: 11 + 43\n3. Carry the sum to the next column if necessary and add the next numbers: 111 + 93\n4. Carry the sum to the next column if necessary and add the next numbers: 127 + 36\n5. Carry the sum to the next column if necessary and add the next numbers: 163 + 84\n6. Carry the sum to the next column if necessary and add the next numbers: 247 + 33\n7. Carry the sum to the next column if necessary and add the next numbers: 280 + 76\n8. Carry the sum to the next column if necessary and add the next numbers: 356 + 48\n9. Carry the sum to the next column if necessary and add the next numbers: 404 + 45\n10. Carry the sum to the next column if necessary and add the next numbers: 449 + 33\n11. Carry the sum to the next column if necessary and add the next numbers: 482 + 10\n12. Carry the sum to the next column if necessary and add the next numbers: 492 + 24\n13. Carry the sum to the next column if necessary and add the last numbers: 516 + 39\n\nSo, 22 + 98 + 43 + 93 + 36 + 84 + 33 + 76 + 48 + 45 + 33 + 10 + 24 +", "Observation": "Answer: 688", "Reasoning Contains Answer": false, "Training Example": "True"}
-...
-"""
+
+def moving_average(data, window_size):
+    return np.convolve(data, np.ones(window_size), "valid") / window_size
+
+
+def smooth_data(data, window_size):
+    return moving_average(data, window_size)
+
+
+def get_latest_log_file():
+    log_files = glob.glob("src/AnalyzeResults/ExpertIterationDictionary_*.log")
+    if not log_files:
+        raise FileNotFoundError("No ExpertIterationDictionary log files found.")
+    return max(log_files, key=os.path.getctime)
+
+
+# Set the window size for smoothing
+max_window_size = 16
+
 # Load the log file into a list of dictionaries
-with open(
-    max(
-        glob.glob("src/AnalyzeResults/ExpertIterationDictionary_*.log"),
-        key=os.path.getctime,
-    ),
-    "r",
-) as file:
+log_file_path = get_latest_log_file()
+with open(log_file_path, "r") as file:
     # Read the first line as hyperparameters
     hyperparameters = json.loads(file.readline().strip())
     # Read the rest of the lines as expert iteration data
@@ -34,15 +43,16 @@ reasoning_contains_answer = [
 
 # Extract and smooth the average log prob data (negated aggregate loss)
 average_log_prob = [-entry["Aggregate loss"] for entry in expert_iteration_data]
-padded_data_log_prob = np.pad(
-    average_log_prob, (max_window_size // 2, max_window_size // 2), mode="edge"
-)
-smoothed_data_log_prob = smooth_data(padded_data_log_prob, max_window_size)[:-1]
+smoothed_data_log_prob = smooth_data(average_log_prob, max_window_size)
 
 # Extract training example data if available
 training_example = [
-    1 if entry.get("Training Example") == "True" else 0 for entry in expert_iteration_data
+    1 if entry.get("Training Example") == "True" else 0
+    for entry in expert_iteration_data
 ]
+
+# Smooth the reasoning contains answer data
+smoothed_data_reasoning = smooth_data(reasoning_contains_answer, max_window_size)
 
 # Create a new plot with raw data, smoothed data, training example indicators (if available), and average log prob
 fig, ax1 = plt.subplots(figsize=(12, 6))
@@ -64,7 +74,7 @@ ax1.plot(
 # Plot smoothed data excluding padded points
 ax1.plot(
     batch_indices[exclude_points:-exclude_points],
-    smoothed_data_reasoning[exclude_points:-exclude_points],
+    smoothed_data_reasoning[:-exclude_points],
     color="red",
     linewidth=2,
     label="Smoothed Data",
@@ -93,7 +103,7 @@ ax1.set_ylim(-0.1, 1.15)
 ax2 = ax1.twinx()
 ax2.plot(
     batch_indices[exclude_points:-exclude_points],
-    smoothed_data_log_prob[exclude_points:-exclude_points],
+    smoothed_data_log_prob[:-exclude_points],
     color="purple",
     linewidth=2,
     label="Smoothed Average Log Prob",
@@ -103,7 +113,9 @@ ax2.set_ylabel("Average Log Prob")
 # Combine legends
 lines1, labels1 = ax1.get_legend_handles_labels()
 lines2, labels2 = ax2.get_legend_handles_labels()
-ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper center", bbox_to_anchor=(0.15, 0.9))
+ax1.legend(
+    lines1 + lines2, labels1 + labels2, loc="upper center", bbox_to_anchor=(0.15, 0.9)
+)
 
 plt.title(
     f"Reasoning Contains Answer and Average Log Prob vs Batch Index\n(Window Size: {max_window_size})"
