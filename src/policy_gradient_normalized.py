@@ -1,7 +1,7 @@
 import datetime
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, get_peft_model_state_dict
 import bitsandbytes
 import random
 import numpy as np
@@ -298,9 +298,7 @@ def train(use_gsm8k: bool):
     filename = (
         f"src/AnalyzeResults/PolicyGradientNormalized_{dataset_type}_{timestamp}.log"
     )
-    model_save_path = (
-        f"src/SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
-    )
+    model_save_path = f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
 
     model, frozen_model, tokenizer, device = load_mistral_model()
     model_learning_rate = 1e-4
@@ -508,6 +506,14 @@ def train(use_gsm8k: bool):
             os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
             torch.save(model.state_dict(), model_save_path)
             print(f"Model weights saved to {model_save_path}")
+
+    # After training is complete
+    # Merge LoRA weights into base model
+    merged_model = model.merge_and_unload()
+
+    # Save the merged model
+    merged_model.save_pretrained(model_save_path)
+    tokenizer.save_pretrained(model_save_path)
 
 
 if __name__ == "__main__":
