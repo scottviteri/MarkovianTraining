@@ -97,8 +97,12 @@ def extract_answer(answer):
         answer = answer.split("=")[-1].strip()
     answer = answer.replace(",", "")
     try:
-        answer = re.findall(r"\d+", answer.strip())[-1]
-        answer = int(answer)
+        # Match optional negative sign followed by digits
+        matches = re.findall(r"-?\d+", answer.strip())
+        if matches:
+            answer = int(matches[-1])  # Take the last match
+        else:
+            answer = "[invalid]"
     except:
         answer = "[invalid]"
     return answer
@@ -140,7 +144,10 @@ def calculate_answer_log_probs(
     # Find the position of the last space before the answer
     # 28705 is space token, leading to the final space before the answer (which doesn't contain spaces)
     answer_start_positions = [
-        (input_ids == 28705).nonzero(as_tuple=True)[0][-1].item() + 1
+        ((input_ids == 28705) | (input_ids == 28747))
+        .nonzero(as_tuple=True)[0][-1]
+        .item()
+        + 1
         for input_ids in tokenized_full_prompts.input_ids
     ]
 
@@ -315,7 +322,56 @@ def load_training_state(log_file):
     # Parse the first line to get the hyperparameters
     hyperparameters = json.loads(lines[0])
 
+    # Add default value for 'r' if it's not present in older log files
+    if "r" not in hyperparameters:
+        hyperparameters["r"] = 0.5
+
     return last_batch_index, hyperparameters
+
+
+def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
+    question, answer = qa_pair
+    prompt = f"Work through the following question step by step, concisely decomposing problems into subproblems.\nQuestion: {question}\nStepByStep:"
+
+    tokenized_inputs = tokenizer(
+        prompt,
+        padding=True,
+        return_tensors="pt",
+    ).to(device)
+
+    with torch.no_grad():
+        outputs = model.generate(
+            tokenized_inputs.input_ids,
+            attention_mask=tokenized_inputs.attention_mask,
+            max_new_tokens=400,
+            do_sample=True,
+            temperature=1.0,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+
+    reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] :]
+    reasoning_text = tokenizer.decode(reasoning_tokens[0], skip_special_tokens=True)
+
+    log_prob_ans_given_reasoning, extracted_generated_answers = (
+        calculate_answer_log_probs(
+            model, tokenizer, device, reasoning_tokens, [answer], use_gsm8k
+        )
+    )
+
+    true_answer = extract_answer(answer)
+    generated_answer = (
+        extracted_generated_answers[0] if extracted_generated_answers else None
+    )
+    is_correct = (
+        generated_answer == true_answer if generated_answer is not None else False
+    )
+
+    print(f"Question: {question}")
+    print(f"True Answer: {true_answer}")
+    print(f"Generated Answer: {generated_answer}")
+    print(f"Is Correct: {is_correct}")
+    print(f"Log Probability: {log_prob_ans_given_reasoning[0].item()}")
+    print(f"Generated Reasoning:\n{reasoning_text}")
 
 
 def train(use_gsm8k: bool, resume: bool):
@@ -569,6 +625,38 @@ def train(use_gsm8k: bool, resume: bool):
     tokenizer.save_pretrained(model_save_path)
 
 
+def main(use_gsm8k: bool, resume: bool, debug_index: int = None):
+    dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
+
+    if debug_index is not None:
+        model_save_path = (
+            f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+        )
+        if not os.path.exists(model_save_path):
+            print(f"Error: Model file not found at {model_save_path}")
+            return
+
+        model, frozen_model, tokenizer, device = load_mistral_model()
+        model.load_state_dict(torch.load(model_save_path))
+        model.eval()
+
+        if use_gsm8k:
+            gsm8k_data = load_gsm8k_dataset()
+            if debug_index >= len(gsm8k_data):
+                print(
+                    f"Error: Debug index {debug_index} is out of range. Max index is {len(gsm8k_data) - 1}"
+                )
+                return
+            qa_pair = gsm8k_data[debug_index]
+        else:
+            qa_pair = generate_question_answer_batch(1)[0]
+
+        debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k)
+        return
+
+    train(use_gsm8k, resume)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Train the model on arithmetic or GSM8K dataset."
@@ -583,6 +671,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Resume training from the last checkpoint",
     )
+    parser.add_argument(
+        "--debug_index",
+        type=int,
+        default=None,
+        help="Index of the datapoint to debug (GSM8K only, random for arithmetic)",
+    )
     args = parser.parse_args()
 
-    train(use_gsm8k=args.use_gsm8k, resume=args.resume)
+    main(use_gsm8k=args.use_gsm8k, resume=args.resume, debug_index=args.debug_index)
