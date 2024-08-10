@@ -39,6 +39,7 @@ def evaluate_model(model, tokenizer, device, test_data, num_samples=None):
     results = []
 
     for question, answer in tqdm(test_data[:num_samples]):
+        # Generate the chain of thought reasoning
         prompt = f"Work through the following question step by step, concisely decomposing problems into subproblems.\nQuestion: {question}\nStepByStep:"
 
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
@@ -51,8 +52,23 @@ def evaluate_model(model, tokenizer, device, test_data, num_samples=None):
                 do_sample=False,
             )
 
-        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        generated_answer = extract_answer(generated_text)
+        reasoning_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+        # Generate the potential answer given the reasoning
+        full_prompt = f"Use the following possibly mistaken reasoning to help predict the true answer, which will come immediately after the 'Answer:' tag. Try to spot flaws in the provided reasoning to guide your prediction.\nStepByStep: {reasoning_text} \nAnswer:"
+        answer_inputs = tokenizer(full_prompt, return_tensors="pt").to(device)
+        with torch.no_grad():
+            answer_outputs = model.generate(
+                **answer_inputs,
+                max_new_tokens=15,
+                do_sample=False,
+            )
+
+        generated_answer_text = tokenizer.decode(
+            answer_outputs[0][answer_inputs.input_ids.shape[1] :],
+            skip_special_tokens=True,
+        )
+        generated_answer = extract_answer(generated_answer_text)
         true_answer = extract_answer(answer)
 
         is_correct = generated_answer == true_answer
@@ -65,7 +81,8 @@ def evaluate_model(model, tokenizer, device, test_data, num_samples=None):
                 "true_answer": true_answer,
                 "generated_answer": generated_answer,
                 "is_correct": is_correct,
-                "full_generation": generated_text,
+                "full_reasoning": reasoning_text,
+                "generated_answer_text": generated_answer_text,
             }
         )
 
