@@ -12,6 +12,7 @@ import argparse
 from datasets import load_dataset
 import re
 import os
+import glob
 
 # Initialize the global variable at the module level
 previous_normalized_rewards = []
@@ -126,7 +127,7 @@ def calculate_answer_log_probs(
             generated_outputs = model.generate(
                 input_ids=tokenized_full_prompts.input_ids,
                 attention_mask=tokenized_full_prompts.attention_mask,
-                max_new_tokens=50,
+                max_new_tokens=15,
                 # temperature=0.0,
                 do_sample=False,
             )
@@ -292,52 +293,97 @@ def calculate_losses(
     return total_loss, policy_loss, ppo_ratio, clipped_ratio
 
 
-def train(use_gsm8k: bool):
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
-    filename = (
-        f"src/AnalyzeResults/PolicyGradientNormalized_{dataset_type}_{timestamp}.log"
-    )
+def get_latest_checkpoint_and_log(dataset_type):
     model_save_path = f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+    log_pattern = f"src/AnalyzeResults/PolicyGradientNormalized_{dataset_type}_*.log"
+    log_files = sorted(glob.glob(log_pattern), key=os.path.getmtime, reverse=True)
+
+    if not os.path.exists(model_save_path) or not log_files:
+        return None, None
+
+    return model_save_path, log_files[0]
+
+
+def load_training_state(log_file):
+    with open(log_file, "r") as f:
+        lines = f.readlines()
+
+    # Parse the last line to get the last batch index
+    last_line = json.loads(lines[-1])
+    last_batch_index = last_line["Batch Index"]
+
+    # Parse the first line to get the hyperparameters
+    hyperparameters = json.loads(lines[0])
+
+    return last_batch_index, hyperparameters
+
+
+def train(use_gsm8k: bool, resume: bool):
+    dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
+
+    if resume:
+        model_save_path, log_file = get_latest_checkpoint_and_log(dataset_type)
+        if model_save_path is None or log_file is None:
+            print("No checkpoint or log file found. Starting from scratch.")
+            resume = False
+        else:
+            print(f"Resuming from checkpoint: {model_save_path}")
+            print(f"Using log file: {log_file}")
+            last_batch_index, hyperparameters = load_training_state(log_file)
+            start_batch = last_batch_index + 1
+
+    if not resume:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = f"src/AnalyzeResults/PolicyGradientNormalized_{dataset_type}_{timestamp}.log"
+        model_save_path = (
+            f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+        )
+        start_batch = 0
+
+        # Define hyperparameters
+        hyperparameters = {
+            "model_learning_rate": 1e-4,
+            "batch_size": 6,
+            "gradient_accumulation_steps": 8,
+            "num_batches": 1001,
+            "use_ppo": True,
+            "ppo_epsilon": 0.2,
+            "normalize_loss": True,
+            "r": 0.5,  # Add r to the hyperparameters
+        }
 
     model, frozen_model, tokenizer, device = load_mistral_model()
-    model_learning_rate = 1e-4
+
+    if resume:
+        model.load_state_dict(torch.load(model_save_path))
+
     model_optimizer = bitsandbytes.optim.AdamW8bit(
-        model.parameters(), lr=model_learning_rate
+        model.parameters(), lr=hyperparameters["model_learning_rate"]
     )
 
-    batch_size = 6
-    normalize_loss = True
-    gradient_accumulation_steps = 8
-    use_ppo = True
-    ppo_epsilon = 0.2
-    r = 0.5  # Set the ratio for exponentially weighted average (adjust as needed)
+    batch_size = hyperparameters["batch_size"]
+    normalize_loss = hyperparameters["normalize_loss"]
+    gradient_accumulation_steps = hyperparameters["gradient_accumulation_steps"]
+    use_ppo = hyperparameters["use_ppo"]
+    ppo_epsilon = hyperparameters["ppo_epsilon"]
+    r = hyperparameters["r"]  # Use r from hyperparameters
     clip_grad_norm = True
 
-    num_batches = 1001
+    num_batches = hyperparameters["num_batches"]
     qa_batches = list(
         generate_question_answer_batches(
             num_batches=num_batches, batch_size=batch_size, use_gsm8k=use_gsm8k
         )
     )
 
-    with open(filename, "w") as log_file:
-        hyperparameters = {
-            "model_learning_rate": model_learning_rate,
-            "batch_size": batch_size,
-            "gradient_accumulation_steps": gradient_accumulation_steps,
-            "effective_batch_size": batch_size * gradient_accumulation_steps,
-            "num_batches": num_batches,
-            "use_ppo": use_ppo,
-            "ppo_epsilon": ppo_epsilon,
-            "normalize_loss": normalize_loss,
-        }
-        json.dump(hyperparameters, log_file)
-        log_file.write("\n")
+    if not resume:
+        with open(log_file, "w") as f:
+            json.dump(hyperparameters, f)
+            f.write("\n")
 
     model_optimizer.zero_grad()
 
-    for batch_index, qa_batch in enumerate(qa_batches):
+    for batch_index, qa_batch in enumerate(qa_batches[start_batch:], start=start_batch):
         questions, answers = zip(*qa_batch)
 
         prompts = [
@@ -493,7 +539,7 @@ def train(use_gsm8k: bool):
                 for gen_ans, true_ans in zip(extracted_generated_answers, true_answers)
             )
             fraction_correct = correct_count / len(answers)
-            
+
             true_answer = true_answers[0]
             log_entry.update(
                 {
@@ -503,9 +549,9 @@ def train(use_gsm8k: bool):
                     "Fraction Correct": fraction_correct,
                 }
             )
-        with open(filename, "a") as log_file:
-            json.dump(log_entry, log_file)
-            log_file.write("\n")
+        with open(log_file, "a") as f:
+            json.dump(log_entry, f)
+            f.write("\n")
 
         # Save model weights every 100 batches
         if (batch_index + 1) % 100 == 0:
@@ -532,6 +578,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Use GSM8K dataset instead of arithmetic questions",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume training from the last checkpoint",
+    )
     args = parser.parse_args()
 
-    train(use_gsm8k=args.use_gsm8k)
+    train(use_gsm8k=args.use_gsm8k, resume=args.resume)

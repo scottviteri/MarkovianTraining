@@ -21,7 +21,15 @@
             "justMyCode": false,
             "args": ["--use_gsm8k"]
         },
-
+        {
+            "name": "Python: GSM8K Resume",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--use_gsm8k", "--resume"]
+        },
         {
             "name": "Python: Torchrun Current File",
             "type": "python",
