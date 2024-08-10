@@ -8,6 +8,10 @@ import numpy as np
 import json
 import copy
 from torch.nn.utils import clip_grad_norm_
+import argparse
+from datasets import load_dataset
+import re
+import os
 
 # Initialize the global variable at the module level
 previous_normalized_rewards = []
@@ -49,8 +53,33 @@ def generate_question_answer_batch(batch_size: int):
     return qa_batch
 
 
-def generate_question_answer_batches(num_batches: int, batch_size: int):
-    return [generate_question_answer_batch(batch_size) for _ in range(num_batches)]
+def load_gsm8k_dataset():
+    ds = load_dataset("openai/gsm8k", "main")
+    questions = ds["train"]["question"]
+    answers = list(map(lambda x: x[x.index("####") + 5 :], ds["train"]["answer"]))
+    return list(zip(questions, answers))
+
+
+def generate_question_answer_batches(
+    num_batches: int, batch_size: int, use_gsm8k: bool
+):
+    if use_gsm8k:
+        gsm8k_data = load_gsm8k_dataset()
+        total_samples = len(gsm8k_data)
+        if num_batches * batch_size > total_samples:
+            print(
+                f"Warning: Requested {num_batches * batch_size} samples, but GSM8K dataset only has {total_samples} samples."
+            )
+            print("Some samples will be repeated.")
+            return [random.sample(gsm8k_data, batch_size) for _ in range(num_batches)]
+        else:
+            shuffled_data = random.sample(gsm8k_data, num_batches * batch_size)
+            return [
+                shuffled_data[i : i + batch_size]
+                for i in range(0, len(shuffled_data), batch_size)
+            ]
+    else:
+        return [generate_question_answer_batch(batch_size) for _ in range(num_batches)]
 
 
 def get_grad_norm(parameters):
@@ -62,7 +91,21 @@ def get_grad_norm(parameters):
     return total_norm**0.5
 
 
-def calculate_answer_log_probs(model, tokenizer, device, reasoning_tokens, answers):
+def extract_answer(answer):
+    if "=" in answer:
+        answer = answer.split("=")[-1].strip()
+    answer = answer.replace(",", "")
+    try:
+        answer = re.findall(r"\d+", answer.strip())[-1]
+        answer = int(answer)
+    except:
+        answer = "[invalid]"
+    return answer
+
+
+def calculate_answer_log_probs(
+    model, tokenizer, device, reasoning_tokens, answers, use_gsm8k
+):
     reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
 
     full_prompts = [
@@ -75,6 +118,23 @@ def calculate_answer_log_probs(model, tokenizer, device, reasoning_tokens, answe
         padding=True,
         return_tensors="pt",
     ).to(device)
+
+    extracted_generated_answers = None
+    if use_gsm8k:
+        # Generate tokens at temperature 0
+        with torch.no_grad():
+            generated_outputs = model.generate(
+                input_ids=tokenized_full_prompts.input_ids,
+                attention_mask=tokenized_full_prompts.attention_mask,
+                max_new_tokens=50,
+                temperature=0.0,
+                do_sample=False,
+            )
+
+        generated_answers = tokenizer.batch_decode(
+            generated_outputs, skip_special_tokens=True
+        )
+        extracted_generated_answers = [extract_answer(ans) for ans in generated_answers]
 
     # Find the position of the last space before the answer
     # 28705 is space token, leading to the final space before the answer (which doesn't contain spaces)
@@ -117,7 +177,7 @@ def calculate_answer_log_probs(model, tokenizer, device, reasoning_tokens, answe
         avg_log_prob = (probs * mask[start_idx:]).sum() / (actual_tokens + 1e-8)
         avg_log_probs.append(avg_log_prob)
 
-    return torch.stack(avg_log_probs)
+    return torch.stack(avg_log_probs), extracted_generated_answers
 
 
 def calculate_ppo_loss(current_log_probs, old_log_probs, advantages, epsilon=0.2):
@@ -144,13 +204,16 @@ def calculate_advantages(
     answers,
     r,
     normalize_loss,
+    use_gsm8k,
 ):
     global previous_normalized_rewards
 
     reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] :]
 
-    log_prob_ans_given_reasoning = calculate_answer_log_probs(
-        frozen_model, tokenizer, device, reasoning_tokens, answers
+    log_prob_ans_given_reasoning, extracted_generated_answers = (
+        calculate_answer_log_probs(
+            frozen_model, tokenizer, device, reasoning_tokens, answers, use_gsm8k
+        )
     )
 
     if normalize_loss:
@@ -158,8 +221,13 @@ def calculate_advantages(
             :, tokenized_inputs.input_ids.shape[1] :
         ]
         log_prob_ans_given_default_reasoning = calculate_answer_log_probs(
-            frozen_model, tokenizer, device, baseline_reasoning_tokens, answers
-        )
+            frozen_model,
+            tokenizer,
+            device,
+            baseline_reasoning_tokens,
+            answers,
+            use_gsm8k,
+        )[0]
         normalized_reward = (
             log_prob_ans_given_reasoning - log_prob_ans_given_default_reasoning
         )
@@ -189,6 +257,7 @@ def calculate_advantages(
         log_prob_ans_given_reasoning,
         log_prob_ans_given_default_reasoning,
         normalized_reward,
+        extracted_generated_answers,
     )
 
 
@@ -223,9 +292,15 @@ def calculate_losses(
     return total_loss, policy_loss, ppo_ratio, clipped_ratio
 
 
-def train():
+def train(use_gsm8k: bool):
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"src/AnalyzeResults/PolicyGradientNormalized_{timestamp}.log"
+    dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
+    filename = (
+        f"src/AnalyzeResults/PolicyGradientNormalized_{dataset_type}_{timestamp}.log"
+    )
+    model_save_path = (
+        f"src/SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+    )
 
     model, frozen_model, tokenizer, device = load_mistral_model()
     model_learning_rate = 1e-4
@@ -234,16 +309,18 @@ def train():
     )
 
     batch_size = 6
-    normalize_loss = True 
+    normalize_loss = True
     gradient_accumulation_steps = 8
-    use_ppo = True 
+    use_ppo = True
     ppo_epsilon = 0.2
     r = 0  # Set the ratio for exponentially weighted average (adjust as needed)
-    clip_grad_norm = True 
+    clip_grad_norm = True
 
     num_batches = 10000
     qa_batches = list(
-        generate_question_answer_batches(num_batches=num_batches, batch_size=batch_size)
+        generate_question_answer_batches(
+            num_batches=num_batches, batch_size=batch_size, use_gsm8k=use_gsm8k
+        )
     )
 
     with open(filename, "w") as log_file:
@@ -301,6 +378,7 @@ def train():
             log_prob_ans_given_reasoning,
             log_prob_ans_given_default_reasoning,
             normalized_reward,
+            extracted_generated_answers,
         ) = calculate_advantages(
             model,
             frozen_model,
@@ -312,6 +390,7 @@ def train():
             answers,
             r,
             normalize_loss,
+            use_gsm8k,
         )
 
         full_attention_mask = torch.cat(
@@ -409,11 +488,37 @@ def train():
                 }
             )
 
+        if use_gsm8k and extracted_generated_answers is not None:
+            true_answer = extract_answer(answers[0])
+            log_entry.update(
+                {
+                    "Generated Answer": extracted_generated_answers[0],
+                    "True Answer": true_answer,
+                    "Is Correct": extracted_generated_answers[0] == true_answer,
+                }
+            )
+
         with open(filename, "a") as log_file:
             json.dump(log_entry, log_file)
             log_file.write("\n")
 
+        # Save model weights every 100 batches
+        if (batch_index + 1) % 1 == 0:
+            print(f"Saving model weights at batch {batch_index + 1}")
+            os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
+            torch.save(model.state_dict(), model_save_path)
+            print(f"Model weights saved to {model_save_path}")
+
 
 if __name__ == "__main__":
-    # Set the normalize_loss parameter manually here
-    train()
+    parser = argparse.ArgumentParser(
+        description="Train the model on arithmetic or GSM8K dataset."
+    )
+    parser.add_argument(
+        "--use_gsm8k",
+        action="store_true",
+        help="Use GSM8K dataset instead of arithmetic questions",
+    )
+    args = parser.parse_args()
+
+    train(use_gsm8k=args.use_gsm8k)

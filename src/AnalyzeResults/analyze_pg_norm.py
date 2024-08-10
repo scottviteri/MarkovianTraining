@@ -19,7 +19,7 @@ def get_latest_log_file():
 
 
 def plot_metrics(
-    file_path, window_size=16, output_file="src/AnalyzeResults/pg_norm_plot.png"
+    file_path, window_size=1, output_file="src/AnalyzeResults/pg_norm_plot.png"
 ):
     with open(file_path, "r") as f:
         lines = f.readlines()
@@ -39,11 +39,15 @@ def plot_metrics(
         for key, value in entry.items():
             if isinstance(value, (int, float)):
                 metrics[key].append(value)
+            elif key == "Is Correct" and isinstance(value, bool):
+                metrics["Fraction Correct"].append(int(value))
 
     # Determine the number of rows needed for the plot
     num_rows = 3 if "PPO Ratio" not in metrics else 4
     if not normalize_loss:
         num_rows -= 1  # Remove one row if not using normalization
+    if "Fraction Correct" in metrics:
+        num_rows += 1  # Add one row for Fraction Correct
 
     # Create the figure and axes
     fig, axs = plt.subplots(num_rows, 2, figsize=(15, 5 * num_rows))
@@ -116,6 +120,19 @@ def plot_metrics(
         axs[row, 1].set_title("PPO Clipped Ratio")
         axs[row, 1].set_xlabel("Batch")
         axs[row, 1].set_ylabel("Ratio")
+
+    # Plot Fraction Correct if present
+    if "Fraction Correct" in metrics:
+        row = num_rows - 1
+        axs[row, 0].plot(moving_average(metrics["Fraction Correct"], window_size))
+        axs[row, 0].set_title("Fraction Correct")
+        axs[row, 0].set_xlabel("Batch")
+        axs[row, 0].set_ylabel("Fraction")
+        axs[row, 0].set_ylim(0, 1)  # Set range from 0 to 1
+
+        # If there's an empty subplot, remove it
+        if num_rows % 2 != 0:
+            fig.delaxes(axs[row, 1])
 
     plt.tight_layout()
     plt.savefig(output_file)

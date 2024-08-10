@@ -13,6 +13,16 @@
             "justMyCode": false
         },
         {
+            "name": "Python: GSM8K",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--use_gsm8k"]
+        },
+
+        {
             "name": "Python: Torchrun Current File",
             "type": "python",
             "request": "launch",
