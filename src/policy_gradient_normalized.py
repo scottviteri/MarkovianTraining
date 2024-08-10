@@ -349,7 +349,7 @@ def train(use_gsm8k: bool, resume: bool):
             "use_ppo": True,
             "ppo_epsilon": 0.2,
             "normalize_loss": True,
-            "r": 0.5,  # Add r to the hyperparameters
+            "r": 0.9,
         }
 
     model, frozen_model, tokenizer, device = load_mistral_model()
@@ -503,6 +503,7 @@ def train(use_gsm8k: bool, resume: bool):
             else None
         )
         advantage_value = advantage[0].item()
+        print("Question: ", q)
         print(reasoning_text_first)
         print("Ans: ", ans, "Avg Log Prob: ", avg_log_prob)
 
