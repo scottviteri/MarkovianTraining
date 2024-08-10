@@ -127,7 +127,7 @@ def calculate_answer_log_probs(
                 input_ids=tokenized_full_prompts.input_ids,
                 attention_mask=tokenized_full_prompts.attention_mask,
                 max_new_tokens=50,
-                temperature=0.0,
+                # temperature=0.0,
                 do_sample=False,
             )
 
@@ -501,7 +501,7 @@ def train(use_gsm8k: bool):
             log_file.write("\n")
 
         # Save model weights every 100 batches
-        if (batch_index + 1) % 1 == 0:
+        if (batch_index + 1) % 100 == 0:
             print(f"Saving model weights at batch {batch_index + 1}")
             os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
             torch.save(model.state_dict(), model_save_path)

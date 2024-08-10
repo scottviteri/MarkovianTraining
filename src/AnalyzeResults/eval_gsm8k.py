@@ -1,12 +1,11 @@
 import torch
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from datasets import load_dataset
 import re
 import argparse
 import json
 from tqdm import tqdm
 import os
-from vllm import LLM, SamplingParams
 
 
 def extract_answer(answer):
@@ -25,40 +24,34 @@ def load_model(model_path):
     tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
 
-    # Initialize VLLM model with merged weights
-    llm = LLM(
-        model=model_path,
-        tensor_parallel_size=1,  # Adjust based on your GPU setup
-        trust_remote_code=True,
-        dtype="bfloat16",
-        load_format="safetensors",
-    )
+    model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.bfloat16)
+    model.eval()
 
-    return llm, tokenizer
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    return model, tokenizer, device
 
 
-def evaluate_model(llm, tokenizer, test_data, num_samples=None):
+def evaluate_model(model, tokenizer, device, test_data, num_samples=None):
     correct = 0
     total = 0
     results = []
 
-    sampling_params = SamplingParams(
-        temperature=0.0,
-        max_tokens=400,
-        stop=["</s>", "[/INST]"],
-    )
+    for question, answer in tqdm(test_data[:num_samples]):
+        prompt = f"Work through the following question step by step, concisely decomposing problems into subproblems.\nQuestion: {question}\nStepByStep:"
 
-    prompts = [
-        f"Work through the following question step by step, concisely decomposing problems into subproblems.\nQuestion: {question}\nStepByStep:"
-        for question, _ in test_data[:num_samples]
-    ]
+        inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
-    outputs = llm.generate(prompts, sampling_params)
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=400,
+                temperature=0.0,
+                do_sample=False,
+            )
 
-    for (question, answer), output in tqdm(
-        zip(test_data[:num_samples], outputs), total=len(prompts)
-    ):
-        generated_text = output.outputs[0].text
+        generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
         generated_answer = extract_answer(generated_text)
         true_answer = extract_answer(answer)
 
@@ -81,12 +74,12 @@ def evaluate_model(llm, tokenizer, test_data, num_samples=None):
 
 
 def main(model_path, num_samples):
-    llm, tokenizer = load_model(model_path)
+    model, tokenizer, device = load_model(model_path)
 
     test_data = load_dataset("openai/gsm8k", "main", split="test")
     test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
 
-    accuracy, results = evaluate_model(llm, tokenizer, test_data, num_samples)
+    accuracy, results = evaluate_model(model, tokenizer, device, test_data, num_samples)
 
     print(f"Accuracy: {accuracy:.2%}")
 
