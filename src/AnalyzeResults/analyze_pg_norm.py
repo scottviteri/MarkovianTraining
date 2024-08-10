@@ -19,7 +19,7 @@ def get_latest_log_file():
 
 
 def plot_metrics(
-    file_path, window_size=1, output_file="src/AnalyzeResults/pg_norm_plot.png"
+    file_path, window_size=16, output_file="src/AnalyzeResults/pg_norm_plot.png"
 ):
     with open(file_path, "r") as f:
         lines = f.readlines()

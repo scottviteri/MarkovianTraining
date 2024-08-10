@@ -311,10 +311,10 @@ def train(use_gsm8k: bool):
     gradient_accumulation_steps = 8
     use_ppo = True
     ppo_epsilon = 0.2
-    r = 0  # Set the ratio for exponentially weighted average (adjust as needed)
+    r = 0.5  # Set the ratio for exponentially weighted average (adjust as needed)
     clip_grad_norm = True
 
-    num_batches = 10000
+    num_batches = 1001
     qa_batches = list(
         generate_question_answer_batches(
             num_batches=num_batches, batch_size=batch_size, use_gsm8k=use_gsm8k
@@ -487,15 +487,22 @@ def train(use_gsm8k: bool):
             )
 
         if use_gsm8k and extracted_generated_answers is not None:
-            true_answer = extract_answer(answers[0])
+            true_answers = [extract_answer(answer) for answer in answers]
+            correct_count = sum(
+                gen_ans == true_ans
+                for gen_ans, true_ans in zip(extracted_generated_answers, true_answers)
+            )
+            fraction_correct = correct_count / len(answers)
+            
+            true_answer = true_answers[0]
             log_entry.update(
                 {
                     "Generated Answer": extracted_generated_answers[0],
                     "True Answer": true_answer,
                     "Is Correct": extracted_generated_answers[0] == true_answer,
+                    "Fraction Correct": fraction_correct,
                 }
             )
-
         with open(filename, "a") as log_file:
             json.dump(log_entry, log_file)
             log_file.write("\n")
