@@ -343,8 +343,8 @@ def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
         outputs = model.generate(
             tokenized_inputs.input_ids,
             attention_mask=tokenized_inputs.attention_mask,
-            max_new_tokens=400,
-            min_new_tokens=400,
+            max_new_tokens=200,
+            min_new_tokens=200,
             do_sample=True,
             temperature=1.0,
             pad_token_id=tokenizer.pad_token_id,
@@ -657,14 +657,6 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
             torch.save(model.state_dict(), model_save_path)
             print(f"Model weights saved to {model_save_path}")
-
-    # After training is complete
-    # Merge LoRA weights into base model
-    merged_model = model.merge_and_unload()
-
-    # Save the merged model
-    merged_model.save_pretrained(model_save_path)
-    tokenizer.save_pretrained(model_save_path)
 
 
 def main(use_gsm8k: bool, resume: bool, debug_index: int = None, use_ei: bool = False):
