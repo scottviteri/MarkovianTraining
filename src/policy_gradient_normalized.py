@@ -26,8 +26,8 @@ def load_mistral_model():
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",
         inference_mode=False,
-        r=8,
-        lora_alpha=16,
+        r=32,
+        lora_alpha=64,
         lora_dropout=0.1,
         target_modules="all-linear",
     )
@@ -116,7 +116,7 @@ def calculate_answer_log_probs(
     reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
 
     full_prompts = [
-        f"Use the following possibly mistaken reasoning to help predict the true answer, which will come immediately after the 'Answer:' tag. Try to spot flaws in the provided reasoning to guide your prediction.\nStepByStep: {r} \nAnswer: {a}"
+        f"[INST] Answer immediately after the '[Answer]' tag.[/INST] [Reasoning]{r}[/Reasoning]\n[Answer]{a}"
         for r, a in zip(reasoning_text, answers)
     ]
 
@@ -134,6 +134,7 @@ def calculate_answer_log_probs(
                 attention_mask=tokenized_full_prompts.attention_mask,
                 max_new_tokens=15,
                 do_sample=False,
+                pad_token_id=tokenizer.pad_token_id
             )
 
         generated_answers = tokenizer.batch_decode(
@@ -142,7 +143,7 @@ def calculate_answer_log_probs(
         extracted_generated_answers = [extract_answer(ans) for ans in generated_answers]
 
     answer_start_positions = [
-        ((input_ids == 28705) | (input_ids == 28747))
+        (input_ids == 28793)
         .nonzero(as_tuple=True)[0][-1]
         .item()
         + 1
@@ -330,7 +331,7 @@ def load_training_state(log_file):
 
 def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
     question, answer = qa_pair
-    prompt = f"Work through the following question step by step, concisely decomposing problems into subproblems.\nQuestion: {question}\nStepByStep:"
+    prompt = f"[INST] Produce a minimal number of tokens which will help you answer the question.[/INST] \n[Question]{question}[/Question]\n[Reasoning]"
 
     tokenized_inputs = tokenizer(
         prompt,
@@ -366,7 +367,7 @@ def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
         generated_answer == true_answer if generated_answer is not None else False
     )
 
-    print(f"Question: {question}")
+    print(f"\n\nQuestion: {question}")
     print(f"True Answer: {true_answer}")
     print(f"Generated Answer: {generated_answer}")
     print(f"Is Correct: {is_correct}")
@@ -410,13 +411,13 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
 
         hyperparameters = {
             "model_learning_rate": 1e-4,
-            "batch_size": 6,
-            "gradient_accumulation_steps": 8,
+            "batch_size": 12,
+            "gradient_accumulation_steps": 16,
             "num_batches": 2001,
-            "use_ppo": False,
+            "use_ppo": True,
             "ppo_epsilon": 0.2,
-            "normalize_loss": False,
-            "r": 0,
+            "normalize_loss": True,
+            "r": 0.5,
         }
 
     model, frozen_model, tokenizer, device = load_mistral_model()
@@ -454,7 +455,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
         questions, answers = zip(*qa_batch)
 
         prompts = [
-            f"Work through the following question step by step, concisely decomposing problems into subproblems.\nQuestion: {q}\nStepByStep:"
+            f"[INST] Produce a minimal numbers of tokens which will help you answer the question.[/INST] [Question]{q}[/Question]\n[Reasoning]"
             for q in questions
         ]
         tokenized_inputs = tokenizer(
@@ -467,8 +468,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             outputs = model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=400,
-                min_new_tokens=400,
+                max_new_tokens=50,
+                min_new_tokens=50,
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
@@ -476,8 +477,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             baseline_outputs = frozen_model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=400,
-                min_new_tokens=400,
+                max_new_tokens=50,
+                min_new_tokens=50,
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
@@ -548,7 +549,6 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
         loss.backward()
 
         grad_norm = get_grad_norm(model.parameters())
-        print(f"Current gradient norm: {grad_norm}")
         if clip_grad_norm:
             clip_grad_norm_(model.parameters(), 1.0)
 
@@ -568,7 +568,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             else None
         )
         advantage_value = advantage[0].item()
-        print("Question: ", q)
+        print("\n\nQuestion: ", q)
         print(reasoning_text_first)
         print("Ans: ", ans, "Avg Log Prob: ", avg_log_prob)
 
@@ -576,7 +576,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             "Aggregate loss": loss.item() * gradient_accumulation_steps,
             "Batch Index": batch_index,
             "Prev Observation": f"Question: {q}",
-            "Action": f"StepByStep: {reasoning_text_first}",
+            "Action": f"Reasoning: {reasoning_text_first}",
             "Observation": f"Answer: {ans}",
             "Reasoning Contains Answer": str(ans) in reasoning_text_first,
             "Avg Log Prob": avg_log_prob,
