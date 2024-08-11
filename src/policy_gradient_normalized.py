@@ -14,13 +14,12 @@ import re
 import os
 import glob
 
-# Initialize the global variable at the module level
+# Global variables
 previous_normalized_rewards = []
-
+previous_advantages = []
 
 def load_mistral_model():
     model_name = "mistralai/Mistral-7B-Instruct-v0.2"
-    # model_name = "distilgpt2"
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
@@ -45,6 +44,10 @@ def load_mistral_model():
 
     return model, frozen_model, tokenizer, device
 
+def calculate_threshold(previous_advantages):
+    if len(previous_advantages) > 0:
+        return max(2.0, np.mean(previous_advantages) - np.std(previous_advantages))
+    return 2.0
 
 def generate_question_answer_batch(batch_size: int):
     qa_batch = []
@@ -97,10 +100,9 @@ def extract_answer(answer):
         answer = answer.split("=")[-1].strip()
     answer = answer.replace(",", "")
     try:
-        # Match optional negative sign followed by digits
         matches = re.findall(r"-?\d+", answer.strip())
         if matches:
-            answer = int(matches[-1])  # Take the last match
+            answer = int(matches[-1])
         else:
             answer = "[invalid]"
     except:
@@ -126,13 +128,11 @@ def calculate_answer_log_probs(
 
     extracted_generated_answers = None
     if use_gsm8k:
-        # Generate tokens at temperature 0
         with torch.no_grad():
             generated_outputs = model.generate(
                 input_ids=tokenized_full_prompts.input_ids,
                 attention_mask=tokenized_full_prompts.attention_mask,
                 max_new_tokens=15,
-                # temperature=0.0,
                 do_sample=False,
             )
 
@@ -141,8 +141,6 @@ def calculate_answer_log_probs(
         )
         extracted_generated_answers = [extract_answer(ans) for ans in generated_answers]
 
-    # Find the position of the last space before the answer
-    # 28705 is space token, leading to the final space before the answer (which doesn't contain spaces)
     answer_start_positions = [
         ((input_ids == 28705) | (input_ids == 28747))
         .nonzero(as_tuple=True)[0][-1]
@@ -177,7 +175,7 @@ def calculate_answer_log_probs(
     ):
         answer_length = len(
             str(answer)
-        )  # Convert to string in case answer is not already a string
+        )
         actual_tokens = mask[start_idx:].sum().item()
         assert (
             actual_tokens == answer_length
@@ -197,7 +195,7 @@ def calculate_ppo_loss(current_log_probs, old_log_probs, advantages, epsilon=0.2
 
 def exponential_weighted_average(values, r):
     weights = np.array([r**i for i in range(len(values))])
-    weights = weights / np.sum(weights)  # Normalize weights to sum to 1
+    weights = weights / np.sum(weights)
     return np.sum(weights * np.array(values))
 
 
@@ -213,8 +211,9 @@ def calculate_advantages(
     r,
     normalize_loss,
     use_gsm8k,
+    use_ei,
 ):
-    global previous_normalized_rewards
+    global previous_normalized_rewards, previous_advantages
 
     reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] :]
 
@@ -243,7 +242,6 @@ def calculate_advantages(
         normalized_reward = log_prob_ans_given_reasoning
         log_prob_ans_given_default_reasoning = None
 
-    # Calculate advantage using exponentially weighted average of previous normalized rewards
     if len(previous_normalized_rewards) > 0:
         avg_previous_reward = exponential_weighted_average(
             previous_normalized_rewards, r
@@ -252,12 +250,16 @@ def calculate_advantages(
     else:
         advantage = normalized_reward
 
-    # Update previous_normalized_rewards
     previous_normalized_rewards.extend(normalized_reward.detach().cpu().numpy())
+    previous_advantages.extend(advantage.detach().cpu().numpy())
 
-    # Keep only the last 1000 rewards to limit memory usage
     if len(previous_normalized_rewards) > 1000:
         previous_normalized_rewards = previous_normalized_rewards[-1000:]
+        previous_advantages = previous_advantages[-1000:]
+
+    if use_ei:
+        threshold = calculate_threshold(previous_advantages)
+        advantage = (advantage > threshold).float()
 
     return (
         advantage,
@@ -315,14 +317,11 @@ def load_training_state(log_file):
     with open(log_file, "r") as f:
         lines = f.readlines()
 
-    # Parse the last line to get the last batch index
     last_line = json.loads(lines[-1])
     last_batch_index = last_line["Batch Index"]
 
-    # Parse the first line to get the hyperparameters
     hyperparameters = json.loads(lines[0])
 
-    # Add default value for 'r' if it's not present in older log files
     if "r" not in hyperparameters:
         hyperparameters["r"] = 0.5
 
@@ -375,15 +374,21 @@ def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
     print(f"Generated Reasoning:\n{reasoning_text}")
 
 
-def calculate_threshold(previous_losses):
-    if len(previous_losses) > 0:
-        return min(2.0, np.mean(previous_losses) - 1.2 * np.std(previous_losses))
-    return 2.0
+def tensor_to_python(value):
+    if isinstance(value, torch.Tensor):
+        return value.item() if value.numel() == 1 else value.tolist()
+    elif isinstance(value, np.ndarray):
+        return value.item() if value.size == 1 else value.tolist()
+    elif isinstance(value, np.float32) or isinstance(value, np.float64):
+        return float(value)
+    elif isinstance(value, np.int32) or isinstance(value, np.int64):
+        return int(value)
+    return value
 
-# Add this at the module level
-previous_losses = []
 
 def train(use_gsm8k: bool, resume: bool, use_ei: bool):
+    global previous_normalized_rewards, previous_advantages
+
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
 
     if resume:
@@ -400,12 +405,9 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
     if not resume:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         log_file = f"src/AnalyzeResults/PolicyGradientNormalized_{dataset_type}_{timestamp}.log"
-        model_save_path = (
-            f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
-        )
+        model_save_path = f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
         start_batch = 0
 
-        # Define hyperparameters
         hyperparameters = {
             "model_learning_rate": 1e-4,
             "batch_size": 6,
@@ -431,7 +433,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
     gradient_accumulation_steps = hyperparameters["gradient_accumulation_steps"]
     use_ppo = hyperparameters["use_ppo"]
     ppo_epsilon = hyperparameters["ppo_epsilon"]
-    r = hyperparameters["r"]  # Use r from hyperparameters
+    r = hyperparameters["r"]
     clip_grad_norm = True
 
     num_batches = hyperparameters["num_batches"]
@@ -500,6 +502,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             r,
             normalize_loss,
             use_gsm8k,
+            use_ei,
         )
 
         full_attention_mask = torch.cat(
@@ -533,50 +536,19 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             dim=1
         )
 
-        if use_ei:
-            # EI-specific logic
-            threshold = calculate_threshold(previous_losses)
-            train_mask = (-advantage < threshold).float()
-
-            if train_mask.sum() > 0:
-                # Calculate loss only for selected examples
-                selected_outputs = outputs[train_mask > 0]
-                selected_full_attention_mask = full_attention_mask[train_mask > 0]
-                
-                ei_outputs = model(
-                    input_ids=selected_outputs,
-                    attention_mask=selected_full_attention_mask
-                )
-                ei_logits = ei_outputs.logits[:, tokenized_inputs.input_ids.shape[1] - 1 : -1, :]
-                ei_log_probs = torch.nn.functional.log_softmax(ei_logits, dim=-1)
-                ei_token_log_probs = ei_log_probs.gather(
-                    2, reasoning_tokens[train_mask > 0].unsqueeze(-1)
-                ).squeeze(-1)
-                ei_avg_log_probs = ei_token_log_probs.mean(dim=1)
-                loss = -ei_avg_log_probs.mean() / gradient_accumulation_steps
-            else:
-                loss = torch.tensor(0.0).to(device)
-
-            previous_losses.extend((-advantage).detach().cpu().numpy())
-            if len(previous_losses) > 1000:
-                previous_losses = previous_losses[-1000:]
-        else:
-            # Existing Policy Gradient logic
-            total_loss, policy_loss, ppo_ratio, clipped_ratio = calculate_losses(
-                unfrozen_avg_log_probs_reasoning_given_question,
-                frozen_avg_log_probs_reasoning_given_question,
-                advantage,
-                use_ppo,
-                ppo_epsilon,
-            )
-            loss = total_loss / gradient_accumulation_steps
+        total_loss, policy_loss, ppo_ratio, clipped_ratio = calculate_losses(
+            unfrozen_avg_log_probs_reasoning_given_question,
+            frozen_avg_log_probs_reasoning_given_question,
+            advantage,
+            use_ppo,
+            ppo_epsilon,
+        )
+        loss = total_loss / gradient_accumulation_steps
 
         loss.backward()
 
-        # Usage
         grad_norm = get_grad_norm(model.parameters())
         print(f"Current gradient norm: {grad_norm}")
-        # Clip gradients to prevent extreme updates
         if clip_grad_norm:
             clip_grad_norm_(model.parameters(), 1.0)
 
@@ -584,7 +556,6 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             model_optimizer.step()
             model_optimizer.zero_grad()
 
-        # Logging
         q = questions[0]
         ans = answers[0]
         reasoning_text_first = tokenizer.decode(
@@ -601,7 +572,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
         print(reasoning_text_first)
         print("Ans: ", ans, "Avg Log Prob: ", avg_log_prob)
 
-        log_entry = {
+        log_entry = {k: tensor_to_python(v) for k, v in {
             "Aggregate loss": loss.item() * gradient_accumulation_steps,
             "Batch Index": batch_index,
             "Prev Observation": f"Question: {q}",
@@ -615,20 +586,19 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             "Total Loss": total_loss.item(),
             "Grad Norm": grad_norm,
             "Use EI": use_ei,
-            "Threshold": threshold if use_ei else None,
-            "Train Mask Sum": train_mask.sum().item() if use_ei else None,
-        }
+            "Mean Previous Advantage": np.mean(previous_advantages) if previous_advantages else None,
+            "Std Previous Advantage": np.std(previous_advantages) if previous_advantages else None,
+            "EI Threshold": calculate_threshold(previous_advantages) if use_ei else None,
+        }.items()}
 
         if normalize_loss and baseline_avg_log_prob is not None:
-            log_entry["Baseline Avg Log Prob"] = baseline_avg_log_prob
+            log_entry["Baseline Avg Log Prob"] = tensor_to_python(baseline_avg_log_prob)
 
         if use_ppo and ppo_ratio is not None:
-            log_entry.update(
-                {
-                    "PPO Ratio": ppo_ratio[0].item(),
-                    "PPO Clipped Ratio": clipped_ratio[0].item(),
-                }
-            )
+            log_entry.update({
+                "PPO Ratio": tensor_to_python(ppo_ratio[0]),
+                "PPO Clipped Ratio": tensor_to_python(clipped_ratio[0]),
+            })
 
         if use_gsm8k and extracted_generated_answers is not None:
             true_answers = [extract_answer(answer) for answer in answers]
@@ -639,33 +609,28 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             fraction_correct = correct_count / len(answers)
 
             true_answer = true_answers[0]
-            log_entry.update(
-                {
-                    "Generated Answer": extracted_generated_answers[0],
-                    "True Answer": true_answer,
-                    "Is Correct": extracted_generated_answers[0] == true_answer,
-                    "Fraction Correct": fraction_correct,
-                }
-            )
+            log_entry.update({
+                "Generated Answer": extracted_generated_answers[0],
+                "True Answer": true_answer,
+                "Is Correct": extracted_generated_answers[0] == true_answer,
+                "Fraction Correct": fraction_correct,
+            })
+
         with open(log_file, "a") as f:
             json.dump(log_entry, f)
             f.write("\n")
 
-        # Save model weights every 100 batches
         if (batch_index + 1) % 100 == 0:
             print(f"Saving model weights at batch {batch_index + 1}")
             os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
             torch.save(model.state_dict(), model_save_path)
-            print(f"Model weights saved to {model_save_path}")
-
+            
 
 def main(use_gsm8k: bool, resume: bool, debug_index: int = None, use_ei: bool = False):
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
 
     if debug_index is not None:
-        model_save_path = (
-            f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
-        )
+        model_save_path = f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
         if not os.path.exists(model_save_path):
             print(f"Error: Model file not found at {model_save_path}")
             return

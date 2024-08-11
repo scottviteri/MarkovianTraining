@@ -21,6 +21,15 @@
             "justMyCode": false,
             "args": ["--use_gsm8k"]
         },
+{
+            "name": "Python: EI",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--use_gsm8k", "--use_ei"]
+        },
         {
             "name": "Python: GSM8K Resume",
             "type": "python",
