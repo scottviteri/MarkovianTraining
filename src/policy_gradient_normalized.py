@@ -26,8 +26,8 @@ def load_mistral_model():
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",
         inference_mode=False,
-        r=32,
-        lora_alpha=64,
+        r=16,
+        lora_alpha=32,
         lora_dropout=0.1,
         target_modules="all-linear",
     )
@@ -116,7 +116,7 @@ def calculate_answer_log_probs(
     reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
 
     full_prompts = [
-        f"[INST] Answer immediately after the '[Answer]' tag.[/INST] [Reasoning]{r}[/Reasoning]\n[Answer]{a}"
+        f"[INST] Answer immediately after the 'Answer:' tag.[/INST] Reasoning: {r}\nAnswer: {a}"
         for r, a in zip(reasoning_text, answers)
     ]
 
@@ -143,7 +143,7 @@ def calculate_answer_log_probs(
         extracted_generated_answers = [extract_answer(ans) for ans in generated_answers]
 
     answer_start_positions = [
-        (input_ids == 28793)
+        ((input_ids == 28747) | (input_ids == 28705))
         .nonzero(as_tuple=True)[0][-1]
         .item()
         + 1
@@ -331,7 +331,7 @@ def load_training_state(log_file):
 
 def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
     question, answer = qa_pair
-    prompt = f"[INST] Produce a minimal number of tokens which will help you answer the question.[/INST] \n[Question]{question}[/Question]\n[Reasoning]"
+    prompt = f"[INST] Produce a minimal text which will help you answer the question.[/INST] Question: {question}\nReasoning: "
 
     tokenized_inputs = tokenizer(
         prompt,
@@ -455,7 +455,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
         questions, answers = zip(*qa_batch)
 
         prompts = [
-            f"[INST] Produce a minimal numbers of tokens which will help you answer the question.[/INST] [Question]{q}[/Question]\n[Reasoning]"
+            f"[INST] Produce a minimal numbers of tokens which will help you answer the question.[/INST] Question: {q}\nReasoning: "
             for q in questions
         ]
         tokenized_inputs = tokenizer(
@@ -571,6 +571,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
         print("\n\nQuestion: ", q)
         print(reasoning_text_first)
         print("Ans: ", ans, "Avg Log Prob: ", avg_log_prob)
+        print("Gen Ans:", extracted_generated_answers[0])
 
         log_entry = {k: tensor_to_python(v) for k, v in {
             "Aggregate loss": loss.item() * gradient_accumulation_steps,
