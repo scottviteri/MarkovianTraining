@@ -26,8 +26,8 @@ def load_mistral_model():
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",
         inference_mode=False,
-        r=16,
-        lora_alpha=32,
+        r=8,
+        lora_alpha=16,
         lora_dropout=0.1,
         target_modules="all-linear",
     )
@@ -116,7 +116,7 @@ def calculate_answer_log_probs(
     reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
 
     full_prompts = [
-        f"[INST] Answer immediately after the 'Answer:' tag.[/INST] Reasoning: {r}\nAnswer: {a}"
+        f"Reasoning: {r}\nAnswer: {a}"
         for r, a in zip(reasoning_text, answers)
     ]
 
@@ -128,17 +128,20 @@ def calculate_answer_log_probs(
 
     extracted_generated_answers = None
     if use_gsm8k:
+        partial_prompts = [f"Reasoning: {r}\nAnswer:" for r in reasoning_text]
+        tokenized_partial_prompts = tokenizer(partial_prompts, padding=True, return_tensors="pt").to(device)
         with torch.no_grad():
             generated_outputs = model.generate(
-                input_ids=tokenized_full_prompts.input_ids,
-                attention_mask=tokenized_full_prompts.attention_mask,
-                max_new_tokens=15,
+                input_ids=tokenized_partial_prompts.input_ids,
+                attention_mask=tokenized_partial_prompts.attention_mask,
+                max_new_tokens=10,
+                min_new_tokens=10,
                 do_sample=False,
                 pad_token_id=tokenizer.pad_token_id
             )
 
         generated_answers = tokenizer.batch_decode(
-            generated_outputs, skip_special_tokens=True
+                generated_outputs[:,-10:], skip_special_tokens=True
         )
         extracted_generated_answers = [extract_answer(ans) for ans in generated_answers]
 
@@ -164,26 +167,8 @@ def calculate_answer_log_probs(
         .squeeze(-1)
         for i, start in enumerate(answer_start_positions)
     ]
-
-    avg_log_probs = []
-    for i, (mask, probs, start_idx, answer) in enumerate(
-        zip(
-            tokenized_full_prompts.attention_mask,
-            answer_log_probs,
-            answer_start_positions,
-            answers,
-        )
-    ):
-        answer_length = len(
-            str(answer)
-        )
-        actual_tokens = mask[start_idx:].sum().item()
-        assert (
-            actual_tokens == answer_length
-        ), f"Mismatch in answer length for index {i}. Expected {answer_length}, got {actual_tokens}"
-        avg_log_prob = (probs * mask[start_idx:]).sum() / (actual_tokens + 1e-8)
-        avg_log_probs.append(avg_log_prob)
-
+    avg_log_probs = list(map(lambda x:x.mean(), answer_log_probs))
+    print("Log Probs:", answer_log_probs[0])
     return torch.stack(avg_log_probs), extracted_generated_answers
 
 
@@ -331,7 +316,7 @@ def load_training_state(log_file):
 
 def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
     question, answer = qa_pair
-    prompt = f"[INST] Produce a minimal text which will help you answer the question.[/INST] Question: {question}\nReasoning: "
+    prompt = f"[INST] Produce concise text which will help you answer the question.[/INST] Question: {question}\nReasoning:"
 
     tokenized_inputs = tokenizer(
         prompt,
@@ -367,12 +352,12 @@ def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
         generated_answer == true_answer if generated_answer is not None else False
     )
 
-    print(f"\n\nQuestion: {question}")
+    print(f"Question: {question}")
     print(f"True Answer: {true_answer}")
     print(f"Generated Answer: {generated_answer}")
     print(f"Is Correct: {is_correct}")
     print(f"Log Probability: {log_prob_ans_given_reasoning[0].item()}")
-    print(f"Generated Reasoning:\n{reasoning_text}")
+    print(f"Generated Reasoning: {reasoning_text}")
 
 
 def tensor_to_python(value):
@@ -453,6 +438,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
 
     for batch_index, qa_batch in enumerate(qa_batches[start_batch:], start=start_batch):
         questions, answers = zip(*qa_batch)
+        print("\n")
 
         prompts = [
             f"[INST] Produce a minimal numbers of tokens which will help you answer the question.[/INST] Question: {q}\nReasoning: "
@@ -468,8 +454,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             outputs = model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=50,
-                min_new_tokens=50,
+                max_new_tokens=25,
+                min_new_tokens=25,
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
@@ -477,8 +463,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             baseline_outputs = frozen_model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=50,
-                min_new_tokens=50,
+                max_new_tokens=25,
+                min_new_tokens=25,
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
@@ -568,7 +554,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             else None
         )
         advantage_value = advantage[0].item()
-        print("\n\nQuestion: ", q)
+        print("Question: ", q)
         print(reasoning_text_first)
         print("Ans: ", ans, "Avg Log Prob: ", avg_log_prob)
         print("Gen Ans:", extracted_generated_answers[0])
