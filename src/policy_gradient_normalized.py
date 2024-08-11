@@ -410,7 +410,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             "model_learning_rate": 1e-4,
             "batch_size": 6,
             "gradient_accumulation_steps": 8,
-            "num_batches": 1001,
+            "num_batches": 2001,
             "use_ppo": True,
             "ppo_epsilon": 0.2,
             "normalize_loss": True,
