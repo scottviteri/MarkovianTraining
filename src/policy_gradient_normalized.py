@@ -342,8 +342,8 @@ def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
         outputs = model.generate(
             tokenized_inputs.input_ids,
             attention_mask=tokenized_inputs.attention_mask,
-            max_new_tokens=200,
-            min_new_tokens=200,
+            max_new_tokens=400,
+            min_new_tokens=400,
             do_sample=True,
             temperature=1.0,
             pad_token_id=tokenizer.pad_token_id,
@@ -413,10 +413,10 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             "batch_size": 6,
             "gradient_accumulation_steps": 8,
             "num_batches": 2001,
-            "use_ppo": True,
+            "use_ppo": False,
             "ppo_epsilon": 0.2,
-            "normalize_loss": True,
-            "r": 0.9,
+            "normalize_loss": False,
+            "r": 0,
         }
 
     model, frozen_model, tokenizer, device = load_mistral_model()
