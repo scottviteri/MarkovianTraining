@@ -344,6 +344,7 @@ def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
             tokenized_inputs.input_ids,
             attention_mask=tokenized_inputs.attention_mask,
             max_new_tokens=400,
+            min_new_tokens=400,
             do_sample=True,
             temperature=1.0,
             pad_token_id=tokenizer.pad_token_id,
@@ -374,7 +375,15 @@ def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
     print(f"Generated Reasoning:\n{reasoning_text}")
 
 
-def train(use_gsm8k: bool, resume: bool):
+def calculate_threshold(previous_losses):
+    if len(previous_losses) > 0:
+        return min(2.0, np.mean(previous_losses) - 1.2 * np.std(previous_losses))
+    return 2.0
+
+# Add this at the module level
+previous_losses = []
+
+def train(use_gsm8k: bool, resume: bool, use_ei: bool):
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
 
     if resume:
@@ -524,15 +533,44 @@ def train(use_gsm8k: bool, resume: bool):
             dim=1
         )
 
-        total_loss, policy_loss, ppo_ratio, clipped_ratio = calculate_losses(
-            unfrozen_avg_log_probs_reasoning_given_question,
-            frozen_avg_log_probs_reasoning_given_question,
-            advantage,
-            use_ppo,
-            ppo_epsilon,
-        )
+        if use_ei:
+            # EI-specific logic
+            threshold = calculate_threshold(previous_losses)
+            train_mask = (-advantage < threshold).float()
 
-        loss = total_loss / gradient_accumulation_steps
+            if train_mask.sum() > 0:
+                # Calculate loss only for selected examples
+                selected_outputs = outputs[train_mask > 0]
+                selected_full_attention_mask = full_attention_mask[train_mask > 0]
+                
+                ei_outputs = model(
+                    input_ids=selected_outputs,
+                    attention_mask=selected_full_attention_mask
+                )
+                ei_logits = ei_outputs.logits[:, tokenized_inputs.input_ids.shape[1] - 1 : -1, :]
+                ei_log_probs = torch.nn.functional.log_softmax(ei_logits, dim=-1)
+                ei_token_log_probs = ei_log_probs.gather(
+                    2, reasoning_tokens[train_mask > 0].unsqueeze(-1)
+                ).squeeze(-1)
+                ei_avg_log_probs = ei_token_log_probs.mean(dim=1)
+                loss = -ei_avg_log_probs.mean() / gradient_accumulation_steps
+            else:
+                loss = torch.tensor(0.0).to(device)
+
+            previous_losses.extend((-advantage).detach().cpu().numpy())
+            if len(previous_losses) > 1000:
+                previous_losses = previous_losses[-1000:]
+        else:
+            # Existing Policy Gradient logic
+            total_loss, policy_loss, ppo_ratio, clipped_ratio = calculate_losses(
+                unfrozen_avg_log_probs_reasoning_given_question,
+                frozen_avg_log_probs_reasoning_given_question,
+                advantage,
+                use_ppo,
+                ppo_epsilon,
+            )
+            loss = total_loss / gradient_accumulation_steps
+
         loss.backward()
 
         # Usage
@@ -576,6 +614,9 @@ def train(use_gsm8k: bool, resume: bool):
             "Policy Loss": policy_loss.item(),
             "Total Loss": total_loss.item(),
             "Grad Norm": grad_norm,
+            "Use EI": use_ei,
+            "Threshold": threshold if use_ei else None,
+            "Train Mask Sum": train_mask.sum().item() if use_ei else None,
         }
 
         if normalize_loss and baseline_avg_log_prob is not None:
@@ -626,7 +667,7 @@ def train(use_gsm8k: bool, resume: bool):
     tokenizer.save_pretrained(model_save_path)
 
 
-def main(use_gsm8k: bool, resume: bool, debug_index: int = None):
+def main(use_gsm8k: bool, resume: bool, debug_index: int = None, use_ei: bool = False):
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
 
     if debug_index is not None:
@@ -655,7 +696,7 @@ def main(use_gsm8k: bool, resume: bool, debug_index: int = None):
         debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k)
         return
 
-    train(use_gsm8k, resume)
+    train(use_gsm8k, resume, use_ei)
 
 
 if __name__ == "__main__":
@@ -678,6 +719,11 @@ if __name__ == "__main__":
         default=None,
         help="Index of the datapoint to debug (GSM8K only, random for arithmetic)",
     )
+    parser.add_argument(
+        "--use_ei",
+        action="store_true",
+        help="Use Expert Iteration instead of Policy Gradient",
+    )
     args = parser.parse_args()
 
-    main(use_gsm8k=args.use_gsm8k, resume=args.resume, debug_index=args.debug_index)
+    main(use_gsm8k=args.use_gsm8k, resume=args.resume, debug_index=args.debug_index, use_ei=args.use_ei)
