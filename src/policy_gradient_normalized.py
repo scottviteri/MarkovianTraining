@@ -441,7 +441,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
         print("\n")
 
         prompts = [
-            f"[INST] Produce a minimal numbers of tokens which will help you answer the question.[/INST] Question: {q}\nReasoning: "
+            f"[INST] Produce a minimal numbers of tokens which will help you answer the question.[/INST] Question: {q}\nReasoning:"
             for q in questions
         ]
         tokenized_inputs = tokenizer(
