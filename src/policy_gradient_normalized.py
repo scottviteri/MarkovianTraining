@@ -27,8 +27,8 @@ def load_mistral_model():
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",
         inference_mode=False,
-        r=16,
-        lora_alpha=32,
+        r=8,
+        lora_alpha=16,
         lora_dropout=0.1,
         target_modules="all-linear",
     )
@@ -447,6 +447,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
     for batch_index, qa_batch in enumerate(qa_batches[start_batch:], start=start_batch):
         questions, answers = zip(*qa_batch)
         print("\n")
+        print("Batch Index:", batch_index)
 
         prompts = [
             f"[INST] Produce minimal text which will help you answer the question.[/INST] Question: {q}\nReasoning:"
@@ -628,10 +629,13 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             json.dump(log_entry, f)
             f.write("\n")
 
-        if (batch_index + 1) % 100 == 0:
-            print(f"Saving model weights at batch {batch_index + 1}")
+        if batch_index % 300 == 0 and batch_index > 0:
+            print(f"Saving model weights at batch {batch_index}")
             os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
-            torch.save(model.state_dict(), model_save_path)
+            # Create a new filename that includes the batch index
+            model_save_path_with_batch = f"SavedModels/PolicyGradientNormalized_{dataset_type}_batch_{batch_index}.pt"
+            # Save the model with the batch index in the filename
+            torch.save(model.state_dict(), model_save_path_with_batch)
 
 
 def main(use_gsm8k: bool, resume: bool, debug_index: int = None, use_ei: bool = False):
