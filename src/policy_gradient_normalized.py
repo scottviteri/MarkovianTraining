@@ -18,6 +18,7 @@ import glob
 previous_normalized_rewards = []
 previous_advantages = []
 
+
 def load_mistral_model():
     model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
@@ -44,10 +45,12 @@ def load_mistral_model():
 
     return model, frozen_model, tokenizer, device
 
+
 def calculate_threshold(previous_advantages):
     if len(previous_advantages) > 0:
-        return max(2.0, np.mean(previous_advantages) - np.std(previous_advantages))
+        return max(2.0, np.mean(previous_advantages) + np.std(previous_advantages))
     return 2.0
+
 
 def generate_question_answer_batch(batch_size: int):
     qa_batch = []
@@ -102,7 +105,7 @@ def extract_answer(answer):
     try:
         matches = re.findall(r"-?\d+", answer.strip())
         if matches:
-            answer = int(matches[-1])
+            answer = int(matches[0])
         else:
             answer = "[invalid]"
     except:
@@ -116,8 +119,7 @@ def calculate_answer_log_probs(
     reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
 
     full_prompts = [
-        f"Reasoning: {r}\nAnswer: {a}"
-        for r, a in zip(reasoning_text, answers)
+        f"Reasoning: {r}\nAnswer: {a}" for r, a in zip(reasoning_text, answers)
     ]
 
     tokenized_full_prompts = tokenizer(
@@ -129,21 +131,25 @@ def calculate_answer_log_probs(
     extracted_generated_answers = None
     if use_gsm8k:
         partial_prompts = [f"Reasoning: {r}\nAnswer:" for r in reasoning_text]
-        tokenized_partial_prompts = tokenizer(partial_prompts, padding=True, return_tensors="pt").to(device)
+        tokenized_partial_prompts = tokenizer(
+            partial_prompts, padding=True, return_tensors="pt"
+        ).to(device)
+        max_answer_length = max(map(len, answers))
         with torch.no_grad():
             generated_outputs = model.generate(
                 input_ids=tokenized_partial_prompts.input_ids,
                 attention_mask=tokenized_partial_prompts.attention_mask,
-                max_new_tokens=10,
-                min_new_tokens=10,
+                max_new_tokens=max_answer_length,
+                # min_new_tokens=10,
                 do_sample=False,
-                pad_token_id=tokenizer.pad_token_id
+                pad_token_id=tokenizer.pad_token_id,
             )
 
         generated_answers = tokenizer.batch_decode(
-                generated_outputs[:,-10:], skip_special_tokens=True
+            generated_outputs[:, -max_answer_length - 1 :], skip_special_tokens=True
         )
-        extracted_generated_answers = [extract_answer(ans) for ans in generated_answers]
+        selected_answers = [x.split("\nAnswer: ")[-1] for x in generated_answers]
+        extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
 
     answer_start_positions = [
         ((input_ids == 28747) | (input_ids == 28705))
@@ -167,7 +173,7 @@ def calculate_answer_log_probs(
         .squeeze(-1)
         for i, start in enumerate(answer_start_positions)
     ]
-    avg_log_probs = list(map(lambda x:x.mean(), answer_log_probs))
+    avg_log_probs = list(map(lambda x: x.mean(), answer_log_probs))
     print("Log Probs:", answer_log_probs[0])
     return torch.stack(avg_log_probs), extracted_generated_answers
 
@@ -391,7 +397,9 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
     if not resume:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         log_file = f"src/AnalyzeResults/PolicyGradientNormalized_{dataset_type}_{timestamp}.log"
-        model_save_path = f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+        model_save_path = (
+            f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+        )
         start_batch = 0
 
         hyperparameters = {
@@ -554,38 +562,49 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             else None
         )
         advantage_value = advantage[0].item()
-        print("Question: ", q)
-        print(reasoning_text_first)
-        print("Ans: ", ans, "Avg Log Prob: ", avg_log_prob)
-        print("Gen Ans:", extracted_generated_answers[0])
+        print("Question:", q)
+        print("Reasoning:", reasoning_text_first)
+        print("Answer:", ans, "Avg Log Prob:", avg_log_prob)
+        print("Generated Answer:", extracted_generated_answers[0])
 
-        log_entry = {k: tensor_to_python(v) for k, v in {
-            "Aggregate loss": loss.item() * gradient_accumulation_steps,
-            "Batch Index": batch_index,
-            "Prev Observation": f"Question: {q}",
-            "Action": f"Reasoning: {reasoning_text_first}",
-            "Observation": f"Answer: {ans}",
-            "Reasoning Contains Answer": str(ans) in reasoning_text_first,
-            "Avg Log Prob": avg_log_prob,
-            "Normalized Reward": normalized_reward[0].item(),
-            "Advantage": advantage_value,
-            "Policy Loss": policy_loss.item(),
-            "Total Loss": total_loss.item(),
-            "Grad Norm": grad_norm,
-            "Use EI": use_ei,
-            "Mean Previous Advantage": np.mean(previous_advantages) if previous_advantages else None,
-            "Std Previous Advantage": np.std(previous_advantages) if previous_advantages else None,
-            "EI Threshold": calculate_threshold(previous_advantages) if use_ei else None,
-        }.items()}
+        log_entry = {
+            k: tensor_to_python(v)
+            for k, v in {
+                "Aggregate loss": loss.item() * gradient_accumulation_steps,
+                "Batch Index": batch_index,
+                "Prev Observation": f"Question: {q}",
+                "Action": f"Reasoning: {reasoning_text_first}",
+                "Observation": f"Answer: {ans}",
+                "Reasoning Contains Answer": str(ans) in reasoning_text_first,
+                "Avg Log Prob": avg_log_prob,
+                "Normalized Reward": normalized_reward[0].item(),
+                "Advantage": advantage_value,
+                "Policy Loss": policy_loss.item(),
+                "Total Loss": total_loss.item(),
+                "Grad Norm": grad_norm,
+                "Use EI": use_ei,
+                "Mean Previous Advantage": (
+                    np.mean(previous_advantages) if previous_advantages else None
+                ),
+                "Std Previous Advantage": (
+                    np.std(previous_advantages) if previous_advantages else None
+                ),
+                "EI Threshold": (
+                    calculate_threshold(previous_advantages) if use_ei else None
+                ),
+            }.items()
+        }
 
         if normalize_loss and baseline_avg_log_prob is not None:
             log_entry["Baseline Avg Log Prob"] = tensor_to_python(baseline_avg_log_prob)
 
         if use_ppo and ppo_ratio is not None:
-            log_entry.update({
-                "PPO Ratio": tensor_to_python(ppo_ratio[0]),
-                "PPO Clipped Ratio": tensor_to_python(clipped_ratio[0]),
-            })
+            log_entry.update(
+                {
+                    "PPO Ratio": tensor_to_python(ppo_ratio[0]),
+                    "PPO Clipped Ratio": tensor_to_python(clipped_ratio[0]),
+                }
+            )
 
         if use_gsm8k and extracted_generated_answers is not None:
             true_answers = [extract_answer(answer) for answer in answers]
@@ -596,12 +615,14 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             fraction_correct = correct_count / len(answers)
 
             true_answer = true_answers[0]
-            log_entry.update({
-                "Generated Answer": extracted_generated_answers[0],
-                "True Answer": true_answer,
-                "Is Correct": extracted_generated_answers[0] == true_answer,
-                "Fraction Correct": fraction_correct,
-            })
+            log_entry.update(
+                {
+                    "Generated Answer": extracted_generated_answers[0],
+                    "True Answer": true_answer,
+                    "Is Correct": extracted_generated_answers[0] == true_answer,
+                    "Fraction Correct": fraction_correct,
+                }
+            )
 
         with open(log_file, "a") as f:
             json.dump(log_entry, f)
@@ -611,13 +632,15 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             print(f"Saving model weights at batch {batch_index + 1}")
             os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
             torch.save(model.state_dict(), model_save_path)
-            
+
 
 def main(use_gsm8k: bool, resume: bool, debug_index: int = None, use_ei: bool = False):
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
 
     if debug_index is not None:
-        model_save_path = f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+        model_save_path = (
+            f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+        )
         if not os.path.exists(model_save_path):
             print(f"Error: Model file not found at {model_save_path}")
             return
@@ -670,4 +693,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    main(use_gsm8k=args.use_gsm8k, resume=args.resume, debug_index=args.debug_index, use_ei=args.use_ei)
+    main(
+        use_gsm8k=args.use_gsm8k,
+        resume=args.resume,
+        debug_index=args.debug_index,
+        use_ei=args.use_ei,
+    )
