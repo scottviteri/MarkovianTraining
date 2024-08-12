@@ -636,7 +636,13 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             model_save_path_with_batch = f"SavedModels/PolicyGradientNormalized_{dataset_type}_batch_{batch_index}.pt"
             # Save the model with the batch index in the filename
             torch.save(model.state_dict(), model_save_path_with_batch)
-
+        if batch_index % 100 == 0 and batch_index > 0:
+            print(f"Saving model weights at batch {batch_index}")
+            os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
+            # Create a new filename that includes the batch index
+            model_save_path_with_batch = f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+            # Save the model with the batch index in the filename
+            torch.save(model.state_dict(), model_save_path_with_batch)
 
 def main(use_gsm8k: bool, resume: bool, debug_index: int = None, use_ei: bool = False):
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
