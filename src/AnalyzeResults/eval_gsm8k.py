@@ -14,14 +14,17 @@ def extract_answer(answer):
         answer = answer.split("=")[-1].strip()
     answer = answer.replace(",", "")
     try:
-        answer = re.findall(r"\d+", answer.strip())[0]
-        answer = int(answer)
+        matches = re.findall(r"-?\d+", answer.strip())
+        if matches:
+            answer = int(matches[0])
+        else:
+            answer = "[invalid]"
     except:
         answer = "[invalid]"
     return answer
 
 
-def load_model(model_path):
+def load_model(model_path, use_base_model=False):
     # Load the tokenizer from the base model
     tokenizer = AutoTokenizer.from_pretrained(
         "mistralai/Mistral-7B-Instruct-v0.2", padding_side="left"
@@ -29,25 +32,26 @@ def load_model(model_path):
     tokenizer.pad_token = tokenizer.eos_token
 
     # Load the base model
-    base_model = AutoModelForCausalLM.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained(
         "mistralai/Mistral-7B-Instruct-v0.2",
         torch_dtype=torch.bfloat16,
         device_map="auto",
     )
 
-    # Define and apply the PEFT configuration
-    peft_config = LoraConfig(
-        task_type="CAUSAL_LM",
-        inference_mode=False,
-        r=16,
-        lora_alpha=32,
-        lora_dropout=0.1,
-        target_modules="all-linear",
-    )
-    model = get_peft_model(base_model, peft_config)
+    if not use_base_model:
+        # Define and apply the PEFT configuration
+        peft_config = LoraConfig(
+            task_type="CAUSAL_LM",
+            inference_mode=False,
+            r=8,
+            lora_alpha=16,
+            lora_dropout=0.1,
+            target_modules="all-linear",
+        )
+        model = get_peft_model(model, peft_config)
 
-    # Load the trained weights
-    model.load_state_dict(torch.load(model_path, map_location="cpu"), strict=False)
+        # Load the trained weights
+        model.load_state_dict(torch.load(model_path, map_location="cpu"), strict=False)
 
     model.eval()
 
@@ -78,7 +82,7 @@ def evaluate_model(
             outputs = model.generate(
                 **inputs,
                 max_new_tokens=100,
-                temperature=0.0,
+                min_new_tokens=100,
                 do_sample=False,
             )
 
@@ -152,8 +156,8 @@ def batch_process_answers(
     return extracted_generated_answers
 
 
-def main(model_path, num_samples, batch_size):
-    model, tokenizer, device = load_model(model_path)
+def main(model_path, num_samples, batch_size, use_base_model):
+    model, tokenizer, device = load_model(model_path, use_base_model)
 
     test_data = load_dataset("openai/gsm8k", "main", split="test")
     test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
@@ -190,10 +194,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size", type=int, default=16, help="Batch size for evaluation"
     )
+    parser.add_argument(
+        "--use_base_model",
+        action="store_true",
+        help="Use the base model without LoRA or loading weights",
+    )
     args = parser.parse_args()
 
-    if not os.path.exists(args.model_path):
+    if not args.use_base_model and not os.path.exists(args.model_path):
         print(f"Error: Model file not found at {args.model_path}")
         exit(1)
 
-    main(args.model_path, args.num_samples, args.batch_size)
+    main(args.model_path, args.num_samples, args.batch_size, args.use_base_model)
