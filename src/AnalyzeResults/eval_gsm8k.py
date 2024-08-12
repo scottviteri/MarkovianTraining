@@ -6,6 +6,7 @@ import argparse
 import json
 from tqdm import tqdm
 import os
+from peft import LoraConfig, get_peft_model
 
 
 def extract_answer(answer):
@@ -13,7 +14,7 @@ def extract_answer(answer):
         answer = answer.split("=")[-1].strip()
     answer = answer.replace(",", "")
     try:
-        answer = re.findall(r"\d+", answer.strip())[-1]
+        answer = re.findall(r"\d+", answer.strip())[0]
         answer = int(answer)
     except:
         answer = "[invalid]"
@@ -21,82 +22,145 @@ def extract_answer(answer):
 
 
 def load_model(model_path):
-    tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
+    # Load the tokenizer from the base model
+    tokenizer = AutoTokenizer.from_pretrained(
+        "mistralai/Mistral-7B-Instruct-v0.2", padding_side="left"
+    )
     tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(model_path, torch_dtype=torch.bfloat16)
+    # Load the base model
+    base_model = AutoModelForCausalLM.from_pretrained(
+        "mistralai/Mistral-7B-Instruct-v0.2",
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+    )
+
+    # Define and apply the PEFT configuration
+    peft_config = LoraConfig(
+        task_type="CAUSAL_LM",
+        inference_mode=False,
+        r=16,
+        lora_alpha=32,
+        lora_dropout=0.1,
+        target_modules="all-linear",
+    )
+    model = get_peft_model(base_model, peft_config)
+
+    # Load the trained weights
+    model.load_state_dict(torch.load(model_path, map_location="cpu"), strict=False)
+
     model.eval()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
 
     return model, tokenizer, device
 
 
-def evaluate_model(model, tokenizer, device, test_data, num_samples=None):
+def evaluate_model(
+    model, tokenizer, device, test_data, num_samples=None, batch_size=16
+):
     correct = 0
     total = 0
     results = []
 
-    for question, answer in tqdm(test_data[:num_samples]):
-        # Generate the chain of thought reasoning
-        prompt = f"Work through the following question step by step, concisely decomposing problems into subproblems.\nQuestion: {question}\nStepByStep:"
+    for i in tqdm(range(0, len(test_data[:num_samples]), batch_size)):
+        batch = test_data[i : i + batch_size]
+        questions, answers = zip(*batch)
 
-        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+        # Generate the chain of thought reasoning
+        prompts = [
+            f"[INST] Produce minimal text which will help you answer the question.[/INST] Question: {q}\nReasoning:"
+            for q in questions
+        ]
+        inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
 
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=400,
+                max_new_tokens=100,
                 temperature=0.0,
                 do_sample=False,
             )
 
-        reasoning_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        reasoning_tokens = outputs[:, inputs.input_ids.shape[1] :]
 
-        # Generate the potential answer given the reasoning
-        full_prompt = f"Use the following possibly mistaken reasoning to help predict the true answer, which will come immediately after the 'Answer:' tag. Try to spot flaws in the provided reasoning to guide your prediction.\nStepByStep: {reasoning_text} \nAnswer:"
-        answer_inputs = tokenizer(full_prompt, return_tensors="pt").to(device)
-        with torch.no_grad():
-            answer_outputs = model.generate(
-                **answer_inputs,
-                max_new_tokens=15,
-                do_sample=False,
+        # Use the provided batch processing function
+        extracted_generated_answers = batch_process_answers(
+            model, tokenizer, device, reasoning_tokens, answers, use_gsm8k=True
+        )
+
+        true_answers = [extract_answer(a) for a in answers]
+
+        for q, true_ans, gen_ans in zip(
+            questions, true_answers, extracted_generated_answers
+        ):
+            is_correct = gen_ans == true_ans
+            correct += is_correct
+            total += 1
+
+            results.append(
+                {
+                    "question": q,
+                    "true_answer": true_ans,
+                    "generated_answer": gen_ans,
+                    "is_correct": is_correct,
+                }
             )
-
-        generated_answer_text = tokenizer.decode(
-            answer_outputs[0][answer_inputs.input_ids.shape[1] :],
-            skip_special_tokens=True,
-        )
-        generated_answer = extract_answer(generated_answer_text)
-        true_answer = extract_answer(answer)
-
-        is_correct = generated_answer == true_answer
-        correct += is_correct
-        total += 1
-
-        results.append(
-            {
-                "question": question,
-                "true_answer": true_answer,
-                "generated_answer": generated_answer,
-                "is_correct": is_correct,
-                "full_reasoning": reasoning_text,
-                "generated_answer_text": generated_answer_text,
-            }
-        )
 
     accuracy = correct / total
     return accuracy, results
 
 
-def main(model_path, num_samples):
+def batch_process_answers(
+    model, tokenizer, device, reasoning_tokens, answers, use_gsm8k
+):
+    reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
+
+    full_prompts = [
+        f"Reasoning: {r}\nAnswer: {a}" for r, a in zip(reasoning_text, answers)
+    ]
+
+    tokenized_full_prompts = tokenizer(
+        full_prompts,
+        padding=True,
+        return_tensors="pt",
+    ).to(device)
+
+    extracted_generated_answers = None
+    if use_gsm8k:
+        partial_prompts = [f"Reasoning: {r}\nAnswer:" for r in reasoning_text]
+        tokenized_partial_prompts = tokenizer(
+            partial_prompts, padding=True, return_tensors="pt"
+        ).to(device)
+        max_answer_length = 15
+        with torch.no_grad():
+            generated_outputs = model.generate(
+                input_ids=tokenized_partial_prompts.input_ids,
+                attention_mask=tokenized_partial_prompts.attention_mask,
+                max_new_tokens=max_answer_length,
+                # min_new_tokens=10,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+
+        generated_answers = tokenizer.batch_decode(
+            generated_outputs[:, -max_answer_length - 1 :], skip_special_tokens=True
+        )
+        selected_answers = [x.split("\nAnswer: ")[-1] for x in generated_answers]
+        extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
+
+    return extracted_generated_answers
+
+
+def main(model_path, num_samples, batch_size):
     model, tokenizer, device = load_model(model_path)
 
     test_data = load_dataset("openai/gsm8k", "main", split="test")
     test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
 
-    accuracy, results = evaluate_model(model, tokenizer, device, test_data, num_samples)
+    accuracy, results = evaluate_model(
+        model, tokenizer, device, test_data, num_samples, batch_size
+    )
 
     print(f"Accuracy: {accuracy:.2%}")
 
@@ -114,7 +178,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_path",
         type=str,
-        default="SavedModels/PolicyGradientNormalized_GSM8K_latest.pt",
+        default="/root/MarkovianTraining/SavedModels/PolicyGradientNormalized_GSM8K_latest.pt",
         help="Path to the trained model weights",
     )
     parser.add_argument(
@@ -123,10 +187,13 @@ if __name__ == "__main__":
         default=None,
         help="Number of samples to evaluate (default: all)",
     )
+    parser.add_argument(
+        "--batch_size", type=int, default=16, help="Batch size for evaluation"
+    )
     args = parser.parse_args()
 
     if not os.path.exists(args.model_path):
         print(f"Error: Model file not found at {args.model_path}")
         exit(1)
 
-    main(args.model_path, args.num_samples)
+    main(args.model_path, args.num_samples, args.batch_size)
