@@ -320,6 +320,21 @@ def load_training_state(log_file):
     return last_batch_index, hyperparameters
 
 
+def load_previous_rewards_and_advantages(log_file):
+    previous_normalized_rewards = []
+    previous_advantages = []
+    with open(log_file, "r") as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+                if "Normalized Reward" in entry and "Advantage" in entry:
+                    previous_normalized_rewards.append(entry["Normalized Reward"])
+                    previous_advantages.append(entry["Advantage"])
+            except json.JSONDecodeError:
+                continue  # Skip lines that can't be parsed as JSON
+    return previous_normalized_rewards, previous_advantages
+
+
 def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
     question, answer = qa_pair
     prompt = f"[INST] Produce concise text which will help you answer the question.[/INST] Question: {question}\nReasoning:"
@@ -394,6 +409,14 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             last_batch_index, hyperparameters = load_training_state(log_file)
             start_batch = last_batch_index + 1
 
+            # Initialize previous_normalized_rewards and previous_advantages from the log file
+            previous_normalized_rewards, previous_advantages = (
+                load_previous_rewards_and_advantages(log_file)
+            )
+            print(
+                f"Loaded {len(previous_normalized_rewards)} previous rewards and advantages"
+            )
+
     if not resume:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         log_file = f"src/AnalyzeResults/PolicyGradientNormalized_{dataset_type}_{timestamp}.log"
@@ -404,9 +427,9 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
 
         hyperparameters = {
             "model_learning_rate": 1e-4,
-            "batch_size": 10,
-            "gradient_accumulation_steps": 16,
-            "num_batches": 2001,
+            "batch_size": 8,
+            "gradient_accumulation_steps": 32,
+            "num_batches": 3001,
             "use_ppo": True,
             "ppo_epsilon": 0.2,
             "normalize_loss": True,
@@ -463,8 +486,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             outputs = model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=100,
-                min_new_tokens=100,
+                max_new_tokens=80,
+                min_new_tokens=80,
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
@@ -472,8 +495,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             baseline_outputs = frozen_model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=100,
-                min_new_tokens=100,
+                max_new_tokens=80,
+                min_new_tokens=80,
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
@@ -640,9 +663,12 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             print(f"Saving model weights at batch {batch_index}")
             os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
             # Create a new filename that includes the batch index
-            model_save_path_with_batch = f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+            model_save_path_with_batch = (
+                f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+            )
             # Save the model with the batch index in the filename
             torch.save(model.state_dict(), model_save_path_with_batch)
+
 
 def main(use_gsm8k: bool, resume: bool, debug_index: int = None, use_ei: bool = False):
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
