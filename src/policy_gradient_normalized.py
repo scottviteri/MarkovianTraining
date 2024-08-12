@@ -629,7 +629,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             json.dump(log_entry, f)
             f.write("\n")
 
-        if batch_index % 300 == 0 and batch_index > 0:
+        if batch_index % 500 == 0 and batch_index > 0:
             print(f"Saving model weights at batch {batch_index}")
             os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
             # Create a new filename that includes the batch index
