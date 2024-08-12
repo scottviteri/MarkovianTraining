@@ -27,8 +27,8 @@ def load_mistral_model():
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",
         inference_mode=False,
-        r=8,
-        lora_alpha=16,
+        r=16,
+        lora_alpha=32,
         lora_dropout=0.1,
         target_modules="all-linear",
     )
@@ -134,7 +134,7 @@ def calculate_answer_log_probs(
         tokenized_partial_prompts = tokenizer(
             partial_prompts, padding=True, return_tensors="pt"
         ).to(device)
-        max_answer_length = max(map(len, answers))
+        max_answer_length = 15
         with torch.no_grad():
             generated_outputs = model.generate(
                 input_ids=tokenized_partial_prompts.input_ids,
@@ -449,7 +449,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
         print("\n")
 
         prompts = [
-            f"[INST] Produce a minimal numbers of tokens which will help you answer the question.[/INST] Question: {q}\nReasoning:"
+            f"[INST] Produce minimal text which will help you answer the question.[/INST] Question: {q}\nReasoning:"
             for q in questions
         ]
         tokenized_inputs = tokenizer(
@@ -462,8 +462,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             outputs = model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=25,
-                min_new_tokens=25,
+                max_new_tokens=100,
+                min_new_tokens=100,
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
@@ -471,8 +471,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             baseline_outputs = frozen_model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=25,
-                min_new_tokens=25,
+                max_new_tokens=100,
+                min_new_tokens=100,
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
