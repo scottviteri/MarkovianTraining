@@ -427,7 +427,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
 
         hyperparameters = {
             "model_learning_rate": 1e-4,
-            "batch_size": 8,
+            "batch_size": 10,
             "gradient_accumulation_steps": 32,
             "num_batches": 3001,
             "use_ppo": True,
