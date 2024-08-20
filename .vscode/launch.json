@@ -13,6 +13,42 @@
             "justMyCode": false
         },
         {
+            "name": "Python: GSM8K",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--use_gsm8k"]
+        },
+{
+            "name": "Python: EI",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--use_gsm8k", "--use_ei"]
+        },
+        {
+            "name": "Python: GSM8K Resume",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--use_gsm8k", "--resume"]
+        },
+        {
+            "name": "Python: GSM8K Debug Index",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": ["--use_gsm8k", "--resume", "--debug_index", "6189"]
+        },
+        {
             "name": "Python: Torchrun Current File",
             "type": "python",
             "request": "launch",

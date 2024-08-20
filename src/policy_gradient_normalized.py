@@ -1,21 +1,26 @@
 import datetime
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, get_peft_model_state_dict
 import bitsandbytes
 import random
 import numpy as np
 import json
 import copy
 from torch.nn.utils import clip_grad_norm_
+import argparse
+from datasets import load_dataset
+import re
+import os
+import glob
 
-# Initialize the global variable at the module level
+# Global variables
 previous_normalized_rewards = []
+previous_advantages = []
 
 
 def load_mistral_model():
     model_name = "mistralai/Mistral-7B-Instruct-v0.2"
-    # model_name = "distilgpt2"
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
@@ -41,6 +46,12 @@ def load_mistral_model():
     return model, frozen_model, tokenizer, device
 
 
+def calculate_threshold(previous_advantages):
+    if len(previous_advantages) > 0:
+        return max(2.0, np.mean(previous_advantages) + np.std(previous_advantages))
+    return 2.0
+
+
 def generate_question_answer_batch(batch_size: int):
     qa_batch = []
     for _ in range(batch_size):
@@ -49,8 +60,33 @@ def generate_question_answer_batch(batch_size: int):
     return qa_batch
 
 
-def generate_question_answer_batches(num_batches: int, batch_size: int):
-    return [generate_question_answer_batch(batch_size) for _ in range(num_batches)]
+def load_gsm8k_dataset():
+    ds = load_dataset("openai/gsm8k", "main")
+    questions = ds["train"]["question"]
+    answers = list(map(lambda x: x[x.index("####") + 5 :], ds["train"]["answer"]))
+    return list(zip(questions, answers))
+
+
+def generate_question_answer_batches(
+    num_batches: int, batch_size: int, use_gsm8k: bool
+):
+    if use_gsm8k:
+        gsm8k_data = load_gsm8k_dataset()
+        total_samples = len(gsm8k_data)
+        if num_batches * batch_size > total_samples:
+            print(
+                f"Warning: Requested {num_batches * batch_size} samples, but GSM8K dataset only has {total_samples} samples."
+            )
+            print("Some samples will be repeated.")
+            return [random.sample(gsm8k_data, batch_size) for _ in range(num_batches)]
+        else:
+            shuffled_data = random.sample(gsm8k_data, num_batches * batch_size)
+            return [
+                shuffled_data[i : i + batch_size]
+                for i in range(0, len(shuffled_data), batch_size)
+            ]
+    else:
+        return [generate_question_answer_batch(batch_size) for _ in range(num_batches)]
 
 
 def get_grad_norm(parameters):
@@ -62,12 +98,28 @@ def get_grad_norm(parameters):
     return total_norm**0.5
 
 
-def calculate_answer_log_probs(model, tokenizer, device, reasoning_tokens, answers):
+def extract_answer(answer):
+    if "=" in answer:
+        answer = answer.split("=")[-1].strip()
+    answer = answer.replace(",", "")
+    try:
+        matches = re.findall(r"-?\d+", answer.strip())
+        if matches:
+            answer = int(matches[0])
+        else:
+            answer = "[invalid]"
+    except:
+        answer = "[invalid]"
+    return answer
+
+
+def calculate_answer_log_probs(
+    model, tokenizer, device, reasoning_tokens, answers, use_gsm8k
+):
     reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
 
     full_prompts = [
-        f"Use the following possibly mistaken reasoning to help predict the true answer, which will come immediately after the 'Answer:' tag. Try to spot flaws in the provided reasoning to guide your prediction.\nStepByStep: {r} \nAnswer: {a}"
-        for r, a in zip(reasoning_text, answers)
+        f"Reasoning: {r}\nAnswer: {a}" for r, a in zip(reasoning_text, answers)
     ]
 
     tokenized_full_prompts = tokenizer(
@@ -76,10 +128,34 @@ def calculate_answer_log_probs(model, tokenizer, device, reasoning_tokens, answe
         return_tensors="pt",
     ).to(device)
 
-    # Find the position of the last space before the answer
-    # 28705 is space token, leading to the final space before the answer (which doesn't contain spaces)
+    extracted_generated_answers = None
+    if use_gsm8k:
+        partial_prompts = [f"Reasoning: {r}\nAnswer:" for r in reasoning_text]
+        tokenized_partial_prompts = tokenizer(
+            partial_prompts, padding=True, return_tensors="pt"
+        ).to(device)
+        max_answer_length = 15
+        with torch.no_grad():
+            generated_outputs = model.generate(
+                input_ids=tokenized_partial_prompts.input_ids,
+                attention_mask=tokenized_partial_prompts.attention_mask,
+                max_new_tokens=max_answer_length,
+                # min_new_tokens=10,
+                do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+
+        generated_answers = tokenizer.batch_decode(
+            generated_outputs[:, -max_answer_length - 1 :], skip_special_tokens=True
+        )
+        selected_answers = [x.split("\nAnswer: ")[-1] for x in generated_answers]
+        extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
+
     answer_start_positions = [
-        (input_ids == 28705).nonzero(as_tuple=True)[0][-1].item() + 1
+        ((input_ids == 28747) | (input_ids == 28705))
+        .nonzero(as_tuple=True)[0][-1]
+        .item()
+        + 1
         for input_ids in tokenized_full_prompts.input_ids
     ]
 
@@ -97,27 +173,9 @@ def calculate_answer_log_probs(model, tokenizer, device, reasoning_tokens, answe
         .squeeze(-1)
         for i, start in enumerate(answer_start_positions)
     ]
-
-    avg_log_probs = []
-    for i, (mask, probs, start_idx, answer) in enumerate(
-        zip(
-            tokenized_full_prompts.attention_mask,
-            answer_log_probs,
-            answer_start_positions,
-            answers,
-        )
-    ):
-        answer_length = len(
-            str(answer)
-        )  # Convert to string in case answer is not already a string
-        actual_tokens = mask[start_idx:].sum().item()
-        assert (
-            actual_tokens == answer_length
-        ), f"Mismatch in answer length for index {i}. Expected {answer_length}, got {actual_tokens}"
-        avg_log_prob = (probs * mask[start_idx:]).sum() / (actual_tokens + 1e-8)
-        avg_log_probs.append(avg_log_prob)
-
-    return torch.stack(avg_log_probs)
+    avg_log_probs = list(map(lambda x: x.mean(), answer_log_probs))
+    print("Log Probs:", answer_log_probs[0])
+    return torch.stack(avg_log_probs), extracted_generated_answers
 
 
 def calculate_ppo_loss(current_log_probs, old_log_probs, advantages, epsilon=0.2):
@@ -129,7 +187,7 @@ def calculate_ppo_loss(current_log_probs, old_log_probs, advantages, epsilon=0.2
 
 def exponential_weighted_average(values, r):
     weights = np.array([r**i for i in range(len(values))])
-    weights = weights / np.sum(weights)  # Normalize weights to sum to 1
+    weights = weights / np.sum(weights)
     return np.sum(weights * np.array(values))
 
 
@@ -144,13 +202,17 @@ def calculate_advantages(
     answers,
     r,
     normalize_loss,
+    use_gsm8k,
+    use_ei,
 ):
-    global previous_normalized_rewards
+    global previous_normalized_rewards, previous_advantages
 
     reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] :]
 
-    log_prob_ans_given_reasoning = calculate_answer_log_probs(
-        frozen_model, tokenizer, device, reasoning_tokens, answers
+    log_prob_ans_given_reasoning, extracted_generated_answers = (
+        calculate_answer_log_probs(
+            frozen_model, tokenizer, device, reasoning_tokens, answers, use_gsm8k
+        )
     )
 
     if normalize_loss:
@@ -158,8 +220,13 @@ def calculate_advantages(
             :, tokenized_inputs.input_ids.shape[1] :
         ]
         log_prob_ans_given_default_reasoning = calculate_answer_log_probs(
-            frozen_model, tokenizer, device, baseline_reasoning_tokens, answers
-        )
+            frozen_model,
+            tokenizer,
+            device,
+            baseline_reasoning_tokens,
+            answers,
+            use_gsm8k,
+        )[0]
         normalized_reward = (
             log_prob_ans_given_reasoning - log_prob_ans_given_default_reasoning
         )
@@ -167,7 +234,6 @@ def calculate_advantages(
         normalized_reward = log_prob_ans_given_reasoning
         log_prob_ans_given_default_reasoning = None
 
-    # Calculate advantage using exponentially weighted average of previous normalized rewards
     if len(previous_normalized_rewards) > 0:
         avg_previous_reward = exponential_weighted_average(
             previous_normalized_rewards, r
@@ -176,12 +242,16 @@ def calculate_advantages(
     else:
         advantage = normalized_reward
 
-    # Update previous_normalized_rewards
     previous_normalized_rewards.extend(normalized_reward.detach().cpu().numpy())
+    previous_advantages.extend(advantage.detach().cpu().numpy())
 
-    # Keep only the last 1000 rewards to limit memory usage
     if len(previous_normalized_rewards) > 1000:
         previous_normalized_rewards = previous_normalized_rewards[-1000:]
+        previous_advantages = previous_advantages[-1000:]
+
+    if use_ei:
+        threshold = calculate_threshold(previous_advantages)
+        advantage = (advantage > threshold).float()
 
     return (
         advantage,
@@ -189,6 +259,7 @@ def calculate_advantages(
         log_prob_ans_given_reasoning,
         log_prob_ans_given_default_reasoning,
         normalized_reward,
+        extracted_generated_answers,
     )
 
 
@@ -223,50 +294,186 @@ def calculate_losses(
     return total_loss, policy_loss, ppo_ratio, clipped_ratio
 
 
-def train():
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"src/AnalyzeResults/PolicyGradientNormalized_{timestamp}.log"
+def get_latest_checkpoint_and_log(dataset_type):
+    model_save_path = f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+    log_pattern = f"src/AnalyzeResults/PolicyGradientNormalized_{dataset_type}_*.log"
+    log_files = sorted(glob.glob(log_pattern), key=os.path.getmtime, reverse=True)
+
+    if not os.path.exists(model_save_path) or not log_files:
+        return None, None
+
+    return model_save_path, log_files[0]
+
+
+def load_training_state(log_file):
+    with open(log_file, "r") as f:
+        lines = f.readlines()
+
+    last_line = json.loads(lines[-1])
+    last_batch_index = last_line["Batch Index"]
+
+    hyperparameters = json.loads(lines[0])
+
+    if "r" not in hyperparameters:
+        hyperparameters["r"] = 0.5
+
+    return last_batch_index, hyperparameters
+
+
+def load_previous_rewards_and_advantages(log_file):
+    previous_normalized_rewards = []
+    previous_advantages = []
+    with open(log_file, "r") as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+                if "Normalized Reward" in entry and "Advantage" in entry:
+                    previous_normalized_rewards.append(entry["Normalized Reward"])
+                    previous_advantages.append(entry["Advantage"])
+            except json.JSONDecodeError:
+                continue  # Skip lines that can't be parsed as JSON
+    return previous_normalized_rewards, previous_advantages
+
+
+def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
+    question, answer = qa_pair
+    prompt = f"[INST] Produce concise text which will help you answer the question.[/INST] Question: {question}\nReasoning:"
+
+    tokenized_inputs = tokenizer(
+        prompt,
+        padding=True,
+        return_tensors="pt",
+    ).to(device)
+
+    with torch.no_grad():
+        outputs = model.generate(
+            tokenized_inputs.input_ids,
+            attention_mask=tokenized_inputs.attention_mask,
+            max_new_tokens=400,
+            min_new_tokens=400,
+            do_sample=True,
+            temperature=1.0,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+
+    reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] :]
+    reasoning_text = tokenizer.decode(reasoning_tokens[0], skip_special_tokens=True)
+
+    log_prob_ans_given_reasoning, extracted_generated_answers = (
+        calculate_answer_log_probs(
+            model, tokenizer, device, reasoning_tokens, [answer], use_gsm8k
+        )
+    )
+
+    true_answer = extract_answer(answer)
+    generated_answer = (
+        extracted_generated_answers[0] if extracted_generated_answers else None
+    )
+    is_correct = (
+        generated_answer == true_answer if generated_answer is not None else False
+    )
+
+    print(f"Question: {question}")
+    print(f"True Answer: {true_answer}")
+    print(f"Generated Answer: {generated_answer}")
+    print(f"Is Correct: {is_correct}")
+    print(f"Log Probability: {log_prob_ans_given_reasoning[0].item()}")
+    print(f"Generated Reasoning: {reasoning_text}")
+
+
+def tensor_to_python(value):
+    if isinstance(value, torch.Tensor):
+        return value.item() if value.numel() == 1 else value.tolist()
+    elif isinstance(value, np.ndarray):
+        return value.item() if value.size == 1 else value.tolist()
+    elif isinstance(value, np.float32) or isinstance(value, np.float64):
+        return float(value)
+    elif isinstance(value, np.int32) or isinstance(value, np.int64):
+        return int(value)
+    return value
+
+
+def train(use_gsm8k: bool, resume: bool, use_ei: bool):
+    global previous_normalized_rewards, previous_advantages
+
+    dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
+
+    if resume:
+        model_save_path, log_file = get_latest_checkpoint_and_log(dataset_type)
+        if model_save_path is None or log_file is None:
+            print("No checkpoint or log file found. Starting from scratch.")
+            resume = False
+        else:
+            print(f"Resuming from checkpoint: {model_save_path}")
+            print(f"Using log file: {log_file}")
+            last_batch_index, hyperparameters = load_training_state(log_file)
+            start_batch = last_batch_index + 1
+
+            # Initialize previous_normalized_rewards and previous_advantages from the log file
+            previous_normalized_rewards, previous_advantages = (
+                load_previous_rewards_and_advantages(log_file)
+            )
+            print(
+                f"Loaded {len(previous_normalized_rewards)} previous rewards and advantages"
+            )
+
+    if not resume:
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = f"src/AnalyzeResults/PolicyGradientNormalized_{dataset_type}_{timestamp}.log"
+        model_save_path = (
+            f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+        )
+        start_batch = 0
+
+        hyperparameters = {
+            "model_learning_rate": 1e-4,
+            "batch_size": 10,
+            "gradient_accumulation_steps": 32,
+            "num_batches": 3001,
+            "use_ppo": True,
+            "ppo_epsilon": 0.2,
+            "normalize_loss": True,
+            "r": 0.5,
+        }
 
     model, frozen_model, tokenizer, device = load_mistral_model()
-    model_learning_rate = 1e-4
+
+    if resume:
+        model.load_state_dict(torch.load(model_save_path))
+
     model_optimizer = bitsandbytes.optim.AdamW8bit(
-        model.parameters(), lr=model_learning_rate
+        model.parameters(), lr=hyperparameters["model_learning_rate"]
     )
 
-    batch_size = 6
-    normalize_loss = True 
-    gradient_accumulation_steps = 8
-    use_ppo = True 
-    ppo_epsilon = 0.2
-    r = 0  # Set the ratio for exponentially weighted average (adjust as needed)
-    clip_grad_norm = True 
+    batch_size = hyperparameters["batch_size"]
+    normalize_loss = hyperparameters["normalize_loss"]
+    gradient_accumulation_steps = hyperparameters["gradient_accumulation_steps"]
+    use_ppo = hyperparameters["use_ppo"]
+    ppo_epsilon = hyperparameters["ppo_epsilon"]
+    r = hyperparameters["r"]
+    clip_grad_norm = True
 
-    num_batches = 10000
+    num_batches = hyperparameters["num_batches"]
     qa_batches = list(
-        generate_question_answer_batches(num_batches=num_batches, batch_size=batch_size)
+        generate_question_answer_batches(
+            num_batches=num_batches, batch_size=batch_size, use_gsm8k=use_gsm8k
+        )
     )
 
-    with open(filename, "w") as log_file:
-        hyperparameters = {
-            "model_learning_rate": model_learning_rate,
-            "batch_size": batch_size,
-            "gradient_accumulation_steps": gradient_accumulation_steps,
-            "effective_batch_size": batch_size * gradient_accumulation_steps,
-            "num_batches": num_batches,
-            "use_ppo": use_ppo,
-            "ppo_epsilon": ppo_epsilon,
-            "normalize_loss": normalize_loss,
-        }
-        json.dump(hyperparameters, log_file)
-        log_file.write("\n")
+    if not resume:
+        with open(log_file, "w") as f:
+            json.dump(hyperparameters, f)
+            f.write("\n")
 
     model_optimizer.zero_grad()
 
-    for batch_index, qa_batch in enumerate(qa_batches):
+    for batch_index, qa_batch in enumerate(qa_batches[start_batch:], start=start_batch):
         questions, answers = zip(*qa_batch)
+        print("\n")
+        print("Batch Index:", batch_index)
 
         prompts = [
-            f"Work through the following question step by step, concisely decomposing problems into subproblems.\nQuestion: {q}\nStepByStep:"
+            f"[INST] Produce minimal text which will help you answer the question.[/INST] Question: {q}\nReasoning:"
             for q in questions
         ]
         tokenized_inputs = tokenizer(
@@ -279,8 +486,8 @@ def train():
             outputs = model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=400,
-                min_new_tokens=400,
+                max_new_tokens=80,
+                min_new_tokens=80,
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
@@ -288,8 +495,8 @@ def train():
             baseline_outputs = frozen_model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=400,
-                min_new_tokens=400,
+                max_new_tokens=80,
+                min_new_tokens=80,
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
@@ -301,6 +508,7 @@ def train():
             log_prob_ans_given_reasoning,
             log_prob_ans_given_default_reasoning,
             normalized_reward,
+            extracted_generated_answers,
         ) = calculate_advantages(
             model,
             frozen_model,
@@ -312,6 +520,8 @@ def train():
             answers,
             r,
             normalize_loss,
+            use_gsm8k,
+            use_ei,
         )
 
         full_attention_mask = torch.cat(
@@ -352,14 +562,11 @@ def train():
             use_ppo,
             ppo_epsilon,
         )
-
         loss = total_loss / gradient_accumulation_steps
+
         loss.backward()
 
-        # Usage
         grad_norm = get_grad_norm(model.parameters())
-        print(f"Current gradient norm: {grad_norm}")
-        # Clip gradients to prevent extreme updates
         if clip_grad_norm:
             clip_grad_norm_(model.parameters(), 1.0)
 
@@ -367,7 +574,6 @@ def train():
             model_optimizer.step()
             model_optimizer.zero_grad()
 
-        # Logging
         q = questions[0]
         ans = answers[0]
         reasoning_text_first = tokenizer.decode(
@@ -380,40 +586,152 @@ def train():
             else None
         )
         advantage_value = advantage[0].item()
-        print(reasoning_text_first)
-        print("Ans: ", ans, "Avg Log Prob: ", avg_log_prob)
+        print("Question:", q)
+        print("Reasoning:", reasoning_text_first)
+        print("Answer:", ans, "Avg Log Prob:", avg_log_prob)
+        print("Generated Answer:", extracted_generated_answers[0])
 
         log_entry = {
-            "Aggregate loss": loss.item() * gradient_accumulation_steps,
-            "Batch Index": batch_index,
-            "Prev Observation": f"Question: {q}",
-            "Action": f"StepByStep: {reasoning_text_first}",
-            "Observation": f"Answer: {ans}",
-            "Reasoning Contains Answer": str(ans) in reasoning_text_first,
-            "Avg Log Prob": avg_log_prob,
-            "Normalized Reward": normalized_reward[0].item(),
-            "Advantage": advantage_value,
-            "Policy Loss": policy_loss.item(),
-            "Total Loss": total_loss.item(),
-            "Grad Norm": grad_norm,
+            k: tensor_to_python(v)
+            for k, v in {
+                "Aggregate loss": loss.item() * gradient_accumulation_steps,
+                "Batch Index": batch_index,
+                "Prev Observation": f"Question: {q}",
+                "Action": f"Reasoning: {reasoning_text_first}",
+                "Observation": f"Answer: {ans}",
+                "Reasoning Contains Answer": str(ans) in reasoning_text_first,
+                "Avg Log Prob": avg_log_prob,
+                "Normalized Reward": normalized_reward[0].item(),
+                "Advantage": advantage_value,
+                "Policy Loss": policy_loss.item(),
+                "Total Loss": total_loss.item(),
+                "Grad Norm": grad_norm,
+                "Use EI": use_ei,
+                "Mean Previous Advantage": (
+                    np.mean(previous_advantages) if previous_advantages else None
+                ),
+                "Std Previous Advantage": (
+                    np.std(previous_advantages) if previous_advantages else None
+                ),
+                "EI Threshold": (
+                    calculate_threshold(previous_advantages) if use_ei else None
+                ),
+            }.items()
         }
 
         if normalize_loss and baseline_avg_log_prob is not None:
-            log_entry["Baseline Avg Log Prob"] = baseline_avg_log_prob
+            log_entry["Baseline Avg Log Prob"] = tensor_to_python(baseline_avg_log_prob)
 
         if use_ppo and ppo_ratio is not None:
             log_entry.update(
                 {
-                    "PPO Ratio": ppo_ratio[0].item(),
-                    "PPO Clipped Ratio": clipped_ratio[0].item(),
+                    "PPO Ratio": tensor_to_python(ppo_ratio[0]),
+                    "PPO Clipped Ratio": tensor_to_python(clipped_ratio[0]),
                 }
             )
 
-        with open(filename, "a") as log_file:
-            json.dump(log_entry, log_file)
-            log_file.write("\n")
+        if use_gsm8k and extracted_generated_answers is not None:
+            true_answers = [extract_answer(answer) for answer in answers]
+            correct_count = sum(
+                gen_ans == true_ans
+                for gen_ans, true_ans in zip(extracted_generated_answers, true_answers)
+            )
+            fraction_correct = correct_count / len(answers)
+
+            true_answer = true_answers[0]
+            log_entry.update(
+                {
+                    "Generated Answer": extracted_generated_answers[0],
+                    "True Answer": true_answer,
+                    "Is Correct": extracted_generated_answers[0] == true_answer,
+                    "Fraction Correct": fraction_correct,
+                }
+            )
+
+        with open(log_file, "a") as f:
+            json.dump(log_entry, f)
+            f.write("\n")
+
+        if batch_index % 500 == 0 and batch_index > 0:
+            print(f"Saving model weights at batch {batch_index}")
+            os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
+            # Create a new filename that includes the batch index
+            model_save_path_with_batch = f"SavedModels/PolicyGradientNormalized_{dataset_type}_batch_{batch_index}.pt"
+            # Save the model with the batch index in the filename
+            torch.save(model.state_dict(), model_save_path_with_batch)
+        if batch_index % 100 == 0 and batch_index > 0:
+            print(f"Saving model weights at batch {batch_index}")
+            os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
+            # Create a new filename that includes the batch index
+            model_save_path_with_batch = (
+                f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+            )
+            # Save the model with the batch index in the filename
+            torch.save(model.state_dict(), model_save_path_with_batch)
+
+
+def main(use_gsm8k: bool, resume: bool, debug_index: int = None, use_ei: bool = False):
+    dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
+
+    if debug_index is not None:
+        model_save_path = (
+            f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+        )
+        if not os.path.exists(model_save_path):
+            print(f"Error: Model file not found at {model_save_path}")
+            return
+
+        model, frozen_model, tokenizer, device = load_mistral_model()
+        model.load_state_dict(torch.load(model_save_path))
+        model.eval()
+
+        if use_gsm8k:
+            gsm8k_data = load_gsm8k_dataset()
+            if debug_index >= len(gsm8k_data):
+                print(
+                    f"Error: Debug index {debug_index} is out of range. Max index is {len(gsm8k_data) - 1}"
+                )
+                return
+            qa_pair = gsm8k_data[debug_index]
+        else:
+            qa_pair = generate_question_answer_batch(1)[0]
+
+        debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k)
+        return
+
+    train(use_gsm8k, resume, use_ei)
 
 
 if __name__ == "__main__":
-    # Set the normalize_loss parameter manually here
-    train()
+    parser = argparse.ArgumentParser(
+        description="Train the model on arithmetic or GSM8K dataset."
+    )
+    parser.add_argument(
+        "--use_gsm8k",
+        action="store_true",
+        help="Use GSM8K dataset instead of arithmetic questions",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume training from the last checkpoint",
+    )
+    parser.add_argument(
+        "--debug_index",
+        type=int,
+        default=None,
+        help="Index of the datapoint to debug (GSM8K only, random for arithmetic)",
+    )
+    parser.add_argument(
+        "--use_ei",
+        action="store_true",
+        help="Use Expert Iteration instead of Policy Gradient",
+    )
+    args = parser.parse_args()
+
+    main(
+        use_gsm8k=args.use_gsm8k,
+        resume=args.resume,
+        debug_index=args.debug_index,
+        use_ei=args.use_ei,
+    )

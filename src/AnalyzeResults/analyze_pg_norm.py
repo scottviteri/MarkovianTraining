@@ -5,6 +5,7 @@ from collections import defaultdict
 import os
 import glob
 import argparse
+import math
 
 
 def moving_average(data, window_size):
@@ -39,83 +40,65 @@ def plot_metrics(
         for key, value in entry.items():
             if isinstance(value, (int, float)):
                 metrics[key].append(value)
+            elif key == "Is Correct" and isinstance(value, bool):
+                metrics["Fraction Correct"].append(int(value))
 
-    # Determine the number of rows needed for the plot
-    num_rows = 3 if "PPO Ratio" not in metrics else 4
-    if not normalize_loss:
-        num_rows -= 1  # Remove one row if not using normalization
+    # Determine if this is an EI run
+    use_ei = any("Use EI" in entry and entry["Use EI"] for entry in map(json.loads, lines[1:]))
 
-    # Create the figure and axes
-    fig, axs = plt.subplots(num_rows, 2, figsize=(15, 5 * num_rows))
-    fig.suptitle(f"Training Metrics (Window Size: {window_size})")
-
-    # Plot Aggregate Loss
-    axs[0, 0].plot(moving_average(metrics["Aggregate loss"], window_size))
-    axs[0, 0].set_title("Aggregate Loss")
-    axs[0, 0].set_xlabel("Batch")
-    axs[0, 0].set_ylabel("Loss")
-
-    # Plot Gradient Norm
-    axs[0, 1].plot(moving_average(metrics["Grad Norm"], window_size))
-    axs[0, 1].set_title("Gradient Norm")
-    axs[0, 1].set_xlabel("Batch")
-    axs[0, 1].set_ylabel("Norm")
+    # Define the metrics to plot
+    plot_info = [
+        ("Aggregate loss", "Aggregate Loss", "Batch", "Loss"),
+        ("Grad Norm", "Gradient Norm", "Batch", "Norm"),
+        ("Avg Log Prob", "Average Log Probability", "Batch", "Log Probability", {"ylim": (None, 0)}),
+        ("Reasoning Contains Answer", "Reasoning Contains Answer", "Batch", "Proportion", {"ylim": (0, 1)}),
+    ]
 
     if normalize_loss:
-        # Plot Normalized Reward
-        axs[1, 0].plot(moving_average(metrics["Normalized Reward"], window_size))
-        axs[1, 0].set_title("Normalized Reward")
-        axs[1, 0].set_xlabel("Batch")
-        axs[1, 0].set_ylabel("Reward")
+        plot_info.extend([
+            ("Normalized Reward", "Normalized Reward", "Batch", "Reward"),
+            ("Advantage", "Advantage", "Batch", "Advantage"),
+        ])
 
-        # Plot Advantage
-        axs[1, 1].plot(moving_average(metrics["Advantage"], window_size))
-        axs[1, 1].set_title("Advantage")
-        axs[1, 1].set_xlabel("Batch")
-        axs[1, 1].set_ylabel("Advantage")
-
-        # Plot Average Log Prob
-        axs[2, 0].plot(moving_average(metrics["Avg Log Prob"], window_size))
-        axs[2, 0].set_title("Average Log Probability")
-        axs[2, 0].set_xlabel("Batch")
-        axs[2, 0].set_ylabel("Log Probability")
-        axs[2, 0].set_ylim(top=0)  # Set maximum to 0
-
-        # Plot Reasoning Contains Answer
-        contains_answer = [int(x) for x in metrics["Reasoning Contains Answer"]]
-        axs[2, 1].plot(moving_average(contains_answer, window_size))
-        axs[2, 1].set_title("Reasoning Contains Answer")
-        axs[2, 1].set_xlabel("Batch")
-        axs[2, 1].set_ylabel("Proportion")
-        axs[2, 1].set_ylim(0, 1)  # Set range from 0 to 1
-    else:
-        # Plot Average Log Prob
-        axs[1, 0].plot(moving_average(metrics["Avg Log Prob"], window_size))
-        axs[1, 0].set_title("Average Log Probability")
-        axs[1, 0].set_xlabel("Batch")
-        axs[1, 0].set_ylabel("Log Probability")
-        axs[1, 0].set_ylim(top=0)  # Set maximum to 0
-
-        # Plot Reasoning Contains Answer
-        contains_answer = [int(x) for x in metrics["Reasoning Contains Answer"]]
-        axs[1, 1].plot(moving_average(contains_answer, window_size))
-        axs[1, 1].set_title("Reasoning Contains Answer")
-        axs[1, 1].set_xlabel("Batch")
-        axs[1, 1].set_ylabel("Proportion")
-        axs[1, 1].set_ylim(0, 1)  # Set range from 0 to 1
-
-    # If PPO is used, plot PPO-specific metrics
     if "PPO Ratio" in metrics:
-        row = 3 if normalize_loss else 2
-        axs[row, 0].plot(moving_average(metrics["PPO Ratio"], window_size))
-        axs[row, 0].set_title("PPO Ratio")
-        axs[row, 0].set_xlabel("Batch")
-        axs[row, 0].set_ylabel("Ratio")
+        plot_info.extend([
+            ("PPO Ratio", "PPO Ratio", "Batch", "Ratio"),
+            ("PPO Clipped Ratio", "PPO Clipped Ratio", "Batch", "Ratio"),
+        ])
 
-        axs[row, 1].plot(moving_average(metrics["PPO Clipped Ratio"], window_size))
-        axs[row, 1].set_title("PPO Clipped Ratio")
-        axs[row, 1].set_xlabel("Batch")
-        axs[row, 1].set_ylabel("Ratio")
+    if use_ei:
+        plot_info.extend([
+            ("Mean Previous Advantage", "Mean Previous Advantage", "Batch", "Advantage"),
+            ("EI Threshold", "EI Threshold", "Batch", "Threshold"),
+        ])
+
+    if "Fraction Correct" in metrics:
+        plot_info.append(("Fraction Correct", "Fraction Correct", "Batch", "Fraction", {"ylim": (0, 1)}))
+
+    # Create the figure and axes
+    num_plots = len(plot_info)
+    num_cols = 2
+    num_rows = math.ceil(num_plots / num_cols)
+    fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 5 * num_rows))
+    fig.suptitle(f"Training Metrics (Window Size: {window_size})")
+
+    # Flatten axs if it's a 2D array
+    axs = axs.flatten() if num_plots > 2 else [axs] if num_plots == 1 else axs
+
+    # Plot the metrics
+    for i, (metric, title, xlabel, ylabel, *extra) in enumerate(plot_info):
+        if metric in metrics:
+            axs[i].plot(moving_average(metrics[metric], window_size))
+            axs[i].set_title(title)
+            axs[i].set_xlabel(xlabel)
+            axs[i].set_ylabel(ylabel)
+            if extra:
+                for key, value in extra[0].items():
+                    getattr(axs[i], f"set_{key}")(value)
+
+    # Remove any unused subplots
+    for i in range(num_plots, len(axs)):
+        fig.delaxes(axs[i])
 
     plt.tight_layout()
     plt.savefig(output_file)
