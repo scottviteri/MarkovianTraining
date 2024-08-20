@@ -51,7 +51,7 @@ def plot_loss(x_loss, loss):
     for a in [axs]:
         a.set_xlabel("Training Steps [ ]", fontsize=18)
         a.set_ylabel("Prediction Loss [a.u.]", fontsize=18)
-        a.legend(loc="upper right")
+        a.legend(loc="upper right", fontsize=14)
         # a.set_xlim(x_min - x_max * 0.05, x_max * 1.3)
         a.tick_params(axis='both', which='major', labelsize=18)
 

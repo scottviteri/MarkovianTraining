@@ -386,10 +386,17 @@ def plot_results(results, model_name, train_model, file_name, x_max_data=None):
             axs4.plot(x, y, ".", label=None, alpha=0.12, color=colors[keys])
             axs4.plot(x, y_smoothed, "-", label=keys, color=colors[keys], lw=2)
 
+            # axs.plot(x, y, ".", label=None, alpha=0.12, color=colors[keys])
+            # axs.plot(x, y_smoothed, "-", label="Training (Mistral)", color=colors[keys], lw=2)
+            # axs2.plot(x, y, ".", label=None, alpha=0.12, color=colors[keys])
+            # axs2.plot(x, y_smoothed, "-", label="Training (Mistral)", color=colors[keys], lw=2)
+            # axs3.plot(x, y, ".", label=None, alpha=0.12, color=colors[keys])
+            # axs3.plot(x, y_smoothed, "-", label="Training (Mistral)", color=colors[keys], lw=2)
+
     for a in [axs, axs2, axs3, axs4]:
         a.set_xlabel("Training Steps [ ]", fontsize=18)
         a.set_ylabel("Prediction Loss [a.u.]", fontsize=18)
-        a.legend(loc="upper right")
+        a.legend(loc="upper right", fontsize=14)
         a.set_xlim(x_min - x_max * 0.05, x_max * 1.3)
         a.tick_params(axis='both', which='major', labelsize=18)
 
@@ -446,14 +453,23 @@ def plot_result_differences(results, model_name, train_model, file_name, tar_key
             loss_gp = y_pure - y
             X_normalized = scaler.fit_transform(x_loss_gp.reshape(-1, 1))
             # kernel = Matern(nu=1.5) + ConstantKernel(1.0) * RBF(length_scale=50.0)
+            # Llama
+            # if tar_key == "Spaces":
+            #     kernel = Matern(nu=1.5, length_scale = 0.5) + WhiteKernel(noise_level=2., noise_level_bounds=[0.4, 3.])
+            #     if keys == "80%Spaces":
+            #         kernel = Matern(nu=1.5, length_scale=0.5) + WhiteKernel(
+            #             noise_level=2., noise_level_bounds=[0.7, 3.])
+            # else:
+            #     kernel = Matern(nu=1.5, length_scale = 0.5, length_scale_bounds=[1e-3, 1e0]) + WhiteKernel(noise_level=2.,
+            #                                           noise_level_bounds=[0.01, 0.5])
+
+            # Mistral
             if tar_key == "Spaces":
-                kernel = Matern(nu=1.5, length_scale = 0.5) + WhiteKernel(noise_level=2., noise_level_bounds=[0.4, 3.])
-                if keys == "80%Spaces":
-                    kernel = Matern(nu=1.5, length_scale=0.5) + WhiteKernel(
-                        noise_level=2., noise_level_bounds=[0.7, 3.])
+                kernel = Matern(nu=1.5, length_scale = 0.5) + WhiteKernel(noise_level=2., noise_level_bounds=[0.75, 3.])
             else:
-                kernel = Matern(nu=1.5, length_scale = 0.5, length_scale_bounds=[1e-3, 1e0]) + WhiteKernel(noise_level=2.,
-                                                      noise_level_bounds=[0.01, 0.5])
+                kernel = Matern(nu=1.5, length_scale = 0.5) + WhiteKernel(noise_level=2.,
+                                                      noise_level_bounds=[0.75, 3.])
+
             gp_signal = GaussianProcessRegressor(kernel=kernel, alpha=0.7,
                                                  n_restarts_optimizer=10)
             gp_signal.fit(X_normalized, loss_gp)
@@ -482,16 +498,19 @@ def plot_result_differences(results, model_name, train_model, file_name, tar_key
     for a in [axs, axs2, axs3]:
         a.set_xlabel("Training Steps [ ]", fontsize=18)
         a.set_ylabel("Loss Difference [a.u.]", fontsize=18)
-        a.legend(loc="upper right", prop={'size': 12})
+        a.legend(loc="upper right", fontsize=16)
         a.set_xlim(x_min - x_max * 0.05, x_max * 1.1)
         a.tick_params(axis='both', which='major', labelsize=18)
 
     fig.tight_layout()
     fig2.tight_layout()
     fig3.tight_layout()
-    fig.savefig(f"{file_name[:-5]}_{model_name}_diff{tar_key}_1.pdf", dpi=300)
-    fig2.savefig(f"{file_name[:-5]}_{model_name}_diff{tar_key}_2.pdf", dpi=300)
-    fig3.savefig(f"{file_name[:-5]}_{model_name}_diff{tar_key}_3.pdf", dpi=300)
+    # fig.savefig(f"{file_name[:-5]}_{model_name}_diff{tar_key}_1.pdf", dpi=300)
+    # fig2.savefig(f"{file_name[:-5]}_{model_name}_diff{tar_key}_2.pdf", dpi=300)
+    # fig3.savefig(f"{file_name[:-5]}_{model_name}_diff{tar_key}_3.pdf", dpi=300)
+    fig.savefig(f"{file_name[:-5]}_diff{tar_key}_1.pdf", dpi=300)
+    fig2.savefig(f"{file_name[:-5]}_diff{tar_key}_2.pdf", dpi=300)
+    fig3.savefig(f"{file_name[:-5]}_diff{tar_key}_3.pdf", dpi=300)
 
 def main():
     re_evaluate = False
@@ -526,10 +545,12 @@ def main():
     elif not do_diffs:
         file_name = "mistral_traj_20240329_234001.json"
         with open('result_mistralfinal.json', 'r') as fp:
+        # with open('result_llama2.json', 'r') as fp:
             res = json.load(fp)
 
         plot_results(
             res["mistral"],
+            # res["llama"],
             model_name="mistral7b",
             train_model="mistral7b",
             file_name=file_name,
@@ -537,20 +558,27 @@ def main():
     else:
         file_name = "mistral_traj_20240329_234001.json"
         with open('result_mistralfinal.json', 'r') as fp:
+        # with open('result_llama2.json', 'r') as fp:
             res = json.load(fp)
 
+        print("SPACES")
         plot_result_differences(
             res["mistral"],
+            # res["llama"],
             model_name="mistral7b",
             train_model="mistral7b",
-            file_name=file_name,
+            # file_name=file_name,
+            file_name=f"{file_name}",
             tar_key="Spaces",
         )
+        print("DIGIT")
         plot_result_differences(
             res["mistral"],
+            # res["llama"],
             model_name="mistral7b",
             train_model="mistral7b",
-            file_name=file_name,
+            # file_name=file_name,
+            file_name=f"{file_name}",
             tar_key="Digit",
         )
 
