@@ -334,7 +334,7 @@ def load_previous_rewards_and_advantages(log_file):
 
 def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
     question, answer = qa_pair
-    prompt = f"[INST] Produce concise text which will help you answer the question.[/INST] Question: {question}\nReasoning:"
+    prompt = f"Produce concise text which will help you answer the question.Question: {question}\nReasoning:"
 
     tokenized_inputs = tokenizer(
         prompt,
@@ -390,7 +390,7 @@ def tensor_to_python(value):
     return value
 
 
-def train(use_gsm8k: bool, resume: bool, use_ei: bool):
+def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
     global previous_normalized_rewards, previous_advantages
 
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
@@ -421,41 +421,44 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
         )
         start_batch = 0
-        # Expert Iteration
-        hyperparameters = {
-            "model_learning_rate": 0.0001,
-            "batch_size": 6,
-            "gradient_accumulation_steps": 8,
-            "num_batches": 10000,
-            "normalize_loss": True,
-            "clip_grad_norm": True,
-            "use_ppo": False,
-            "ppo_epsilon": None,
-            "r": None,
-        }
-        ## Policy Gradient
-        # hyperparameters = {
-        #    "model_learning_rate": 0.0001,
-        #    "batch_size": 6,
-        #    "gradient_accumulation_steps": 8,
-        #    "num_batches": 10000,
-        #    "normalize_loss": True,
-        #    "use_ppo": False,
-        #    "ppo_epsilon": 0.2,
-        #    "normalize_loss": False,
-        #    "r": None
-        # }
-        ## Proximal Policy Optimization
-        # hyperparameters = {
-        #    "model_learning_rate": 0.0001,
-        #    "batch_size": 6,
-        #    "gradient_accumulation_steps": 8,
-        #    "num_batches": 10000,
-        #    "normalize_loss": True,
-        #    "use_ppo": True,
-        #    "ppo_epsilon": 0.2,
-        #    "r": 0.5
-        # }
+
+        # Select hyperparameters based on flags
+        if use_ei:
+            hyperparameters = {
+                "model_learning_rate": 0.0001,
+                "batch_size": 6,
+                "gradient_accumulation_steps": 8,
+                "num_batches": 10000,
+                "normalize_loss": True,
+                "clip_grad_norm": True,
+                "use_ppo": False,
+                "ppo_epsilon": None,
+                "r": None,
+            }
+        elif use_ppo:
+            hyperparameters = {
+                "model_learning_rate": 0.0001,
+                "batch_size": 6,
+                "gradient_accumulation_steps": 8,
+                "num_batches": 10000,
+                "normalize_loss": True,
+                "use_ppo": True,
+                "ppo_epsilon": 0.2,
+                "r": 0.5,
+                "clip_grad_norm": True,
+            }
+        else:  # Policy Gradient
+            hyperparameters = {
+                "model_learning_rate": 0.0001,
+                "batch_size": 6,
+                "gradient_accumulation_steps": 8,
+                "num_batches": 10000,
+                "normalize_loss": False,
+                "use_ppo": False,
+                "ppo_epsilon": None,
+                "r": None,
+                "clip_grad_norm": True,
+            }
 
     model, frozen_model, tokenizer, device = load_mistral_model()
 
@@ -494,7 +497,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
         print("Batch Index:", batch_index)
 
         prompts = [
-            f"[INST] Produce minimal text which will help you answer the question.[/INST] Question: {q}\nReasoning:"
+            f"Produce minimal text which will help you answer the question.Question: {q}\nReasoning:"
             for q in questions
         ]
         tokenized_inputs = tokenizer(
@@ -693,7 +696,13 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             torch.save(model.state_dict(), model_save_path_with_batch)
 
 
-def main(use_gsm8k: bool, resume: bool, debug_index: int = None, use_ei: bool = False):
+def main(
+    use_gsm8k: bool,
+    resume: bool,
+    debug_index: int = None,
+    use_ei: bool = False,
+    use_ppo: bool = False,
+):
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
 
     if debug_index is not None:
@@ -722,7 +731,7 @@ def main(use_gsm8k: bool, resume: bool, debug_index: int = None, use_ei: bool = 
         debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k)
         return
 
-    train(use_gsm8k, resume, use_ei)
+    train(use_gsm8k, resume, use_ei, use_ppo)
 
 
 if __name__ == "__main__":
@@ -750,6 +759,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Use Expert Iteration instead of Policy Gradient",
     )
+    parser.add_argument(
+        "--use_ppo",
+        action="store_true",
+        help="Use Proximal Policy Optimization instead of Policy Gradient",
+    )
     args = parser.parse_args()
 
     main(
@@ -757,4 +771,5 @@ if __name__ == "__main__":
         resume=args.resume,
         debug_index=args.debug_index,
         use_ei=args.use_ei,
+        use_ppo=args.use_ppo,
     )
