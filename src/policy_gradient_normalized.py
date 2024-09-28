@@ -234,7 +234,7 @@ def calculate_advantages(
         normalized_reward = log_prob_ans_given_reasoning
         log_prob_ans_given_default_reasoning = None
 
-    if len(previous_normalized_rewards) > 0:
+    if len(previous_normalized_rewards) > 0 and r is not None:
         avg_previous_reward = exponential_weighted_average(
             previous_normalized_rewards, r
         )
@@ -424,17 +424,51 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
         )
         start_batch = 0
-
+        # Expert Iteration
         hyperparameters = {
-            "model_learning_rate": 1e-4,
+            "model_learning_rate": 0.0001,
             "batch_size": 6,
             "gradient_accumulation_steps": 8,
-            "num_batches": 10001,
-            "use_ppo": True,
-            "ppo_epsilon": 0.2,
+            "num_batches": 10000,
             "normalize_loss": True,
-            "r": 0.5,
+            "clip_grad_norm": True,
+            "use_ppo": False,
+            "ppo_epsilon": None,
+            "r": None,
         }
+        ## Policy Gradient
+        # hyperparameters = {
+        #    "model_learning_rate": 0.0001,
+        #    "batch_size": 6,
+        #    "gradient_accumulation_steps": 8,
+        #    "num_batches": 10000,
+        #    "normalize_loss": True,
+        #    "use_ppo": False,
+        #    "ppo_epsilon": 0.2,
+        #    "normalize_loss": False,
+        #    "r": None
+        # }
+        ## Proximal Policy Optimization
+        # hyperparameters = {
+        #    "model_learning_rate": 0.0001,
+        #    "batch_size": 6,
+        #    "gradient_accumulation_steps": 8,
+        #    "num_batches": 10000,
+        #    "normalize_loss": True,
+        #    "use_ppo": True,
+        #    "ppo_epsilon": 0.2,
+        #    "r": 0.2
+        # }
+    # hyperparameters = {
+    #    "model_learning_rate": 1e-4,
+    #    "batch_size": 6,
+    #    "gradient_accumulation_steps": 8,
+    #    "num_batches": 10001,
+    #    "use_ppo": True,
+    #    "ppo_epsilon": 0.2,
+    #    "normalize_loss": True,
+    #    "r": 0.2,
+    # }
 
     model, frozen_model, tokenizer, device = load_mistral_model()
 
