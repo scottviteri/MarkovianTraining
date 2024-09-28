@@ -314,9 +314,6 @@ def load_training_state(log_file):
 
     hyperparameters = json.loads(lines[0])
 
-    if "r" not in hyperparameters:
-        hyperparameters["r"] = 0.5
-
     return last_batch_index, hyperparameters
 
 
@@ -457,18 +454,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
         #    "normalize_loss": True,
         #    "use_ppo": True,
         #    "ppo_epsilon": 0.2,
-        #    "r": 0.2
+        #    "r": 0.5
         # }
-    # hyperparameters = {
-    #    "model_learning_rate": 1e-4,
-    #    "batch_size": 6,
-    #    "gradient_accumulation_steps": 8,
-    #    "num_batches": 10001,
-    #    "use_ppo": True,
-    #    "ppo_epsilon": 0.2,
-    #    "normalize_loss": True,
-    #    "r": 0.2,
-    # }
 
     model, frozen_model, tokenizer, device = load_mistral_model()
 
