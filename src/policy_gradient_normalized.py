@@ -186,7 +186,7 @@ def calculate_ppo_loss(current_log_probs, old_log_probs, advantages, epsilon=0.2
 
 
 def exponential_weighted_average(values, r):
-    weights = np.array([r**i for i in range(len(values))])
+    weights = np.array([r ** (len(values) - i) for i in range(len(values))])
     weights = weights / np.sum(weights)
     return np.sum(weights * np.array(values))
 
