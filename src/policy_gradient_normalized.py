@@ -516,12 +516,13 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             return_tensors="pt",
         ).to(device)
 
+        cot_length = 80 if use_gsm8k else 400
         with torch.no_grad():
             outputs = model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=80,
-                min_new_tokens=80,
+                max_new_tokens=cot_length,
+                min_new_tokens=cot_length,
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
@@ -529,8 +530,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
             baseline_outputs = frozen_model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=80,
-                min_new_tokens=80,
+                max_new_tokens=cot_length,
+                min_new_tokens=cot_length,
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
