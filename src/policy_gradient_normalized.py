@@ -427,9 +427,9 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
 
         hyperparameters = {
             "model_learning_rate": 1e-4,
-            "batch_size": 10,
-            "gradient_accumulation_steps": 32,
-            "num_batches": 3001,
+            "batch_size": 6,
+            "gradient_accumulation_steps": 8,
+            "num_batches": 10001,
             "use_ppo": True,
             "ppo_epsilon": 0.2,
             "normalize_loss": True,
@@ -589,7 +589,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool):
         print("Question:", q)
         print("Reasoning:", reasoning_text_first)
         print("Answer:", ans, "Avg Log Prob:", avg_log_prob)
-        print("Generated Answer:", extracted_generated_answers[0])
+        if extracted_generated_answers is not None:
+            print("Generated Answer:", extracted_generated_answers[0])
 
         log_entry = {
             k: tensor_to_python(v)
