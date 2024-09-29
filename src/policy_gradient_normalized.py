@@ -47,9 +47,9 @@ def load_mistral_model():
 
 
 def calculate_threshold(previous_advantages):
-    if len(previous_advantages) > 0:
-        return max(2.0, np.mean(previous_advantages) + np.std(previous_advantages))
-    return 2.0
+    if len(previous_advantages) > 15:
+        return np.mean(previous_advantages) + np.std(previous_advantages)
+    return float('inf')
 
 
 def generate_question_answer_batch(batch_size: int):
