@@ -398,7 +398,7 @@ def tensor_to_python(value):
     return value
 
 
-def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
+def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bool):
     global previous_normalized_rewards, previous_advantages
 
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
@@ -424,6 +424,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
             # Update hyperparameters with current flags if needed
             hyperparameters["use_ei"] = use_ei
             hyperparameters["use_ppo"] = use_ppo
+            hyperparameters["use_pg"] = use_pg
             # Update any hyperparameters related to use_ppo and use_ei
             hyperparameters["r"] = 0.8 if use_ppo else None
             hyperparameters["ppo_epsilon"] = 0.2 if use_ppo else None
@@ -447,6 +448,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
             "ppo_epsilon": 0.2 if use_ppo else None,
             "r": 0.8 if use_ppo else None,
             "use_ei": use_ei,
+            "use_pg": use_pg,
+            "use_ppo": use_ppo,
         }
 
     model, frozen_model, tokenizer, device = load_mistral_model()
