@@ -1,7 +1,7 @@
 import datetime
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import LoraConfig, get_peft_model, get_peft_model_state_dict
+from peft import LoraConfig, get_peft_model
 import bitsandbytes
 import random
 import numpy as np
@@ -322,13 +322,10 @@ def load_previous_rewards_and_advantages(log_file):
     previous_advantages = []
     with open(log_file, "r") as f:
         for line in f:
-            try:
-                entry = json.loads(line)
-                if "Normalized Reward" in entry and "Advantage" in entry:
-                    previous_normalized_rewards.append(entry["Normalized Reward"])
-                    previous_advantages.append(entry["Advantage"])
-            except json.JSONDecodeError:
-                continue  # Skip lines that can't be parsed as JSON
+            entry = json.loads(line)
+            if "Normalized Reward" in entry and "Advantage" in entry:
+                previous_normalized_rewards.append(entry["Normalized Reward"])
+                previous_advantages.append(entry["Advantage"])
     return previous_normalized_rewards, previous_advantages
 
 
@@ -390,7 +387,7 @@ def tensor_to_python(value):
     return value
 
 
-def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
+def train(use_gsm8k: bool, resume: bool, use_ei: bool = False, use_ppo: bool):
     global previous_normalized_rewards, previous_advantages
 
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
@@ -430,7 +427,6 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
                 "gradient_accumulation_steps": 8,
                 "num_batches": 10000,
                 "normalize_loss": True,
-                "clip_grad_norm": True,
                 "use_ppo": False,
                 "ppo_epsilon": None,
                 "r": None,
@@ -445,7 +441,6 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
                 "use_ppo": True,
                 "ppo_epsilon": 0.2,
                 "r": 0.5,
-                "clip_grad_norm": True,
             }
         else:  # Policy Gradient
             hyperparameters = {
@@ -457,7 +452,6 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
                 "use_ppo": False,
                 "ppo_epsilon": None,
                 "r": None,
-                "clip_grad_norm": True,
             }
 
     model, frozen_model, tokenizer, device = load_mistral_model()
@@ -475,7 +469,6 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
     use_ppo = hyperparameters["use_ppo"]
     ppo_epsilon = hyperparameters["ppo_epsilon"]
     r = hyperparameters["r"]
-    clip_grad_norm = True
 
     num_batches = hyperparameters["num_batches"]
     qa_batches = list(
@@ -592,8 +585,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
         loss.backward()
 
         grad_norm = get_grad_norm(model.parameters())
-        if clip_grad_norm:
-            clip_grad_norm_(model.parameters(), 1.0)
+        clip_grad_norm_(model.parameters(), 1.0)
 
         if (batch_index + 1) % gradient_accumulation_steps == 0:
             model_optimizer.step()
@@ -678,14 +670,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
             json.dump(log_entry, f)
             f.write("\n")
 
-        if batch_index % 500 == 0 and batch_index > 0:
-            print(f"Saving model weights at batch {batch_index}")
-            os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
-            # Create a new filename that includes the batch index
-            model_save_path_with_batch = f"SavedModels/PolicyGradientNormalized_{dataset_type}_batch_{batch_index}.pt"
-            # Save the model with the batch index in the filename
-            torch.save(model.state_dict(), model_save_path_with_batch)
-        if batch_index % 100 == 0 and batch_index > 0:
+        if batch_index % 601 == 0 and batch_index > 0:
             print(f"Saving model weights at batch {batch_index}")
             os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
             # Create a new filename that includes the batch index
@@ -696,13 +681,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
             torch.save(model.state_dict(), model_save_path_with_batch)
 
 
-def main(
-    use_gsm8k: bool,
-    resume: bool,
-    debug_index: int = None,
-    use_ei: bool = False,
-    use_ppo: bool = False,
-):
+def main(use_gsm8k: bool, resume: bool, debug_index: int = None, use_ei: bool = False, use_ppo: bool = False):
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
 
     if debug_index is not None:
@@ -741,11 +720,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use_gsm8k",
         action="store_true",
+        default=False,
         help="Use GSM8K dataset instead of arithmetic questions",
     )
     parser.add_argument(
         "--resume",
         action="store_true",
+        default=False,
         help="Resume training from the last checkpoint",
     )
     parser.add_argument(
@@ -757,11 +738,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use_ei",
         action="store_true",
+        default=False,
         help="Use Expert Iteration instead of Policy Gradient",
     )
     parser.add_argument(
         "--use_ppo",
         action="store_true",
+        default=True,
         help="Use Proximal Policy Optimization instead of Policy Gradient",
     )
     args = parser.parse_args()
