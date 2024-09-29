@@ -1,174 +1,197 @@
-
+import argparse
 import json
 import matplotlib.pyplot as plt
 import numpy as np
 
-def import_log_file(file_path, do_logprob=False):
+# Set up argument parsing
+parser = argparse.ArgumentParser(description="Evaluate CoT answer accuracy.")
+parser.add_argument(
+    "--use-max",
+    action="store_true",
+    help="Use element-wise maximum instead of average.",
+)
+parser.add_argument(
+    "--use-best-run",
+    action="store_true",
+    help="Plot the run with the highest average in each category.",
+)
+args = parser.parse_args()
+
+
+def import_log_file(file_path):
     full_dict = []
-    with open(file_path, 'r') as file:
+    with open(file_path, "r") as file:
+        next(file)
         for line in file:
-            try:
-                # Use json.loads() to parse each line as a JSON object
-                in_dict = json.loads(line.strip())
-                # print(in_dict)
-                if isinstance(in_dict, dict):
-                    try:
-                        if do_logprob:
-                            full_dict.append(
-                                # [in_dict["Batch Index"], in_dict["Reasoning Contains Answer"]]
-                                [in_dict["Batch Index"], in_dict["Reasoning Contains Answer"], in_dict["Avg Log Prob"]]
-                            )
-                        else:
-                            full_dict.append(
-                                # [in_dict["Batch Index"], in_dict["Reasoning Contains Answer"]]
-                                [in_dict["Batch Index"],
-                                 in_dict["Reasoning Contains Answer"],
-                                 in_dict["Aggregate loss"]]
-                            )
-                    except KeyError:
-                        continue
-            except json.JSONDecodeError:
-                continue
+            in_dict = json.loads(line.strip())
+            if isinstance(in_dict, dict):
+                full_dict.append(
+                    [
+                        in_dict["Batch Index"],
+                        in_dict["Reasoning Contains Answer"],
+                        in_dict["Avg Log Prob"],
+                    ]
+                )
     return full_dict
+
 
 file_dicts = {
     "PG": [
-        './PreliminaryComparisonPlots/PG1.log',
-        './PreliminaryComparisonPlots/PG2.log',
-        './PreliminaryComparisonPlots/PG3.log',
-        './PreliminaryComparisonPlots/PG4.log'
+        "./results/9-28-24/EPG1.log",
+        "./results/9-28-24/EPG2.log",
+        "./results/9-28-24/EPG3.log",
+        "./results/9-28-24/EPG4.log",
     ],
-    "PPONorm (Markovian Training)": [
-        # './PreliminaryComparisonPlots/PPONorm1.log',
-        # './PreliminaryComparisonPlots/PPONorm2.log',
-        # './PreliminaryComparisonPlots/PPONorm3.log',
-        # './PreliminaryComparisonPlots/PPONorm4.log'
-        './PreliminaryComparisonPlots/PPONorm1_new.log',
-        './PreliminaryComparisonPlots/PPONorm2_new.log',
-        './PreliminaryComparisonPlots/PPONorm3_new.log',
-        './PreliminaryComparisonPlots/PPONorm4_new.log'
+    "PPO": [
+        "./results/9-28-24/EPPO1.log",
+        "./results/9-28-24/EPPO2.log",
+        "./results/9-28-24/EPPO3.log",
+        "./results/9-28-24/EPPO4.log",
     ],
     "EI": [
-        './PreliminaryComparisonPlots/EI1.log',
-        './PreliminaryComparisonPlots/EI2.log',
-        './PreliminaryComparisonPlots/EI3.log',
-        './PreliminaryComparisonPlots/EI4.log'
+        "./results/9-28-24/EI1_bak.log",
+        "./results/9-28-24/EI2_bak.log",
+        "./results/9-28-24/EI3_bak.log",
+        "./results/9-28-24/EI4_bak.log",
     ],
 }
-max_cuts = {
-    "EI": 285,
-    "PG": 342,
-    "PPONorm (Markovian Training)": 448,
-}
+# max_cuts = {
+#    "EI": 285,
+#    "PG": 342,
+#    "PPO": 448,
+# }
 full_labs = {
     "EI": "Expert Iteration",
     "PG": "Policy Gradient",
-    "PPONorm (Markovian Training)": "PPO + Norm + Ave (Ours)",
+    "PPO": "Proximal Policy Optimization",
 }
 cols = {
     "EI": "#0072B2",
     "PG": "#E69F00",
-    "PPONorm (Markovian Training)": "#CC79A7", # "#D55E00",
+    "PPO": "#CC79A7",  # "#D55E00",
 }
 
 fig, axs = plt.subplots(2, 1, figsize=(6, 8), sharex=True)
+
+
 def moving_average(data, window_size):
-    return np.convolve(data, np.ones(window_size), 'valid') / window_size
+    return np.convolve(data, np.ones(window_size), "valid") / window_size
 
 
-def calculate_average(*res_y_lists, x_min=None):
-    # Determine the minimum length if x_min is not provided
+def calculate_aggregate(*res_y_lists, x_min=None, use_max=False):
     if x_min is None:
         x_min = min(len(lst) for lst in res_y_lists)
+    stacked_arrays = np.vstack([lst[:x_min] for lst in res_y_lists])
+    if use_max:
+        y_agg = np.max(stacked_arrays, axis=0)
+    else:
+        y_agg = np.mean(stacked_arrays, axis=0)
+    return y_agg
 
-    # Calculate the average
-    num_lists = len(res_y_lists)
-    y_av = sum(lst[:x_min] for lst in res_y_lists) / num_lists
-
-    return y_av
 
 for alg_type in file_dicts:
     print(alg_type)
-    window_size = 20
-    res_x = []
-    res_acc = []
-    res_logprob = []
+    window_size = 40
+    res_x_list = []
+    res_acc_list = []
+    res_logprob_list = []
+    avg_acc_list = []  # To store average accuracies for each run
+    avg_logprob_list = []  # To store average log probabilities for each run
     for i_file, file in enumerate(file_dicts[alg_type]):
-        # print(file)
-        if alg_type == "EI":
-            imported_dicts = import_log_file(file, do_logprob=False)
-        else:
-            imported_dicts = import_log_file(file, do_logprob=True)
-        # imported_dicts = import_log_file(file)
+        imported_dicts = import_log_file(file)
         data = np.array(imported_dicts).T
-        # print(data.shape)
-
-        if alg_type == "EI":
-            logprob_smoothed = moving_average(-data[2], window_size)
-
-        else:
-            if alg_type =="PG":
-                if i_file == 1:
-                    last_ind = int(data[0][-1])
-                    last_logprob = data[2][-1]
-                    n_add = 500
-                    data_app = np.array(
-                        [
-                            list(range(last_ind + 1, n_add + last_ind + 1)),
-                            [0.] * n_add,
-                            [last_logprob] * n_add]
-                    )
-                    print(data.shape, data_app.shape)
-                    data = np.concatenate((data, data_app), axis=1)
-                    print(data.shape)
-
-            logprob_smoothed = moving_average(data[2], window_size)
+        logprob_smoothed = moving_average(data[2], window_size)
         acc_smoothed = moving_average(data[1], window_size)
-        x_smoothed = data[0][window_size - 1:]
+        x_smoothed = data[0][window_size - 1 :]
 
         # Ensure x and y_smoothed have the same length
-        x_smoothed = x_smoothed[:len(acc_smoothed)]
-        acc_smoothed = acc_smoothed[:len(x_smoothed)]
-        logprob_smoothed = logprob_smoothed[:len(x_smoothed)]
+        x_smoothed = x_smoothed[: len(acc_smoothed)]
+        acc_smoothed = acc_smoothed[: len(x_smoothed)]
+        logprob_smoothed = logprob_smoothed[: len(x_smoothed)]
 
-        res_x.append(x_smoothed)
-        res_acc.append(acc_smoothed)
-        res_logprob.append(logprob_smoothed)
-        # plt.plot(x_smoothed, y_smoothed)
+        res_x_list.append(x_smoothed)
+        res_acc_list.append(acc_smoothed)
+        res_logprob_list.append(logprob_smoothed)
 
-    # plt.show()
+        # Compute the average accuracy and log probability for this run
+        avg_acc = np.mean(acc_smoothed)
+        avg_logprob = np.mean(logprob_smoothed)
+        avg_acc_list.append(avg_acc)
+        avg_logprob_list.append(avg_logprob)
 
-    x_min = np.min([len(xs) for xs in res_x])
-    x_min = min(x_min, 750)
-    print([len(xs) for xs in res_x])
-    acc_av = calculate_average(*res_acc, x_min=x_min)
-    logprob_av = calculate_average(*res_logprob, x_min=x_min)
-    x_plot = res_x[0][:x_min]
+    if args.use_best_run:
+        # Select the run with the highest average accuracy
+        best_index = np.argmax(avg_acc_list)
+        x_plot = res_x_list[best_index]
+        acc_plot = res_acc_list[best_index]
+        logprob_plot = res_logprob_list[best_index]
+        label_suffix = " (Best Of 4)"
+    else:
+        # Proceed with aggregation (average or max)
+        x_min = np.min([len(xs) for xs in res_x_list])
+        x_min = min(x_min, 750)
 
-    axs[0].plot(x_plot[:max_cuts[alg_type]], acc_av[:max_cuts[alg_type]], label=full_labs[alg_type], c=cols[alg_type], lw=2)
-    axs[1].plot(x_plot[:max_cuts[alg_type]], logprob_av[:max_cuts[alg_type]], label=full_labs[alg_type], c=cols[alg_type], lw=2)
+        acc_plot = calculate_aggregate(*res_acc_list, x_min=x_min, use_max=args.use_max)
+        logprob_plot = calculate_aggregate(
+            *res_logprob_list, x_min=x_min, use_max=args.use_max
+        )
+        x_plot = res_x_list[0][:x_min]
+        label_suffix = ""
 
-    axs[0].plot(x_plot[max_cuts[alg_type]:], acc_av[max_cuts[alg_type]:],
-                label=None, c=cols[alg_type], alpha=0.5, ls="--")
-    axs[1].plot(x_plot[max_cuts[alg_type]:], logprob_av[max_cuts[alg_type]:],
-                label=None, c=cols[alg_type], alpha=0.5, ls="--")
+    # Plotting
+    axs[0].plot(
+        x_plot,
+        acc_plot,
+        label=full_labs[alg_type] + label_suffix,
+        c=cols[alg_type],
+        lw=2,
+    )
+    axs[1].plot(
+        x_plot,
+        logprob_plot,
+        label=full_labs[alg_type] + label_suffix,
+        c=cols[alg_type],
+        lw=2,
+    )
+
+    # Optional dashed lines (if needed)
+    axs[0].plot(
+        x_plot,
+        acc_plot,
+        label=None,
+        c=cols[alg_type],
+        alpha=0.5,
+        ls="--",
+    )
+    axs[1].plot(
+        x_plot,
+        logprob_plot,
+        label=None,
+        c=cols[alg_type],
+        alpha=0.5,
+        ls="--",
+    )
 
 axs[0].legend()
 axs[1].set_xlabel("Training Batch No. [ ]")
-axs[0].tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+axs[0].tick_params(axis="x", which="both", bottom=False, top=False, labelbottom=False)
 axs[0].set_ylabel("P(Answer contained in CoT) [ ]")
-axs[0].set_ylim([0., 1.])
-axs[0].set_xlim([0., 600])
-axs[0].text(0.05, 0.65, f'Smoothing window = {window_size}',
-        transform=axs[0].transAxes,
-        verticalalignment='top',
-        bbox=dict(boxstyle='round', facecolor='white', edgecolor='black'))
+axs[0].set_ylim([0.0, 1.0])
+axs[0].set_xlim([0.0, 800])
+axs[0].text(
+    0.05,
+    0.65,
+    f"Smoothing window = {window_size}",
+    transform=axs[0].transAxes,
+    verticalalignment="top",
+    bbox=dict(boxstyle="round", facecolor="white", edgecolor="black"),
+)
 # axs[1].set_ylabel("LogProb [ ]")
 axs[1].set_ylabel("ln P(Answer | CoT) [ ]")
 plt.subplots_adjust(hspace=0.05)
 # caption = "Figure 1: This is a caption for the sine wave plot. This is a caption for the sine wave plot. This is a caption for the sine wave plot. This is a caption for the sine wave plot."
 # fig.text(0.5, 0.01, caption, wrap=True, horizontalalignment='center', fontsize=10)
-plt.savefig("rebuttal_plot.pdf", dpi=300)
+plt.savefig("rebuttal_plot.png", dpi=300)
 plt.show()
 
 
