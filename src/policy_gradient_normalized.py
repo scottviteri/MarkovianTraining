@@ -448,7 +448,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
                 "batch_size": 6,
                 "gradient_accumulation_steps": 8,
                 "num_batches": 10000,
-                "normalize_loss": False,
+                "normalize_loss": True,
                 "use_ppo": False,
                 "ppo_epsilon": None,
                 "r": None,
