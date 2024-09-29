@@ -440,7 +440,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
                 "normalize_loss": True,
                 "use_ppo": True,
                 "ppo_epsilon": 0.2,
-                "r": 0.5,
+                "r": 0.8,
             }
         else:  # Policy Gradient
             hyperparameters = {
