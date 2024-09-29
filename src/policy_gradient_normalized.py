@@ -178,11 +178,11 @@ def calculate_answer_log_probs(
     return torch.stack(avg_log_probs), extracted_generated_answers
 
 
-def calculate_ppo_loss(current_log_probs, old_log_probs, advantages, epsilon=0.2):
-    ratio = torch.exp(current_log_probs - old_log_probs)
-    clipped_ratio = torch.clamp(ratio, 1 - epsilon, 1 + epsilon)
-    loss = -torch.min(ratio * advantages, clipped_ratio * advantages)
-    return loss.mean()
+# def calculate_ppo_loss(current_log_probs, old_log_probs, advantages, epsilon=0.2):
+#    ratio = torch.exp(current_log_probs - old_log_probs)
+#    clipped_ratio = torch.clamp(ratio, 1 - epsilon, 1 + epsilon)
+#    loss = -torch.min(ratio * advantages, clipped_ratio * advantages)
+#    return loss.mean()
 
 
 def exponential_weighted_average(values, r):
@@ -253,7 +253,13 @@ def calculate_advantages(
 
     if use_ei:
         threshold = calculate_threshold(previous_advantages)
-        advantage = (advantage > threshold).float()
+        mask = (advantage > threshold).float()
+        if not (hyperparameters["use_pg"] or hyperparameters["use_ppo"]):
+            # If only use_ei is enabled, set advantage to 1 where mask is 1
+            advantage = mask
+        else:
+            # When use_ei is combined with use_pg or use_ppo, zero out advantages below threshold
+            advantage = advantage * mask
 
     return (
         advantage,
@@ -271,6 +277,8 @@ def calculate_losses(
     advantage,
     hyperparameters,
 ):
+    use_ei = hyperparameters["use_ei"]
+    use_pg = hyperparameters["use_pg"]
     use_ppo = hyperparameters["use_ppo"]
     ppo_epsilon = hyperparameters.get("ppo_epsilon", 0.2)
 
@@ -280,18 +288,17 @@ def calculate_losses(
             - frozen_avg_log_probs_reasoning_given_question
         )
         clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
-        policy_loss = calculate_ppo_loss(
-            unfrozen_avg_log_probs_reasoning_given_question,
-            frozen_avg_log_probs_reasoning_given_question,
-            advantage,
-            epsilon=ppo_epsilon,
-        )
-    else:
+        policy_loss = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
+        policy_loss = policy_loss.mean()
+    elif use_ei or use_pg:
+        # Standard Policy Gradient loss
         policy_loss = (
-            unfrozen_avg_log_probs_reasoning_given_question * -advantage.detach()
+            -unfrozen_avg_log_probs_reasoning_given_question * advantage.detach()
         ).mean()
         ppo_ratio = None
         clipped_ratio = None
+    else:
+        raise ValueError("At least one of use_pg, use_ppo, or use_ei must be True.")
 
     total_loss = policy_loss
 
@@ -675,6 +682,7 @@ def main(
     debug_index: int = None,
     use_ei: bool = False,
     use_ppo: bool = False,
+    use_pg: bool = False,
 ):
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
 
@@ -704,7 +712,7 @@ def main(
         debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k)
         return
 
-    train(use_gsm8k, resume, use_ei, use_ppo)
+    train(use_gsm8k, resume, use_ei, use_ppo, use_pg)
 
 
 if __name__ == "__main__":
@@ -741,7 +749,18 @@ if __name__ == "__main__":
         default=False,
         help="Use Proximal Policy Optimization",
     )
+    parser.add_argument(
+        "--use_pg",
+        action="store_true",
+        default=False,
+        help="Use Policy Gradient",
+    )
     args = parser.parse_args()
+
+    if not (args.use_ei or args.use_pg or args.use_ppo):
+        raise ValueError(
+            "At least one of --use_ei, --use_pg, or --use_ppo must be specified."
+        )
 
     main(
         use_gsm8k=args.use_gsm8k,
@@ -749,4 +768,5 @@ if __name__ == "__main__":
         debug_index=args.debug_index,
         use_ei=args.use_ei,
         use_ppo=args.use_ppo,
+        use_pg=args.use_pg,
     )
