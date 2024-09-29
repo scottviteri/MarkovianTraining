@@ -387,7 +387,7 @@ def tensor_to_python(value):
     return value
 
 
-def train(use_gsm8k: bool, resume: bool, use_ei: bool = False, use_ppo: bool):
+def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
     global previous_normalized_rewards, previous_advantages
 
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
@@ -681,7 +681,13 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool = False, use_ppo: bool):
             torch.save(model.state_dict(), model_save_path_with_batch)
 
 
-def main(use_gsm8k: bool, resume: bool, debug_index: int = None, use_ei: bool = False, use_ppo: bool = False):
+def main(
+    use_gsm8k: bool,
+    resume: bool,
+    debug_index: int = None,
+    use_ei: bool = False,
+    use_ppo: bool = False,
+):
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
 
     if debug_index is not None:
