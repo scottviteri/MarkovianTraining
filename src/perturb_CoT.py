@@ -13,6 +13,8 @@ def perturb_CoT(CoT, config):
     """
     Perturb the chain-of-thought (CoT) according to the perturbation configuration.
     """
+    # Remove leading "Reasoning:" if present
+    CoT = re.sub(r'^Reasoning:\s*', '', CoT.strip())
     perturbed_CoT = CoT
 
     # Randomly delete a fraction of characters
@@ -85,8 +87,9 @@ def main():
                 continue
             CoT = entry["Action"]
             observation = entry["Observation"]
-            question = entry.get("Prev Observation", "")
-            combined_input = question + "\n" + CoT
+
+            # Remove leading "Answer:" from observation if present
+            observation_clean = re.sub(r'^Answer:\s*', '', observation.strip())
 
             entry_results = {
                 "Batch Index": entry.get("Batch Index", None),
@@ -95,14 +98,21 @@ def main():
 
             for pert_name, pert_config in perturbations.items():
                 if pert_name == "Original":
-                    perturbed_CoT = CoT
+                    perturbed_CoT = re.sub(r'^Reasoning:\s*', '', CoT.strip())
                 else:
                     perturbed_CoT = perturb_CoT(CoT, pert_config)
-                perturbed_input = question + "\n" + perturbed_CoT
                 
+                # Print the prompts
+                # print(f"\n--- Prompt for {pert_name} ---")
+                # print("Input:")
+                # print(perturbed_CoT)
+                # print("\nObservation (Answer):")
+                # print(observation_clean)
+                # print("----------------------------\n")
+
                 # Tokenize the input before passing to calculate_answer_log_probs
-                tokenized_input = tokenizer(perturbed_input, return_tensors="pt", truncation=True, max_length=2048).input_ids.to(device)
-                tokenized_observation = tokenizer(observation, return_tensors="pt", truncation=True, max_length=2048).input_ids.to(device)
+                tokenized_input = tokenizer(perturbed_CoT, return_tensors="pt", truncation=True, max_length=2048).input_ids.to(device)
+                tokenized_observation = tokenizer(observation_clean, return_tensors="pt", truncation=True, max_length=2048).input_ids.to(device)
                 
                 avg_log_prob = calculate_answer_log_probs(
                     model,
