@@ -49,7 +49,7 @@ def load_mistral_model():
 def calculate_threshold(previous_advantages):
     if len(previous_advantages) > 15:
         return np.mean(previous_advantages) + np.std(previous_advantages)
-    return float('inf')
+    return float("inf")
 
 
 def generate_question_answer_batch(batch_size: int):
@@ -200,12 +200,14 @@ def calculate_advantages(
     outputs,
     baseline_outputs,
     answers,
-    r,
-    normalize_loss,
+    hyperparameters,
     use_gsm8k,
-    use_ei,
 ):
     global previous_normalized_rewards, previous_advantages
+
+    use_ei = hyperparameters["use_ei"]
+    r = hyperparameters.get("r", None)
+    normalize_loss = hyperparameters.get("normalize_loss", True)
 
     reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] :]
 
@@ -267,9 +269,11 @@ def calculate_losses(
     unfrozen_avg_log_probs_reasoning_given_question,
     frozen_avg_log_probs_reasoning_given_question,
     advantage,
-    use_ppo,
-    ppo_epsilon,
+    hyperparameters,
 ):
+    use_ppo = hyperparameters["use_ppo"]
+    ppo_epsilon = hyperparameters.get("ppo_epsilon", 0.2)
+
     if use_ppo:
         ppo_ratio = torch.exp(
             unfrozen_avg_log_probs_reasoning_given_question
@@ -410,6 +414,12 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
             print(
                 f"Loaded {len(previous_normalized_rewards)} previous rewards and advantages"
             )
+            # Update hyperparameters with current flags if needed
+            hyperparameters["use_ei"] = use_ei
+            hyperparameters["use_ppo"] = use_ppo
+            # Update any hyperparameters related to use_ppo and use_ei
+            hyperparameters["r"] = 0.8 if use_ppo else None
+            hyperparameters["ppo_epsilon"] = 0.2 if use_ppo else None
 
     if not resume:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -419,40 +429,18 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
         )
         start_batch = 0
 
-        # Select hyperparameters based on flags
-        if use_ei:
-            hyperparameters = {
-                "model_learning_rate": 0.0001,
-                "batch_size": 6,
-                "gradient_accumulation_steps": 8,
-                "num_batches": 10000,
-                "normalize_loss": True,
-                "use_ppo": False,
-                "ppo_epsilon": None,
-                "r": None,
-            }
-        elif use_ppo:
-            hyperparameters = {
-                "model_learning_rate": 0.0001,
-                "batch_size": 6,
-                "gradient_accumulation_steps": 8,
-                "num_batches": 10000,
-                "normalize_loss": True,
-                "use_ppo": True,
-                "ppo_epsilon": 0.2,
-                "r": 0.8,
-            }
-        else:  # Policy Gradient
-            hyperparameters = {
-                "model_learning_rate": 0.0001,
-                "batch_size": 6,
-                "gradient_accumulation_steps": 8,
-                "num_batches": 10000,
-                "normalize_loss": True,
-                "use_ppo": False,
-                "ppo_epsilon": None,
-                "r": None,
-            }
+        # Initialize hyperparameters
+        hyperparameters = {
+            "model_learning_rate": 0.0001,
+            "batch_size": 6,
+            "gradient_accumulation_steps": 8,
+            "num_batches": 10000,
+            "normalize_loss": True,
+            "use_ppo": use_ppo,
+            "ppo_epsilon": 0.2 if use_ppo else None,
+            "r": 0.8 if use_ppo else None,
+            "use_ei": use_ei,
+        }
 
     model, frozen_model, tokenizer, device = load_mistral_model()
 
@@ -466,9 +454,6 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
     batch_size = hyperparameters["batch_size"]
     normalize_loss = hyperparameters["normalize_loss"]
     gradient_accumulation_steps = hyperparameters["gradient_accumulation_steps"]
-    use_ppo = hyperparameters["use_ppo"]
-    ppo_epsilon = hyperparameters["ppo_epsilon"]
-    r = hyperparameters["r"]
 
     num_batches = hyperparameters["num_batches"]
     qa_batches = list(
@@ -536,10 +521,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
             outputs,
             baseline_outputs,
             answers,
-            r,
-            normalize_loss,
+            hyperparameters,
             use_gsm8k,
-            use_ei,
         )
 
         full_attention_mask = torch.cat(
@@ -559,6 +542,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
         unfrozen_log_probs = torch.nn.functional.log_softmax(unfrozen_logits, dim=-1)
         frozen_log_probs = torch.nn.functional.log_softmax(frozen_logits, dim=-1)
 
+        reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] : -1]
         unfrozen_token_log_probs = unfrozen_log_probs.gather(
             2, reasoning_tokens.unsqueeze(-1)
         ).squeeze(-1)
@@ -577,8 +561,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
             unfrozen_avg_log_probs_reasoning_given_question,
             frozen_avg_log_probs_reasoning_given_question,
             advantage,
-            use_ppo,
-            ppo_epsilon,
+            hyperparameters,
         )
         loss = total_loss / gradient_accumulation_steps
 
@@ -609,6 +592,13 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
         if extracted_generated_answers is not None:
             print("Generated Answer:", extracted_generated_answers[0])
 
+        if previous_advantages:
+            mean_prev_advantage = np.mean(previous_advantages)
+            std_prev_advantage = np.std(previous_advantages)
+        else:
+            mean_prev_advantage = None
+            std_prev_advantage = None
+
         log_entry = {
             k: tensor_to_python(v)
             for k, v in {
@@ -624,15 +614,13 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
                 "Policy Loss": policy_loss.item(),
                 "Total Loss": total_loss.item(),
                 "Grad Norm": grad_norm,
-                "Use EI": use_ei,
-                "Mean Previous Advantage": (
-                    np.mean(previous_advantages) if previous_advantages else None
-                ),
-                "Std Previous Advantage": (
-                    np.std(previous_advantages) if previous_advantages else None
-                ),
+                "Use EI": hyperparameters["use_ei"],
+                "Mean Previous Advantage": mean_prev_advantage,
+                "Std Previous Advantage": std_prev_advantage,
                 "EI Threshold": (
-                    calculate_threshold(previous_advantages) if use_ei else None
+                    calculate_threshold(previous_advantages)
+                    if hyperparameters["use_ei"]
+                    else None
                 ),
             }.items()
         }
@@ -640,7 +628,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool):
         if normalize_loss and baseline_avg_log_prob is not None:
             log_entry["Baseline Avg Log Prob"] = tensor_to_python(baseline_avg_log_prob)
 
-        if use_ppo and ppo_ratio is not None:
+        if hyperparameters["use_ppo"] and ppo_ratio is not None:
             log_entry.update(
                 {
                     "PPO Ratio": tensor_to_python(ppo_ratio[0]),
@@ -745,13 +733,13 @@ if __name__ == "__main__":
         "--use_ei",
         action="store_true",
         default=False,
-        help="Use Expert Iteration instead of Policy Gradient",
+        help="Use Expert Iteration",
     )
     parser.add_argument(
         "--use_ppo",
         action="store_true",
         default=False,
-        help="Use Proximal Policy Optimization instead of Policy Gradient",
+        help="Use Proximal Policy Optimization",
     )
     args = parser.parse_args()
 
