@@ -750,7 +750,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use_ppo",
         action="store_true",
-        default=True,
+        default=False,
         help="Use Proximal Policy Optimization instead of Policy Gradient",
     )
     args = parser.parse_args()
