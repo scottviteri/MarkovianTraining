@@ -52,16 +52,16 @@ file_dicts = {
         "./results/9-28-24/EPG4.log",
     ],
     "PPO": [
-        "./results/9-28-24/EPPO1.log",
-        "./results/9-28-24/EPPO2.log",
-        "./results/9-28-24/EPPO3.log",
-        "./results/9-28-24/EPPO4.log",
+        "./results/9-28-24/EPPO1_R1.log",
+        "./results/9-28-24/EPPO2_R1.log",
+        "./results/9-28-24/EPPO3_R1.log",
+        "./results/9-28-24/EPPO4_R1.log",
     ],
     "EI": [
-        "./results/9-28-24/EI1_bak.log",
-        "./results/9-28-24/EI2_bak.log",
-        "./results/9-28-24/EI3_bak.log",
-        "./results/9-28-24/EI4_bak.log",
+        "./results/9-28-24/EI1_bak2.log",
+        "./results/9-28-24/EI2_bak2.log",
+        "./results/9-28-24/EI3_bak2.log",
+        "./results/9-28-24/EI4_bak2.log",
     ],
 }
 
