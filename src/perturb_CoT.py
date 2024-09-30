@@ -254,13 +254,13 @@ def plot_original_vs_llama(log_files, window_size=40):
                 linewidth=2,
             )
 
-    plt.xlabel("Sample", fontsize=12)
-    plt.ylabel("Average Log Probability", fontsize=12)
+    plt.xlabel("Sample", fontsize=14)
+    plt.ylabel("Average Log Probability", fontsize=14)
     plt.title(
         f"Average Original vs Llama Results (Smoothing Window: {window_size})",
         fontsize=14,
     )
-    plt.legend(fontsize=10)
+    plt.legend(fontsize=14, loc="lower right")
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.tight_layout()
 
@@ -335,12 +335,12 @@ def plot_results(log_files, window_size=40):
 
             color_index += 1
 
-    plt.xlabel("Sample", fontsize=12)
-    plt.ylabel("Average Difference in Negated Log Probability", fontsize=12)
+    plt.xlabel("Sample", fontsize=14)
+    plt.ylabel("Average Difference in Negated Log Probability", fontsize=14)
     plt.title(
         f"Average Perturbation Results (Smoothing Window: {window_size})", fontsize=14
     )
-    plt.legend(fontsize=10)
+    plt.legend(fontsize=14)
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.tight_layout()
 
