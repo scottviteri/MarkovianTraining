@@ -116,6 +116,21 @@ def extract_answer(answer):
 def calculate_answer_log_probs(
     model, tokenizer, device, reasoning_tokens, answers, use_gsm8k
 ):
+    """
+    Calculate the log probabilities of the answers given the reasoning.
+
+    Args:
+        model: The language model to use for calculations.
+        tokenizer: The tokenizer associated with the model.
+        device: The device (CPU or GPU) to perform calculations on.
+        reasoning_tokens (torch.Tensor): Tokenized reasoning text, shape [batch_size, seq_len].
+        answers (List[str]): A list of answer strings, one for each item in the batch.
+        use_gsm8k (bool): Whether to use GSM8K-specific processing.
+
+    Returns:
+        torch.Tensor: The average log probabilities of the answers, shape [batch_size].
+        List[str] or None: Extracted generated answers if use_gsm8k is True, otherwise None.
+    """
     reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
 
     full_prompts = [
@@ -158,6 +173,13 @@ def calculate_answer_log_probs(
         + 1
         for input_ids in tokenized_full_prompts.input_ids
     ]
+    if len(answers) == 1:
+        assert (
+            tokenizer.decode(
+                tokenized_full_prompts.input_ids[0][answer_start_positions[0] :]
+            )
+            == answers[0]
+        )
 
     with torch.no_grad():
         outputs = model(
@@ -174,7 +196,7 @@ def calculate_answer_log_probs(
         for i, start in enumerate(answer_start_positions)
     ]
     avg_log_probs = list(map(lambda x: x.mean(), answer_log_probs))
-    print("Log Probs:", answer_log_probs[0])
+    # print("Log Probs:", answer_log_probs[0])
     return torch.stack(avg_log_probs), extracted_generated_answers
 
 

@@ -1,7 +1,4 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
@@ -13,6 +10,15 @@
             "justMyCode": false
         },
         {
+            "name": "Python: Perturb CoT",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/perturb_CoT.py",
+            "args": ["--log_file", "EI1.log"],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+        },
+        {
             "name": "Python: GSM8K",
             "type": "python",
             "request": "launch",
@@ -21,7 +27,7 @@
             "justMyCode": false,
             "args": ["--use_gsm8k"]
         },
-{
+        {
             "name": "Python: EI",
             "type": "python",
             "request": "launch",
