@@ -167,7 +167,7 @@ def calculate_answer_log_probs(
         extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
 
     answer_start_positions = [
-        ((input_ids == 28747) | (input_ids == 28705))
+        ((input_ids == 28747) | (input_ids == 28705) | (input_ids == 29871))
         .nonzero(as_tuple=True)[0][-1]
         .item()
         + 1
