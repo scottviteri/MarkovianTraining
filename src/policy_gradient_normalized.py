@@ -468,7 +468,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
             "normalize_loss": True,
             "use_ppo": use_ppo,
             "ppo_epsilon": 0.2 if use_ppo else None,
-            "r": 0.8 if use_ppo else None,
+            "r": 1.0 if use_ppo else None,
             "use_ei": use_ei,
             "use_pg": use_pg,
             "use_ppo": use_ppo,
