@@ -138,7 +138,7 @@ def main():
     parser.add_argument(
         "--log_files",
         nargs="+",
-        help="Paths to the log files within ./results/9-28-24/",
+        help="Paths to the log files within the results subfolder",
     )
     parser.add_argument(
         "--plot", action="store_true", help="Plot results from existing JSON files"
@@ -151,12 +151,19 @@ def main():
     parser.add_argument(
         "--window_size", type=int, default=40, help="Smoothing window size for plotting"
     )
+    parser.add_argument(
+        "--results_subfolder",
+        default="9-28-24",
+        help="Subfolder within ./results/ to use (default: 9-28-24)",
+    )
     args = parser.parse_args()
 
+    results_path = os.path.join("./results", args.results_subfolder)
+
     if args.plot:
-        plot_results(args.log_files, args.window_size)
+        plot_results(args.log_files, args.window_size, results_path)
     elif args.plot_llama:
-        plot_original_vs_llama(args.log_files, args.window_size)
+        plot_original_vs_llama(args.log_files, args.window_size, results_path)
     else:
         # Define perturbation configurations
         perturbations = {
@@ -180,7 +187,7 @@ def main():
         )
 
         for log_file in args.log_files:
-            input_path = os.path.join("./results/9-28-24", log_file)
+            input_path = os.path.join(results_path, log_file)
             results = process_file(
                 input_path,
                 perturbations,
@@ -194,20 +201,18 @@ def main():
 
             # Save results to a JSON file, overwriting if it exists
             output_file = os.path.join(
-                "./results/9-28-24",
-                f"perturbation_results_{os.path.basename(log_file)}.json",
+                results_path, f"perturbation_results_{os.path.basename(log_file)}.json"
             )
             with open(output_file, "w", encoding="utf-8") as f_out:
                 json.dump(results, f_out, indent=2)
             print(f"Results saved to {output_file}")
 
 
-def plot_original_vs_llama(log_files, window_size=40):
+def plot_original_vs_llama(log_files, window_size=40, results_path="./results/9-28-24"):
     all_data = []
     for log_file in log_files:
         result_file = os.path.join(
-            "./results/9-28-24",
-            f"perturbation_results_{os.path.basename(log_file)}.json",
+            results_path, f"perturbation_results_{os.path.basename(log_file)}.json"
         )
         with open(result_file, "r") as f:
             all_data.append(json.load(f))
@@ -254,13 +259,13 @@ def plot_original_vs_llama(log_files, window_size=40):
                 linewidth=2,
             )
 
-    plt.xlabel("Sample", fontsize=14)
-    plt.ylabel("Average Log Probability", fontsize=14)
+    plt.xlabel("Sample", fontsize=16)
+    plt.ylabel("Average Log Probability", fontsize=16)
     plt.title(
         f"Average Original vs Llama Results (Smoothing Window: {window_size})",
-        fontsize=14,
+        fontsize=16,
     )
-    plt.legend(fontsize=14, loc="lower right")
+    plt.legend(fontsize=20, loc="lower right")
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.tight_layout()
 
@@ -269,12 +274,11 @@ def plot_original_vs_llama(log_files, window_size=40):
     print(f"Plot saved to {output_file}")
 
 
-def plot_results(log_files, window_size=40):
+def plot_results(log_files, window_size=40, results_path="./results/9-28-24"):
     all_data = []
     for log_file in log_files:
         result_file = os.path.join(
-            "./results/9-28-24",
-            f"perturbation_results_{os.path.basename(log_file)}.json",
+            results_path, f"perturbation_results_{os.path.basename(log_file)}.json"
         )
         with open(result_file, "r") as f:
             all_data.append(json.load(f))
@@ -335,12 +339,12 @@ def plot_results(log_files, window_size=40):
 
             color_index += 1
 
-    plt.xlabel("Sample", fontsize=14)
-    plt.ylabel("Average Difference in Negated Log Probability", fontsize=14)
+    plt.xlabel("Sample", fontsize=20)
+    plt.ylabel("Average Difference in Negated Log Probability", fontsize=20)
     plt.title(
-        f"Average Perturbation Results (Smoothing Window: {window_size})", fontsize=14
+        f"Average Perturbation Results (Smoothing Window: {window_size})", fontsize=20
     )
-    plt.legend(fontsize=14)
+    plt.legend(fontsize=20)
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.tight_layout()
 
