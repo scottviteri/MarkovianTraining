@@ -13,6 +13,8 @@ def perturb_CoT(CoT, config):
     """
     Perturb the chain-of-thought (CoT) according to the perturbation configuration.
     """
+    # Remove leading "Reasoning:" if present
+    CoT = re.sub(r'^Reasoning:\s*', '', CoT.strip())
     perturbed_CoT = CoT
 
     # Randomly delete a fraction of characters
@@ -51,7 +53,7 @@ def main():
         description="Perturb Chain-of-Thought and calculate losses"
     )
     parser.add_argument(
-        "log_file", help="Path to the log file within ./results/9-28-24/"
+        "--log_file", help="Path to the log file within ./results/9-28-24/"
     )
     args = parser.parse_args()
 
@@ -75,6 +77,8 @@ def main():
     }
 
     results = []
+    total_log_probs = {pert_name: 0.0 for pert_name in perturbations}  # Changed to float
+    count = 0
 
     with open(log_file, "r") as f:
         for line in tqdm(f):
@@ -83,8 +87,9 @@ def main():
                 continue
             CoT = entry["Action"]
             observation = entry["Observation"]
-            question = entry.get("Prev Observation", "")
-            combined_input = question + "\n" + CoT
+
+            # Remove leading "Answer:" from observation if present
+            observation_clean = re.sub(r'^Answer:\s*', '', observation.strip())
 
             entry_results = {
                 "Batch Index": entry.get("Batch Index", None),
@@ -93,21 +98,44 @@ def main():
 
             for pert_name, pert_config in perturbations.items():
                 if pert_name == "Original":
-                    perturbed_CoT = CoT
+                    perturbed_CoT = re.sub(r'^Reasoning:\s*', '', CoT.strip())
                 else:
                     perturbed_CoT = perturb_CoT(CoT, pert_config)
-                perturbed_input = question + "\n" + perturbed_CoT
+                
+                # Print the prompts
+                # print(f"\n--- Prompt for {pert_name} ---")
+                # print("Input:")
+                # print(perturbed_CoT)
+                # print("\nObservation (Answer):")
+                # print(observation_clean)
+                # print("----------------------------\n")
+
+                # Tokenize the input before passing to calculate_answer_log_probs
+                tokenized_input = tokenizer(perturbed_CoT, return_tensors="pt", truncation=True, max_length=2048).input_ids.to(device)
+                tokenized_observation = tokenizer(observation_clean, return_tensors="pt", truncation=True, max_length=2048).input_ids.to(device)
+                
                 avg_log_prob = calculate_answer_log_probs(
                     model,
                     tokenizer,
                     device,
-                    perturbed_input,
-                    observation,
+                    tokenized_input,
+                    tokenized_observation,
                     use_gsm8k=False,
                 )
-                entry_results["Avg Log Probs"][pert_name] = avg_log_prob
+                # Extract the first value from the tuple
+                avg_log_prob_value = avg_log_prob[0].item()  # Convert to Python float
+                entry_results["Avg Log Probs"][pert_name] = avg_log_prob_value
+                total_log_probs[pert_name] += avg_log_prob_value
 
             results.append(entry_results)
+            count += 1
+
+            if count % 10 == 0:
+                print(f"Average log probs after {count} iterations:")
+                for pert_name in perturbations:
+                    avg = total_log_probs[pert_name] / count
+                    print(f"{pert_name}: {avg:.4f}")
+                print()
 
     # Save results to a JSON file
     output_file = os.path.join("./results/9-28-24", "perturbation_results.json")
