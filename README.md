@@ -9,25 +9,37 @@ pip install scipy transformers datasets==2.14.6 torchtyping==0.1.4 && pip instal
 
 ## Scripts
 
-### 1. Policy Gradient Training (`policy_gradient_normalized.py`)
+### 1. Policy Gradient Training (`src/policy_gradient_normalized.py`)
 
 This script implements the main training loop for policy gradient methods.
 
 Usage:
 ```
 # Policy Gradient:
-python src/policy_gradient_normalized.py --use_gsm8k --use_ei --use_pg
+python src/policy_gradient_normalized.py --use_ei --use_pg
 
 # Proximal Policy Optimization:
-python src/policy_gradient_normalized.py --use_gsm8k --use_ei --use_ppo
+python src/policy_gradient_normalized.py --use_ei --use_ppo
 
 # Expert Iteration:
-python src/policy_gradient_normalized.py --use_gsm8k --use_ei
+python src/policy_gradient_normalized.py --use_ei
 ```
 
-Note: The `--use_gsm8k` flag trains the model on the GSM8K training set. The trained model weights are saved for later evaluation.
+### 5. GSM8K Training and Evaluation
 
-### 2. CoT Answer Accuracy Evaluation (`eval_cot_answer_accuracy.py`)
+To reproduce the GSM8K results using Proximal Policy Optimization (PPO) with Expert Iteration (EI), run the following command:
+
+```
+python src/policy_gradient_normalized.py --use_gsm8k --use_ei --use_ppo
+```
+
+This command will train a model using PPO with EI on the GSM8K dataset and evaluate its performance.
+
+### 6. GSM8K Training and Evaluation
+
+Note: The `--use_gsm8k` flag trains the model on the GSM8K training set. The trained model weights are saved for later evaluation in SavedModels/.
+
+### 2. CoT Answer Accuracy Evaluation (`src/eval_cot_answer_accuracy.py`)
 
 Evaluates and visualizes the performance of trained models.
 
@@ -36,7 +48,7 @@ Usage:
 python src/eval_cot_answer_accuracy.py --use-max
 ```
 
-### 3. Chain-of-Thought Perturbation Analysis (`perturb_CoT.py`)
+### 3. Chain-of-Thought Perturbation Analysis (`src/perturb_CoT.py`)
 
 Analyzes the robustness of trained models by applying perturbations to the chain-of-thought reasoning.
 
@@ -52,7 +64,7 @@ python src/perturb_CoT.py --log_file PPO1.log PPO2.log PPO3.log PPO4.log --resul
 python src/perturb_CoT.py --log_file PPO1.log PPO2.log PPO3.log PPO4.log --results_subfolder Official --plot_llama
 ```
 
-### 4. GSM8K Evaluation (`eval_gsm8k.py`)
+### 4. GSM8K Evaluation (`src/AnalyzeResults/eval_gsm8k.py`)
 
 Evaluates the trained model on the GSM8K test set.
 
@@ -69,7 +81,7 @@ All results, including plots and log files, are stored in the `results/Official`
 
 ## AnalyzeResults Directory
 
-The `AnalyzeResults` directory gets populated with detailed log files when running `policy_gradient_normalized.py`. Here's how it works:
+The `src/AnalyzeResults` directory gets populated with detailed log files when running `src/policy_gradient_normalized.py`. Here's how it works:
 
 1. Log File Creation: At the start of training, a new log file is created in `src/AnalyzeResults` with the format:
    ```
