@@ -162,10 +162,16 @@ def main():
         help="Subfolder within ./results/ to use (default: 9-28-24)",
     )
     parser.add_argument(
+        "--truncate_fraction",
+        type=float,
+        default=0.10,
+        help="Fraction of the chain of thought to truncate from the end (default: 0.10)",
+    )
+    parser.add_argument(
         "--perturbation_fraction",
         type=float,
-        default=0.20,
-        help="Fraction for perturbations (default: 0.20)",
+        default=0.30,
+        help="Fraction for digit change and deletion perturbations (default: 0.30)",
     )
     args = parser.parse_args()
 
@@ -185,8 +191,8 @@ def main():
             f"Delete{int(args.perturbation_fraction*100)}%": {
                 "delete_fraction": args.perturbation_fraction
             },
-            f"Truncate{int(args.perturbation_fraction*100)}%": {
-                "truncate_fraction": args.perturbation_fraction
+            f"Truncate{int(args.truncate_fraction*100)}%": {
+                "truncate_fraction": args.truncate_fraction
             },
         }
 
