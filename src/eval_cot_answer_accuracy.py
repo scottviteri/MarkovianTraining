@@ -46,22 +46,22 @@ def import_log_file(file_path):
 
 file_dicts = {
     "PG": [
-        "./results/9-28-24/EPG1.log",
-        "./results/9-28-24/EPG2.log",
-        "./results/9-28-24/EPG3.log",
-        "./results/9-28-24/EPG4.log",
+        "./results/Official/PG1.log",
+        "./results/Official/PG2.log",
+        "./results/Official/PG3.log",
+        "./results/Official/PG4.log",
     ],
     "PPO": [
-        "./results/9-28-24/EPPO1_R1.log",
-        "./results/9-28-24/EPPO2_R1.log",
-        "./results/9-28-24/EPPO3_R1.log",
-        "./results/9-28-24/EPPO4_R1.log",
+        "./results/Official/PPO1.log",
+        "./results/Official/PPO2.log",
+        "./results/Official/PPO3.log",
+        "./results/Official/PPO4.log",
     ],
     "EI": [
-        "./results/9-28-24/EI1_bak2.log",
-        "./results/9-28-24/EI2_bak2.log",
-        "./results/9-28-24/EI3_bak2.log",
-        "./results/9-28-24/EI4_bak2.log",
+        "./results/Official/EI1.log",
+        "./results/Official/EI2.log",
+        "./results/Official/EI3.log",
+        "./results/Official/EI4.log",
     ],
 }
 
