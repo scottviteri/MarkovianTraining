@@ -462,8 +462,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
         # Initialize hyperparameters
         hyperparameters = {
             "model_learning_rate": 0.0001,
-            "batch_size": 10 if use_gsm8k else 6,
-            "gradient_accumulation_steps": 32 if use_gsm8k else 8,
+            "batch_size": 7 if use_gsm8k else 6,
+            "gradient_accumulation_steps": 64 if use_gsm8k else 8,
             "num_batches": 10000,
             "normalize_loss": True,
             "use_ppo": use_ppo,
@@ -516,7 +516,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
             return_tensors="pt",
         ).to(device)
 
-        cot_length = 80 if use_gsm8k else 400
+        cot_length = 200 if use_gsm8k else 400
         with torch.no_grad():
             outputs = model.generate(
                 tokenized_inputs.input_ids,
