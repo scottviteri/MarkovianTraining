@@ -462,13 +462,13 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
         # Initialize hyperparameters
         hyperparameters = {
             "model_learning_rate": 0.0001,
-            "batch_size": 7 if use_gsm8k else 6,
-            "gradient_accumulation_steps": 64 if use_gsm8k else 8,
+            "batch_size": 6,
+            "gradient_accumulation_steps": 32 if use_gsm8k else 8,
             "num_batches": 10000,
             "normalize_loss": True,
             "use_ppo": use_ppo,
             "ppo_epsilon": 0.2 if use_ppo else None,
-            "r": 1.0 if use_ppo else None,
+            "r": None,
             "use_ei": use_ei,
             "use_pg": use_pg,
             "use_ppo": use_ppo,
