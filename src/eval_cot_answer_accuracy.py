@@ -305,5 +305,5 @@ axs[0].grid(True, linestyle="--", alpha=0.5)
 axs[1].grid(True, linestyle="--", alpha=0.5)
 
 plt.tight_layout()
-plt.savefig("rebuttal_plot.pdf", dpi=300)
+plt.savefig("results/Official/cot_performance_comparison.pdf", dpi=300)
 plt.show()

@@ -269,7 +269,9 @@ def plot_original_vs_llama(log_files, window_size=40, results_path="./results/9-
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.tight_layout()
 
-    output_file = f"average_original_vs_llama_plot_smooth{window_size}.png"
+    output_file = (
+        f"results/Official/average_original_vs_llama_plot_smooth{window_size}.png"
+    )
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Plot saved to {output_file}")
 
@@ -348,7 +350,9 @@ def plot_results(log_files, window_size=40, results_path="./results/9-28-24"):
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.tight_layout()
 
-    output_file = f"average_perturbation_results_plot_smooth{window_size}.png"
+    output_file = (
+        f"results/Official/average_perturbation_results_plot_smooth{window_size}.png"
+    )
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Plot saved to {output_file}")
 
