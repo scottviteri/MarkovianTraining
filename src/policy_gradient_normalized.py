@@ -463,7 +463,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
         hyperparameters = {
             "model_learning_rate": 0.0001,
             "batch_size": 10 if use_gsm8k else 6,
-            "gradient_accumulation_steps": 16 if use_gsm8k else 8,
+            "gradient_accumulation_steps": 32 if use_gsm8k else 8,
             "num_batches": 10000,
             "normalize_loss": True,
             "use_ppo": use_ppo,
