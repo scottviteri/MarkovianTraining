@@ -182,7 +182,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_path",
         type=str,
-        default="/root/MarkovianTraining/SavedModels/PolicyGradientNormalized_GSM8K_latest.pt",
+        default="./SavedModels/PolicyGradientNormalized_GSM8K_latest.pt",
         help="Path to the trained model weights",
     )
     parser.add_argument(

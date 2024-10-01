@@ -41,6 +41,11 @@ def perturb_CoT(CoT, config):
 
         perturbed_CoT = re.sub(r"\d", replace_digit, perturbed_CoT)
 
+    # Truncate a fraction from the end
+    if config.get("truncate_fraction", 0) > 0:
+        truncate_length = int(len(perturbed_CoT) * (1 - config["truncate_fraction"]))
+        perturbed_CoT = perturbed_CoT[:truncate_length]
+
     return perturbed_CoT
 
 
@@ -156,6 +161,12 @@ def main():
         default="9-28-24",
         help="Subfolder within ./results/ to use (default: 9-28-24)",
     )
+    parser.add_argument(
+        "--perturbation_fraction",
+        type=float,
+        default=0.20,
+        help="Fraction for perturbations (default: 0.20)",
+    )
     args = parser.parse_args()
 
     results_path = os.path.join("./results", args.results_subfolder)
@@ -168,10 +179,15 @@ def main():
         # Define perturbation configurations
         perturbations = {
             "Original": {},
-            "DigitChange15%": {"digit_change_prob": 0.15},
-            "DigitChange30%": {"digit_change_prob": 0.30},
-            "Delete15%": {"delete_fraction": 0.15},
-            "Delete30%": {"delete_fraction": 0.30},
+            f"DigitChange{int(args.perturbation_fraction*100)}%": {
+                "digit_change_prob": args.perturbation_fraction
+            },
+            f"Delete{int(args.perturbation_fraction*100)}%": {
+                "delete_fraction": args.perturbation_fraction
+            },
+            f"Truncate{int(args.perturbation_fraction*100)}%": {
+                "truncate_fraction": args.perturbation_fraction
+            },
         }
 
         # Load Mistral model and tokenizer
