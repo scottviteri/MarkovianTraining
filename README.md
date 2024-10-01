@@ -78,7 +78,7 @@ Key features:
 
 ## Results
 
-All results, including plots and log files, are stored in the `results/Official` directory.
+All results, including plots and log files, are stored in the `results/Official` directory. The plots and full training logs from the paper can be found in this directory.
 
 ## Reproduction Steps
 
@@ -115,3 +115,4 @@ Please ensure all dependencies are installed before running the scripts.
 - The `--use-max` flag in `eval_cot_answer_accuracy.py` is required to reproduce the results as presented.
 - Adjust batch sizes and other parameters as needed based on your hardware capabilities.
 - Some scripts may require significant computational resources, especially when working with large language models.
+- The plots and full training logs from the paper can be found in the `results/Official` directory.
