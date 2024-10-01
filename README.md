@@ -9,8 +9,8 @@ pip install scipy transformers datasets==2.14.6 torchtyping==0.1.4 && pip instal
 
 ## Scripts
 
-### 1. Policy Gradient Training (`src/policy_gradient_normalized.py`)
-
+### 1. Policy Gradient Main (`src/policy_gradient_normalized.py`)
+#### Arithmetic Training
 This script implements the main training loop for policy gradient methods.
 
 Usage:
@@ -25,7 +25,7 @@ python src/policy_gradient_normalized.py --use_ei --use_ppo
 python src/policy_gradient_normalized.py --use_ei
 ```
 
-### 5. GSM8K Training and Evaluation
+#### GSM8K Training
 
 To reproduce the GSM8K results using Proximal Policy Optimization (PPO) with Expert Iteration (EI), run the following command:
 
@@ -35,13 +35,20 @@ python src/policy_gradient_normalized.py --use_gsm8k --use_ei --use_ppo
 
 This command will train a model using PPO with EI on the GSM8K dataset and evaluate its performance.
 
-### 6. GSM8K Training and Evaluation
+#### GSM8K Evaluation (`src/AnalyzeResults/eval_gsm8k.py`)
 
-Note: The `--use_gsm8k` flag trains the model on the GSM8K training set. The trained model weights are saved for later evaluation in SavedModels/.
+Evaluates the trained model on the GSM8K test set.
+
+Usage:
+```
+python src/AnalyzeResults/eval_gsm8k.py --model_path <path_to_model> --num_samples <number_of_samples> --batch_size <batch_size>
+```
+
+This script is designed to evaluate a model that has been trained using the `--use_gsm8k` flag in `policy_gradient_normalized.py`. It uses saved model weights (by default in SavedModels/) to perform evaluation on the GSM8K test set.
 
 ### 2. CoT Answer Accuracy Evaluation (`src/eval_cot_answer_accuracy.py`)
 
-Evaluates and visualizes the performance of trained models.
+Evaluates and visualizes the performance of trained models (Figure 2).
 
 Usage:
 ```
@@ -50,7 +57,7 @@ python src/eval_cot_answer_accuracy.py --use-max
 
 ### 3. Chain-of-Thought Perturbation Analysis (`src/perturb_CoT.py`)
 
-Analyzes the robustness of trained models by applying perturbations to the chain-of-thought reasoning.
+Analyzes the robustness of trained models by applying perturbations to the chain-of-thought reasoning (Figure 3).
 
 Usage:
 ```
@@ -63,17 +70,6 @@ python src/perturb_CoT.py --log_file PPO1.log PPO2.log PPO3.log PPO4.log --resul
 # Plot Llama comparison:
 python src/perturb_CoT.py --log_file PPO1.log PPO2.log PPO3.log PPO4.log --results_subfolder Official --plot_llama
 ```
-
-### 4. GSM8K Evaluation (`src/AnalyzeResults/eval_gsm8k.py`)
-
-Evaluates the trained model on the GSM8K test set.
-
-Usage:
-```
-python src/AnalyzeResults/eval_gsm8k.py --model_path <path_to_model> --num_samples <number_of_samples> --batch_size <batch_size>
-```
-
-This script is designed to evaluate a model that has been trained using the `--use_gsm8k` flag in `policy_gradient_normalized.py`. It uses the saved model weights to perform evaluation on the GSM8K test set.
 
 ## Results
 
