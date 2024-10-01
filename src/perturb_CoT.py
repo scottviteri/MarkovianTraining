@@ -201,7 +201,7 @@ def main():
 
             # Save results to a JSON file, overwriting if it exists
             output_file = os.path.join(
-                results_path, f"perturbation_results_{os.path.basename(log_file)}.json"
+                results_path, f"analysis_results_{os.path.basename(log_file)}.json"
             )
             with open(output_file, "w", encoding="utf-8") as f_out:
                 json.dump(results, f_out, indent=2)
@@ -212,7 +212,7 @@ def plot_original_vs_llama(log_files, window_size=40, results_path="./results/9-
     all_data = []
     for log_file in log_files:
         result_file = os.path.join(
-            results_path, f"perturbation_results_{os.path.basename(log_file)}.json"
+            results_path, f"analysis_results_{os.path.basename(log_file)}.json"
         )
         with open(result_file, "r") as f:
             all_data.append(json.load(f))
@@ -280,7 +280,7 @@ def plot_results(log_files, window_size=40, results_path="./results/9-28-24"):
     all_data = []
     for log_file in log_files:
         result_file = os.path.join(
-            results_path, f"perturbation_results_{os.path.basename(log_file)}.json"
+            results_path, f"analysis_results_{os.path.basename(log_file)}.json"
         )
         with open(result_file, "r") as f:
             all_data.append(json.load(f))
@@ -341,10 +341,10 @@ def plot_results(log_files, window_size=40, results_path="./results/9-28-24"):
 
             color_index += 1
 
-    plt.xlabel("Sample", fontsize=20)
-    plt.ylabel("Average Difference in Negated Log Probability", fontsize=20)
+    plt.xlabel("Sample", fontsize=16)
+    plt.ylabel("Average Difference in Negated Log Probability", fontsize=16)
     plt.title(
-        f"Average Perturbation Results (Smoothing Window: {window_size})", fontsize=20
+        f"Average Perturbation Results (Smoothing Window: {window_size})", fontsize=16
     )
     plt.legend(fontsize=20)
     plt.grid(True, linestyle="--", alpha=0.7)
