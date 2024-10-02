@@ -461,10 +461,11 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
             "normalize_loss": True,
             "use_ppo": use_ppo,
             "ppo_epsilon": 0.2 if use_ppo else None,
-            "r": None,
+            "r": 1.0 if use_ppo else None,
             "use_ei": use_ei,
             "use_pg": use_pg,
             "use_ppo": use_ppo,
+            "cot_length": 80 if use_gsm8k else 400,  # Add this line
         }
 
     model, frozen_model, tokenizer, device = load_mistral_model()
@@ -509,7 +510,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
             return_tensors="pt",
         ).to(device)
 
-        cot_length = 80 if use_gsm8k else 400
+        cot_length = hyperparameters["cot_length"]  # Use this instead of hardcoding
         with torch.no_grad():
             outputs = model.generate(
                 tokenized_inputs.input_ids,
