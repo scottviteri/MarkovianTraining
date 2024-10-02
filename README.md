@@ -41,7 +41,7 @@ python src/policy_gradient_normalized.py --use_gsm8k --use_ei --use_ppo
 
 This command will train a model using PPO with EI on the GSM8K dataset and evaluate its performance.
 
-Note: In the run that achieved 35.65% accuracy (as plotted in the appendix of the paper), we set the "r" hyperparameter to None in the `policy_gradient_normalized.py` script. However, we suspect this setting is unnecessary to achieve similar results.
+Note: In the run that achieved 35.71% accuracy (as plotted in the appendix of the paper), we set the "r" hyperparameter to None in the `policy_gradient_normalized.py` script. However, we suspect this setting is unnecessary to achieve similar results.
 
 #### GSM8K Evaluation (`src/AnalyzeResults/eval_gsm8k.py`)
 
