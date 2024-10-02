@@ -27,13 +27,21 @@ python src/policy_gradient_normalized.py --use_ei
 
 #### GSM8K Training
 
-To reproduce the GSM8K results using Proximal Policy Optimization (PPO) with Expert Iteration (EI), run the following command:
+To train the model on the GSM8K dataset using Proximal Policy Optimization (PPO), run the following command:
+
+```
+python src/policy_gradient_normalized.py --use_gsm8k --use_ppo
+```
+
+To reproduce the GSM8K results using Proximal Policy Optimization (PPO) with Expert Iteration (EI), run:
 
 ```
 python src/policy_gradient_normalized.py --use_gsm8k --use_ei --use_ppo
 ```
 
 This command will train a model using PPO with EI on the GSM8K dataset and evaluate its performance.
+
+Note: In the run that achieved 35.65% accuracy (as plotted in the appendix of the paper), we set the "r" hyperparameter to None in the `policy_gradient_normalized.py` script. However, we suspect this setting is unnecessary to achieve similar results.
 
 #### GSM8K Evaluation (`src/AnalyzeResults/eval_gsm8k.py`)
 
@@ -126,3 +134,17 @@ Please ensure all dependencies are installed before running the scripts.
 - The `--use-max` flag in `eval_cot_answer_accuracy.py` is required to reproduce the results as presented.
 - Adjust batch sizes and other parameters as needed based on your hardware capabilities.
 - Some scripts may require significant computational resources, especially when working with large language models.
+
+## GSM8K Results
+
+To generate the GSM8K Performance plot from the appendix, use the following command:
+
+```
+python src/AnalyzeResults/analyze_pg_norm.py --gsm8k_plot --window_size=100 --log_file results/Official/GSM8K_training.log
+```
+
+This command will create a plot showing two metrics over the course of training:
+1. "Fraction Correct (per batch)": The fraction of correct answers in each batch.
+2. "Reasoning Contains Answer": The proportion of reasoning steps that contain the correct answer.
+
+The plot uses a moving average with a window size of 100 batches to smooth out short-term fluctuations and highlight longer-term trends.
