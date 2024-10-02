@@ -443,13 +443,6 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
             print(
                 f"Loaded {len(previous_normalized_rewards)} previous rewards and advantages"
             )
-            # Update hyperparameters with current flags if needed
-            hyperparameters["use_ei"] = use_ei
-            hyperparameters["use_ppo"] = use_ppo
-            hyperparameters["use_pg"] = use_pg
-            # Update any hyperparameters related to use_ppo and use_ei
-            hyperparameters["r"] = 0.8 if use_ppo else None
-            hyperparameters["ppo_epsilon"] = 0.2 if use_ppo else None
 
     if not resume:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
