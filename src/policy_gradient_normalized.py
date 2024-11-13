@@ -30,11 +30,11 @@ def load_model(model_type="mistral"):
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
-    
+
     model = AutoModelForCausalLM.from_pretrained(
-        model_name, 
+        model_name,
         torch_dtype=torch.bfloat16,
-        device_map="auto"  # Added for better device management
+        device_map="auto",  # Added for better device management
     )
 
     peft_config = LoraConfig(
@@ -72,7 +72,7 @@ def generate_question_answer_batch(batch_size: int, use_negative: bool = False):
             # Generate numbers between -99 and 99, excluding 0
             numbers = [random.randint(-99, 99) for _ in range(15)]
             numbers = [n for n in numbers if n != 0]  # Remove any zeros
-            
+
             # Format each number, wrapping negatives in parentheses
             formatted_numbers = []
             for n in numbers:
@@ -80,7 +80,7 @@ def generate_question_answer_batch(batch_size: int, use_negative: bool = False):
                     formatted_numbers.append(f"({n})")
                 else:
                     formatted_numbers.append(str(n))
-            
+
             question = " + ".join(formatted_numbers)
             answer = str(sum(numbers))
         else:
@@ -88,7 +88,7 @@ def generate_question_answer_batch(batch_size: int, use_negative: bool = False):
             numbers = [random.randint(1, 99) for _ in range(15)]
             question = " + ".join(map(str, numbers))
             answer = str(sum(numbers))
-        
+
         qa_batch.append((question, answer))
     return qa_batch
 
@@ -101,34 +101,36 @@ def load_gsm8k_dataset():
 
 
 def generate_question_answer_batches(
-    num_batches: int, 
-    batch_size: int, 
-    use_gsm8k: bool, 
+    num_batches: int,
+    batch_size: int,
+    use_gsm8k: bool,
     use_negative: bool = False,
-    use_wiki: bool = False
+    use_wiki: bool = False,
 ):
     """Generate batches of Q&A pairs from different sources."""
     if use_wiki:
         # Load Wikipedia dataset
         wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
-        
+
         # Create chunks and pairs
         qa_pairs = []
         for article in wiki_dataset:
-            text = article['text']
-            chunks = [text[i:i+200] for i in range(0, len(text), 200)]
-            
+            text = article["text"]
+            chunks = [text[i : i + 200] for i in range(0, len(text), 200)]
+
             # Create pairs from adjacent chunks
-            for i in range(0, len(chunks)-1, 2):
-                qa_pairs.append((chunks[i], chunks[i+1]))
-                
+            for i in range(0, len(chunks) - 1, 2):
+                qa_pairs.append((chunks[i], chunks[i + 1]))
+
             if len(qa_pairs) >= num_batches * batch_size:
                 break
-        
+
         # Shuffle and create batches
         random.shuffle(qa_pairs)
-        qa_pairs = qa_pairs[:num_batches * batch_size]
-        return [qa_pairs[i:i + batch_size] for i in range(0, len(qa_pairs), batch_size)]
+        qa_pairs = qa_pairs[: num_batches * batch_size]
+        return [
+            qa_pairs[i : i + batch_size] for i in range(0, len(qa_pairs), batch_size)
+        ]
     elif use_gsm8k:
         gsm8k_data = load_gsm8k_dataset()
         total_samples = len(gsm8k_data)
@@ -145,7 +147,10 @@ def generate_question_answer_batches(
                 for i in range(0, len(shuffled_data), batch_size)
             ]
     else:
-        return [generate_question_answer_batch(batch_size, use_negative) for _ in range(num_batches)]
+        return [
+            generate_question_answer_batch(batch_size, use_negative)
+            for _ in range(num_batches)
+        ]
 
 
 def get_grad_norm(parameters):
@@ -173,7 +178,14 @@ def extract_answer(answer):
 
 
 def calculate_answer_log_probs(
-    model, tokenizer, device, reasoning_tokens, answers, use_gsm8k, model_type
+    model,
+    tokenizer,
+    device,
+    reasoning_tokens,
+    answers,
+    use_gsm8k,
+    model_type,
+    debug_index=None,
 ):
     """
     Calculate the log probabilities of the answers given the reasoning.
@@ -186,6 +198,7 @@ def calculate_answer_log_probs(
         answers (List[str]): A list of answer strings, one for each item in the batch.
         use_gsm8k (bool): Whether to use GSM8K-specific processing.
         model_type (str): The type of model being used ('mistral' or 'llama').
+        debug_index (int, optional): If set, enables debug output for this index.
 
     Returns:
         torch.Tensor: The average log probabilities of the answers, shape [batch_size].
@@ -225,21 +238,25 @@ def calculate_answer_log_probs(
         )
         selected_answers = [x.split("\nAnswer: ")[-1] for x in generated_answers]
         extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
-    # if llama, start at max index of space (220) or colon (25), plus 1
+    # if llama, start at last index of colon (25), plus 1
     answer_start_positions = [
-        ((input_ids == 28747) | (input_ids == 28705) | (input_ids == 29871) if model_type == "mistral" else (input_ids == 220) | (input_ids == 25))
+        (
+            (input_ids == 28747) | (input_ids == 28705) | (input_ids == 29871)
+            if model_type == "mistral"
+            else (input_ids == 25)
+        )
         .nonzero(as_tuple=True)[0][-1]
         .item()
         + 1
         for input_ids in tokenized_full_prompts.input_ids
     ]
-    if len(answers) == 1:
-        assert (
-            tokenizer.decode(
-                tokenized_full_prompts.input_ids[0][answer_start_positions[0] :]
-            )
-            == answers[0]
-        )
+    # if len(answers) == 1:
+    assert (
+        tokenizer.decode(
+            tokenized_full_prompts.input_ids[0][answer_start_positions[0] :]
+        ).strip()
+        == answers[0].strip()
+    )
 
     with torch.no_grad():
         outputs = model(
@@ -255,6 +272,19 @@ def calculate_answer_log_probs(
         .squeeze(-1)
         for i, start in enumerate(answer_start_positions)
     ]
+
+    if debug_index is not None:
+        # Debug output for token-by-token probabilities
+        tokens = [
+            tokenizer.decode([x])
+            for x in tokenized_full_prompts.input_ids[
+                0, answer_start_positions[0] :
+            ].tolist()
+        ]
+        probs = answer_log_probs[0].tolist()
+        print("\nToken-by-token log probabilities:")
+        print([(tokens[i], probs[i]) for i in range(len(tokens))])
+
     avg_log_probs = list(map(lambda x: x.mean(), answer_log_probs))
     # print("Log Probs:", answer_log_probs[0])
     return torch.stack(avg_log_probs), extracted_generated_answers
@@ -285,6 +315,7 @@ def calculate_advantages(
     hyperparameters,
     use_gsm8k,
     model_type,
+    debug_index=None,
 ):
     global previous_normalized_rewards, previous_advantages
 
@@ -296,7 +327,14 @@ def calculate_advantages(
 
     log_prob_ans_given_reasoning, extracted_generated_answers = (
         calculate_answer_log_probs(
-            frozen_model, tokenizer, device, reasoning_tokens, answers, use_gsm8k, model_type
+            frozen_model,
+            tokenizer,
+            device,
+            reasoning_tokens,
+            answers,
+            use_gsm8k,
+            model_type,
+            debug_index,
         )
     )
 
@@ -424,9 +462,24 @@ def load_previous_rewards_and_advantages(log_file):
     return previous_normalized_rewards, previous_advantages
 
 
-def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
+def debug_single_datapoint(
+    model, tokenizer, device, qa_pair, use_gsm8k, model_type, use_wiki, hyperparameters
+):
     question, answer = qa_pair
-    prompt = f"Produce concise text which will help you answer the question.Question: {question}\nReasoning:"
+
+    # Update prompts based on dataset type
+    if use_wiki:
+        prompt = (
+            f"<|start_header_id|>user<|end_header_id|>Previous: {question}\nProvide a summary that captures key elements suggesting what comes next:<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nSummary:"
+            if model_type == "llama"
+            else f"{question}\nProvide a summary that captures key elements suggesting what comes next: \nSummary:"
+        )
+    else:
+        prompt = (
+            f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the following question:  Question: {question}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:"
+            if model_type == "llama"
+            else f"{question}\nProduce minimal text which will help you answer the following question:  Question: {question} \nReasoning:"
+        )
 
     tokenized_inputs = tokenizer(
         prompt,
@@ -438,8 +491,8 @@ def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
         outputs = model.generate(
             tokenized_inputs.input_ids,
             attention_mask=tokenized_inputs.attention_mask,
-            max_new_tokens=200,
-            min_new_tokens=200,
+            max_new_tokens=hyperparameters["cot_length"],
+            min_new_tokens=hyperparameters["cot_length"],
             do_sample=True,
             temperature=1.0,
             pad_token_id=tokenizer.pad_token_id,
@@ -450,7 +503,14 @@ def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
 
     log_prob_ans_given_reasoning, extracted_generated_answers = (
         calculate_answer_log_probs(
-            model, tokenizer, device, reasoning_tokens, [answer], use_gsm8k
+            model,
+            tokenizer,
+            device,
+            reasoning_tokens,
+            [answer],
+            use_gsm8k,
+            model_type,
+            debug_index=0,
         )
     )
 
@@ -483,14 +543,15 @@ def tensor_to_python(value):
 
 
 def train(
-    use_gsm8k: bool, 
-    resume: bool, 
-    use_ei: bool, 
-    use_ppo: bool, 
-    use_pg: bool, 
-    model_type: str, 
+    use_gsm8k: bool,
+    resume: bool,
+    use_ei: bool,
+    use_ppo: bool,
+    use_pg: bool,
+    model_type: str,
     use_negative: bool,
-    use_wiki: bool = False
+    use_wiki: bool = False,
+    debug_index: int = None,
 ):
     global previous_normalized_rewards, previous_advantages
 
@@ -562,11 +623,11 @@ def train(
     num_batches = hyperparameters["num_batches"]
     qa_batches = list(
         generate_question_answer_batches(
-            num_batches=num_batches, 
-            batch_size=batch_size, 
+            num_batches=num_batches,
+            batch_size=batch_size,
             use_gsm8k=use_gsm8k,
             use_negative=use_negative,
-            use_wiki=use_wiki
+            use_wiki=use_wiki,
         )
     )
 
@@ -585,14 +646,20 @@ def train(
         # Update prompts based on dataset type
         if use_wiki:
             prompts = [
-                f"<|start_header_id|>user<|end_header_id|>Previous: {q}\nProvide a summary that captures key elements suggesting what comes next:<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nSummary:" if model_type == "llama" else
-                f"[INST] Previous: {q}\nProvide a summary that captures key elements suggesting what comes next: [/INST] \nSummary:"
+                (
+                    f"<|start_header_id|>user<|end_header_id|>Previous: {q}\nProvide a summary that captures key elements suggesting what comes next:<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nSummary:"
+                    if model_type == "llama"
+                    else f"{q}\nProvide a summary that captures key elements suggesting what comes next: \nSummary:"
+                )
                 for q in questions
             ]
         else:
             prompts = [
-                f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the following question:  Question: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:" if model_type == "llama" else
-                f"[INST] Produce minimal text which will help you answer the following question:  Question: {q} [/INST] \nReasoning:"
+                (
+                    f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the following question:  Question: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:"
+                    if model_type == "llama"
+                    else f"{q}\nProduce minimal text which will help you answer the following question:  Question: {q} \nReasoning:"
+                )
                 for q in questions
             ]
 
@@ -641,6 +708,7 @@ def train(
             hyperparameters,
             use_gsm8k,
             model_type,
+            debug_index,
         )
 
         full_attention_mask = torch.cat(
@@ -796,11 +864,11 @@ def main(
     use_pg: bool = False,
     model_type: str = "mistral",
     use_negative: bool = False,
-    use_wiki: bool = False
+    use_wiki: bool = False,
 ):
     # Update dataset type
     dataset_type = "Wikipedia" if use_wiki else "GSM8K" if use_gsm8k else "Arithmetic"
-    
+
     if debug_index is not None:
         model_save_path = (
             f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
@@ -813,7 +881,33 @@ def main(
         model.load_state_dict(torch.load(model_save_path))
         model.eval()
 
-        if use_gsm8k:
+        # Set cot_length based on model type and dataset
+        if model_type == "mistral":
+            cot_length = (
+                80 if use_gsm8k else 400
+            )  # 400 for arithmetic/wiki, 80 for GSM8K
+        else:  # llama
+            cot_length = (
+                60 if use_gsm8k else 150
+            )  # 150 for arithmetic/wiki, 60 for GSM8K
+
+        hyperparameters = {
+            "cot_length": cot_length,
+            # Add other hyperparameters as needed
+        }
+
+        if use_wiki:
+            # Load Wikipedia dataset
+            wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
+            # Get a single article and create a QA pair
+            article = wiki_dataset[debug_index]["text"]
+            chunks = [article[i : i + 200] for i in range(0, len(article), 200)]
+            if len(chunks) >= 2:
+                qa_pair = (chunks[0], chunks[1])
+            else:
+                print("Error: Article too short to create QA pair")
+                return
+        elif use_gsm8k:
             gsm8k_data = load_gsm8k_dataset()
             if debug_index >= len(gsm8k_data):
                 print(
@@ -824,18 +918,28 @@ def main(
         else:
             qa_pair = generate_question_answer_batch(1, use_negative)[0]
 
-        debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k)
+        debug_single_datapoint(
+            model,
+            tokenizer,
+            device,
+            qa_pair,
+            use_gsm8k,
+            model_type,
+            use_wiki,
+            hyperparameters,
+        )
         return
 
     train(
-        use_gsm8k, 
-        resume, 
-        use_ei, 
-        use_ppo, 
-        use_pg, 
+        use_gsm8k,
+        resume,
+        use_ei,
+        use_ppo,
+        use_pg,
         model_type,
         use_negative,
-        use_wiki
+        use_wiki,
+        debug_index,
     )
 
 
@@ -914,5 +1018,5 @@ if __name__ == "__main__":
         use_pg=args.use_pg,
         model_type=args.model_type,
         use_negative=args.use_negative,
-        use_wiki=args.use_wiki
+        use_wiki=args.use_wiki,
     )

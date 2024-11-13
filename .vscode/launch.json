@@ -80,6 +80,21 @@
             ],
             "console": "integratedTerminal",
             "justMyCode": false
+        },
+        {
+            "name": "Python: Wiki Llama",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/policy_gradient_normalized.py",
+            "args": [
+                "--use_wiki",
+                "--use_ei",
+                "--use_ppo",
+                "--model_type",
+                "llama"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false
         }
     ]
 }
