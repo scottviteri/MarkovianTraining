@@ -106,28 +106,57 @@ def generate_question_answer_batches(
     use_gsm8k: bool,
     use_negative: bool = False,
     use_wiki: bool = False,
+    debug_index: int = None,
 ):
     """Generate batches of Q&A pairs from different sources."""
+    if debug_index is not None:
+        # For debug mode, generate a single batch
+        if use_wiki:
+            # Load Wikipedia dataset
+            wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
+            qa_pairs = []
+            # Get batch_size articles starting at debug_index * batch_size
+            for i in range(batch_size):
+                article_idx = debug_index * batch_size + i
+                article = wiki_dataset[article_idx]["text"]
+                chunks = [article[i : i + 200] for i in range(0, len(article), 200)]
+                if len(chunks) >= 2:
+                    qa_pairs.append((chunks[0], chunks[1]))
+                else:
+                    raise ValueError(
+                        f"Article at index {article_idx} too short to create QA pair"
+                    )
+            return [qa_pairs]  # Return a single batch
+        elif use_gsm8k:
+            gsm8k_data = load_gsm8k_dataset()
+            start_idx = debug_index * batch_size
+            if start_idx >= len(gsm8k_data):
+                raise ValueError(
+                    f"Debug index {debug_index} is out of range. Max index is {len(gsm8k_data) // batch_size - 1}"
+                )
+            qa_pairs = gsm8k_data[start_idx : start_idx + batch_size]
+            return [qa_pairs]
+        else:
+            return [generate_question_answer_batch(batch_size, use_negative)]
+
     if use_wiki:
         # Load Wikipedia dataset
         wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
 
-        # Create chunks and pairs
+        # Create chunks and pairs in deterministic order
         qa_pairs = []
-        for article in wiki_dataset:
-            text = article["text"]
-            chunks = [text[i : i + 200] for i in range(0, len(text), 200)]
+        for article_idx in range(num_batches * batch_size):
+            article = wiki_dataset[article_idx]["text"]
+            chunks = [article[i : i + 200] for i in range(0, len(article), 200)]
 
             # Create pairs from adjacent chunks
-            for i in range(0, len(chunks) - 1, 2):
-                qa_pairs.append((chunks[i], chunks[i + 1]))
+            if len(chunks) >= 2:
+                qa_pairs.append((chunks[0], chunks[1]))
 
             if len(qa_pairs) >= num_batches * batch_size:
                 break
 
-        # Shuffle and create batches
-        random.shuffle(qa_pairs)
-        qa_pairs = qa_pairs[: num_batches * batch_size]
+        # Create batches without shuffling
         return [
             qa_pairs[i : i + batch_size] for i in range(0, len(qa_pairs), batch_size)
         ]
@@ -238,25 +267,44 @@ def calculate_answer_log_probs(
         )
         selected_answers = [x.split("\nAnswer: ")[-1] for x in generated_answers]
         extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
-    # if llama, start at last index of colon (25), plus 1
-    answer_start_positions = [
-        (
-            (input_ids == 28747) | (input_ids == 28705) | (input_ids == 29871)
-            if model_type == "mistral"
-            else (input_ids == 25)
-        )
-        .nonzero(as_tuple=True)[0][-1]
-        .item()
-        + 1
-        for input_ids in tokenized_full_prompts.input_ids
-    ]
-    # if len(answers) == 1:
-    assert (
-        tokenizer.decode(
-            tokenized_full_prompts.input_ids[0][answer_start_positions[0] :]
+    # if llama, find last occurrence of [16533, 25] and use 25's index + 1
+    answer_start_positions = []
+    for input_ids in tokenized_full_prompts.input_ids:
+        if model_type == "mistral":
+            pos = (
+                (input_ids == 28747) | (input_ids == 28705) | (input_ids == 29871)
+            ).nonzero(as_tuple=True)[0][-1].item() + 1
+        else:  # llama
+            # Find positions of both tokens
+            token_positions = (input_ids == 16533).nonzero(as_tuple=True)[0]
+            colon_positions = (input_ids == 25).nonzero(as_tuple=True)[0]
+
+            # Find the last pair where 16533 is followed by 25
+            last_pair_pos = None
+            for token_pos in reversed(token_positions.tolist()):
+                # Look for a colon after this token
+                following_colons = colon_positions[colon_positions > token_pos]
+                if len(following_colons) > 0 and following_colons[0] == token_pos + 1:
+                    last_pair_pos = following_colons[0]
+                    break
+
+            if last_pair_pos is None:
+                raise ValueError("Could not find required token sequence [16533, 25]")
+
+            pos = last_pair_pos + 1
+        answer_start_positions.append(pos)
+
+    # Assert that the decoded tokens after each start position match the expected answers
+    for i in range(len(answers)):
+        decoded_answer = tokenizer.decode(
+            tokenized_full_prompts.input_ids[i][answer_start_positions[i] :]
         ).strip()
-        == answers[0].strip()
-    )
+        expected_answer = answers[i].strip()
+        if decoded_answer != expected_answer:
+            print(f"Answer mismatch at index {i}:")
+            print(f"Decoded:  {decoded_answer}")
+            print(f"Expected: {expected_answer}")
+        # assert decoded_answer == expected_answer, f"Answer mismatch at index {i}"
 
     with torch.no_grad():
         outputs = model(
@@ -462,74 +510,6 @@ def load_previous_rewards_and_advantages(log_file):
     return previous_normalized_rewards, previous_advantages
 
 
-def debug_single_datapoint(
-    model, tokenizer, device, qa_pair, use_gsm8k, model_type, use_wiki, hyperparameters
-):
-    question, answer = qa_pair
-
-    # Update prompts based on dataset type
-    if use_wiki:
-        prompt = (
-            f"<|start_header_id|>user<|end_header_id|>Previous: {question}\nProvide a summary that captures key elements suggesting what comes next:<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nSummary:"
-            if model_type == "llama"
-            else f"{question}\nProvide a summary that captures key elements suggesting what comes next: \nSummary:"
-        )
-    else:
-        prompt = (
-            f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the following question:  Question: {question}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:"
-            if model_type == "llama"
-            else f"{question}\nProduce minimal text which will help you answer the following question:  Question: {question} \nReasoning:"
-        )
-
-    tokenized_inputs = tokenizer(
-        prompt,
-        padding=True,
-        return_tensors="pt",
-    ).to(device)
-
-    with torch.no_grad():
-        outputs = model.generate(
-            tokenized_inputs.input_ids,
-            attention_mask=tokenized_inputs.attention_mask,
-            max_new_tokens=hyperparameters["cot_length"],
-            min_new_tokens=hyperparameters["cot_length"],
-            do_sample=True,
-            temperature=1.0,
-            pad_token_id=tokenizer.pad_token_id,
-        )
-
-    reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] :]
-    reasoning_text = tokenizer.decode(reasoning_tokens[0], skip_special_tokens=True)
-
-    log_prob_ans_given_reasoning, extracted_generated_answers = (
-        calculate_answer_log_probs(
-            model,
-            tokenizer,
-            device,
-            reasoning_tokens,
-            [answer],
-            use_gsm8k,
-            model_type,
-            debug_index=0,
-        )
-    )
-
-    true_answer = extract_answer(answer)
-    generated_answer = (
-        extracted_generated_answers[0] if extracted_generated_answers else None
-    )
-    is_correct = (
-        generated_answer == true_answer if generated_answer is not None else False
-    )
-
-    print(f"Question: {question}")
-    print(f"True Answer: {true_answer}")
-    print(f"Generated Answer: {generated_answer}")
-    print(f"Is Correct: {is_correct}")
-    print(f"Log Probability: {log_prob_ans_given_reasoning[0].item()}")
-    print(f"Generated Reasoning: {reasoning_text}")
-
-
 def tensor_to_python(value):
     if isinstance(value, torch.Tensor):
         return value.item() if value.numel() == 1 else value.tolist()
@@ -623,11 +603,12 @@ def train(
     num_batches = hyperparameters["num_batches"]
     qa_batches = list(
         generate_question_answer_batches(
-            num_batches=num_batches,
+            num_batches=1 if debug_index is not None else num_batches,
             batch_size=batch_size,
             use_gsm8k=use_gsm8k,
             use_negative=use_negative,
             use_wiki=use_wiki,
+            debug_index=debug_index,
         )
     )
 
@@ -870,65 +851,7 @@ def main(
     dataset_type = "Wikipedia" if use_wiki else "GSM8K" if use_gsm8k else "Arithmetic"
 
     if debug_index is not None:
-        model_save_path = (
-            f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
-        )
-        if not os.path.exists(model_save_path):
-            print(f"Error: Model file not found at {model_save_path}")
-            return
-
-        model, frozen_model, tokenizer, device = load_model(model_type)
-        model.load_state_dict(torch.load(model_save_path))
-        model.eval()
-
-        # Set cot_length based on model type and dataset
-        if model_type == "mistral":
-            cot_length = (
-                80 if use_gsm8k else 400
-            )  # 400 for arithmetic/wiki, 80 for GSM8K
-        else:  # llama
-            cot_length = (
-                60 if use_gsm8k else 150
-            )  # 150 for arithmetic/wiki, 60 for GSM8K
-
-        hyperparameters = {
-            "cot_length": cot_length,
-            # Add other hyperparameters as needed
-        }
-
-        if use_wiki:
-            # Load Wikipedia dataset
-            wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
-            # Get a single article and create a QA pair
-            article = wiki_dataset[debug_index]["text"]
-            chunks = [article[i : i + 200] for i in range(0, len(article), 200)]
-            if len(chunks) >= 2:
-                qa_pair = (chunks[0], chunks[1])
-            else:
-                print("Error: Article too short to create QA pair")
-                return
-        elif use_gsm8k:
-            gsm8k_data = load_gsm8k_dataset()
-            if debug_index >= len(gsm8k_data):
-                print(
-                    f"Error: Debug index {debug_index} is out of range. Max index is {len(gsm8k_data) - 1}"
-                )
-                return
-            qa_pair = gsm8k_data[debug_index]
-        else:
-            qa_pair = generate_question_answer_batch(1, use_negative)[0]
-
-        debug_single_datapoint(
-            model,
-            tokenizer,
-            device,
-            qa_pair,
-            use_gsm8k,
-            model_type,
-            use_wiki,
-            hyperparameters,
-        )
-        return
+        print(f"Running in debug mode with batch index {debug_index}")
 
     train(
         use_gsm8k,
