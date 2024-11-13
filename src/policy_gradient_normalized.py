@@ -101,9 +101,35 @@ def load_gsm8k_dataset():
 
 
 def generate_question_answer_batches(
-    num_batches: int, batch_size: int, use_gsm8k: bool, use_negative: bool = False
+    num_batches: int, 
+    batch_size: int, 
+    use_gsm8k: bool, 
+    use_negative: bool = False,
+    use_wiki: bool = False
 ):
-    if use_gsm8k:
+    """Generate batches of Q&A pairs from different sources."""
+    if use_wiki:
+        # Load Wikipedia dataset
+        wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
+        
+        # Create chunks and pairs
+        qa_pairs = []
+        for article in wiki_dataset:
+            text = article['text']
+            chunks = [text[i:i+200] for i in range(0, len(text), 200)]
+            
+            # Create pairs from adjacent chunks
+            for i in range(0, len(chunks)-1, 2):
+                qa_pairs.append((chunks[i], chunks[i+1]))
+                
+            if len(qa_pairs) >= num_batches * batch_size:
+                break
+        
+        # Shuffle and create batches
+        random.shuffle(qa_pairs)
+        qa_pairs = qa_pairs[:num_batches * batch_size]
+        return [qa_pairs[i:i + batch_size] for i in range(0, len(qa_pairs), batch_size)]
+    elif use_gsm8k:
         gsm8k_data = load_gsm8k_dataset()
         total_samples = len(gsm8k_data)
         if num_batches * batch_size > total_samples:
@@ -456,10 +482,20 @@ def tensor_to_python(value):
     return value
 
 
-def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bool, model_type: str, use_negative: bool):
+def train(
+    use_gsm8k: bool, 
+    resume: bool, 
+    use_ei: bool, 
+    use_ppo: bool, 
+    use_pg: bool, 
+    model_type: str, 
+    use_negative: bool,
+    use_wiki: bool = False
+):
     global previous_normalized_rewards, previous_advantages
 
-    dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
+    # Update dataset type string
+    dataset_type = "Wikipedia" if use_wiki else "GSM8K" if use_gsm8k else "Arithmetic"
 
     if resume:
         model_save_path, log_file = get_latest_checkpoint_and_log(dataset_type)
@@ -529,7 +565,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
             num_batches=num_batches, 
             batch_size=batch_size, 
             use_gsm8k=use_gsm8k,
-            use_negative=use_negative
+            use_negative=use_negative,
+            use_wiki=use_wiki
         )
     )
 
@@ -544,11 +581,21 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
         questions, answers = zip(*qa_batch)
         print("\n")
         print("Batch Index:", batch_index)
-        prompts = [
-            f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the following question:  Question: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:" if model_type == "llama" else
-            f"Produce minimal text which will help you answer the following question:  Question: {q}  \nReasoning:"
-            for q in questions
-        ]
+
+        # Update prompts based on dataset type
+        if use_wiki:
+            prompts = [
+                f"<|start_header_id|>user<|end_header_id|>Previous: {q}\nProvide a summary that captures key elements suggesting what comes next:<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nSummary:" if model_type == "llama" else
+                f"[INST] Previous: {q}\nProvide a summary that captures key elements suggesting what comes next: [/INST] \nSummary:"
+                for q in questions
+            ]
+        else:
+            prompts = [
+                f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the following question:  Question: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:" if model_type == "llama" else
+                f"[INST] Produce minimal text which will help you answer the following question:  Question: {q} [/INST] \nReasoning:"
+                for q in questions
+            ]
+
         tokenized_inputs = tokenizer(
             prompts,
             padding=True,
@@ -749,9 +796,11 @@ def main(
     use_pg: bool = False,
     model_type: str = "mistral",
     use_negative: bool = False,
+    use_wiki: bool = False
 ):
-    dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
-
+    # Update dataset type
+    dataset_type = "Wikipedia" if use_wiki else "GSM8K" if use_gsm8k else "Arithmetic"
+    
     if debug_index is not None:
         model_save_path = (
             f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
@@ -785,13 +834,14 @@ def main(
         use_ppo, 
         use_pg, 
         model_type,
-        use_negative
+        use_negative,
+        use_wiki
     )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Train the model on arithmetic or GSM8K dataset."
+        description="Train the model on arithmetic, GSM8K, or Wikipedia dataset."
     )
     parser.add_argument(
         "--use_gsm8k",
@@ -842,6 +892,12 @@ if __name__ == "__main__":
         default=False,
         help="Include negative numbers in arithmetic questions",
     )
+    parser.add_argument(
+        "--use_wiki",
+        action="store_true",
+        default=False,
+        help="Use Wikipedia dataset for training",
+    )
     args = parser.parse_args()
 
     if not (args.use_ei or args.use_pg or args.use_ppo):
@@ -857,5 +913,6 @@ if __name__ == "__main__":
         use_ppo=args.use_ppo,
         use_pg=args.use_pg,
         model_type=args.model_type,
-        use_negative=args.use_negative
+        use_negative=args.use_negative,
+        use_wiki=args.use_wiki
     )
