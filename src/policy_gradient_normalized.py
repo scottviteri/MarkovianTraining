@@ -214,6 +214,7 @@ def calculate_answer_log_probs(
     answers,
     use_gsm8k,
     model_type,
+    use_wiki,
     debug_index=None,
 ):
     """
@@ -227,6 +228,7 @@ def calculate_answer_log_probs(
         answers (List[str]): A list of answer strings, one for each item in the batch.
         use_gsm8k (bool): Whether to use GSM8K-specific processing.
         model_type (str): The type of model being used ('mistral' or 'llama').
+        use_wiki (bool): Whether using Wikipedia dataset.
         debug_index (int, optional): If set, enables debug output for this index.
 
     Returns:
@@ -235,9 +237,17 @@ def calculate_answer_log_probs(
     """
     reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
 
-    full_prompts = [
-        f"Reasoning: {r}\nAnswer: {a}" for r, a in zip(reasoning_text, answers)
-    ]
+    # Update full prompts based on dataset type
+    if use_wiki:
+        full_prompts = [
+            f"Summary: {r}\nAnswer: {a}" for r, a in zip(reasoning_text, answers)
+        ]
+        partial_prompts = [f"Summary: {r}\nAnswer:" for r in reasoning_text]
+    else:
+        full_prompts = [
+            f"Reasoning: {r}\nAnswer: {a}" for r, a in zip(reasoning_text, answers)
+        ]
+        partial_prompts = [f"Reasoning: {r}\nAnswer:" for r in reasoning_text]
 
     tokenized_full_prompts = tokenizer(
         full_prompts,
@@ -247,7 +257,6 @@ def calculate_answer_log_probs(
 
     extracted_generated_answers = None
     if use_gsm8k:
-        partial_prompts = [f"Reasoning: {r}\nAnswer:" for r in reasoning_text]
         tokenized_partial_prompts = tokenizer(
             partial_prompts, padding=True, return_tensors="pt"
         ).to(device)
@@ -363,6 +372,7 @@ def calculate_advantages(
     hyperparameters,
     use_gsm8k,
     model_type,
+    use_wiki,
     debug_index=None,
 ):
     global previous_normalized_rewards, previous_advantages
@@ -382,6 +392,7 @@ def calculate_advantages(
             answers,
             use_gsm8k,
             model_type,
+            use_wiki,
             debug_index,
         )
     )
@@ -398,6 +409,7 @@ def calculate_advantages(
             answers,
             use_gsm8k,
             model_type,
+            use_wiki,
         )[0]
         normalized_reward = (
             log_prob_ans_given_reasoning - log_prob_ans_given_default_reasoning
@@ -624,22 +636,22 @@ def train(
         print("\n")
         print("Batch Index:", batch_index)
 
-        # Update prompts based on dataset type
+        # Update prompts based on dataset type and model
         if use_wiki:
             prompts = [
                 (
-                    f"<|start_header_id|>user<|end_header_id|>Previous: {q}\nProvide a summary that captures key elements suggesting what comes next:<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nSummary:"
+                    f"<|start_header_id|>user<|end_header_id|>Provide a summary that captures key elements suggesting what comes next:\nContext: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nSummary:"
                     if model_type == "llama"
-                    else f"{q}\nProvide a summary that captures key elements suggesting what comes next: \nSummary:"
+                    else f"{q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nSummary:"
                 )
                 for q in questions
             ]
         else:
             prompts = [
                 (
-                    f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the following question:  Question: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:"
+                    f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer this question:\nQuestion: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:"
                     if model_type == "llama"
-                    else f"{q}\nProduce minimal text which will help you answer the following question:  Question: {q} \nReasoning:"
+                    else f"{q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:"
                 )
                 for q in questions
             ]
@@ -689,6 +701,7 @@ def train(
             hyperparameters,
             use_gsm8k,
             model_type,
+            use_wiki,
             debug_index,
         )
 
@@ -753,8 +766,14 @@ def train(
             else None
         )
         advantage_value = advantage[0].item()
-        print("Question:", q)
-        print("Reasoning:", reasoning_text_first)
+
+        # Update printing format based on dataset type
+        if use_wiki:
+            print("Context:", q)
+            print("Summary:", reasoning_text_first)
+        else:
+            print("Question:", q)
+            print("Reasoning:", reasoning_text_first)
         print("Answer:", ans, "Avg Log Prob:", avg_log_prob)
         if extracted_generated_answers is not None:
             print("Generated Answer:", extracted_generated_answers[0])
@@ -771,8 +790,8 @@ def train(
             for k, v in {
                 "Aggregate loss": loss.item() * gradient_accumulation_steps,
                 "Batch Index": batch_index,
-                "Prev Observation": f"Question: {q}",
-                "Action": f"Reasoning: {reasoning_text_first}",
+                "Prev Observation": f"{'Context' if use_wiki else 'Question'}: {q}",
+                "Action": f"{'Summary' if use_wiki else 'Reasoning'}: {reasoning_text_first}",
                 "Observation": f"Answer: {ans}",
                 "Reasoning Contains Answer": str(ans) in reasoning_text_first,
                 "Avg Log Prob": avg_log_prob,
