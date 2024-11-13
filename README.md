@@ -4,14 +4,19 @@ This project implements and evaluates various reinforcement learning algorithms 
 
 ## Installation
 
-1. Clone the repository:
+Install the package dependencies:
+
 ```bash
-git clone [repository-url]
+pip install transformers wandb scipy datasets==2.14.6 torchtyping==0.1.4 && pip install peft einops apache_beam==2.51.0 matplotlib && pip install -U flash-attn --no-build-isolation && pip install openai bitsandbytes scipy scikit-learn
 ```
 
-2. Install dependencies using Poetry:
+## Testing
+
+To run tests, first set the PYTHONPATH to include the current directory:
+
 ```bash
-poetry install
+export PYTHONPATH=$PYTHONPATH:$(pwd)
+pytest
 ```
 
 ## Scripts
