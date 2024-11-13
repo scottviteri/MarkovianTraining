@@ -127,7 +127,7 @@ def extract_answer(answer):
 
 
 def calculate_answer_log_probs(
-    model, tokenizer, device, reasoning_tokens, answers, use_gsm8k
+    model, tokenizer, device, reasoning_tokens, answers, use_gsm8k, model_type
 ):
     """
     Calculate the log probabilities of the answers given the reasoning.
@@ -139,6 +139,7 @@ def calculate_answer_log_probs(
         reasoning_tokens (torch.Tensor): Tokenized reasoning text, shape [batch_size, seq_len].
         answers (List[str]): A list of answer strings, one for each item in the batch.
         use_gsm8k (bool): Whether to use GSM8K-specific processing.
+        model_type (str): The type of model being used ('mistral' or 'llama').
 
     Returns:
         torch.Tensor: The average log probabilities of the answers, shape [batch_size].
@@ -178,9 +179,8 @@ def calculate_answer_log_probs(
         )
         selected_answers = [x.split("\nAnswer: ")[-1] for x in generated_answers]
         extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
-
     answer_start_positions = [
-        ((input_ids == 28747) | (input_ids == 28705) | (input_ids == 29871))
+        ((input_ids == 28747) | (input_ids == 28705) | (input_ids == 29871) if model_type == "mistral" else (input_ids == 220))
         .nonzero(as_tuple=True)[0][-1]
         .item()
         + 1
@@ -237,6 +237,7 @@ def calculate_advantages(
     answers,
     hyperparameters,
     use_gsm8k,
+    model_type,
 ):
     global previous_normalized_rewards, previous_advantages
 
@@ -248,7 +249,7 @@ def calculate_advantages(
 
     log_prob_ans_given_reasoning, extracted_generated_answers = (
         calculate_answer_log_probs(
-            frozen_model, tokenizer, device, reasoning_tokens, answers, use_gsm8k
+            frozen_model, tokenizer, device, reasoning_tokens, answers, use_gsm8k, model_type
         )
     )
 
@@ -263,6 +264,7 @@ def calculate_advantages(
             baseline_reasoning_tokens,
             answers,
             use_gsm8k,
+            model_type,
         )[0]
         normalized_reward = (
             log_prob_ans_given_reasoning - log_prob_ans_given_default_reasoning
@@ -514,7 +516,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
         print("Batch Index:", batch_index)
         prompts = [
             f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the following question:  Question: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:" if model_type == "llama" else
-            f"[INST] Produce minimal text which will help you answer the following question:  Question: {q} [\INST] \nReasoning:"
+            f"Produce minimal text which will help you answer the following question:  Question: {q}  \nReasoning:"
             for q in questions
         ]
         tokenized_inputs = tokenizer(
@@ -562,6 +564,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
             answers,
             hyperparameters,
             use_gsm8k,
+            model_type,
         )
 
         full_attention_mask = torch.cat(
