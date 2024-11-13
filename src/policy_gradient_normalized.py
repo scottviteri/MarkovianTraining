@@ -391,8 +391,8 @@ def debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k):
         outputs = model.generate(
             tokenized_inputs.input_ids,
             attention_mask=tokenized_inputs.attention_mask,
-            max_new_tokens=400,
-            min_new_tokens=400,
+            max_new_tokens=200,
+            min_new_tokens=200,
             do_sample=True,
             temperature=1.0,
             pad_token_id=tokenizer.pad_token_id,
@@ -467,6 +467,12 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
         )
         start_batch = 0
 
+        # Set cot_length based on model type and dataset
+        if model_type == "mistral":
+            cot_length = 80 if use_gsm8k else 400  # 400 for arithmetic, 80 for GSM8K
+        else:  # llama
+            cot_length = 60 if use_gsm8k else 150  # 150 for arithmetic, 60 for GSM8K
+
         # Initialize hyperparameters
         hyperparameters = {
             "model_learning_rate": 0.0001,
@@ -480,7 +486,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
             "use_ei": use_ei,
             "use_pg": use_pg,
             "use_ppo": use_ppo,
-            "cot_length": 80 if use_gsm8k else 400,  # Add this line
+            "cot_length": cot_length,
         }
 
     model, frozen_model, tokenizer, device = load_model(model_type)
@@ -525,13 +531,12 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
             return_tensors="pt",
         ).to(device)
 
-        cot_length = hyperparameters["cot_length"]  # Use this instead of hardcoding
         with torch.no_grad():
             outputs = model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=cot_length,
-                min_new_tokens=cot_length,
+                max_new_tokens=hyperparameters["cot_length"],
+                min_new_tokens=hyperparameters["cot_length"],
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
@@ -539,8 +544,8 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
             baseline_outputs = frozen_model.generate(
                 tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=cot_length,
-                min_new_tokens=cot_length,
+                max_new_tokens=hyperparameters["cot_length"],
+                min_new_tokens=hyperparameters["cot_length"],
                 do_sample=True,
                 temperature=1.0,
                 pad_token_id=tokenizer.pad_token_id,
