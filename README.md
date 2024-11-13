@@ -3,13 +3,31 @@
 This project implements and evaluates various reinforcement learning algorithms for training language models on question-answering tasks, with a focus on chain-of-thought (CoT) reasoning. The code implements the figures for "Markovian Transformers for Informative Language Modeling" (https://arxiv.org/abs/2404.18988).
 
 ## Installation
+
+1. Clone the repository:
+```bash
+git clone [repository-url]
 ```
-pip install scipy transformers datasets==2.14.6 torchtyping==0.1.4 && pip install peft einops apache_beam==2.51.0 matplotlib wandb && pip install -U flash-attn --no-build-isolation && pip install openai bitsandbytes scipy scikit-learn 
+
+2. Install dependencies using Poetry:
+```bash
+poetry install
 ```
 
 ## Scripts
 
 ### 1. Policy Gradient Main (`src/policy_gradient_normalized.py`)
+#### Model Selection
+The script supports both Mistral and Llama models. You can specify the model using the `--model_type` flag:
+
+```bash
+# Using Mistral (default):
+python src/policy_gradient_normalized.py --use_ei --use_pg --model_type mistral
+
+# Using Llama:
+python src/policy_gradient_normalized.py --use_ei --use_pg --model_type llama
+```
+
 #### Arithmetic Training
 This script implements the main training loop for policy gradient methods.
 
@@ -48,8 +66,12 @@ Note: In the run that achieved 35.71% accuracy (as plotted in the appendix of th
 Evaluates the trained model on the GSM8K test set.
 
 Usage:
-```
-python src/AnalyzeResults/eval_gsm8k.py --model_path <path_to_model> --num_samples <number_of_samples> --batch_size <batch_size>
+```bash
+# Using Mistral (default):
+python src/AnalyzeResults/eval_gsm8k.py --model_path <path_to_model> --num_samples <number_of_samples> --batch_size <batch_size> --model_type mistral
+
+# Using Llama:
+python src/AnalyzeResults/eval_gsm8k.py --model_path <path_to_model> --num_samples <number_of_samples> --batch_size <batch_size> --model_type llama
 ```
 
 This script is designed to evaluate a model that has been trained using the `--use_gsm8k` flag in `policy_gradient_normalized.py`. It uses saved model weights (by default in SavedModels/) to perform evaluation on the GSM8K test set.
@@ -119,19 +141,23 @@ This script reads the log files in `src/AnalyzeResults`, processes the data, and
 
 ## Dependencies
 
-- PyTorch
-- Transformers (Hugging Face)
-- NumPy
-- Matplotlib
-- tqdm
-- datasets (Hugging Face)
-- PEFT (Parameter-Efficient Fine-Tuning)
+This project requires the following main dependencies:
+- Python 3.10+
+- PyTorch 2.1.0+
+- Transformers 4.35.2+
+- Datasets 2.14.6+
+- Accelerate 0.24.1+
+- Weights & Biases 0.15.12+
+- Pytest 7.4.3+
+- Pytest-cov 4.1.0+
+- Multiprocess 0.70.17
 
 Please ensure all dependencies are installed before running the scripts.
 
 ## Notes
 
 - The `--use-max` flag in `eval_cot_answer_accuracy.py` is required to reproduce the results as presented.
+- When using `--model_type llama`, ensure you have appropriate access to the Llama model weights.
 - Adjust batch sizes and other parameters as needed based on your hardware capabilities.
 - Some scripts may require significant computational resources, especially when working with large language models.
 

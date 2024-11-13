@@ -19,11 +19,24 @@ previous_normalized_rewards = []
 previous_advantages = []
 
 
-def load_mistral_model():
-    model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+def load_model(model_type="mistral"):
+    """Load either Mistral or Llama 3.1 model based on parameter."""
+    if model_type == "mistral":
+        model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+    elif model_type == "llama":
+        model_name = "meta-llama/Llama-3.1-8B-Instruct"  # Using 8B version
+    else:
+        raise ValueError("model_type must be either 'mistral' or 'llama'")
+
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
+    
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name, 
+        torch_dtype=torch.bfloat16,
+        device_map="auto"  # Added for better device management
+    )
+
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",
         inference_mode=False,
@@ -266,8 +279,8 @@ def calculate_advantages(
     else:
         advantage = normalized_reward
 
-    previous_normalized_rewards.extend(normalized_reward.detach().cpu().numpy())
-    previous_advantages.extend(advantage.detach().cpu().numpy())
+    previous_normalized_rewards.extend(normalized_reward.detach().float().cpu().numpy())
+    previous_advantages.extend(advantage.detach().float().cpu().numpy())
 
     if len(previous_normalized_rewards) > 1000:
         previous_normalized_rewards = previous_normalized_rewards[-1000:]
@@ -420,7 +433,7 @@ def tensor_to_python(value):
     return value
 
 
-def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bool):
+def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bool, model_type: str):
     global previous_normalized_rewards, previous_advantages
 
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
@@ -468,7 +481,7 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
             "cot_length": 80 if use_gsm8k else 400,  # Add this line
         }
 
-    model, frozen_model, tokenizer, device = load_mistral_model()
+    model, frozen_model, tokenizer, device = load_model(model_type)
 
     if resume:
         model.load_state_dict(torch.load(model_save_path))
@@ -499,9 +512,9 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
         questions, answers = zip(*qa_batch)
         print("\n")
         print("Batch Index:", batch_index)
-
         prompts = [
-            f"Produce minimal text which will help you answer the question.Question: {q}\nReasoning:"
+            f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the following question:  Question: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:" if model_type == "llama" else
+            f"[INST] Produce minimal text which will help you answer the following question:  Question: {q} [\INST] \nReasoning:"
             for q in questions
         ]
         tokenized_inputs = tokenizer(
@@ -702,6 +715,7 @@ def main(
     use_ei: bool = False,
     use_ppo: bool = False,
     use_pg: bool = False,
+    model_type: str = "mistral"
 ):
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
 
@@ -713,7 +727,7 @@ def main(
             print(f"Error: Model file not found at {model_save_path}")
             return
 
-        model, frozen_model, tokenizer, device = load_mistral_model()
+        model, frozen_model, tokenizer, device = load_model(model_type)
         model.load_state_dict(torch.load(model_save_path))
         model.eval()
 
@@ -731,7 +745,7 @@ def main(
         debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k)
         return
 
-    train(use_gsm8k, resume, use_ei, use_ppo, use_pg)
+    train(use_gsm8k, resume, use_ei, use_ppo, use_pg, model_type)
 
 
 if __name__ == "__main__":
@@ -774,6 +788,13 @@ if __name__ == "__main__":
         default=False,
         help="Use Policy Gradient",
     )
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        choices=["mistral", "llama"],
+        default="mistral",
+        help="Choose between Mistral and Llama 3.1 models",
+    )
     args = parser.parse_args()
 
     if not (args.use_ei or args.use_pg or args.use_ppo):
@@ -788,4 +809,5 @@ if __name__ == "__main__":
         use_ei=args.use_ei,
         use_ppo=args.use_ppo,
         use_pg=args.use_pg,
+        model_type=args.model_type
     )

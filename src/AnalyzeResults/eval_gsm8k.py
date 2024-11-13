@@ -24,16 +24,21 @@ def extract_answer(answer):
     return answer
 
 
-def load_model(model_path, use_base_model=False):
-    # Load the tokenizer from the base model
-    tokenizer = AutoTokenizer.from_pretrained(
-        "mistralai/Mistral-7B-Instruct-v0.2", padding_side="left"
-    )
+def load_model(model_path, use_base_model=False, model_type="mistral"):
+    # Load the base model and tokenizer based on model type
+    if model_type == "mistral":
+        base_model = "mistralai/Mistral-7B-Instruct-v0.2"
+    elif model_type == "llama":
+        base_model = "meta-llama/Llama-3.1-8B-Instruct"
+    else:
+        raise ValueError("model_type must be either 'mistral' or 'llama'")
+
+    tokenizer = AutoTokenizer.from_pretrained(base_model, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
 
     # Load the base model
     model = AutoModelForCausalLM.from_pretrained(
-        "mistralai/Mistral-7B-Instruct-v0.2",
+        base_model,
         torch_dtype=torch.bfloat16,
         device_map="auto",
     )
@@ -61,7 +66,7 @@ def load_model(model_path, use_base_model=False):
 
 
 def evaluate_model(
-    model, tokenizer, device, test_data, num_samples=None, batch_size=16
+    model, tokenizer, device, test_data, num_samples=None, batch_size=16, model_type="mistral"
 ):
     correct = 0
     total = 0
@@ -71,8 +76,9 @@ def evaluate_model(
         batch = test_data[i : i + batch_size]
         questions, answers = zip(*batch)
 
-        # Generate the chain of thought reasoning
+        # Generate prompts based on model type
         prompts = [
+            f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the question.<|eot_id|><|start_header_id|>assistant<|end_header_id|> Question: {q}\nReasoning:" if model_type == "llama" else
             f"[INST] Produce minimal text which will help you answer the question.[/INST] Question: {q}\nReasoning:"
             for q in questions
         ]
@@ -156,14 +162,14 @@ def batch_process_answers(
     return extracted_generated_answers
 
 
-def main(model_path, num_samples, batch_size, use_base_model):
-    model, tokenizer, device = load_model(model_path, use_base_model)
+def main(model_path, num_samples, batch_size, use_base_model, model_type):
+    model, tokenizer, device = load_model(model_path, use_base_model, model_type)
 
     test_data = load_dataset("openai/gsm8k", "main", split="test")
     test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
 
     accuracy, results = evaluate_model(
-        model, tokenizer, device, test_data, num_samples, batch_size
+        model, tokenizer, device, test_data, num_samples, batch_size, model_type
     )
 
     print(f"Accuracy: {accuracy:.2%}")
@@ -199,10 +205,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Use the base model without LoRA or loading weights",
     )
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        choices=["mistral", "llama"],
+        default="mistral",
+        help="Choose between Mistral and Llama 3.1 models",
+    )
     args = parser.parse_args()
 
     if not args.use_base_model and not os.path.exists(args.model_path):
         print(f"Error: Model file not found at {args.model_path}")
         exit(1)
 
-    main(args.model_path, args.num_samples, args.batch_size, args.use_base_model)
+    main(args.model_path, args.num_samples, args.batch_size, args.use_base_model, args.model_type)
