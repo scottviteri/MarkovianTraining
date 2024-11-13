@@ -65,11 +65,31 @@ def calculate_threshold(previous_advantages):
     return float("inf")
 
 
-def generate_question_answer_batch(batch_size: int):
+def generate_question_answer_batch(batch_size: int, use_negative: bool = False):
     qa_batch = []
     for _ in range(batch_size):
-        numbers = [random.randint(1, 99) for _ in range(15)]
-        qa_batch.append((" + ".join(map(str, numbers)), str(sum(numbers))))
+        if use_negative:
+            # Generate numbers between -99 and 99, excluding 0
+            numbers = [random.randint(-99, 99) for _ in range(15)]
+            numbers = [n for n in numbers if n != 0]  # Remove any zeros
+            
+            # Format each number, wrapping negatives in parentheses
+            formatted_numbers = []
+            for n in numbers:
+                if n < 0:
+                    formatted_numbers.append(f"({n})")
+                else:
+                    formatted_numbers.append(str(n))
+            
+            question = " + ".join(formatted_numbers)
+            answer = str(sum(numbers))
+        else:
+            # Original positive-only logic
+            numbers = [random.randint(1, 99) for _ in range(15)]
+            question = " + ".join(map(str, numbers))
+            answer = str(sum(numbers))
+        
+        qa_batch.append((question, answer))
     return qa_batch
 
 
@@ -81,7 +101,7 @@ def load_gsm8k_dataset():
 
 
 def generate_question_answer_batches(
-    num_batches: int, batch_size: int, use_gsm8k: bool
+    num_batches: int, batch_size: int, use_gsm8k: bool, use_negative: bool = False
 ):
     if use_gsm8k:
         gsm8k_data = load_gsm8k_dataset()
@@ -99,7 +119,7 @@ def generate_question_answer_batches(
                 for i in range(0, len(shuffled_data), batch_size)
             ]
     else:
-        return [generate_question_answer_batch(batch_size) for _ in range(num_batches)]
+        return [generate_question_answer_batch(batch_size, use_negative) for _ in range(num_batches)]
 
 
 def get_grad_norm(parameters):
@@ -179,8 +199,9 @@ def calculate_answer_log_probs(
         )
         selected_answers = [x.split("\nAnswer: ")[-1] for x in generated_answers]
         extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
+    # if llama, start at max index of space (220) or colon (25), plus 1
     answer_start_positions = [
-        ((input_ids == 28747) | (input_ids == 28705) | (input_ids == 29871) if model_type == "mistral" else (input_ids == 220))
+        ((input_ids == 28747) | (input_ids == 28705) | (input_ids == 29871) if model_type == "mistral" else (input_ids == 220) | (input_ids == 25))
         .nonzero(as_tuple=True)[0][-1]
         .item()
         + 1
@@ -435,7 +456,7 @@ def tensor_to_python(value):
     return value
 
 
-def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bool, model_type: str):
+def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bool, model_type: str, use_negative: bool):
     global previous_normalized_rewards, previous_advantages
 
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
@@ -505,7 +526,10 @@ def train(use_gsm8k: bool, resume: bool, use_ei: bool, use_ppo: bool, use_pg: bo
     num_batches = hyperparameters["num_batches"]
     qa_batches = list(
         generate_question_answer_batches(
-            num_batches=num_batches, batch_size=batch_size, use_gsm8k=use_gsm8k
+            num_batches=num_batches, 
+            batch_size=batch_size, 
+            use_gsm8k=use_gsm8k,
+            use_negative=use_negative
         )
     )
 
@@ -723,7 +747,8 @@ def main(
     use_ei: bool = False,
     use_ppo: bool = False,
     use_pg: bool = False,
-    model_type: str = "mistral"
+    model_type: str = "mistral",
+    use_negative: bool = False,
 ):
     dataset_type = "GSM8K" if use_gsm8k else "Arithmetic"
 
@@ -748,12 +773,20 @@ def main(
                 return
             qa_pair = gsm8k_data[debug_index]
         else:
-            qa_pair = generate_question_answer_batch(1)[0]
+            qa_pair = generate_question_answer_batch(1, use_negative)[0]
 
         debug_single_datapoint(model, tokenizer, device, qa_pair, use_gsm8k)
         return
 
-    train(use_gsm8k, resume, use_ei, use_ppo, use_pg, model_type)
+    train(
+        use_gsm8k, 
+        resume, 
+        use_ei, 
+        use_ppo, 
+        use_pg, 
+        model_type,
+        use_negative
+    )
 
 
 if __name__ == "__main__":
@@ -803,6 +836,12 @@ if __name__ == "__main__":
         default="mistral",
         help="Choose between Mistral and Llama 3.1 models",
     )
+    parser.add_argument(
+        "--use_negative",
+        action="store_true",
+        default=False,
+        help="Include negative numbers in arithmetic questions",
+    )
     args = parser.parse_args()
 
     if not (args.use_ei or args.use_pg or args.use_ppo):
@@ -817,5 +856,6 @@ if __name__ == "__main__":
         use_ei=args.use_ei,
         use_ppo=args.use_ppo,
         use_pg=args.use_pg,
-        model_type=args.model_type
+        model_type=args.model_type,
+        use_negative=args.use_negative
     )
