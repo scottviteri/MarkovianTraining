@@ -637,24 +637,28 @@ def train(
         print("Batch Index:", batch_index)
 
         # Update prompts based on dataset type and model
-        if use_wiki:
-            prompts = [
-                (
+        if model_type == "mistral":
+            if use_wiki:
+                prompts = [
+                    f"<s_user> Provide a summary that captures key elements suggesting what comes next using the following context. Context: {q} </s_user>\nSummary:"
+                    for q in questions
+                ]
+            else:
+                prompts = [
+                    f"<s_user> Produce minimal text which will help you answer this question. Question: {q} </s_user>\nReasoning:"
+                    for q in questions
+                ]
+        else:  # llama
+            if use_wiki:
+                prompts = [
                     f"<|start_header_id|>user<|end_header_id|>Provide a summary that captures key elements suggesting what comes next:\nContext: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nSummary:"
-                    if model_type == "llama"
-                    else f"{q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nSummary:"
-                )
-                for q in questions
-            ]
-        else:
-            prompts = [
-                (
+                    for q in questions
+                ]
+            else:
+                prompts = [
                     f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer this question:\nQuestion: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:"
-                    if model_type == "llama"
-                    else f"{q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:"
-                )
-                for q in questions
-            ]
+                    for q in questions
+                ]
 
         tokenized_inputs = tokenizer(
             prompts,
