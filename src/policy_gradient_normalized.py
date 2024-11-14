@@ -117,8 +117,8 @@ def generate_question_answer_batches(
         for article_idx in range(num_batches * batch_size):
             article = wiki_dataset[article_idx]["text"]
             # chunks = [article[i : i + 400] for i in range(0, len(article), 400)]
-            if len(article) >= 1400:
-                qa_pairs.append((article[:1000], article[1000:1400]))
+            if len(article) >= 2000:
+                qa_pairs.append((article[:1000], article[1000:500]))
 
             if len(qa_pairs) >= num_batches * batch_size:
                 break
@@ -624,11 +624,10 @@ def train(
         questions, answers = zip(*qa_batch)
         print("\n")
         print("Batch Index:", batch_index)
-
         if model_type == "mistral":
             if use_wiki:
                 prompts = [
-                    f"[INST] Given this opening text from an article, write a concise summary that would allow someone to predict what comes next, without seeing the rest. Your summary should capture key elements that suggest the likely continuation of the text.\n\nOpening text: {q} [/INST]\nSummary:"
+                    f"[INST] Given this opening text from an article, write whatever {hyperparameters['cot_length']} tokens you suspect might help you predict the next 500 tokens. Be creative!\n\nOpening text: {q} [/INST]\nHelpful Text:"
                     for q in questions
                 ]
             else:
@@ -639,7 +638,7 @@ def train(
         else:  # llama
             if use_wiki:
                 prompts = [
-                    f"<start_header_id>user<|end_header_id|> Given this opening text from an article, write a concise summary that would allow someone to predict what comes next, without seeing the rest. Your summary should capture key elements that suggest the likely continuation of the text.\n\nOpening text: {q}<|eot_id|><start_header_id>assistant<|end_header_id|>\nSummary:"
+                    f"<start_header_id>user<|end_header_id|> Given this opening text from an article, write whatever {hyperparameters['cot_length']} tokens you suspect might help you predict the next 500 tokens. Be creative!\n\nOpening text: {q}<|eot_id|><start_header_id>assistant<|end_header_id|>\nHelpful Text:"
                     for q in questions
                 ]
             else:
@@ -647,7 +646,6 @@ def train(
                     f"<start_header_id>user<|end_header_id|> Produce minimal text which will help you answer this question:\nQuestion: {q}<|eot_id|><start_header_id>assistant<|end_header_id|>\nReasoning:"
                     for q in questions
                 ]
-
         tokenized_inputs = tokenizer(
             prompts,
             padding=True,
