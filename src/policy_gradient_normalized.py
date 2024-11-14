@@ -109,35 +109,6 @@ def generate_question_answer_batches(
     debug_index: int = None,
 ):
     """Generate batches of Q&A pairs from different sources."""
-    # if debug_index is not None:
-    #    # For debug mode, generate a single batch
-    #    if use_wiki:
-    #        # Load Wikipedia dataset
-    #        wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
-    #        qa_pairs = []
-    #        # Get batch_size articles starting at debug_index * batch_size
-    #        for i in range(batch_size):
-    #            article_idx = debug_index * batch_size + i
-    #            article = wiki_dataset[article_idx]["text"]
-    #            chunks = [article[i : i + 200] for i in range(0, len(article), 200)]
-    #            if len(chunks) >= 2:
-    #                qa_pairs.append((chunks[0], chunks[1]))
-    #            else:
-    #                raise ValueError(
-    #                    f"Article at index {article_idx} too short to create QA pair"
-    #                )
-    #        return [qa_pairs]  # Return a single batch
-    #    elif use_gsm8k:
-    #        gsm8k_data = load_gsm8k_dataset()
-    #        start_idx = debug_index * batch_size
-    #        if start_idx >= len(gsm8k_data):
-    #            raise ValueError(
-    #                f"Debug index {debug_index} is out of range. Max index is {len(gsm8k_data) // batch_size - 1}"
-    #            )
-    #        qa_pairs = gsm8k_data[start_idx : start_idx + batch_size]
-    #        return [qa_pairs]
-    #    else:
-    #        return [generate_question_answer_batch(batch_size, use_negative)]
     if use_wiki:
         # Load Wikipedia dataset
         wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
@@ -147,9 +118,9 @@ def generate_question_answer_batches(
             article = wiki_dataset[article_idx]["text"]
             chunks = [article[i : i + 400] for i in range(0, len(article), 400)]
 
-            # Create pairs from adjacent chunks
+            # Create pairs with the question being 400 and the answer being 100
             if len(chunks) >= 2:
-                qa_pairs.append((chunks[0], chunks[1]))
+                qa_pairs.append((chunks[0], chunks[1][:100]))
 
             if len(qa_pairs) >= num_batches * batch_size:
                 break
