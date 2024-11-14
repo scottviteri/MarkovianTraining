@@ -656,27 +656,26 @@ def train(
         print("\n")
         print("Batch Index:", batch_index)
 
-        # Update prompts based on dataset type and model
         if model_type == "mistral":
             if use_wiki:
                 prompts = [
-                    f"<s_user> Given this opening text from an article, write a concise summary that would allow someone to predict what comes next, without seeing the rest. Your summary should capture key elements that suggest the likely continuation of the text.\n\nOpening text: {q} </s_assistant>\nSummary:"
+                    f"[INST] Given this opening text from an article, write a concise summary that would allow someone to predict what comes next, without seeing the rest. Your summary should capture key elements that suggest the likely continuation of the text.\n\nOpening text: {q} [/INST]\nSummary:"
                     for q in questions
                 ]
             else:
                 prompts = [
-                    f"<s_user> Produce minimal text which will help you answer this question. Question: {q} </s_assistant>\nReasoning:"
+                    f"[INST] Produce minimal text which will help you answer this question. Question: {q} [/INST]\nReasoning:"
                     for q in questions
                 ]
         else:  # llama
             if use_wiki:
                 prompts = [
-                    f"<s_user> Given this opening text from an article, write a concise summary that would allow someone to predict what comes next, without seeing the rest. Your summary should capture key elements that suggest the likely continuation of the text.\n\nOpening text: {q}<|eot_id|><s_assistant>\nSummary:"
+                    f"<start_header_id>user<|end_header_id|> Given this opening text from an article, write a concise summary that would allow someone to predict what comes next, without seeing the rest. Your summary should capture key elements that suggest the likely continuation of the text.\n\nOpening text: {q}<|eot_id|><start_header_id>assistant<|end_header_id|>\nSummary:"
                     for q in questions
                 ]
             else:
                 prompts = [
-                    f"<s_user> Produce minimal text which will help you answer this question:\nQuestion: {q}<|eot_id|><s_assistant>\nReasoning:"
+                    f"<start_header_id>user<|end_header_id|> Produce minimal text which will help you answer this question:\nQuestion: {q}<|eot_id|><start_header_id>assistant<|end_header_id|>\nReasoning:"
                     for q in questions
                 ]
 
