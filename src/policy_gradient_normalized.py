@@ -117,8 +117,8 @@ def generate_question_answer_batches(
         for article_idx in range(num_batches * batch_size):
             article = wiki_dataset[article_idx]["text"]
             # chunks = [article[i : i + 400] for i in range(0, len(article), 400)]
-            if len(article) >= 1500:
-                qa_pairs.append((article[:1000], article[1000:500]))
+            if len(article) >= 2000:
+                qa_pairs.append((article[:1000], article[1000:2000]))
 
             if len(qa_pairs) >= num_batches * batch_size:
                 break
@@ -210,9 +210,9 @@ def calculate_answer_log_probs(
     # Update full prompts based on dataset type
     if use_wiki:
         full_prompts = [
-            f"Summary: {r}\nAnswer: {a}" for r, a in zip(reasoning_text, answers)
+            f"Helpful Text: {r}\nAnswer: {a}" for r, a in zip(reasoning_text, answers)
         ]
-        partial_prompts = [f"Summary: {r}\nAnswer:" for r in reasoning_text]
+        partial_prompts = [f"Helpful Text: {r}\nAnswer:" for r in reasoning_text]
     else:
         full_prompts = [
             f"Reasoning: {r}\nAnswer: {a}" for r, a in zip(reasoning_text, answers)
@@ -766,7 +766,7 @@ def train(
         # Update printing format based on dataset type
         if use_wiki:
             print("Context:", q)
-            print("Summary:", reasoning_text_first)
+            print("Helpful Text:", reasoning_text_first)
         else:
             print("Question:", q)
             print("Reasoning:", reasoning_text_first)
@@ -787,7 +787,7 @@ def train(
                 "Aggregate loss": loss.item() * gradient_accumulation_steps,
                 "Batch Index": batch_index,
                 "Prev Observation": f"{'Context' if use_wiki else 'Question'}: {q}",
-                "Action": f"{'Summary' if use_wiki else 'Reasoning'}: {reasoning_text_first}",
+                "Action": f"{'Helpful Text' if use_wiki else 'Reasoning'}: {reasoning_text_first}",
                 "Observation": f"Answer: {ans}",
                 "Reasoning Contains Answer": str(ans) in reasoning_text_first,
                 "Avg Log Prob": avg_log_prob,
