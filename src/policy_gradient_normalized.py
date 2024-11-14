@@ -117,7 +117,7 @@ def generate_question_answer_batches(
         for article_idx in range(num_batches * batch_size):
             article = wiki_dataset[article_idx]["text"]
             # chunks = [article[i : i + 400] for i in range(0, len(article), 400)]
-            if len(article) >= 2000:
+            if len(article) >= 1500:
                 qa_pairs.append((article[:1000], article[1000:500]))
 
             if len(qa_pairs) >= num_batches * batch_size:
