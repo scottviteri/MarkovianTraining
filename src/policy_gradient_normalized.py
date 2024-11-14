@@ -657,24 +657,28 @@ def train(
         print("Batch Index:", batch_index)
 
         # Update prompts based on dataset type and model
-        if use_wiki:
-            prompts = [
-                (
-                    f"<|start_header_id|>user<|end_header_id|>Provide a summary that captures key elements suggesting what comes next:\nContext: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nSummary:"
-                    if model_type == "llama"
-                    else f"{q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nSummary:"
-                )
-                for q in questions
-            ]
-        else:
-            prompts = [
-                (
-                    f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer this question:\nQuestion: {q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:"
-                    if model_type == "llama"
-                    else f"{q}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\nReasoning:"
-                )
-                for q in questions
-            ]
+        if model_type == "mistral":
+            if use_wiki:
+                prompts = [
+                    f"<s_user> Given this opening text from an article, write a concise summary that would allow someone to predict what comes next, without seeing the rest. Your summary should capture key elements that suggest the likely continuation of the text.\n\nOpening text: {q} </s_assistant>\nSummary:"
+                    for q in questions
+                ]
+            else:
+                prompts = [
+                    f"<s_user> Produce minimal text which will help you answer this question. Question: {q} </s_assistant>\nReasoning:"
+                    for q in questions
+                ]
+        else:  # llama
+            if use_wiki:
+                prompts = [
+                    f"<s_user> Given this opening text from an article, write a concise summary that would allow someone to predict what comes next, without seeing the rest. Your summary should capture key elements that suggest the likely continuation of the text.\n\nOpening text: {q}<|eot_id|><s_assistant>\nSummary:"
+                    for q in questions
+                ]
+            else:
+                prompts = [
+                    f"<s_user> Produce minimal text which will help you answer this question:\nQuestion: {q}<|eot_id|><s_assistant>\nReasoning:"
+                    for q in questions
+                ]
 
         tokenized_inputs = tokenizer(
             prompts,
