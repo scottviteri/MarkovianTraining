@@ -312,8 +312,8 @@ def calculate_answer_log_probs(
         expected_answer = answers[i].strip()
         if decoded_answer != expected_answer:
             print(f"Answer mismatch at index {i}:")
-            print(f"Decoded:  {decoded_answer}")
-            print(f"Expected: {expected_answer}")
+            # print(f"Decoded:  {decoded_answer}")
+            # print(f"Expected: {expected_answer}")
         # assert decoded_answer == expected_answer, f"Answer mismatch at index {i}"
 
     with torch.no_grad():
