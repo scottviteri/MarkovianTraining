@@ -154,7 +154,10 @@ def generate_question_answer_batches(
             if len(qa_pairs) >= num_batches * batch_size:
                 break
 
-        # Create batches without shuffling
+        # Shuffle the qa_pairs
+        random.shuffle(qa_pairs)
+
+        # Create batches from shuffled pairs
         return [
             qa_pairs[i : i + batch_size] for i in range(0, len(qa_pairs), batch_size)
         ]
