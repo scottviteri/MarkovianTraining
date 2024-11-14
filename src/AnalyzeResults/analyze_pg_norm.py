@@ -44,36 +44,76 @@ def plot_metrics(
                 metrics["Fraction Correct"].append(int(value))
 
     # Determine if this is an EI run
-    use_ei = any("Use EI" in entry and entry["Use EI"] for entry in map(json.loads, lines[1:]))
+    use_ei = any(
+        "Use EI" in entry and entry["Use EI"] for entry in map(json.loads, lines[1:])
+    )
 
     # Define the metrics to plot
     plot_info = [
         ("Aggregate loss", "Aggregate Loss", "Batch", "Loss"),
         ("Grad Norm", "Gradient Norm", "Batch", "Norm"),
-        ("Avg Log Prob", "Average Log Probability", "Batch", "Log Probability", {"ylim": (None, 0)}),
-        ("Reasoning Contains Answer", "Reasoning Contains Answer", "Batch", "Proportion", {"ylim": (0, 1)}),
+        (
+            "Avg Log Prob",
+            "Average Log Probability",
+            "Batch",
+            "Log Probability",
+            {"ylim": (None, 0)},
+        ),
+        (
+            "Reasoning Contains Answer",
+            "Reasoning Contains Answer",
+            "Batch",
+            "Proportion",
+            {"ylim": (0, 1)},
+        ),
     ]
 
     if normalize_loss:
-        plot_info.extend([
-            ("Normalized Reward", "Normalized Reward", "Batch", "Reward"),
-            ("Advantage", "Advantage", "Batch", "Advantage"),
-        ])
+        plot_info.extend(
+            [
+                ("Normalized Reward", "Normalized Reward", "Batch", "Reward"),
+                ("Advantage", "Advantage", "Batch", "Advantage"),
+            ]
+        )
 
     if "PPO Ratio" in metrics:
-        plot_info.extend([
-            ("PPO Ratio", "PPO Ratio", "Batch", "Ratio"),
-            ("PPO Clipped Ratio", "PPO Clipped Ratio", "Batch", "Ratio"),
-        ])
+        plot_info.extend(
+            [
+                ("PPO Ratio", "PPO Ratio", "Batch", "Ratio"),
+                ("PPO Clipped Ratio", "PPO Clipped Ratio", "Batch", "Ratio"),
+            ]
+        )
 
     if use_ei:
-        plot_info.extend([
-            ("Mean Previous Advantage", "Mean Previous Advantage", "Batch", "Advantage"),
-            ("EI Threshold", "EI Threshold", "Batch", "Threshold"),
-        ])
+        plot_info.extend(
+            [
+                (
+                    "Mean Previous Advantage",
+                    "Mean Previous Advantage",
+                    "Batch",
+                    "Advantage",
+                ),
+                ("EI Threshold", "EI Threshold", "Batch", "Threshold"),
+                (
+                    "Fraction Active Samples",
+                    "Fraction of Active Samples",
+                    "Batch",
+                    "Fraction",
+                    {"ylim": (0, 1)},
+                ),
+            ]
+        )
 
     if "Fraction Correct" in metrics:
-        plot_info.append(("Fraction Correct", "Fraction Correct", "Batch", "Fraction", {"ylim": (0, 1)}))
+        plot_info.append(
+            (
+                "Fraction Correct",
+                "Fraction Correct",
+                "Batch",
+                "Fraction",
+                {"ylim": (0, 1)},
+            )
+        )
 
     # Create the figure and axes
     num_plots = len(plot_info)

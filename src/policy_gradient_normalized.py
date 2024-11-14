@@ -469,12 +469,26 @@ def calculate_losses(
         )
         clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
         policy_loss = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
-        policy_loss = policy_loss.mean()
+        # Get number of non-zero advantages
+        num_active = torch.sum(advantage != 0).item()
+        if num_active > 0:
+            policy_loss = (
+                policy_loss.sum() / num_active
+            )  # Average only over active samples
+        else:
+            policy_loss = (
+                policy_loss.sum() * 0.0
+            )  # Return zero loss if no active samples
     elif use_ei or use_pg:
         # Standard Policy Gradient loss
         policy_loss = (
             -unfrozen_avg_log_probs_reasoning_given_question * advantage.detach()
-        ).mean()
+        )
+        num_active = torch.sum(advantage != 0).item()
+        if num_active > 0:
+            policy_loss = policy_loss.sum() / num_active
+        else:
+            policy_loss = policy_loss.sum() * 0.0
         ppo_ratio = None
         clipped_ratio = None
     else:
@@ -482,7 +496,7 @@ def calculate_losses(
 
     total_loss = policy_loss
 
-    return total_loss, policy_loss, ppo_ratio, clipped_ratio
+    return total_loss, policy_loss, ppo_ratio, clipped_ratio, num_active
 
 
 def get_latest_checkpoint_and_log(dataset_type):
@@ -740,22 +754,28 @@ def train(
             dim=1
         )
 
-        total_loss, policy_loss, ppo_ratio, clipped_ratio = calculate_losses(
-            unfrozen_avg_log_probs_reasoning_given_question,
-            frozen_avg_log_probs_reasoning_given_question,
-            advantage,
-            hyperparameters,
+        total_loss, policy_loss, ppo_ratio, clipped_ratio, num_active = (
+            calculate_losses(
+                unfrozen_avg_log_probs_reasoning_given_question,
+                frozen_avg_log_probs_reasoning_given_question,
+                advantage,
+                hyperparameters,
+            )
         )
-        loss = total_loss / gradient_accumulation_steps
 
-        loss.backward()
+        # Only accumulate gradients if we have active samples
+        if num_active > 0:
+            loss = total_loss / gradient_accumulation_steps
+            loss.backward()
 
-        grad_norm = get_grad_norm(model.parameters())
-        clip_grad_norm_(model.parameters(), 1.0)
+            grad_norm = get_grad_norm(model.parameters())
+            clip_grad_norm_(model.parameters(), 1.0)
+        else:
+            loss = torch.tensor(0.0)
+            grad_norm = 0.0
 
-        if (batch_index + 1) % gradient_accumulation_steps == 0:
-            model_optimizer.step()
-            model_optimizer.zero_grad()
+        # Update logging to include fraction of active samples
+        fraction_active = num_active / batch_size
 
         q = questions[0]
         ans = answers[0]
@@ -811,6 +831,9 @@ def train(
                     if hyperparameters["use_ei"]
                     else None
                 ),
+                "Fraction Active Samples": fraction_active,
+                "Num Active Samples": num_active,
+                "Batch Size": batch_size,
             }.items()
         }
 

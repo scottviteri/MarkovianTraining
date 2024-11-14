@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Array of hosts (top 4 from config)
-hosts=("Wiki" "LlamaCtxt200" "Llama30add" "4mst")
+hosts=("Wiki" "LlamaCtxt200" "Llama30add" "4mst" "5ei_wiki" "6pg_wiki" "7ei" "8pg")
 
 # Check if arguments were provided
 if [ $# -eq 0 ]; then
