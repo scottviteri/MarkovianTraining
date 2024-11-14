@@ -18,6 +18,25 @@ import glob
 previous_normalized_rewards = []
 previous_advantages = []
 
+# Add at the top of the file with other imports
+class Colors:
+    """ANSI color codes"""
+    BLUE = "\033[94m"
+    GREEN = "\033[92m"
+    RED = "\033[91m"
+    YELLOW = "\033[93m"
+    BOLD = "\033[1m"
+    UNDERLINE = "\033[4m"
+    END = "\033[0m"
+
+def print_batch_delimiter():
+    """Print a visually distinct line between batches"""
+    print("\n" + "="*80)
+
+def colored_print(label: str, text: str, color: str = Colors.BLUE):
+    """Print text with colored label, adding newline before and keeping text raw."""
+    print(f"\n{color}{label}{Colors.END}")
+    print(repr(text))
 
 def load_model(model_type="mistral"):
     """Load either Mistral or Llama 3.1 model based on parameter."""
@@ -65,10 +84,11 @@ def calculate_threshold(previous_advantages):
     return float("inf")
 
 
-def generate_question_answer_batch(batch_size: int, use_negative: bool = False):
+def generate_question_answer_batch(batch_size: int, task_type: str):
+    """Generate a batch of arithmetic questions and answers."""
     qa_batch = []
     for _ in range(batch_size):
-        if use_negative:
+        if task_type == 'arithmetic-negative':
             # Generate numbers between -99 and 99, excluding 0
             numbers = [random.randint(-99, 99) for _ in range(15)]
             numbers = [n for n in numbers if n != 0]  # Remove any zeros
@@ -83,8 +103,7 @@ def generate_question_answer_batch(batch_size: int, use_negative: bool = False):
 
             question = " + ".join(formatted_numbers)
             answer = str(sum(numbers))
-        else:
-            # Original positive-only logic
+        else:  # regular arithmetic
             numbers = [random.randint(1, 99) for _ in range(15)]
             question = " + ".join(map(str, numbers))
             answer = str(sum(numbers))
@@ -100,37 +119,145 @@ def load_gsm8k_dataset():
     return list(zip(questions, answers))
 
 
+def get_model_specific_tokens(model_type):
+    """Return model-specific tokens for prompt construction."""
+    if model_type == "mistral":
+        return {
+            "inst_start": "]",
+            "inst_end": "]",
+            "user_start": "",
+            "user_end": "",
+            "assistant_start": "",
+            "assistant_end": "",
+        }
+    else:  # llama
+        return {
+            "inst_start": "<start_header_id>user<|end_header_id|>",
+            "inst_end": "<|eot_id|><start_header_id>assistant<|end_header_id|>",
+            "user_start": "",
+            "user_end": "",
+            "assistant_start": "",
+            "assistant_end": "",
+        }
+
+
+def construct_prompt(task_type, question, model_type, hyperparameters):
+    """Construct prompt based on task type and model."""
+    tokens = get_model_specific_tokens(model_type)
+    
+    if task_type == "wiki_compression":
+        base_prompt = (
+            f"The following text is the {hyperparameters['target_length']} tokens you need to reconstruct. "
+            f"Write {hyperparameters['cot_length']} tokens that will help you reconstruct it. "
+            f"Be concise and focus on key information!\n\nText to reconstruct: {question}"
+        )
+    elif task_type == "wiki_continuation":
+        # Preserve old wiki prompt
+        base_prompt = (
+            f"Given this opening text from an article, write whatever "
+            f"{hyperparameters['cot_length']} tokens you suspect might help you "
+            f"predict the next {hyperparameters['target_length']} tokens. Be creative!\n\nOpening text: {question}"
+        )
+    else:  # arithmetic/gsm8k
+        base_prompt = f"Produce minimal text which will help you answer this question. Question: {question}"
+
+    # Construct full prompt with model-specific tokens
+    if model_type == "mistral":
+        return f"{tokens['inst_start']} {base_prompt} {tokens['inst_end']}\nReasoning:"
+    else:  # llama
+        return f"{tokens['inst_start']} {base_prompt} {tokens['inst_end']}\nReasoning:"
+
+
+def get_text_with_token_length(text: str, desired_tokens: int, tokenizer) -> tuple[str, int]:
+    """
+    Binary search to find text that tokenizes to desired number of tokens.
+    Returns (text_chunk, actual_token_count) or (None, 0) if text is too short.
+    """
+    # Initial guess based on 4 chars per token
+    chars = desired_tokens * 4
+    if len(text) < chars:
+        return None, 0
+        
+    # Binary search for correct length
+    left, right = 1, len(text)
+    best_text = None
+    best_count = 0
+    
+    while left <= right:
+        mid = (left + right) // 2
+        chunk = text[:mid]
+        tokens = tokenizer(chunk, return_tensors="pt")
+        token_count = len(tokens.input_ids[0])
+        
+        if token_count == desired_tokens:
+            return chunk, token_count
+        elif token_count < desired_tokens:
+            left = mid + 1
+            # Save this as best if it's closer than previous best
+            if abs(token_count - desired_tokens) < abs(best_count - desired_tokens):
+                best_text = chunk
+                best_count = token_count
+        else:
+            right = mid - 1
+            # Save this as best if it's closer than previous best
+            if abs(token_count - desired_tokens) < abs(best_count - desired_tokens):
+                best_text = chunk
+                best_count = token_count
+    
+    return best_text, best_count
+
 def generate_question_answer_batches(
     num_batches: int,
     batch_size: int,
-    use_gsm8k: bool,
-    use_negative: bool = False,
-    use_wiki: bool = False,
-    debug_index: int = None,
+    task_type: str,
+    tokenizer,  # Need to pass tokenizer
+    hyperparameters: dict = None,
 ):
     """Generate batches of Q&A pairs from different sources."""
-    if use_wiki:
+    if task_type in ['wiki_compression', 'wiki_continuation']:
         # Load Wikipedia dataset
         wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
-        # Create chunks and pairs in deterministic order
         qa_pairs = []
-        for article_idx in range(num_batches * batch_size):
-            article = wiki_dataset[article_idx]["text"]
-            # chunks = [article[i : i + 400] for i in range(0, len(article), 400)]
-            if len(article) >= 2000:
-                qa_pairs.append((article[:1000], article[1000:2000]))
-
-            if len(qa_pairs) >= num_batches * batch_size:
+        
+        question_tokens = hyperparameters.get('question_length', 500)
+        target_tokens = hyperparameters.get('target_length', 500)
+        
+        article_idx = 0
+        while len(qa_pairs) < num_batches * batch_size:
+            if article_idx >= len(wiki_dataset):
+                print(f"Warning: Reached end of Wikipedia dataset after {len(qa_pairs)} examples")
                 break
+                
+            article = wiki_dataset[article_idx]["text"]
+            article_idx += 1
+            
+            if task_type == 'wiki_compression':
+                # For compression task, get text of exact token length
+                text_chunk, actual_tokens = get_text_with_token_length(
+                    article, target_tokens, tokenizer
+                )
+                if text_chunk is not None:
+                    qa_pairs.append((text_chunk, text_chunk))
+                    
+            else:  # wiki_continuation
+                # Get question and answer chunks
+                q_chunk, q_tokens = get_text_with_token_length(
+                    article, question_tokens, tokenizer
+                )
+                if q_chunk is None:
+                    continue
+                    
+                remaining_text = article[len(q_chunk):]
+                a_chunk, a_tokens = get_text_with_token_length(
+                    remaining_text, target_tokens, tokenizer
+                )
+                if a_chunk is not None:
+                    qa_pairs.append((q_chunk, a_chunk))
 
-        # Shuffle the qa_pairs
         random.shuffle(qa_pairs)
-
-        # Create batches from shuffled pairs
-        return [
-            qa_pairs[i : i + batch_size] for i in range(0, len(qa_pairs), batch_size)
-        ]
-    elif use_gsm8k:
+        return [qa_pairs[i:i + batch_size] for i in range(0, len(qa_pairs), batch_size)]
+    
+    elif task_type == 'gsm8k':
         gsm8k_data = load_gsm8k_dataset()
         total_samples = len(gsm8k_data)
         if num_batches * batch_size > total_samples:
@@ -145,9 +272,9 @@ def generate_question_answer_batches(
                 shuffled_data[i : i + batch_size]
                 for i in range(0, len(shuffled_data), batch_size)
             ]
-    else:
+    else:  # arithmetic or arithmetic-negative
         return [
-            generate_question_answer_batch(batch_size, use_negative)
+            generate_question_answer_batch(batch_size, task_type)
             for _ in range(num_batches)
         ]
 
@@ -182,33 +309,14 @@ def calculate_answer_log_probs(
     device,
     reasoning_tokens,
     answers,
-    use_gsm8k,
+    task_type,
     model_type,
-    use_wiki,
-    debug_index=None,
 ):
-    """
-    Calculate the log probabilities of the answers given the reasoning.
-
-    Args:
-        model: The language model to use for calculations.
-        tokenizer: The tokenizer associated with the model.
-        device: The device (CPU or GPU) to perform calculations on.
-        reasoning_tokens (torch.Tensor): Tokenized reasoning text, shape [batch_size, seq_len].
-        answers (List[str]): A list of answer strings, one for each item in the batch.
-        use_gsm8k (bool): Whether to use GSM8K-specific processing.
-        model_type (str): The type of model being used ('mistral' or 'llama').
-        use_wiki (bool): Whether using Wikipedia dataset.
-        debug_index (int, optional): If set, enables debug output for this index.
-
-    Returns:
-        torch.Tensor: The average log probabilities of the answers, shape [batch_size].
-        List[str] or None: Extracted generated answers if use_gsm8k is True, otherwise None.
-    """
+    """Calculate the log probabilities of the answers given the reasoning."""
     reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
 
     # Update full prompts based on dataset type
-    if use_wiki:
+    if task_type in ['wiki_compression', 'wiki_continuation']:
         full_prompts = [
             f"Helpful Text: {r}\nAnswer: {a}" for r, a in zip(reasoning_text, answers)
         ]
@@ -226,7 +334,7 @@ def calculate_answer_log_probs(
     ).to(device)
 
     extracted_generated_answers = None
-    if use_gsm8k:
+    if task_type == 'gsm8k':
         tokenized_partial_prompts = tokenizer(
             partial_prompts, padding=True, return_tensors="pt"
         ).to(device)
@@ -280,7 +388,7 @@ def calculate_answer_log_probs(
         ).strip()
         expected_answer = answers[i].strip()
         if decoded_answer != expected_answer:
-            print(f"Answer mismatch at index {i}:")
+            colored_print("Answer mismatch at index", str(i), Colors.RED)
             # print(f"Decoded:  {decoded_answer}")
             # print(f"Expected: {expected_answer}")
         # assert decoded_answer == expected_answer, f"Answer mismatch at index {i}"
@@ -299,18 +407,6 @@ def calculate_answer_log_probs(
         .squeeze(-1)
         for i, start in enumerate(answer_start_positions)
     ]
-
-    if debug_index is not None:
-        # Debug output for token-by-token probabilities
-        tokens = [
-            tokenizer.decode([x])
-            for x in tokenized_full_prompts.input_ids[
-                0, answer_start_positions[0] :
-            ].tolist()
-        ]
-        probs = answer_log_probs[0].tolist()
-        print("\nToken-by-token log probabilities:")
-        print([(tokens[i], probs[i]) for i in range(len(tokens))])
 
     avg_log_probs = list(map(lambda x: x.mean(), answer_log_probs))
     # print("Log Probs:", answer_log_probs[0])
@@ -340,10 +436,8 @@ def calculate_advantages(
     baseline_outputs,
     answers,
     hyperparameters,
-    use_gsm8k,
+    task_type,
     model_type,
-    use_wiki,
-    debug_index=None,
 ):
     global previous_normalized_rewards, previous_advantages
 
@@ -360,10 +454,8 @@ def calculate_advantages(
             device,
             reasoning_tokens,
             answers,
-            use_gsm8k,
+            task_type,
             model_type,
-            use_wiki,
-            debug_index,
         )
     )
 
@@ -377,9 +469,8 @@ def calculate_advantages(
             device,
             baseline_reasoning_tokens,
             answers,
-            use_gsm8k,
+            task_type,
             model_type,
-            use_wiki,
         )[0]
         normalized_reward = (
             log_prob_ans_given_reasoning - log_prob_ans_given_default_reasoning
@@ -518,75 +609,140 @@ def tensor_to_python(value):
     return value
 
 
+def get_default_hyperparameters(task_type: str, model_type: str, use_ppo: bool, use_ei: bool, use_pg: bool) -> dict:
+    """Get default hyperparameters based on task and model configuration."""
+    defaults = {
+        "batch_size": {
+            "gsm8k": 10,
+            "default": 6
+        },
+        "gradient_accumulation_steps": {
+            "gsm8k": 32,
+            "default": 8
+        },
+        "cot_length": {
+            "llama": {
+                "gsm8k": 60,
+                "wiki_compression": 100,
+                "wiki_continuation": 100,
+                "default": 150
+            },
+            "mistral": {
+                "gsm8k": 80,
+                "default": 400
+            }
+        }
+    }
+
+    # Get task-specific or default values
+    batch_size = defaults["batch_size"].get(task_type, defaults["batch_size"]["default"])
+    grad_steps = defaults["gradient_accumulation_steps"].get(task_type, 
+                                                           defaults["gradient_accumulation_steps"]["default"])
+    
+    # Get model and task specific CoT length
+    model_defaults = defaults["cot_length"][model_type]
+    cot_length = model_defaults.get(task_type, model_defaults["default"])
+
+    return {
+        "model_learning_rate": 0.0001,
+        "batch_size": batch_size,
+        "gradient_accumulation_steps": grad_steps,
+        "num_batches": 10000,
+        "cot_length": cot_length,
+        "question_length": 500,
+        "target_length": 500,
+        "normalize_loss": True,
+        # PPO specific parameters
+        "ppo_epsilon": 0.2 if use_ppo else None,
+        "r": 1.0 if use_ppo else None,
+        # Training method flags
+        "use_ppo": use_ppo,
+        "use_ei": use_ei,
+        "use_pg": use_pg,
+    }
+
+def print_debug_info(task_type, q, reasoning_text_first, ans, avg_log_prob, extracted_generated_answers=None):
+    """Print debug information with consistent coloring and formatting."""
+    print_batch_delimiter()
+    
+    if task_type == 'wiki_compression':
+        colored_print("Full Text", q, Colors.BLUE)
+        colored_print("Compression", reasoning_text_first, Colors.YELLOW)
+    elif task_type == 'wiki_continuation':
+        colored_print("Context", q, Colors.BLUE)
+        colored_print("Helpful Text", reasoning_text_first, Colors.YELLOW)
+    else:  # arithmetic or gsm8k
+        colored_print("Question", q, Colors.BLUE)
+        colored_print("Reasoning", reasoning_text_first, Colors.YELLOW)
+    
+    colored_print("Answer", ans, Colors.GREEN)
+    colored_print("Avg Log Prob", str(avg_log_prob), Colors.BOLD)
+    
+    if extracted_generated_answers is not None:
+        colored_print("Generated Answer", repr(extracted_generated_answers[0]), Colors.RED)
+
 def train(
-    use_gsm8k: bool,
+    task_type: str,
     resume: bool,
     use_ei: bool,
     use_ppo: bool,
     use_pg: bool,
     model_type: str,
-    use_negative: bool,
-    use_wiki: bool = False,
-    debug_index: int = None,
+    hyperparameters: dict = None,
 ):
+    """Train the model with the specified configuration."""
     global previous_normalized_rewards, previous_advantages
-
-    # Update dataset type string
-    dataset_type = "Wikipedia" if use_wiki else "GSM8K" if use_gsm8k else "Arithmetic"
+    
+    # Update dataset type for logging
+    dataset_type = task_type.replace('_', '-').title()
+    
+    # Initialize paths
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_path = f"checkpoints/{dataset_type}/{timestamp}"
+    os.makedirs(base_path, exist_ok=True)
+    model_save_path = f"{base_path}/model"
+    log_file = f"{base_path}/log.jsonl"
 
     if resume:
         model_save_path, log_file = get_latest_checkpoint_and_log(dataset_type)
-        if model_save_path is None or log_file is None:
-            print("No checkpoint or log file found. Starting from scratch.")
-            resume = False
-        else:
-            print(f"Resuming from checkpoint: {model_save_path}")
-            print(f"Using log file: {log_file}")
-            last_batch_index, hyperparameters = load_training_state(log_file)
-            start_batch = last_batch_index + 1
-
-            # Initialize previous_normalized_rewards and previous_advantages from the log file
-            previous_normalized_rewards, previous_advantages = (
-                load_previous_rewards_and_advantages(log_file)
-            )
-            print(
-                f"Loaded {len(previous_normalized_rewards)} previous rewards and advantages"
-            )
-
-    if not resume:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file = f"src/AnalyzeResults/PolicyGradientNormalized_{dataset_type}_{timestamp}.log"
-        model_save_path = (
-            f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
-        )
+        with open(log_file, "r") as f:
+            lines = f.readlines()
+            hyperparameters = json.loads(lines[0])["hyperparameters"]
+            
+            # Repopulate previous values from log
+            previous_normalized_rewards = []
+            previous_advantages = []
+            for line in lines[1:]:  # Skip hyperparameters line
+                log_entry = json.loads(line)
+                if "normalized_rewards" in log_entry:
+                    previous_normalized_rewards.extend(log_entry["normalized_rewards"])
+                if "advantages" in log_entry:
+                    previous_advantages.extend(log_entry["advantages"])
+            
+            start_batch = len(lines) - 1
+            print(f"Resuming from batch {start_batch}")
+            print(f"Loaded {len(previous_normalized_rewards)} previous rewards")
+            print(f"Loaded {len(previous_advantages)} previous advantages")
+    else:
         start_batch = 0
+        previous_normalized_rewards = []
+        previous_advantages = []
+        # Get default hyperparameters
+        defaults = get_default_hyperparameters(
+            task_type=task_type,
+            model_type=model_type,
+            use_ppo=use_ppo,
+            use_ei=use_ei,
+            use_pg=use_pg
+        )
+        
+        # Override defaults with any provided hyperparameters
+        hyperparameters = {**defaults, **(hyperparameters or {})}
 
-        # Set cot_length based on model type and dataset
-        if model_type == "mistral":
-            cot_length = 80 if use_gsm8k else 400  # 400 for arithmetic, 80 for GSM8K
-        else:  # llama
-            if use_wiki:
-                cot_length = 400
-            else:
-                cot_length = (
-                    60 if use_gsm8k else 150
-                )  # 150 for arithmetic, 60 for GSM8K
-
-        # Initialize hyperparameters
-        hyperparameters = {
-            "model_learning_rate": 0.0001,
-            "batch_size": 10 if use_gsm8k else 6,
-            "gradient_accumulation_steps": 32 if use_gsm8k else 8,
-            "num_batches": 10000,
-            "normalize_loss": True,
-            "use_ppo": use_ppo,
-            "ppo_epsilon": 0.2 if use_ppo else None,
-            "r": 1.0 if use_ppo else None,
-            "use_ei": use_ei,
-            "use_pg": use_pg,
-            "use_ppo": use_ppo,
-            "cot_length": cot_length,
-        }
+        # Initialize logging
+        with open(log_file, "w") as f:
+            json.dump({"hyperparameters": hyperparameters}, f)
+            f.write("\n")
 
     model, frozen_model, tokenizer, device = load_model(model_type)
 
@@ -604,48 +760,31 @@ def train(
     num_batches = hyperparameters["num_batches"]
     qa_batches = list(
         generate_question_answer_batches(
-            num_batches=1 if debug_index is not None else num_batches,
-            batch_size=batch_size,
-            use_gsm8k=use_gsm8k,
-            use_negative=use_negative,
-            use_wiki=use_wiki,
-            debug_index=debug_index,
+            num_batches=hyperparameters["num_batches"],
+            batch_size=hyperparameters["batch_size"],
+            task_type=task_type,
+            tokenizer=tokenizer,  # Pass tokenizer
+            hyperparameters=hyperparameters,
         )
     )
-
-    if not resume:
-        with open(log_file, "w") as f:
-            json.dump(hyperparameters, f)
-            f.write("\n")
 
     model_optimizer.zero_grad()
 
     for batch_index, qa_batch in enumerate(qa_batches[start_batch:], start=start_batch):
+        print_batch_delimiter()
+        colored_print("Batch:", str(batch_index), Colors.BOLD)
+        
         questions, answers = zip(*qa_batch)
-        print("\n")
-        print("Batch Index:", batch_index)
-        if model_type == "mistral":
-            if use_wiki:
-                prompts = [
-                    f"[INST] Given this opening text from an article, write whatever {hyperparameters['cot_length']} tokens you suspect might help you predict the next 1000 tokens. Be creative!\n\nOpening text: {q} [/INST]\nHelpful Text:"
-                    for q in questions
-                ]
-            else:
-                prompts = [
-                    f"[INST] Produce minimal text which will help you answer this question. Question: {q} [/INST]\nReasoning:"
-                    for q in questions
-                ]
-        else:  # llama
-            if use_wiki:
-                prompts = [
-                    f"<start_header_id>user<|end_header_id|> Given this opening text from an article, write whatever {hyperparameters['cot_length']} tokens you suspect might help you predict the next 1000 tokens. Be creative!\n\nOpening text: {q}<|eot_id|><start_header_id>assistant<|end_header_id|>\nHelpful Text:"
-                    for q in questions
-                ]
-            else:
-                prompts = [
-                    f"<start_header_id>user<|end_header_id|> Produce minimal text which will help you answer this question:\nQuestion: {q}<|eot_id|><start_header_id>assistant<|end_header_id|>\nReasoning:"
-                    for q in questions
-                ]
+        prompts = [
+            construct_prompt(
+                task_type,
+                q,
+                model_type,
+                hyperparameters
+            )
+            for q in questions
+        ]
+
         tokenized_inputs = tokenizer(
             prompts,
             padding=True,
@@ -689,10 +828,8 @@ def train(
             baseline_outputs,
             answers,
             hyperparameters,
-            use_gsm8k,
+            task_type,
             model_type,
-            use_wiki,
-            debug_index,
         )
 
         full_attention_mask = torch.cat(
@@ -763,16 +900,7 @@ def train(
         )
         advantage_value = advantage[0].item()
 
-        # Update printing format based on dataset type
-        if use_wiki:
-            print("Context:", q)
-            print("Helpful Text:", reasoning_text_first)
-        else:
-            print("Question:", q)
-            print("Reasoning:", reasoning_text_first)
-        print("Answer:", ans, "Avg Log Prob:", avg_log_prob)
-        if extracted_generated_answers is not None:
-            print("Generated Answer:", extracted_generated_answers[0])
+        print_debug_info(task_type, q, reasoning_text_first, ans, avg_log_prob, extracted_generated_answers)
 
         if previous_advantages:
             mean_prev_advantage = np.mean(previous_advantages)
@@ -786,8 +914,8 @@ def train(
             for k, v in {
                 "Aggregate loss": loss.item() * gradient_accumulation_steps,
                 "Batch Index": batch_index,
-                "Prev Observation": f"{'Context' if use_wiki else 'Question'}: {q}",
-                "Action": f"{'Helpful Text' if use_wiki else 'Reasoning'}: {reasoning_text_first}",
+                "Prev Observation": f"{'Context' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Question'}: {q}",
+                "Action": f"{'Helpful Text' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Reasoning'}: {reasoning_text_first}",
                 "Observation": f"Answer: {ans}",
                 "Reasoning Contains Answer": str(ans) in reasoning_text_first,
                 "Avg Log Prob": avg_log_prob,
@@ -821,7 +949,7 @@ def train(
                 }
             )
 
-        if use_gsm8k and extracted_generated_answers is not None:
+        if task_type == 'gsm8k' and extracted_generated_answers is not None:
             true_answers = [extract_answer(answer) for answer in answers]
             correct_count = sum(
                 gen_ans == true_ans
@@ -855,56 +983,61 @@ def train(
 
 
 def main(
-    use_gsm8k: bool,
+    task_type: str,
     resume: bool,
-    debug_index: int = None,
     use_ei: bool = False,
     use_ppo: bool = False,
     use_pg: bool = False,
-    model_type: str = "mistral",
-    use_negative: bool = False,
-    use_wiki: bool = False,
+    model_type: str = "llama",
+    cot_length: int = None,
+    batch_size: int = None,
+    gradient_accumulation_steps: int = None,
+    normalize_loss: bool = None,
 ):
-    # Update dataset type
-    dataset_type = "Wikipedia" if use_wiki else "GSM8K" if use_gsm8k else "Arithmetic"
-
-    if debug_index is not None:
-        print(f"Running in debug mode with batch index {debug_index}")
+    """Main entry point with command-line parameter handling."""
+    hyperparameters = {}
+    if cot_length is not None:
+        hyperparameters["cot_length"] = cot_length
+    if batch_size is not None:
+        hyperparameters["batch_size"] = batch_size
+    if gradient_accumulation_steps is not None:
+        hyperparameters["gradient_accumulation_steps"] = gradient_accumulation_steps
+    if normalize_loss is not None:
+        hyperparameters["normalize_loss"] = normalize_loss
 
     train(
-        use_gsm8k,
-        resume,
-        use_ei,
-        use_ppo,
-        use_pg,
-        model_type,
-        use_negative,
-        use_wiki,
-        debug_index,
+        task_type=task_type,
+        resume=resume,
+        use_ei=use_ei,
+        use_ppo=use_ppo,
+        use_pg=use_pg,
+        model_type=model_type,
+        hyperparameters=hyperparameters if hyperparameters else None,
     )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Train the model on arithmetic, GSM8K, or Wikipedia dataset."
+        description="Train the model on various tasks."
     )
     parser.add_argument(
-        "--use_gsm8k",
-        action="store_true",
-        default=False,
-        help="Use GSM8K dataset instead of arithmetic questions",
+        "--task_type",
+        type=str,
+        choices=[
+            'arithmetic',
+            'arithmetic-negative',
+            'gsm8k',
+            'wiki_compression',
+            'wiki_continuation'
+        ],
+        default='arithmetic',
+        help="Type of task to train on",
     )
     parser.add_argument(
         "--resume",
         action="store_true",
         default=False,
         help="Resume training from the last checkpoint",
-    )
-    parser.add_argument(
-        "--debug_index",
-        type=int,
-        default=None,
-        help="Index of the datapoint to debug (GSM8K only, random for arithmetic)",
     )
     parser.add_argument(
         "--use_ei",
@@ -927,21 +1060,34 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_type",
         type=str,
-        choices=["mistral", "llama"],
-        default="mistral",
-        help="Choose between Mistral and Llama 3.1 models",
+        choices=["llama", "mistral"],
+        default="llama",
+        help="Choose between Llama and Mistral models",
+    )
+    # Hyperparameter overrides
+    parser.add_argument(
+        "--cot_length",
+        type=int,
+        default=None,
+        help="Length of chain-of-thought reasoning",
     )
     parser.add_argument(
-        "--use_negative",
-        action="store_true",
-        default=False,
-        help="Include negative numbers in arithmetic questions",
+        "--batch_size",
+        type=int,
+        default=None,
+        help="Batch size for training",
     )
     parser.add_argument(
-        "--use_wiki",
-        action="store_true",
-        default=False,
-        help="Use Wikipedia dataset for training",
+        "--gradient_accumulation_steps",
+        type=int,
+        default=None,
+        help="Number of gradient accumulation steps",
+    )
+    parser.add_argument(
+        "--normalize_loss",
+        type=bool,
+        default=None,
+        help="Whether to normalize the loss (default: True)",
     )
     args = parser.parse_args()
 
@@ -951,13 +1097,14 @@ if __name__ == "__main__":
         )
 
     main(
-        use_gsm8k=args.use_gsm8k,
+        task_type=args.task_type,
         resume=args.resume,
-        debug_index=args.debug_index,
         use_ei=args.use_ei,
         use_ppo=args.use_ppo,
         use_pg=args.use_pg,
         model_type=args.model_type,
-        use_negative=args.use_negative,
-        use_wiki=args.use_wiki,
+        cot_length=args.cot_length,
+        batch_size=args.batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        normalize_loss=args.normalize_loss,
     )

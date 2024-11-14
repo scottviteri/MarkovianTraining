@@ -23,48 +23,49 @@ pytest
 
 ### 1. Policy Gradient Main (`src/policy_gradient_normalized.py`)
 #### Model Selection
-The script supports both Mistral and Llama models. You can specify the model using the `--model_type` flag:
+The script supports both Llama (default) and Mistral models. You can specify the model using the `--model_type` flag:
 
 ```bash
-# Using Mistral (default):
-python src/policy_gradient_normalized.py --use_ei --use_pg --model_type mistral
+# Using Llama (default):
+python src/policy_gradient_normalized.py --task_type arithmetic --use_pg
 
-# Using Llama:
-python src/policy_gradient_normalized.py --use_ei --use_pg --model_type llama
+# Using Mistral:
+python src/policy_gradient_normalized.py --task_type arithmetic --use_pg --model_type mistral
 ```
 
-#### Arithmetic Training
-This script implements the main training loop for policy gradient methods.
+#### Task Types
+The script supports several different tasks:
 
-Usage:
+```bash
+# Basic Arithmetic:
+python src/policy_gradient_normalized.py --task_type arithmetic --use_pg
+
+# Arithmetic with Negative Numbers:
+python src/policy_gradient_normalized.py --task_type arithmetic-negative --use_pg
+
+# GSM8K Math Problems:
+python src/policy_gradient_normalized.py --task_type gsm8k --use_pg
+
+# Wikipedia Text Compression:
+python src/policy_gradient_normalized.py --task_type wiki_compression --use_pg
+
+# Wikipedia Text Continuation:
+python src/policy_gradient_normalized.py --task_type wiki_continuation --use_pg
 ```
+
+#### Training Methods
+For any task type, you can use different training methods:
+
+```bash
 # Policy Gradient:
-python src/policy_gradient_normalized.py --use_ei --use_pg
+python src/policy_gradient_normalized.py --task_type <task> --use_pg
 
 # Proximal Policy Optimization:
-python src/policy_gradient_normalized.py --use_ei --use_ppo
+python src/policy_gradient_normalized.py --task_type <task> --use_ppo
 
 # Expert Iteration:
-python src/policy_gradient_normalized.py --use_ei
+python src/policy_gradient_normalized.py --task_type <task> --use_ei
 ```
-
-#### GSM8K Training
-
-To train the model on the GSM8K dataset using Proximal Policy Optimization (PPO), run the following command:
-
-```
-python src/policy_gradient_normalized.py --use_gsm8k --use_ppo
-```
-
-To reproduce the GSM8K results using Proximal Policy Optimization (PPO) with Expert Iteration (EI), run:
-
-```
-python src/policy_gradient_normalized.py --use_gsm8k --use_ei --use_ppo
-```
-
-This command will train a model using PPO with EI on the GSM8K dataset and evaluate its performance.
-
-Note: In the run that achieved 35.71% accuracy (as plotted in the appendix of the paper), we set the "r" hyperparameter to None in the `policy_gradient_normalized.py` script. However, we suspect this setting is unnecessary to achieve similar results.
 
 #### GSM8K Evaluation (`src/AnalyzeResults/eval_gsm8k.py`)
 
@@ -72,14 +73,12 @@ Evaluates the trained model on the GSM8K test set.
 
 Usage:
 ```bash
-# Using Mistral (default):
+# Using Llama (default):
+python src/AnalyzeResults/eval_gsm8k.py --model_path <path_to_model> --num_samples <number_of_samples> --batch_size <batch_size>
+
+# Using Mistral:
 python src/AnalyzeResults/eval_gsm8k.py --model_path <path_to_model> --num_samples <number_of_samples> --batch_size <batch_size> --model_type mistral
-
-# Using Llama:
-python src/AnalyzeResults/eval_gsm8k.py --model_path <path_to_model> --num_samples <number_of_samples> --batch_size <batch_size> --model_type llama
 ```
-
-This script is designed to evaluate a model that has been trained using the `--use_gsm8k` flag in `policy_gradient_normalized.py`. It uses saved model weights (by default in SavedModels/) to perform evaluation on the GSM8K test set.
 
 ### 2. CoT Answer Accuracy Evaluation (`src/eval_cot_answer_accuracy.py`)
 
