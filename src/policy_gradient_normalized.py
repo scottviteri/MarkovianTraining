@@ -606,7 +606,7 @@ def train(
         # Initialize hyperparameters
         hyperparameters = {
             "model_learning_rate": 0.0001,
-            "batch_size": 10 if use_gsm8k else 6,
+            "batch_size": 8 if use_wiki else (10 if use_gsm8k else 6),
             "gradient_accumulation_steps": 32 if use_gsm8k else 8,
             "num_batches": 10000,
             "normalize_loss": True,
