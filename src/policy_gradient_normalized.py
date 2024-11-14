@@ -24,7 +24,7 @@ def load_model(model_type="mistral"):
     if model_type == "mistral":
         model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     elif model_type == "llama":
-        model_name = "meta-llama/Llama-3.1-8B-Instruct"  # Using 8B version
+        model_name = "meta-llama/Llama-3.2-3B-Instruct"  # Using 8B version
     else:
         raise ValueError("model_type must be either 'mistral' or 'llama'")
 
@@ -116,11 +116,9 @@ def generate_question_answer_batches(
         qa_pairs = []
         for article_idx in range(num_batches * batch_size):
             article = wiki_dataset[article_idx]["text"]
-            chunks = [article[i : i + 400] for i in range(0, len(article), 400)]
-
-            # Create pairs with the question being 400 and the answer being 100
-            if len(chunks) >= 2:
-                qa_pairs.append((chunks[0], chunks[1][:100]))
+            # chunks = [article[i : i + 400] for i in range(0, len(article), 400)]
+            if len(article) >= 1400:
+                qa_pairs.append((article[:1000], article[1000:1400]))
 
             if len(qa_pairs) >= num_batches * batch_size:
                 break
@@ -568,7 +566,7 @@ def train(
             cot_length = 80 if use_gsm8k else 400  # 400 for arithmetic, 80 for GSM8K
         else:  # llama
             if use_wiki:
-                cot_length = 150
+                cot_length = 400
             else:
                 cot_length = (
                     60 if use_gsm8k else 150
