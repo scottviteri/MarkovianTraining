@@ -627,7 +627,7 @@ def train(
         if model_type == "mistral":
             if use_wiki:
                 prompts = [
-                    f"[INST] Given this opening text from an article, write whatever {hyperparameters['cot_length']} tokens you suspect might help you predict the next 500 tokens. Be creative!\n\nOpening text: {q} [/INST]\nHelpful Text:"
+                    f"[INST] Given this opening text from an article, write whatever {hyperparameters['cot_length']} tokens you suspect might help you predict the next 1000 tokens. Be creative!\n\nOpening text: {q} [/INST]\nHelpful Text:"
                     for q in questions
                 ]
             else:
@@ -638,7 +638,7 @@ def train(
         else:  # llama
             if use_wiki:
                 prompts = [
-                    f"<start_header_id>user<|end_header_id|> Given this opening text from an article, write whatever {hyperparameters['cot_length']} tokens you suspect might help you predict the next 500 tokens. Be creative!\n\nOpening text: {q}<|eot_id|><start_header_id>assistant<|end_header_id|>\nHelpful Text:"
+                    f"<start_header_id>user<|end_header_id|> Given this opening text from an article, write whatever {hyperparameters['cot_length']} tokens you suspect might help you predict the next 1000 tokens. Be creative!\n\nOpening text: {q}<|eot_id|><start_header_id>assistant<|end_header_id|>\nHelpful Text:"
                     for q in questions
                 ]
             else:
