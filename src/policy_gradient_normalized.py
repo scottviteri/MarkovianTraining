@@ -597,7 +597,7 @@ def train(
             cot_length = 80 if use_gsm8k else 400  # 400 for arithmetic, 80 for GSM8K
         else:  # llama
             if use_wiki:
-                cot_length = 50
+                cot_length = 150
             else:
                 cot_length = (
                     60 if use_gsm8k else 150
