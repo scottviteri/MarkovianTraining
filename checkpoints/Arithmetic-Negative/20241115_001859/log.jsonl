@@ -1,0 +1,1 @@
+{"hyperparameters": {"model_learning_rate": 0.0001, "batch_size": 6, "gradient_accumulation_steps": 8, "num_batches": 10000, "cot_length": 150, "question_length": 500, "target_length": 500, "normalize_loss": true, "ppo_epsilon": 0.2, "r": 1.0, "use_ppo": true, "use_ei": true, "use_pg": false}}

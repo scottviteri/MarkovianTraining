@@ -616,14 +616,32 @@ def calculate_losses(
 
 
 def get_latest_checkpoint_and_log(dataset_type):
-    model_save_path = f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
-    log_pattern = f"src/AnalyzeResults/PolicyGradientNormalized_{dataset_type}_*.log"
-    log_files = sorted(glob.glob(log_pattern), key=os.path.getmtime, reverse=True)
-
-    if not os.path.exists(model_save_path) or not log_files:
+    checkpoints_dir = f"checkpoints/{dataset_type}"
+    if not os.path.exists(checkpoints_dir):
         return None, None
 
-    return model_save_path, log_files[0]
+    # Get all subdirectories (timestamps) in the checkpoints directory
+    checkpoint_folders = sorted(
+        [
+            os.path.join(checkpoints_dir, d)
+            for d in os.listdir(checkpoints_dir)
+            if os.path.isdir(os.path.join(checkpoints_dir, d))
+        ],
+        key=os.path.getmtime,
+        reverse=True,
+    )
+
+    if not checkpoint_folders:
+        return None, None
+
+    latest_checkpoint_folder = checkpoint_folders[0]
+    model_save_path = os.path.join(latest_checkpoint_folder, "model")
+    log_file = os.path.join(latest_checkpoint_folder, "log.jsonl")
+
+    if not os.path.exists(model_save_path) or not os.path.exists(log_file):
+        return None, None
+
+    return model_save_path, log_file
 
 
 def load_training_state(log_file):

@@ -13,10 +13,24 @@ def moving_average(data, window_size):
 
 
 def get_latest_log_file():
-    log_files = glob.glob("src/AnalyzeResults/PolicyGradientNormalized_*.log")
+    """
+    Find the most recent log.jsonl file in the checkpoints directory.
+    Searches across all task subdirectories.
+    """
+    checkpoints_dir = "checkpoints"
+
+    # Find all log.jsonl files recursively
+    log_files = []
+    for root, dirs, files in os.walk(checkpoints_dir):
+        if "log.jsonl" in files:
+            log_file_path = os.path.join(root, "log.jsonl")
+            log_files.append(log_file_path)
+
     if not log_files:
-        raise FileNotFoundError("No PolicyGradientNormalized log files found.")
-    return max(log_files, key=os.path.getctime)
+        raise FileNotFoundError("No log.jsonl files found in checkpoints directory.")
+
+    # Return the most recently modified log file
+    return max(log_files, key=os.path.getmtime)
 
 
 def plot_metrics(
@@ -155,8 +169,17 @@ if __name__ == "__main__":
         default=16,
         help="Window size for moving average (default: 16)",
     )
+    parser.add_argument(
+        "--log_file",
+        type=str,
+        default=None,
+        help="Specific log file to analyze (optional)",
+    )
     args = parser.parse_args()
 
-    latest_log_file = get_latest_log_file()
-    plot_metrics(latest_log_file, window_size=args.window_size)
+    # Use provided log file or find the latest one
+    log_file = args.log_file or get_latest_log_file()
+
+    print(f"Analyzing log file: {log_file}")
+    plot_metrics(log_file, window_size=args.window_size)
     print(f"Plot saved as pg_norm_plot.png with window size {args.window_size}")
