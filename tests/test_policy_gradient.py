@@ -15,7 +15,15 @@ def model_setup():
 @pytest.fixture
 def sample_qa_batch():
     """Generate a sample QA batch for testing"""
-    return generate_question_answer_batch(batch_size=2)
+    return next(
+        generate_question_answer_batches(
+            num_batches=1,
+            batch_size=2,
+            task_type="arithmetic",
+            tokenizer=None,
+            hyperparameters=None,
+        )
+    )
 
 
 @pytest.fixture
@@ -63,10 +71,19 @@ def test_load_model_invalid():
         load_model("invalid_model")
 
 
-# Data Generation Tests
 def test_generate_question_answer_batch():
     """Test arithmetic question generation"""
-    batch = generate_question_answer_batch(batch_size=3, task_type="arithmetic")
+    # Use generate_question_answer_batches with num_batches=1
+    batch = next(
+        generate_question_answer_batches(
+            num_batches=1,
+            batch_size=3,
+            task_type="arithmetic",
+            tokenizer=None,  # Tokenizer is optional for this test
+            hyperparameters={},  # Empty hyperparameters
+        )
+    )
+
     assert len(batch) == 3
     for question, answer in batch:
         assert isinstance(question, str)
@@ -77,9 +94,17 @@ def test_generate_question_answer_batch():
 
 def test_generate_negative_arithmetic_batch():
     """Test negative arithmetic question generation"""
-    batch = generate_question_answer_batch(
-        batch_size=3, task_type="arithmetic-negative"
+    # Use generate_question_answer_batches with num_batches=1
+    batch = next(
+        generate_question_answer_batches(
+            num_batches=1,
+            batch_size=3,
+            task_type="arithmetic-negative",
+            tokenizer=None,  # Tokenizer is optional for this test
+            hyperparameters={},  # Empty hyperparameters
+        )
     )
+
     assert len(batch) == 3
     for question, answer in batch:
         assert isinstance(question, str)
@@ -93,7 +118,7 @@ def test_generate_wiki_batch(model_setup, sample_hyperparameters):
     model, frozen_model, tokenizer, device = model_setup
 
     for task_type in ["wiki_compression", "wiki_continuation"]:
-        qa_batches = list(
+        qa_batch = next(
             generate_question_answer_batches(
                 num_batches=1,
                 batch_size=2,
@@ -102,11 +127,10 @@ def test_generate_wiki_batch(model_setup, sample_hyperparameters):
                 hyperparameters=sample_hyperparameters,
             )
         )
-        assert len(qa_batches) > 0
-        assert len(qa_batches[0]) > 0
+        assert len(qa_batch) > 0
 
         # Check token lengths
-        for q, a in qa_batches[0]:
+        for q, a in qa_batch:
             q_tokens = len(tokenizer(q, return_tensors="pt").input_ids[0])
             a_tokens = len(tokenizer(a, return_tensors="pt").input_ids[0])
 
@@ -119,10 +143,19 @@ def test_generate_wiki_batch(model_setup, sample_hyperparameters):
 
 def test_load_gsm8k_dataset():
     """Test GSM8K dataset loading"""
-    data = load_gsm8k_dataset()
-    assert len(data) > 0
-    assert isinstance(data[0], tuple)
-    assert len(data[0]) == 2
+    data_iterator = load_gsm8k_dataset()
+
+    # Try to get the first item from the iterator
+    first_item = next(data_iterator)
+
+    # Check the first item
+    assert isinstance(first_item, tuple)
+    assert len(first_item) == 2
+
+    # Optionally, you can check the types of the tuple elements
+    question, answer = first_item
+    assert isinstance(question, str)
+    assert isinstance(answer, str)
 
 
 # Answer Extraction Tests
@@ -187,17 +220,31 @@ def test_training_step(model_setup, sample_hyperparameters):
     """Test a single training step"""
     model, frozen_model, tokenizer, device = model_setup
     task_type = "arithmetic"  # Using arithmetic as a simple test case
+    model_type = "mistral"  # Specify model type
 
-    batch = generate_question_answer_batch(batch_size=2, task_type=task_type)
-    questions, answers = zip(*batch)
-
-    prompts = [
-        construct_prompt(
+    # Use generate_question_answer_batches with num_batches=1
+    batch = next(
+        generate_question_answer_batches(
+            num_batches=1,
+            batch_size=2,
             task_type=task_type,
-            question=q,
-            model_type="mistral",
+            tokenizer=tokenizer,
             hyperparameters=sample_hyperparameters,
         )
+    )
+    questions, answers = zip(*batch)
+
+    # Use construct_prompts directly
+    tokens = get_model_specific_tokens(model_type)
+
+    # Construct base prompt for arithmetic
+    base_prompt = (
+        f"Produce minimal text which will help you answer this question. Question:"
+    )
+    prompt_type = "Reasoning:"
+
+    prompts = [
+        f"{tokens['inst_start']} {base_prompt} {q} {tokens['inst_end']}\n{prompt_type}"
         for q in questions
     ]
 
@@ -262,11 +309,266 @@ def test_get_default_hyperparameters():
     params = get_default_hyperparameters(
         task_type="arithmetic",
         model_type="llama",
-        use_ppo=False,
-        use_ei=False,
-        use_pg=True,
+        training_methods={"use_ppo": False, "use_ei": False, "use_pg": True},
     )
     assert params["cot_length"] == 150  # Default for llama arithmetic
-    assert params["question_length"] == 500
-    assert params["target_length"] == 500
+    assert "question_length" not in params  # No default for arithmetic
+    assert "target_length" not in params  # No default for arithmetic
     assert params["normalize_loss"] is True
+    assert params["use_pg"] is True
+    assert params["use_ppo"] is False
+    assert params["use_ei"] is False
+
+
+def test_get_text_with_token_length(model_setup):
+    """Test binary search for text with desired token length"""
+    _, _, tokenizer, _ = model_setup
+
+    # Test case 1: Text long enough for desired tokens
+    long_text = "This is a very long text " * 100
+    desired_tokens = 50
+    chunk, actual_tokens = get_text_with_token_length(
+        long_text, desired_tokens, tokenizer
+    )
+
+    assert chunk is not None
+    assert isinstance(chunk, str)
+    # Allow small deviation due to binary search approximation
+    assert abs(actual_tokens - desired_tokens) <= 5
+
+    # Test case 2: Text too short for desired tokens
+    short_text = "This is too short"
+    desired_tokens = 100
+    chunk, actual_tokens = get_text_with_token_length(
+        short_text, desired_tokens, tokenizer
+    )
+
+    assert chunk is None
+    assert actual_tokens == 0
+
+    # Test case 3: Binary search convergence
+    medium_text = "This is a test sentence. " * 20
+    desired_tokens = 20
+    chunk, actual_tokens = get_text_with_token_length(
+        medium_text, desired_tokens, tokenizer
+    )
+
+    assert chunk is not None
+    tokens = tokenizer(chunk, return_tensors="pt").input_ids[0]
+    # Verify binary search found a close approximation
+    assert len(tokens) == desired_tokens
+
+
+def test_arithmetic_lazy_loading(model_setup, sample_hyperparameters):
+    """Test lazy loading behavior of arithmetic dataset"""
+    _, _, tokenizer, _ = model_setup
+
+    gen = generate_question_answer_batches(
+        num_batches=10,
+        batch_size=4,
+        task_type="arithmetic",
+        tokenizer=tokenizer,
+        hyperparameters=sample_hyperparameters,
+    )
+
+    # Get first chunk
+    first_chunk = []
+    for _ in range(25):  # 100/4 = 25 batches in first chunk
+        batch = next(gen)
+        assert len(batch) == 4
+        first_chunk.extend(batch)
+
+    # Verify uniqueness within chunk
+    questions = [q for q, _ in first_chunk]
+    assert len(set(questions)) == len(
+        questions
+    ), "Questions should be unique within chunk"
+
+    # Get start of next chunk to verify different questions
+    next_batch = next(gen)
+    assert len(next_batch) == 4
+    assert all(
+        q not in questions for q, _ in next_batch
+    ), "Next chunk should have different questions"
+
+
+def test_gsm8k_lazy_loading(model_setup, sample_hyperparameters):
+    """Test lazy loading behavior of GSM8K dataset"""
+    _, _, tokenizer, _ = model_setup
+
+    gen = generate_question_answer_batches(
+        num_batches=10,
+        batch_size=4,
+        task_type="gsm8k",
+        tokenizer=tokenizer,
+        hyperparameters=sample_hyperparameters,
+    )
+
+    # Get first chunk
+    first_chunk = []
+    chunk_batches = 0
+    for batch in gen:
+        assert len(batch) == 4
+        first_chunk.extend(batch)
+        chunk_batches += 1
+        if chunk_batches >= 25:  # 100/4 = 25 batches
+            break
+
+    assert len(first_chunk) == 100, "Should get 100 examples in first chunk"
+
+
+def test_wiki_compression_lazy_loading(model_setup, sample_hyperparameters):
+    """Test lazy loading behavior of Wikipedia compression dataset"""
+    _, _, tokenizer, _ = model_setup
+
+    gen = generate_question_answer_batches(
+        num_batches=10,
+        batch_size=4,
+        task_type="wiki_compression",
+        tokenizer=tokenizer,
+        hyperparameters=sample_hyperparameters,
+    )
+
+    # Get first chunk
+    first_chunk = []
+    chunk_batches = 0
+    for batch in gen:
+        assert len(batch) == 4
+        first_chunk.extend(batch)
+        chunk_batches += 1
+        if chunk_batches >= 25:  # 100/4 = 25 batches
+            break
+
+    # Verify token lengths
+    for q, a in first_chunk[:5]:  # Only check first 5 to speed up test
+        q_tokens = len(tokenizer(q, return_tensors="pt").input_ids[0])
+        assert abs(q_tokens - sample_hyperparameters["target_length"]) <= 5
+
+
+def test_wiki_continuation_lazy_loading(model_setup, sample_hyperparameters):
+    """Test lazy loading behavior of Wikipedia continuation dataset"""
+    _, _, tokenizer, _ = model_setup
+
+    gen = generate_question_answer_batches(
+        num_batches=10,
+        batch_size=4,
+        task_type="wiki_continuation",
+        tokenizer=tokenizer,
+        hyperparameters=sample_hyperparameters,
+    )
+
+    # Get first chunk
+    first_chunk = []
+    chunk_batches = 0
+    for batch in gen:
+        assert len(batch) == 4
+        first_chunk.extend(batch)
+        chunk_batches += 1
+        if chunk_batches >= 25:  # 100/4 = 25 batches
+            break
+
+    # Verify token lengths for first 5 examples to speed up test
+    for q, a in first_chunk[:5]:
+        q_tokens = len(tokenizer(q, return_tensors="pt").input_ids[0])
+        a_tokens = len(tokenizer(a, return_tensors="pt").input_ids[0])
+
+        assert abs(q_tokens - sample_hyperparameters["question_length"]) <= 5
+        assert abs(a_tokens - sample_hyperparameters["target_length"]) <= 5
+
+
+def test_construct_prompts(model_setup):
+    """Test prompt construction for different tasks and models"""
+    _, _, tokenizer, _ = model_setup
+
+    test_cases = [
+        {
+            "task_type": "arithmetic",
+            "question": "15 + 23 + 45",
+            "model_type": "mistral",
+            "hyperparameters": {"cot_length": 150, "target_length": 500},
+            "reasoning": "Let me solve this step by step:\n15 + 23 = 38\n38 + 45 = 83",
+        },
+        {
+            "task_type": "wiki_compression",
+            "question": "The quick brown fox jumps over the lazy dog.",
+            "model_type": "llama",
+            "hyperparameters": {"cot_length": 150, "target_length": 500},
+            "reasoning": "This sentence contains all letters of the alphabet.",
+        },
+        {
+            "task_type": "wiki_continuation",
+            "question": "In the beginning there was",
+            "model_type": "mistral",
+            "hyperparameters": {"cot_length": 150, "target_length": 500},
+            "reasoning": "This appears to be the start of a creation story.",
+        },
+    ]
+
+    for case in test_cases:
+        # Test non-redacted prompt (without reasoning)
+        base_case = {k: v for k, v in case.items() if k != "reasoning"}
+        base_prompt = construct_prompts(**base_case)
+
+        # Verify question is present in base prompt
+        assert case["question"] in base_prompt
+
+        # Verify task-specific elements
+        if case["task_type"] == "wiki_compression":
+            assert "Full Text:" in base_prompt
+            assert str(case["hyperparameters"]["target_length"]) in base_prompt
+        elif case["task_type"] == "wiki_continuation":
+            assert "Opening text:" in base_prompt
+        else:  # arithmetic
+            assert "Question:" in base_prompt
+
+        # Test redacted prompt (with reasoning)
+        full_prompt = construct_prompts(**case)
+
+        # Verify question is redacted in full prompt
+        assert "<Redacted>" in full_prompt
+        assert case["question"] not in full_prompt
+        assert case["reasoning"] in full_prompt
+
+        # Verify model-specific tokens
+        # Don't Change This!
+        if case["model_type"] == "mistral":
+            assert "[INST]" in full_prompt
+            assert "</s> [INST] Answer:" in full_prompt
+        else:  # llama
+            assert "<start_header_id>user<|end_header_id|>" in full_prompt
+            assert (
+                "<|eot_id|><start_header_id>user<|end_header_id|> Answer:"
+                in full_prompt
+            )
+
+
+def test_prompt_edge_cases(model_setup):
+    """Test edge cases in prompt construction"""
+    _, _, tokenizer, _ = model_setup
+
+    base_case = {
+        "task_type": "arithmetic",
+        "question": "1 + 1",
+        "model_type": "mistral",
+        "hyperparameters": {"cot_length": 150, "target_length": 500},
+    }
+
+    # Test empty question (non-redacted)
+    empty_q_case = base_case.copy()
+    empty_q_case["question"] = ""
+    prompt = construct_prompts(**empty_q_case)
+    assert "Question: " in prompt
+
+    # Test empty question (redacted)
+    prompt = construct_prompts(**empty_q_case, reasoning="some reasoning")
+    assert "<Redacted>" in prompt
+
+    # Test empty reasoning
+    prompt = construct_prompts(**base_case, reasoning="")
+    assert "<Redacted>" in prompt
+    assert prompt.endswith("Answer:")
+
+    # Test None reasoning (should return non-redacted prompt)
+    base_prompt = construct_prompts(**base_case)  # reasoning defaults to None
+    assert base_case["question"] in base_prompt
+    assert "<Redacted>" not in base_prompt

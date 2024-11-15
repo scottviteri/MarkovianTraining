@@ -1,6 +1,7 @@
 {
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "Python: Current File",
             "type": "python",
@@ -75,8 +76,9 @@
                 "--use_ei",
                 "--use_ppo",
                 "--model_type",
-                "llama",
-                "--use_negative"
+                "mistral",
+                "--task_type",
+                "arithmetic_negative"
             ],
             "console": "integratedTerminal",
             "justMyCode": false
@@ -87,7 +89,8 @@
             "request": "launch",
             "program": "${workspaceFolder}/src/policy_gradient_normalized.py",
             "args": [
-                "--use_wiki",
+                "--task_type",
+                "wiki_compression",
                 "--use_ei",
                 "--use_ppo",
                 "--model_type",

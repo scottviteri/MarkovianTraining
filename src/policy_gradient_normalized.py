@@ -18,9 +18,11 @@ import glob
 previous_normalized_rewards = []
 previous_advantages = []
 
+
 # Add at the top of the file with other imports
 class Colors:
     """ANSI color codes"""
+
     BLUE = "\033[94m"
     GREEN = "\033[92m"
     RED = "\033[91m"
@@ -29,14 +31,22 @@ class Colors:
     UNDERLINE = "\033[4m"
     END = "\033[0m"
 
+
 def print_batch_delimiter():
     """Print a visually distinct line between batches"""
-    print("\n" + "="*80)
+    print("\n" + "=" * 80)
 
-def colored_print(label: str, text: str, color: str = Colors.BLUE):
-    """Print text with colored label, adding newline before and keeping text raw."""
-    print(f"\n{color}{label}{Colors.END}")
-    print(repr(text))
+
+def colored_print(
+    label: str, text: str, color: str = Colors.BLUE, inline: bool = False
+):
+    """Print text with colored label, optionally on same line."""
+    if inline:
+        print(f"\n{color}{label}{Colors.END} {text}", end="")
+    else:
+        print(f"\n{color}{label}{Colors.END}")
+        print(repr(text))
+
 
 def load_model(model_type="mistral"):
     """Load either Mistral or Llama 3.1 model based on parameter."""
@@ -84,11 +94,11 @@ def calculate_threshold(previous_advantages):
     return float("inf")
 
 
-def generate_question_answer_batch(batch_size: int, task_type: str):
-    """Generate a batch of arithmetic questions and answers."""
-    qa_batch = []
-    for _ in range(batch_size):
-        if task_type == 'arithmetic-negative':
+def generate_arithmetic_pairs(task_type: str, num_examples: int = 1000):
+    """Lazily generate arithmetic QA pairs with shuffling within chunks."""
+    qa_pairs = []
+    for _ in range(num_examples):
+        if task_type == "arithmetic-negative":
             # Generate numbers between -99 and 99, excluding 0
             numbers = [random.randint(-99, 99) for _ in range(15)]
             numbers = [n for n in numbers if n != 0]  # Remove any zeros
@@ -107,88 +117,118 @@ def generate_question_answer_batch(batch_size: int, task_type: str):
             numbers = [random.randint(1, 99) for _ in range(15)]
             question = " + ".join(map(str, numbers))
             answer = str(sum(numbers))
+        qa_pairs.append((question, answer))
 
-        qa_batch.append((question, answer))
-    return qa_batch
+    random.shuffle(qa_pairs)
+    return qa_pairs
 
 
-def load_gsm8k_dataset():
+def load_gsm8k_dataset(chunk_size: int = 1000):
+    """Lazily load GSM8K dataset in chunks."""
     ds = load_dataset("openai/gsm8k", "main")
     questions = ds["train"]["question"]
     answers = list(map(lambda x: x[x.index("####") + 5 :], ds["train"]["answer"]))
-    return list(zip(questions, answers))
+    qa_pairs = list(zip(questions, answers))
+
+    for i in range(0, len(qa_pairs), chunk_size):
+        chunk = qa_pairs[i : i + chunk_size]
+        random.shuffle(chunk)
+        yield from chunk
 
 
 def get_model_specific_tokens(model_type):
-    """Return model-specific tokens for prompt construction."""
+    """
+    Return model-specific tokens for prompt construction.
+
+    !!! DO NOT MODIFY THIS FUNCTION!!!
+    These tokens are specific to each model's training format and changing them will break the model.
+    """
     if model_type == "mistral":
         return {
-            "inst_start": "]",
-            "inst_end": "]",
-            "user_start": "",
-            "user_end": "",
-            "assistant_start": "",
-            "assistant_end": "",
+            "inst_start": "[INST]",
+            "inst_end": "[/INST]",
         }
     else:  # llama
         return {
-            "inst_start": "<start_header_id>user<|end_header_id|>",
-            "inst_end": "<|eot_id|><start_header_id>assistant<|end_header_id|>",
-            "user_start": "",
-            "user_end": "",
-            "assistant_start": "",
-            "assistant_end": "",
+            "inst_start": "",
+            "inst_end": "",
         }
 
 
-def construct_prompt(task_type, question, model_type, hyperparameters):
-    """Construct prompt based on task type and model."""
+def construct_prompts(task_type, question, model_type, hyperparameters, reasoning=None):
+    """
+    Construct both partial and full prompts.
+    Returns (partial_prompt, full_prompt). full_prompt will be None if reasoning or answer is None.
+
+    partial_prompt: Used for generating reasoning, includes all formatting except answer
+    full_prompt: Used for calculating log probs, includes everything including answer
+
+    Args:
+        task_type: Type of task ('arithmetic', 'wiki_compression', 'wiki_continuation', 'gsm8k')
+        question: The input question or text
+        model_type: Type of model ('mistral' or 'llama')
+        hyperparameters: Dictionary containing model hyperparameters
+        reasoning: Optional reasoning text to include
+    """
+
     tokens = get_model_specific_tokens(model_type)
-    
+
+    # Construct base prompt
     if task_type == "wiki_compression":
         base_prompt = (
-            f"The following text is the {hyperparameters['target_length']} tokens you need to reconstruct. "
-            f"Write {hyperparameters['cot_length']} tokens that will help you reconstruct it. "
-            f"Be concise and focus on key information!\n\nText to reconstruct: {question}"
+            f"The following text is the {hyperparameters['target_length']} characters, which you will need to reconstruct."
+            f"You can write {hyperparameters['cot_length']} tokens as your memory during the reconstruction. "
+            f"Feel free to be creative!\n\nFull Text:"
         )
+        prompt_type = "Compression:"
     elif task_type == "wiki_continuation":
-        # Preserve old wiki prompt
         base_prompt = (
             f"Given this opening text from an article, write whatever "
             f"{hyperparameters['cot_length']} tokens you suspect might help you "
-            f"predict the next {hyperparameters['target_length']} tokens. Be creative!\n\nOpening text: {question}"
+            f"predict the next {hyperparameters['target_length']} tokens. Be creative!\n\nOpening text:"
         )
+        prompt_type = "Helpful Text:"
     else:  # arithmetic/gsm8k
-        base_prompt = f"Produce minimal text which will help you answer this question. Question: {question}"
+        base_prompt = f"You will be given an arithmetic problem, which you have {hyperparameters['cot_length']} tokens to work through step-by-step. Question:"
+        prompt_type = "Reasoning:"
 
-    # Construct full prompt with model-specific tokens
+    # Construct initial prompt with model-specific tokens
+    if reasoning is None:
+        return f"{tokens['inst_start']} {base_prompt} {question} {tokens['inst_end']}\n{prompt_type}"
+
+    base_with_type = f"{tokens['inst_start']} {base_prompt} <Redacted> {tokens['inst_end']}\n{prompt_type}"
+
+    # Add model-specific answer header to partial prompt
     if model_type == "mistral":
-        return f"{tokens['inst_start']} {base_prompt} {tokens['inst_end']}\nReasoning:"
-    else:  # llama
-        return f"{tokens['inst_start']} {base_prompt} {tokens['inst_end']}\nReasoning:"
+        partial_prompt = base_with_type + reasoning + " Answer: "
+    else:  # llama -- maybe the space afterwards is important
+        partial_prompt = base_with_type + reasoning + f" Answer: "
+    return partial_prompt
 
 
-def get_text_with_token_length(text: str, desired_tokens: int, tokenizer) -> tuple[str, int]:
+def get_text_with_token_length(
+    text: str, desired_tokens: int, tokenizer
+) -> tuple[str, int]:
     """
     Binary search to find text that tokenizes to desired number of tokens.
     Returns (text_chunk, actual_token_count) or (None, 0) if text is too short.
     """
-    # Initial guess based on 4 chars per token
-    chars = desired_tokens * 4
-    if len(text) < chars:
+    # Initial check
+    tokens = tokenizer(text, return_tensors="pt").input_ids[0]
+    if len(tokens) < desired_tokens:
         return None, 0
-        
+
     # Binary search for correct length
     left, right = 1, len(text)
     best_text = None
     best_count = 0
-    
+
     while left <= right:
         mid = (left + right) // 2
         chunk = text[:mid]
-        tokens = tokenizer(chunk, return_tensors="pt")
-        token_count = len(tokens.input_ids[0])
-        
+        tokens = tokenizer(chunk, return_tensors="pt").input_ids[0]
+        token_count = len(tokens)
+
         if token_count == desired_tokens:
             return chunk, token_count
         elif token_count < desired_tokens:
@@ -203,80 +243,87 @@ def get_text_with_token_length(text: str, desired_tokens: int, tokenizer) -> tup
             if abs(token_count - desired_tokens) < abs(best_count - desired_tokens):
                 best_text = chunk
                 best_count = token_count
-    
+
     return best_text, best_count
+
 
 def generate_question_answer_batches(
     num_batches: int,
     batch_size: int,
     task_type: str,
-    tokenizer,  # Need to pass tokenizer
+    tokenizer,
     hyperparameters: dict = None,
 ):
-    """Generate batches of Q&A pairs from different sources."""
-    if task_type in ['wiki_compression', 'wiki_continuation']:
-        # Load Wikipedia dataset
+    """Generate batches of Q&A pairs lazily."""
+    total_examples_needed = num_batches * batch_size
+    qa_pairs = []
+    chunk_size = 100  # Reduced from 1000 to 100
+
+    if task_type in ["wiki_compression", "wiki_continuation"]:
         wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
-        qa_pairs = []
-        
-        question_tokens = hyperparameters.get('question_length', 500)
-        target_tokens = hyperparameters.get('target_length', 500)
-        
         article_idx = 0
-        while len(qa_pairs) < num_batches * batch_size:
+
+        while len(qa_pairs) < chunk_size:
             if article_idx >= len(wiki_dataset):
-                print(f"Warning: Reached end of Wikipedia dataset after {len(qa_pairs)} examples")
+                print(
+                    f"Warning: Reached end of Wikipedia dataset after {len(qa_pairs)} examples"
+                )
                 break
-                
+
             article = wiki_dataset[article_idx]["text"]
             article_idx += 1
-            
-            if task_type == 'wiki_compression':
-                # For compression task, get text of exact token length
-                text_chunk, actual_tokens = get_text_with_token_length(
-                    article, target_tokens, tokenizer
+
+            if task_type == "wiki_compression":
+                chunk, token_count = get_text_with_token_length(
+                    article, hyperparameters["target_length"], tokenizer
                 )
-                if text_chunk is not None:
-                    qa_pairs.append((text_chunk, text_chunk))
-                    
+                if chunk is not None:
+                    qa_pairs.append((chunk, chunk))
             else:  # wiki_continuation
-                # Get question and answer chunks
-                q_chunk, q_tokens = get_text_with_token_length(
-                    article, question_tokens, tokenizer
+                q_chunk, q_count = get_text_with_token_length(
+                    article, hyperparameters["question_length"], tokenizer
                 )
                 if q_chunk is None:
                     continue
-                    
-                remaining_text = article[len(q_chunk):]
-                a_chunk, a_tokens = get_text_with_token_length(
-                    remaining_text, target_tokens, tokenizer
+
+                # Skip if question contains "Answer:"
+                if "Answer:" in q_chunk:
+                    continue
+
+                remaining_text = article[len(q_chunk) :]
+                a_chunk, a_count = get_text_with_token_length(
+                    remaining_text, hyperparameters["target_length"], tokenizer
                 )
                 if a_chunk is not None:
+                    # Skip if answer contains "Answer:"
+                    if "Answer:" in a_chunk:
+                        continue
                     qa_pairs.append((q_chunk, a_chunk))
 
-        random.shuffle(qa_pairs)
-        return [qa_pairs[i:i + batch_size] for i in range(0, len(qa_pairs), batch_size)]
-    
-    elif task_type == 'gsm8k':
-        gsm8k_data = load_gsm8k_dataset()
-        total_samples = len(gsm8k_data)
-        if num_batches * batch_size > total_samples:
-            print(
-                f"Warning: Requested {num_batches * batch_size} samples, but GSM8K dataset only has {total_samples} samples."
-            )
-            print("Some samples will be repeated.")
-            return [random.sample(gsm8k_data, batch_size) for _ in range(num_batches)]
-        else:
-            shuffled_data = random.sample(gsm8k_data, num_batches * batch_size)
-            return [
-                shuffled_data[i : i + batch_size]
-                for i in range(0, len(shuffled_data), batch_size)
-            ]
-    else:  # arithmetic or arithmetic-negative
-        return [
-            generate_question_answer_batch(batch_size, task_type)
-            for _ in range(num_batches)
-        ]
+            # If we have enough pairs, shuffle and yield batches
+            if len(qa_pairs) >= chunk_size:
+                random.shuffle(qa_pairs)
+                for i in range(0, len(qa_pairs), batch_size):
+                    yield qa_pairs[i : i + batch_size]
+                qa_pairs = []  # Reset for next chunk
+
+    elif task_type == "gsm8k":
+        gsm8k_iter = load_gsm8k_dataset(chunk_size)
+        current_chunk = []
+
+        for qa_pair in gsm8k_iter:
+            current_chunk.append(qa_pair)
+            if len(current_chunk) >= chunk_size:
+                random.shuffle(current_chunk)
+                for i in range(0, len(current_chunk), batch_size):
+                    yield current_chunk[i : i + batch_size]
+                current_chunk = []
+
+    else:  # arithmetic tasks
+        while True:
+            qa_pairs = generate_arithmetic_pairs(task_type, chunk_size)
+            for i in range(0, len(qa_pairs), batch_size):
+                yield qa_pairs[i : i + batch_size]
 
 
 def get_grad_norm(parameters):
@@ -307,26 +354,27 @@ def calculate_answer_log_probs(
     model,
     tokenizer,
     device,
+    questions,
     reasoning_tokens,
     answers,
     task_type,
     model_type,
+    hyperparameters,
 ):
     """Calculate the log probabilities of the answers given the reasoning."""
     reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
-
     # Update full prompts based on dataset type
-    if task_type in ['wiki_compression', 'wiki_continuation']:
-        full_prompts = [
-            f"Helpful Text: {r}\nAnswer: {a}" for r, a in zip(reasoning_text, answers)
-        ]
-        partial_prompts = [f"Helpful Text: {r}\nAnswer:" for r in reasoning_text]
-    else:
-        full_prompts = [
-            f"Reasoning: {r}\nAnswer: {a}" for r, a in zip(reasoning_text, answers)
-        ]
-        partial_prompts = [f"Reasoning: {r}\nAnswer:" for r in reasoning_text]
-
+    partial_prompts = [
+        construct_prompts(
+            task_type=task_type,
+            question=q,
+            model_type=model_type,
+            hyperparameters=hyperparameters,
+            reasoning=r,
+        )
+        for q, r in zip(questions, reasoning_text)
+    ]
+    full_prompts = [x + y for x, y in zip(partial_prompts, answers)]
     tokenized_full_prompts = tokenizer(
         full_prompts,
         padding=True,
@@ -334,7 +382,7 @@ def calculate_answer_log_probs(
     ).to(device)
 
     extracted_generated_answers = None
-    if task_type == 'gsm8k':
+    if task_type == "gsm8k":
         tokenized_partial_prompts = tokenizer(
             partial_prompts, padding=True, return_tensors="pt"
         ).to(device)
@@ -352,33 +400,30 @@ def calculate_answer_log_probs(
         generated_answers = tokenizer.batch_decode(
             generated_outputs[:, -max_answer_length - 1 :], skip_special_tokens=True
         )
-        selected_answers = [x.split("\nAnswer: ")[-1] for x in generated_answers]
+        selected_answers = [x.split("\n")[-1] for x in generated_answers]  # check this
         extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
     # if llama, find last occurrence of [16533, 25] and use 25's index + 1
     answer_start_positions = []
     for input_ids in tokenized_full_prompts.input_ids:
         if model_type == "mistral":
-            pos = (
-                (input_ids == 28747) | (input_ids == 28705) | (input_ids == 29871)
-            ).nonzero(as_tuple=True)[0][-1].item() + 1
+            matching_indices = (
+                (input_ids[:-1] == 26307)
+                & (
+                    (input_ids[1:] == 28747)
+                    | (input_ids[1:] == 28705)
+                    | (input_ids[1:] == 29871)
+                )
+            ).nonzero(as_tuple=True)[0]
+            pos = matching_indices[-1].item() + 2
         else:  # llama
-            # Find positions of both tokens
-            token_positions = (input_ids == 16533).nonzero(as_tuple=True)[0]
-            colon_positions = (input_ids == 25).nonzero(as_tuple=True)[0]
-
-            # Find the last pair where 16533 is followed by 25
-            last_pair_pos = None
-            for token_pos in reversed(token_positions.tolist()):
-                # Look for a colon after this token
-                following_colons = colon_positions[colon_positions > token_pos]
-                if len(following_colons) > 0 and following_colons[0] == token_pos + 1:
-                    last_pair_pos = following_colons[0]
-                    break
-
-            if last_pair_pos is None:
-                raise ValueError("Could not find required token sequence [16533, 25]")
-
-            pos = last_pair_pos + 1
+            # could potentially do
+            # tokenizer.encode(" [Answer] ")
+            # [128000, 510 =[, 16533=Answer, 60=], 220] <- unnecessary, just remove Answer: from dataset
+            matching_indices = (
+                ((input_ids[:-1] == 16533) | (input_ids[:-1] == 22559))
+                & (input_ids[1:] == 25)
+            ).nonzero(as_tuple=True)[0]
+            pos = matching_indices[-1].item() + 2  # to account for Answer:
         answer_start_positions.append(pos)
 
     # Assert that the decoded tokens after each start position match the expected answers
@@ -387,7 +432,10 @@ def calculate_answer_log_probs(
             tokenized_full_prompts.input_ids[i][answer_start_positions[i] :]
         ).strip()
         expected_answer = answers[i].strip()
-        if decoded_answer != expected_answer:
+        if (
+            decoded_answer[:3] != expected_answer[:3]
+            or decoded_answer[-3:] != expected_answer[-3:]
+        ):
             colored_print("Answer mismatch at index", str(i), Colors.RED)
             # print(f"Decoded:  {decoded_answer}")
             # print(f"Expected: {expected_answer}")
@@ -434,6 +482,7 @@ def calculate_advantages(
     tokenized_inputs,
     outputs,
     baseline_outputs,
+    questions,
     answers,
     hyperparameters,
     task_type,
@@ -452,10 +501,12 @@ def calculate_advantages(
             frozen_model,
             tokenizer,
             device,
+            questions,
             reasoning_tokens,
             answers,
             task_type,
             model_type,
+            hyperparameters,
         )
     )
 
@@ -467,10 +518,12 @@ def calculate_advantages(
             frozen_model,
             tokenizer,
             device,
+            questions,
             baseline_reasoning_tokens,
             answers,
             task_type,
             model_type,
+            hyperparameters,
         )[0]
         normalized_reward = (
             log_prob_ans_given_reasoning - log_prob_ans_given_default_reasoning
@@ -609,77 +662,133 @@ def tensor_to_python(value):
     return value
 
 
-def get_default_hyperparameters(task_type: str, model_type: str, use_ppo: bool, use_ei: bool, use_pg: bool) -> dict:
-    """Get default hyperparameters based on task and model configuration."""
-    defaults = {
-        "batch_size": {
-            "gsm8k": 10,
-            "default": 6
-        },
-        "gradient_accumulation_steps": {
-            "gsm8k": 32,
-            "default": 8
-        },
-        "cot_length": {
-            "llama": {
-                "gsm8k": 60,
-                "wiki_compression": 100,
-                "wiki_continuation": 100,
-                "default": 150
-            },
-            "mistral": {
-                "gsm8k": 80,
-                "default": 400
+def get_default_hyperparameters(
+    task_type: str, model_type: str, training_methods: dict
+):
+    """
+    Get default hyperparameters based on task, model, and training methods.
+
+    Args:
+        task_type: Type of task (e.g., 'gsm8k', 'wiki_compression')
+        model_type: Type of model (e.g., 'llama', 'mistral')
+        training_methods: Dictionary of training method flags
+            {
+                'use_ppo': bool,
+                'use_ei': bool,
+                'use_pg': bool
             }
-        }
-    }
 
-    # Get task-specific or default values
-    batch_size = defaults["batch_size"].get(task_type, defaults["batch_size"]["default"])
-    grad_steps = defaults["gradient_accumulation_steps"].get(task_type, 
-                                                           defaults["gradient_accumulation_steps"]["default"])
-    
-    # Get model and task specific CoT length
-    model_defaults = defaults["cot_length"][model_type]
-    cot_length = model_defaults.get(task_type, model_defaults["default"])
-
-    return {
+    Returns:
+        Dictionary of default hyperparameters
+    """
+    # Base default hyperparameters
+    defaults = {
         "model_learning_rate": 0.0001,
-        "batch_size": batch_size,
-        "gradient_accumulation_steps": grad_steps,
         "num_batches": 10000,
-        "cot_length": cot_length,
-        "question_length": 500,
-        "target_length": 500,
         "normalize_loss": True,
-        # PPO specific parameters
-        "ppo_epsilon": 0.2 if use_ppo else None,
-        "r": 1.0 if use_ppo else None,
-        # Training method flags
-        "use_ppo": use_ppo,
-        "use_ei": use_ei,
-        "use_pg": use_pg,
     }
 
-def print_debug_info(task_type, q, reasoning_text_first, ans, avg_log_prob, extracted_generated_answers=None):
+    # Task-specific batch sizes and gradient accumulation
+    batch_size_defaults = {
+        "llama": {
+            "gsm8k": 10,
+            "wiki_compression": 6,
+            "wiki_continuation": 6,
+            "default": 6,
+        },
+        "mistral": {
+            "gsm8k": 10,
+            "wiki_compression": 2,
+            "wiki_continuation": 2,
+            "default": 2,
+        },
+    }
+
+    # Gradient accumulation steps
+    grad_accumulation_defaults = {
+        "gsm8k": 32,
+        "wiki_compression": 8,
+        "wiki_continuation": 8,
+        "default": 8,
+    }
+
+    # Chain of thought length defaults
+    cot_length_defaults = {
+        "llama": {
+            "gsm8k": 60,
+            "wiki_compression": 150,
+            "wiki_continuation": 150,
+            "arithmetic": 150,
+            "negative_arithmetic": 150,
+            "default": 150,
+        },
+        "mistral": {
+            "gsm8k": 80,
+            "wiki_compression": 200,
+            "wiki_continuation": 200,
+            "arithmetic": 400,
+            "negative_arithmetic": 400,
+            "default": 400,
+        },
+    }
+
+    # Get specific or default values
+    defaults["batch_size"] = batch_size_defaults.get(model_type, {}).get(
+        task_type, batch_size_defaults[model_type]["default"]
+    )
+
+    defaults["gradient_accumulation_steps"] = grad_accumulation_defaults.get(
+        task_type, grad_accumulation_defaults["default"]
+    )
+
+    defaults["cot_length"] = cot_length_defaults.get(model_type, {}).get(
+        task_type, cot_length_defaults[model_type]["default"]
+    )
+
+    # Task-specific length parameters
+    if task_type in ["wiki_compression", "wiki_continuation"]:
+        defaults["question_length"] = 500
+        defaults["target_length"] = 500
+
+    # Training method specific parameters
+    if training_methods.get("use_ppo", False):
+        defaults["ppo_epsilon"] = 0.2
+        defaults["r"] = 1.0
+    else:
+        defaults["ppo_epsilon"] = None
+        defaults["r"] = None
+
+    # Add training method flags
+    defaults.update(training_methods)
+
+    return defaults
+
+
+def print_debug_info(
+    task_type,
+    q,
+    reasoning_text_first,
+    ans,
+    avg_log_prob,
+    extracted_generated_answers=None,
+):
     """Print debug information with consistent coloring and formatting."""
-    print_batch_delimiter()
-    
-    if task_type == 'wiki_compression':
-        colored_print("Full Text", q, Colors.BLUE)
-        colored_print("Compression", reasoning_text_first, Colors.YELLOW)
-    elif task_type == 'wiki_continuation':
-        colored_print("Context", q, Colors.BLUE)
-        colored_print("Helpful Text", reasoning_text_first, Colors.YELLOW)
+    if task_type == "wiki_compression":
+        colored_print("Full Text:", q, Colors.BLUE)
+        colored_print("Compression:", reasoning_text_first, Colors.YELLOW)
+    elif task_type == "wiki_continuation":
+        colored_print("Context:", q, Colors.BLUE)
+        colored_print("Helpful Text:", reasoning_text_first, Colors.YELLOW)
     else:  # arithmetic or gsm8k
-        colored_print("Question", q, Colors.BLUE)
-        colored_print("Reasoning", reasoning_text_first, Colors.YELLOW)
-    
-    colored_print("Answer", ans, Colors.GREEN)
-    colored_print("Avg Log Prob", str(avg_log_prob), Colors.BOLD)
-    
+        colored_print("Question:", q, Colors.BLUE)
+        colored_print("Reasoning:", reasoning_text_first, Colors.YELLOW)
+
+    colored_print("Answer:", ans, Colors.GREEN)
+    colored_print("Avg Log Prob:", str(avg_log_prob), Colors.BOLD, inline=True)
+
     if extracted_generated_answers is not None:
-        colored_print("Generated Answer", repr(extracted_generated_answers[0]), Colors.RED)
+        colored_print("Generated Answer:", extracted_generated_answers[0], Colors.RED)
+
 
 def train(
     task_type: str,
@@ -692,10 +801,10 @@ def train(
 ):
     """Train the model with the specified configuration."""
     global previous_normalized_rewards, previous_advantages
-    
+
     # Update dataset type for logging
-    dataset_type = task_type.replace('_', '-').title()
-    
+    dataset_type = task_type.replace("_", "-").title()
+
     # Initialize paths
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     base_path = f"checkpoints/{dataset_type}/{timestamp}"
@@ -708,7 +817,7 @@ def train(
         with open(log_file, "r") as f:
             lines = f.readlines()
             hyperparameters = json.loads(lines[0])["hyperparameters"]
-            
+
             # Repopulate previous values from log
             previous_normalized_rewards = []
             previous_advantages = []
@@ -718,7 +827,7 @@ def train(
                     previous_normalized_rewards.extend(log_entry["normalized_rewards"])
                 if "advantages" in log_entry:
                     previous_advantages.extend(log_entry["advantages"])
-            
+
             start_batch = len(lines) - 1
             print(f"Resuming from batch {start_batch}")
             print(f"Loaded {len(previous_normalized_rewards)} previous rewards")
@@ -731,11 +840,9 @@ def train(
         defaults = get_default_hyperparameters(
             task_type=task_type,
             model_type=model_type,
-            use_ppo=use_ppo,
-            use_ei=use_ei,
-            use_pg=use_pg
+            training_methods={"use_ppo": use_ppo, "use_ei": use_ei, "use_pg": use_pg},
         )
-        
+
         # Override defaults with any provided hyperparameters
         hyperparameters = {**defaults, **(hyperparameters or {})}
 
@@ -753,34 +860,36 @@ def train(
         model.parameters(), lr=hyperparameters["model_learning_rate"]
     )
 
-    batch_size = hyperparameters["batch_size"]
-    normalize_loss = hyperparameters["normalize_loss"]
-    gradient_accumulation_steps = hyperparameters["gradient_accumulation_steps"]
-
-    num_batches = hyperparameters["num_batches"]
-    qa_batches = list(
-        generate_question_answer_batches(
-            num_batches=hyperparameters["num_batches"],
-            batch_size=hyperparameters["batch_size"],
-            task_type=task_type,
-            tokenizer=tokenizer,  # Pass tokenizer
-            hyperparameters=hyperparameters,
-        )
+    # Create generator instead of materializing all batches
+    qa_generator = generate_question_answer_batches(
+        num_batches=hyperparameters["num_batches"],
+        batch_size=hyperparameters["batch_size"],
+        task_type=task_type,
+        tokenizer=tokenizer,
+        hyperparameters=hyperparameters,
     )
 
     model_optimizer.zero_grad()
 
-    for batch_index, qa_batch in enumerate(qa_batches[start_batch:], start=start_batch):
+    # Iterate over generator directly
+    for batch_index in range(start_batch, hyperparameters["num_batches"]):
         print_batch_delimiter()
-        colored_print("Batch:", str(batch_index), Colors.BOLD)
-        
+        colored_print("Batch:", str(batch_index), Colors.BOLD, inline=True)
+        try:
+            qa_batch = next(qa_generator)
+        except StopIteration:
+            print("Reached end of dataset")
+            break
+
         questions, answers = zip(*qa_batch)
+
+        # Use construct_prompts for creating prompts
         prompts = [
-            construct_prompt(
-                task_type,
-                q,
-                model_type,
-                hyperparameters
+            construct_prompts(
+                task_type=task_type,
+                question=q,
+                model_type=model_type,
+                hyperparameters=hyperparameters,
             )
             for q in questions
         ]
@@ -826,6 +935,7 @@ def train(
             tokenized_inputs,
             outputs,
             baseline_outputs,
+            questions,
             answers,
             hyperparameters,
             task_type,
@@ -875,7 +985,7 @@ def train(
 
         # Only accumulate gradients if we have active samples
         if num_active > 0:
-            loss = total_loss / gradient_accumulation_steps
+            loss = total_loss / hyperparameters["gradient_accumulation_steps"]
             loss.backward()
 
             grad_norm = get_grad_norm(model.parameters())
@@ -885,7 +995,7 @@ def train(
             grad_norm = 0.0
 
         # Update logging to include fraction of active samples
-        fraction_active = num_active / batch_size
+        fraction_active = num_active / hyperparameters["batch_size"]
 
         q = questions[0]
         ans = answers[0]
@@ -900,7 +1010,14 @@ def train(
         )
         advantage_value = advantage[0].item()
 
-        print_debug_info(task_type, q, reasoning_text_first, ans, avg_log_prob, extracted_generated_answers)
+        print_debug_info(
+            task_type,
+            q,
+            reasoning_text_first,
+            ans,
+            avg_log_prob,
+            extracted_generated_answers,
+        )
 
         if previous_advantages:
             mean_prev_advantage = np.mean(previous_advantages)
@@ -912,7 +1029,8 @@ def train(
         log_entry = {
             k: tensor_to_python(v)
             for k, v in {
-                "Aggregate loss": loss.item() * gradient_accumulation_steps,
+                "Aggregate loss": loss.item()
+                * hyperparameters["gradient_accumulation_steps"],
                 "Batch Index": batch_index,
                 "Prev Observation": f"{'Context' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Question'}: {q}",
                 "Action": f"{'Helpful Text' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Reasoning'}: {reasoning_text_first}",
@@ -934,11 +1052,11 @@ def train(
                 ),
                 "Fraction Active Samples": fraction_active,
                 "Num Active Samples": num_active,
-                "Batch Size": batch_size,
+                "Batch Size": hyperparameters["batch_size"],
             }.items()
         }
 
-        if normalize_loss and baseline_avg_log_prob is not None:
+        if baseline_avg_log_prob is not None:
             log_entry["Baseline Avg Log Prob"] = tensor_to_python(baseline_avg_log_prob)
 
         if hyperparameters["use_ppo"] and ppo_ratio is not None:
@@ -949,7 +1067,7 @@ def train(
                 }
             )
 
-        if task_type == 'gsm8k' and extracted_generated_answers is not None:
+        if task_type == "gsm8k" and extracted_generated_answers is not None:
             true_answers = [extract_answer(answer) for answer in answers]
             correct_count = sum(
                 gen_ans == true_ans
@@ -1017,20 +1135,18 @@ def main(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Train the model on various tasks."
-    )
+    parser = argparse.ArgumentParser(description="Train the model on various tasks.")
     parser.add_argument(
         "--task_type",
         type=str,
         choices=[
-            'arithmetic',
-            'arithmetic-negative',
-            'gsm8k',
-            'wiki_compression',
-            'wiki_continuation'
+            "arithmetic",
+            "arithmetic_negative",
+            "gsm8k",
+            "wiki_compression",
+            "wiki_continuation",
         ],
-        default='arithmetic',
+        default="arithmetic",
         help="Type of task to train on",
     )
     parser.add_argument(
