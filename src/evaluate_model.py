@@ -7,6 +7,7 @@ import json
 from tqdm import tqdm
 import os
 from peft import LoraConfig, get_peft_model
+import datetime
 
 
 def extract_answer(answer):
@@ -29,7 +30,7 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
     if model_type == "mistral":
         base_model = "mistralai/Mistral-7B-Instruct-v0.2"
     elif model_type == "llama":
-        base_model = "meta-llama/Llama-3.1-8B-Instruct"
+        base_model = "meta-llama/Llama-3.2-3B-Instruct"
     else:
         raise ValueError("model_type must be either 'mistral' or 'llama'")
 
@@ -66,7 +67,13 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
 
 
 def evaluate_model(
-    model, tokenizer, device, test_data, num_samples=None, batch_size=16, model_type="mistral"
+    model,
+    tokenizer,
+    device,
+    test_data,
+    num_samples=None,
+    batch_size=16,
+    model_type="mistral",
 ):
     correct = 0
     total = 0
@@ -78,8 +85,11 @@ def evaluate_model(
 
         # Generate prompts based on model type
         prompts = [
-            f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the question.<|eot_id|><|start_header_id|>assistant<|end_header_id|> Question: {q}\nReasoning:" if model_type == "llama" else
-            f"[INST] Produce minimal text which will help you answer the question.[/INST] Question: {q}\nReasoning:"
+            (
+                f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the question.<|eot_id|><|start_header_id|>assistant<|end_header_id|> Question: {q}\nReasoning:"
+                if model_type == "llama"
+                else f"{tokenizer.bos_token} Produce minimal text which will help you answer the question. {tokenizer.eos_token} Question: {q}\nReasoning:"
+            )
             for q in questions
         ]
         inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
@@ -162,6 +172,43 @@ def batch_process_answers(
     return extracted_generated_answers
 
 
+def find_latest_checkpoint():
+    """
+    Find the most recent model checkpoint across all tasks and model types.
+
+    Returns:
+        str: Path to the most recent model checkpoint, or None if no checkpoint found
+    """
+    checkpoints_dir = "checkpoints"
+
+    # Collect all potential model checkpoints
+    model_checkpoints = []
+
+    # Walk through the checkpoints directory
+    for task_dir in os.listdir(checkpoints_dir):
+        task_path = os.path.join(checkpoints_dir, task_dir)
+        if os.path.isdir(task_path):
+            for timestamp_dir in os.listdir(task_path):
+                checkpoint_path = os.path.join(task_path, timestamp_dir, "model.pt")
+                if os.path.exists(checkpoint_path):
+                    # Get the full timestamp for sorting
+                    full_timestamp = os.path.join(task_path, timestamp_dir)
+                    model_checkpoints.append(
+                        (
+                            os.path.getmtime(
+                                full_timestamp
+                            ),  # modification time for sorting
+                            checkpoint_path,
+                        )
+                    )
+
+    # Sort by timestamp, most recent first
+    if model_checkpoints:
+        return sorted(model_checkpoints, key=lambda x: x[0], reverse=True)[0][1]
+
+    return None
+
+
 def main(model_path, num_samples, batch_size, use_base_model, model_type):
     model, tokenizer, device = load_model(model_path, use_base_model, model_type)
 
@@ -174,9 +221,25 @@ def main(model_path, num_samples, batch_size, use_base_model, model_type):
 
     print(f"Accuracy: {accuracy:.2%}")
 
-    output_file = "evaluation_results.json"
+    # Create results directory if it doesn't exist
+    os.makedirs("results/evaluations", exist_ok=True)
+
+    # Generate a timestamp-based filename
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_file = f"results/evaluations/gsm8k_eval_{model_type}_{timestamp}.json"
+
     with open(output_file, "w") as f:
-        json.dump({"accuracy": accuracy, "results": results}, f, indent=2)
+        json.dump(
+            {
+                "accuracy": accuracy,
+                "results": results,
+                "model_path": model_path,
+                "model_type": model_type,
+                "num_samples": num_samples,
+            },
+            f,
+            indent=2,
+        )
 
     print(f"Detailed results saved to {output_file}")
 
@@ -188,7 +251,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_path",
         type=str,
-        default="./SavedModels/PolicyGradientNormalized_GSM8K_latest.pt",
+        default=None,  # Remove default path
         help="Path to the trained model weights",
     )
     parser.add_argument(
@@ -214,8 +277,25 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    # If no model path is provided, try to find the latest checkpoint
+    if args.model_path is None:
+        args.model_path = find_latest_checkpoint()
+
+        if args.model_path is None:
+            print("Error: No model checkpoint found in the checkpoints directory.")
+            exit(1)
+
+        # Optionally, detect model type from the path
+        args.model_type = "mistral" if "mistral" in args.model_path.lower() else "llama"
+
     if not args.use_base_model and not os.path.exists(args.model_path):
         print(f"Error: Model file not found at {args.model_path}")
         exit(1)
 
-    main(args.model_path, args.num_samples, args.batch_size, args.use_base_model, args.model_type)
+    main(
+        args.model_path,
+        args.num_samples,
+        args.batch_size,
+        args.use_base_model,
+        args.model_type,
+    )

@@ -825,10 +825,10 @@ def train(
 
     # Initialize paths
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_path = f"checkpoints/{dataset_type}/{timestamp}"
-    os.makedirs(base_path, exist_ok=True)
-    model_save_path = f"{base_path}/model"
-    log_file = f"{base_path}/log.jsonl"
+    checkpoint_dir = os.path.join("checkpoints", task_type, timestamp)
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    model_save_path = os.path.join(checkpoint_dir, "model.pt")
+    log_file = os.path.join(checkpoint_dir, "log.jsonl")
 
     if resume:
         model_save_path, log_file = get_latest_checkpoint_and_log(dataset_type)
@@ -1109,13 +1109,17 @@ def train(
 
         if batch_index % 200 == 0 and batch_index > 0:
             print(f"Saving model weights at batch {batch_index}")
-            os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
-            # Create a new filename that includes the batch index
-            model_save_path_with_batch = (
-                f"SavedModels/PolicyGradientNormalized_{dataset_type}_latest.pt"
+
+            # Save model weights
+            torch.save(
+                {
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": model_optimizer.state_dict(),
+                    "batch_index": batch_index,
+                    "hyperparameters": hyperparameters,
+                },
+                model_save_path,
             )
-            # Save the model with the batch index in the filename
-            torch.save(model.state_dict(), model_save_path_with_batch)
 
 
 def main(

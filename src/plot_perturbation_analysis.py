@@ -6,7 +6,7 @@ from tqdm import tqdm
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import random
-from train import calculate_answer_log_probs
+from src.train import calculate_answer_log_probs
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import savgol_filter
