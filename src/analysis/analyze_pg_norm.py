@@ -33,17 +33,20 @@ def get_latest_log_file():
     return max(log_files, key=os.path.getmtime)
 
 
-def plot_metrics(
-    file_path, window_size=16, output_file="src/AnalyzeResults/pg_norm_plot.png"
-):
+def plot_metrics(file_path, window_size=16, output_file=None):
     with open(file_path, "r") as f:
         lines = f.readlines()
 
     # Parse the hyperparameters from the first line
     hyperparameters = json.loads(lines[0])
     print("Hyperparameters:")
-    for key, value in hyperparameters.items():
-        print(f"{key}: {value}")
+    print("hyperparameters:", hyperparameters)
+
+    # If no output file is specified, create a default one in the current directory
+    if output_file is None:
+        # Create output directory if it doesn't exist
+        os.makedirs("plots", exist_ok=True)
+        output_file = os.path.join("plots", "pg_norm_plot.png")
 
     normalize_loss = hyperparameters.get("normalize_loss", True)
 
@@ -175,11 +178,17 @@ if __name__ == "__main__":
         default=None,
         help="Specific log file to analyze (optional)",
     )
+    parser.add_argument(
+        "--output_file",
+        type=str,
+        default=None,
+        help="Output plot file path (optional)",
+    )
     args = parser.parse_args()
 
     # Use provided log file or find the latest one
     log_file = args.log_file or get_latest_log_file()
 
     print(f"Analyzing log file: {log_file}")
-    plot_metrics(log_file, window_size=args.window_size)
+    plot_metrics(log_file, window_size=args.window_size, output_file=args.output_file)
     print(f"Plot saved as pg_norm_plot.png with window size {args.window_size}")
