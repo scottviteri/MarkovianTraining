@@ -20,6 +20,51 @@ previous_normalized_rewards = []
 previous_advantages = []
 
 
+def find_latest_result(return_log=False):
+    """
+    Find the most recent result file across all tasks and model types.
+
+    Args:
+        return_log (bool): If True, return the log file instead of the model checkpoint
+
+    Returns:
+        str: Path to the most recent result file, or None if no result found
+    """
+    results_dir = "results"
+
+    # Collect all potential result files
+    result_files = []
+
+    # Walk through the results directory
+    for task_dir in os.listdir(results_dir):
+        task_path = os.path.join(results_dir, task_dir)
+        if os.path.isdir(task_path):
+            for timestamp_dir in os.listdir(task_path):
+                full_timestamp_path = os.path.join(task_path, timestamp_dir)
+
+                # Check for model checkpoint or log file
+                if return_log:
+                    log_path = os.path.join(full_timestamp_path, "log.jsonl")
+                    file_path = log_path
+                else:
+                    model_path = os.path.join(full_timestamp_path, "model.pt")
+                    file_path = model_path
+
+                if os.path.exists(file_path):
+                    result_files.append(
+                        (
+                            os.path.getmtime(full_timestamp_path),
+                            file_path,
+                        )
+                    )
+
+    # Sort by timestamp, most recent first
+    if result_files:
+        return sorted(result_files, key=lambda x: x[0], reverse=True)[0][1]
+
+    return None
+
+
 # Add at the top of the file with other imports
 class Colors:
     """ANSI color codes"""
@@ -54,7 +99,7 @@ def load_model(model_type="mistral"):
     if model_type == "mistral":
         model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     elif model_type == "llama":
-        model_name = "meta-llama/Llama-3.2-3B-Instruct"  # Using 8B version
+        model_name = "meta-llama/Llama-3.1-8B-Instruct"  # Using 8B version
     else:
         raise ValueError("model_type must be either 'mistral' or 'llama'")
 
@@ -713,8 +758,8 @@ def get_default_hyperparameters(
             "gsm8k": 10,
             "wiki_compression": 6,
             "wiki_continuation": 6,
-            "arithmetic": 16,  # Added default for arithmetic
-            "arithmetic_negative": 16,  # Added default for negative arithmetic
+            "arithmetic": 2,  # Added default for arithmetic
+            "arithmetic_negative": 8,  # Added default for negative arithmetic
             "default": 6,
         },
         "mistral": {
@@ -732,8 +777,8 @@ def get_default_hyperparameters(
         "gsm8k": 32,
         "wiki_compression": 8,
         "wiki_continuation": 8,
-        "arithmetic": 16,  # Added default for arithmetic
-        "arithmetic_negative": 16,  # Added default for negative arithmetic
+        "arithmetic": 8,  # Added default for arithmetic
+        "arithmetic_negative": 8,  # Added default for negative arithmetic
         "default": 8,
     }
 
@@ -743,8 +788,8 @@ def get_default_hyperparameters(
             "gsm8k": 60,
             "wiki_compression": 150,
             "wiki_continuation": 150,
-            "arithmetic": 150,
-            "arithmetic_negative": 150,
+            "arithmetic": 250,
+            "arithmetic_negative": 250,
             "default": 150,
         },
         "mistral": {
@@ -859,11 +904,12 @@ def train(
         start_batch = 0
         previous_normalized_rewards = []
         previous_advantages = []
+        # Write hyperparameters as the first line in the log file
+        with open(log_file, "w") as f:
+            json.dump(hyperparameters, f)
+            f.write("\n")
 
     model, frozen_model, tokenizer, device = load_model(model_type)
-
-    if resume:
-        model.load_state_dict(torch.load(model_save_path))
 
     model_optimizer = bitsandbytes.optim.AdamW8bit(
         model.parameters(), lr=hyperparameters["model_learning_rate"]

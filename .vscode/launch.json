@@ -1,119 +1,36 @@
 {
     "version": "0.2.0",
     "configurations": [
-
         {
-            "name": "Python: Current File",
+            "name": "Perturbation Analysis",
             "type": "python",
             "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal",
-            "justMyCode": false
-        },
-        {
-            "name": "Python: Perturb CoT",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/src/perturb_CoT.py",
-            "args": ["--log_file", "EI1.log"],
-            "console": "integratedTerminal",
-            "justMyCode": false,
-        },
-        {
-            "name": "Python: GSM8K",
-            "type": "python",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "args": ["--use_gsm8k"]
-        },
-        {
-            "name": "Python: EI",
-            "type": "python",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "args": ["--use_gsm8k", "--use_ei"]
-        },
-        {
-            "name": "Python: GSM8K Resume",
-            "type": "python",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "args": ["--use_gsm8k", "--resume"]
-        },
-        {
-            "name": "Python: GSM8K Debug Index",
-            "type": "python",
-            "request": "launch",
-            "program": "${file}",
-            "console": "integratedTerminal",
-            "justMyCode": false,
-            "args": ["--use_gsm8k", "--resume", "--debug_index", "6189"]
-        },
-        {
-            "name": "Python: Torchrun Current File",
-            "type": "python",
-            "request": "launch",
-            "program": "/usr/local/bin/torchrun",
+            "program": "${workspaceFolder}/src/perturbation_analysis.py",
             "args": [
-                "--nproc_per_node=1",
-                "${file}"
+                "--plot"
             ],
             "console": "integratedTerminal",
-            "justMyCode": false
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
         },
         {
-            "name": "Python: PG Negative Arithmetic",
+            "name": "Train Model",
             "type": "python",
             "request": "launch",
-            "program": "${workspaceFolder}/src/policy_gradient_normalized.py",
+            "program": "${workspaceFolder}/src/train.py",
             "args": [
-                "--use_ei",
-                "--use_ppo",
                 "--model_type",
-                "mistral",
-                "--task_type",
-                "arithmetic_negative"
-            ],
-            "console": "integratedTerminal",
-            "justMyCode": false
-        },
-        {
-            "name": "Python: Wiki Llama",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/src/policy_gradient_normalized.py",
-            "args": [
-                "--task_type",
-                "wiki_compression",
+                "llama",
                 "--use_ei",
-                "--use_ppo",
-                "--model_type",
-                "llama"
+                "--use_ppo"
             ],
             "console": "integratedTerminal",
-            "justMyCode": false
-        },
-        {
-            "name": "Python: Debug Index Wiki Llama",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/src/policy_gradient_normalized.py",
-            "args": [
-                "--use_wiki",
-                "--use_ei",
-                "--use_ppo",
-                "--model_type",
-                "llama"
-            ],
-            "console": "integratedTerminal",
-            "justMyCode": false
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
         }
- 
     ]
 }

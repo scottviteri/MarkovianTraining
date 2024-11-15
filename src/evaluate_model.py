@@ -8,6 +8,7 @@ from tqdm import tqdm
 import os
 from peft import LoraConfig, get_peft_model
 import datetime
+from train import find_latest_result
 
 
 def extract_answer(answer):
@@ -172,43 +173,6 @@ def batch_process_answers(
     return extracted_generated_answers
 
 
-def find_latest_checkpoint():
-    """
-    Find the most recent model checkpoint across all tasks and model types.
-
-    Returns:
-        str: Path to the most recent model checkpoint, or None if no checkpoint found
-    """
-    checkpoints_dir = "checkpoints"
-
-    # Collect all potential model checkpoints
-    model_checkpoints = []
-
-    # Walk through the checkpoints directory
-    for task_dir in os.listdir(checkpoints_dir):
-        task_path = os.path.join(checkpoints_dir, task_dir)
-        if os.path.isdir(task_path):
-            for timestamp_dir in os.listdir(task_path):
-                checkpoint_path = os.path.join(task_path, timestamp_dir, "model.pt")
-                if os.path.exists(checkpoint_path):
-                    # Get the full timestamp for sorting
-                    full_timestamp = os.path.join(task_path, timestamp_dir)
-                    model_checkpoints.append(
-                        (
-                            os.path.getmtime(
-                                full_timestamp
-                            ),  # modification time for sorting
-                            checkpoint_path,
-                        )
-                    )
-
-    # Sort by timestamp, most recent first
-    if model_checkpoints:
-        return sorted(model_checkpoints, key=lambda x: x[0], reverse=True)[0][1]
-
-    return None
-
-
 def main(model_path, num_samples, batch_size, use_base_model, model_type):
     model, tokenizer, device = load_model(model_path, use_base_model, model_type)
 
@@ -279,7 +243,7 @@ if __name__ == "__main__":
 
     # If no model path is provided, try to find the latest checkpoint
     if args.model_path is None:
-        args.model_path = find_latest_checkpoint()
+        args.model_path = find_latest_result()
 
         if args.model_path is None:
             print("Error: No model checkpoint found in the checkpoints directory.")

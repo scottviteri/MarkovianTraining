@@ -1,7 +1,7 @@
 import pytest
 import torch
 import numpy as np
-from src.policy_gradient_normalized import *
+from train import *
 
 
 # Fixtures

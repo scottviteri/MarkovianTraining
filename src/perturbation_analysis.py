@@ -1,145 +1,182 @@
 import os
 import json
+import re
+import random
 import argparse
 import numpy as np
-import datetime
+import torch
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from scipy.signal import savgol_filter
 
+# Import from your existing modules
+from train import calculate_answer_log_probs, find_latest_result
 
-def find_latest_log_file():
+
+def load_model_and_tokenizer(model_name):
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name, torch_dtype=torch.float16, device_map="auto"
+    )
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
+    return model, tokenizer, device
+
+
+def perturb_CoT(CoT, config):
     """
-    Find the most recent log.jsonl file in the checkpoints directory.
-
-    Returns:
-        str: Path to the most recent log file, or None if no log file found
+    Perturb the chain-of-thought (CoT) according to the perturbation configuration.
     """
-    checkpoints_dir = "checkpoints"
-    log_files = []
+    # Remove leading "Reasoning:" if present
+    CoT = re.sub(r"^Reasoning:\s*", "", CoT.strip())
+    perturbed_CoT = CoT
 
-    # Walk through all subdirectories in checkpoints
-    for root, dirs, files in os.walk(checkpoints_dir):
-        for file in files:
-            if file == "log.jsonl":
-                full_path = os.path.join(root, file)
-                log_files.append((os.path.getmtime(full_path), full_path))
+    # Randomly delete a fraction of characters
+    if config.get("delete_fraction", 0) > 0:
+        chars = list(perturbed_CoT)
+        num_to_delete = int(len(chars) * config["delete_fraction"])
+        indices_to_delete = random.sample(range(len(chars)), num_to_delete)
+        chars = [char for idx, char in enumerate(chars) if idx not in indices_to_delete]
+        perturbed_CoT = "".join(chars)
 
-    # Sort by modification time and return the most recent
-    if log_files:
-        return sorted(log_files, key=lambda x: x[0], reverse=True)[0][1]
+    # Randomly replace digits
+    if config.get("digit_change_prob", 0) > 0:
 
-    return None
+        def replace_digit(match):
+            if random.random() < config["digit_change_prob"]:
+                return str(random.randint(0, 9))
+            else:
+                return match.group(0)
+
+        perturbed_CoT = re.sub(r"\d", replace_digit, perturbed_CoT)
+
+    # Truncate a fraction from the end
+    if config.get("truncate_fraction", 0) > 0:
+        truncate_length = int(len(perturbed_CoT) * (1 - config["truncate_fraction"]))
+        perturbed_CoT = perturbed_CoT[:truncate_length]
+
+    return perturbed_CoT
 
 
-def run_perturbations(log_files):
+def run_perturbations(log_file):
     """
-    Run perturbation analysis on the given log files.
+    Run perturbation analysis on the given log file.
 
     Args:
-        log_files (list): List of log file paths to analyze
+        log_file (str): Path to the log file to analyze
 
     Returns:
-        dict: Perturbation analysis results
+        list: Perturbation analysis results
     """
-    perturbation_results = {"files": log_files, "perturbations": []}
+    # Load models
+    mistral_model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+    mistral_model, mistral_tokenizer, mistral_device = load_model_and_tokenizer(
+        mistral_model_name
+    )
 
-    for file in log_files:
-        with open(file, "r") as f:
-            # Assuming log file contains JSON lines with perturbation data
-            file_results = [json.loads(line) for line in f]
-            perturbation_results["perturbations"].append(file_results)
+    # Define perturbation configurations
+    perturbations = {
+        "Original": {},
+        "DigitChange30%": {"digit_change_prob": 0.30},
+        "Delete30%": {"delete_fraction": 0.30},
+        "Truncate10%": {"truncate_fraction": 0.10},
+    }
 
-    return perturbation_results
+    perturbation_data = []
+
+    # Process the log file to extract perturbation data
+    with open(log_file, "r") as f:
+        log_data = [json.loads(line) for line in f]
+
+    # Extract hyperparameters from the first line of the log file
+    hyperparameters = log_data[0]
+
+    # Extract perturbation-related metrics
+    for entry in log_data:
+        # Skip entries without Action or Observation
+        if "Action" not in entry or "Observation" not in entry:
+            continue
+
+        CoT = entry["Action"]
+        observation = re.sub(r"^Answer:\s*", "", entry["Observation"].strip())
+        question = entry.get("Question", "")
+
+        # Prepare entry results
+        entry_results = {
+            "Batch Index": entry.get("Batch Index", None),
+            "Avg Log Probs": {},
+        }
+
+        # Perform perturbations and calculate log probabilities
+        for pert_name, pert_config in perturbations.items():
+            if pert_name == "Original":
+                perturbed_CoT = re.sub(r"^Reasoning:\s*", "", CoT.strip())
+            else:
+                perturbed_CoT = perturb_CoT(CoT, pert_config)
+
+            # Tokenize the reasoning
+            tokenized_input = mistral_tokenizer(
+                perturbed_CoT,
+                return_tensors="pt",
+                truncation=True,
+                max_length=2048,
+                add_special_tokens=False,
+            ).input_ids.to(mistral_device)
+
+            # Extract task_type and model_type from hyperparameters
+            task_type = hyperparameters.get("task_type", "gsm8k")
+            model_type = hyperparameters.get("model_type", "mistral")
+
+            avg_log_prob, _ = calculate_answer_log_probs(
+                model=mistral_model,
+                tokenizer=mistral_tokenizer,
+                device=mistral_device,
+                questions=[question],
+                reasoning_tokens=tokenized_input,
+                answers=[observation],
+                task_type=task_type,
+                model_type=model_type,
+                hyperparameters=hyperparameters,
+            )
+            avg_log_prob_value = avg_log_prob[0].item()
+
+            entry_results["Avg Log Probs"][pert_name] = avg_log_prob_value
+
+        perturbation_data.append(entry_results)
+
+    return perturbation_data
 
 
-def save_perturbation_results(results, output_file=None):
-    """
-    Save perturbation analysis results to a JSON file.
-
-    Args:
-        results (dict): Perturbation analysis results
-        output_file (str, optional): Path to save the results
-    """
-    if output_file is None:
-        # Create a timestamped output file in results/perturbations/
-        os.makedirs("results/perturbations", exist_ok=True)
-        output_file = f"results/perturbations/perturbation_analysis_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-
-    with open(output_file, "w") as f:
-        json.dump(results, f, indent=2)
-
-    print(f"Perturbation analysis results saved to {output_file}")
-
-
-def plot_perturbation_results(log_files, window_size=40):
+def plot_perturbation_results(log_file, window_size=40):
     """
     Plot the results of perturbation analysis.
 
     Args:
-        log_files (list): List of log file paths to plot
+        log_file (str): Path to the log file to plot
         window_size (int): Smoothing window size
     """
-    all_data = []
-    for log_file in log_files:
-        # Check if a pre-existing analysis result file exists
-        result_file = os.path.join(
-            "results/perturbations",
-            f"analysis_results_{os.path.basename(log_file)}.json",
-        )
-
-        if os.path.exists(result_file):
-            # If pre-existing result file exists, load it
-            with open(result_file, "r") as f:
-                all_data.append(json.load(f))
-        else:
-            # If no pre-existing file, process the log file directly
-            print(
-                f"No pre-existing analysis found for {log_file}. Processing log file directly."
-            )
-
-            # Process the log file to extract perturbation data
-            with open(log_file, "r") as f:
-                log_data = [json.loads(line) for line in f]
-
-            # Extract perturbation-related metrics
-            # This is a placeholder - you'll need to adapt this to your specific log file structure
-            perturbation_data = []
-            for entry in log_data:
-                # Example extraction - modify based on your actual log file structure
-                pert_entry = {
-                    "Avg Log Probs": {
-                        "Original": entry.get("Avg Log Prob", 0),
-                        # Add other perturbation types as needed
-                    }
-                }
-                perturbation_data.append(pert_entry)
-
-            all_data.append(perturbation_data)
+    # Always regenerate the analysis results
+    results = run_perturbations(log_file)
 
     # Check if we have any data to plot
-    if not all_data:
+    if not results:
         print("No data found to plot.")
         return
 
-    # Find the minimum length among all datasets
-    min_length = min(len(data) for data in all_data)
-
     # Initialize the averaged data
-    # Dynamically extract perturbation types from the first dataset
     averaged_data = {
-        pert: [] for pert in all_data[0][0]["Avg Log Probs"].keys() if pert != "Llama"
+        pert: [] for pert in results[0]["Avg Log Probs"].keys() if pert != "Original"
     }
 
-    # Calculate the average across all datasets
-    for i in range(min_length):
-        for pert in averaged_data.keys():
-            values = [
-                -data[i]["Avg Log Probs"][pert]
-                - (-data[i]["Avg Log Probs"]["Original"])
-                for data in all_data
-            ]
-            averaged_data[pert].append(np.mean(values))
+    # Calculate the differences from the original
+    for pert in averaged_data.keys():
+        values = [
+            -entry["Avg Log Probs"][pert] - (-entry["Avg Log Probs"]["Original"])
+            for entry in results
+        ]
+        averaged_data[pert] = values
 
     plt.figure(figsize=(12, 6))
 
@@ -148,39 +185,36 @@ def plot_perturbation_results(log_files, window_size=40):
     color_index = 0
 
     for pert, values in averaged_data.items():
-        if pert != "Original":  # Skip plotting the Original, as it will always be 0
-            if len(values) > window_size:
-                # Apply Savitzky-Golay filter for smoothing
-                smoothed_values = savgol_filter(values, window_size, 3)
+        if len(values) > window_size:
+            # Apply Savitzky-Golay filter for smoothing
+            smoothed_values = savgol_filter(values, window_size, 3)
 
-                # Only plot the central part not affected by edge effects
-                half_window = window_size // 2
-                x_values = range(half_window, len(smoothed_values) - half_window)
-                y_values = smoothed_values[half_window:-half_window]
+            # Only plot the central part not affected by edge effects
+            half_window = window_size // 2
+            x_values = range(half_window, len(smoothed_values) - half_window)
+            y_values = smoothed_values[half_window:-half_window]
 
-                plt.plot(
-                    x_values,
-                    y_values,
-                    label=pert,
-                    color=colors[color_index % len(colors)],
-                    linewidth=2,
-                )
-            else:
-                # If we can't smooth, plot the original values
-                plt.plot(
-                    values,
-                    label=pert,
-                    color=colors[color_index % len(colors)],
-                    linewidth=2,
-                )
+            plt.plot(
+                x_values,
+                y_values,
+                label=pert,
+                color=colors[color_index % len(colors)],
+                linewidth=2,
+            )
+        else:
+            # If we can't smooth, plot the original values
+            plt.plot(
+                values,
+                label=pert,
+                color=colors[color_index % len(colors)],
+                linewidth=2,
+            )
 
-            color_index += 1
+        color_index += 1
 
     plt.xlabel("Sample", fontsize=16)
-    plt.ylabel("Average Difference in Negated Log Probability", fontsize=16)
-    plt.title(
-        f"Average Perturbation Results (Smoothing Window: {window_size})", fontsize=16
-    )
+    plt.ylabel("Difference in Negated Log Probability", fontsize=16)
+    plt.title(f"Perturbation Results (Smoothing Window: {window_size})", fontsize=16)
     plt.legend(fontsize=20)
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.tight_layout()
@@ -188,10 +222,10 @@ def plot_perturbation_results(log_files, window_size=40):
     # Increase font size for tick labels
     plt.tick_params(axis="both", which="major", labelsize=14)
 
-    # Ensure results directory exists
-    os.makedirs("results/plots", exist_ok=True)
+    # Save the plot in the same directory as the input log file
     output_file = os.path.join(
-        "results/plots", f"average_perturbation_results_plot_smooth{window_size}.png"
+        os.path.dirname(log_file),
+        f"perturbation_results_plot_smooth{window_size}.png",
     )
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Plot saved to {output_file}")
@@ -200,39 +234,25 @@ def plot_perturbation_results(log_files, window_size=40):
 
 def main():
     parser = argparse.ArgumentParser(description="Perturbation Analysis Tool")
-    parser.add_argument("log_files", nargs="*", help="Log files to analyze (optional)")
+    parser.add_argument("log_file", nargs="?", help="Log file to analyze (optional)")
     parser.add_argument("--plot", action="store_true", help="Plot perturbation results")
-    parser.add_argument("--output", type=str, help="Output file for analysis results")
+    parser.add_argument(
+        "--window_size", type=int, default=40, help="Smoothing window size"
+    )
 
     args = parser.parse_args()
 
-    # If no log files provided, find the most recent one
-    if not args.log_files:
-        latest_log_file = find_latest_log_file()
+    # If no log file provided, find the most recent log file from checkpoints
+    if not args.log_file:
+        latest_log_file = find_latest_result(return_log=True)
         if latest_log_file:
-            args.log_files = [latest_log_file]
+            args.log_file = latest_log_file
             print(f"Using most recent log file: {latest_log_file}")
         else:
-            print("No log files found in checkpoints directory.")
+            print("No log files found in results directory.")
             return
-
-    # Resolve log file paths
-    resolved_log_files = []
-    for file in args.log_files:
-        if not os.path.exists(file):
-            # Try to find in checkpoints directory
-            checkpoint_path = os.path.join("checkpoints", file)
-            if os.path.exists(checkpoint_path):
-                file = checkpoint_path
-        resolved_log_files.append(file)
-
-    # Run analysis
-    results = run_perturbations(resolved_log_files)
-
-    if args.plot:
-        plot_perturbation_results(resolved_log_files)
-    else:
-        save_perturbation_results(results, args.output)
+    # Plot the results
+    plot_perturbation_results(args.log_file, window_size=args.window_size)
 
 
 if __name__ == "__main__":
