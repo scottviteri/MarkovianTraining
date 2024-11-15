@@ -615,28 +615,28 @@ def calculate_losses(
     return total_loss, policy_loss, ppo_ratio, clipped_ratio, num_active
 
 
-def get_latest_checkpoint_and_log(dataset_type):
-    checkpoints_dir = f"checkpoints/{dataset_type}"
-    if not os.path.exists(checkpoints_dir):
+def get_latest_result_and_log(dataset_type):
+    results_dir = f"results/{dataset_type}"
+    if not os.path.exists(results_dir):
         return None, None
 
-    # Get all subdirectories (timestamps) in the checkpoints directory
-    checkpoint_folders = sorted(
+    # Get all subdirectories (timestamps) in the results directory
+    results_folders = sorted(
         [
-            os.path.join(checkpoints_dir, d)
-            for d in os.listdir(checkpoints_dir)
-            if os.path.isdir(os.path.join(checkpoints_dir, d))
+            os.path.join(results_dir, d)
+            for d in os.listdir(results_dir)
+            if os.path.isdir(os.path.join(results_dir, d))
         ],
         key=os.path.getmtime,
         reverse=True,
     )
 
-    if not checkpoint_folders:
+    if not results_folders:
         return None, None
 
-    latest_checkpoint_folder = checkpoint_folders[0]
-    model_save_path = os.path.join(latest_checkpoint_folder, "model")
-    log_file = os.path.join(latest_checkpoint_folder, "log.jsonl")
+    latest_result_folder = results_folders[0]
+    model_save_path = os.path.join(latest_result_folder, "model")
+    log_file = os.path.join(latest_result_folder, "log.jsonl")
 
     if not os.path.exists(model_save_path) or not os.path.exists(log_file):
         return None, None
@@ -712,12 +712,16 @@ def get_default_hyperparameters(
             "gsm8k": 10,
             "wiki_compression": 6,
             "wiki_continuation": 6,
+            "arithmetic": 16,  # Added default for arithmetic
+            "arithmetic_negative": 16,  # Added default for negative arithmetic
             "default": 6,
         },
         "mistral": {
             "gsm8k": 10,
             "wiki_compression": 2,
             "wiki_continuation": 2,
+            "arithmetic": 8,  # Added default for arithmetic
+            "arithmetic_negative": 8,  # Added default for negative arithmetic
             "default": 2,
         },
     }
@@ -727,6 +731,8 @@ def get_default_hyperparameters(
         "gsm8k": 32,
         "wiki_compression": 8,
         "wiki_continuation": 8,
+        "arithmetic": 16,  # Added default for arithmetic
+        "arithmetic_negative": 16,  # Added default for negative arithmetic
         "default": 8,
     }
 
@@ -737,7 +743,7 @@ def get_default_hyperparameters(
             "wiki_compression": 150,
             "wiki_continuation": 150,
             "arithmetic": 150,
-            "negative_arithmetic": 150,
+            "arithmetic_negative": 150,
             "default": 150,
         },
         "mistral": {
@@ -745,7 +751,7 @@ def get_default_hyperparameters(
             "wiki_compression": 200,
             "wiki_continuation": 200,
             "arithmetic": 400,
-            "negative_arithmetic": 400,
+            "arithmetic_negative": 400,
             "default": 400,
         },
     }
@@ -815,59 +821,43 @@ def train(
     use_ppo: bool,
     use_pg: bool,
     model_type: str,
-    hyperparameters: dict = None,
+    hyperparameters: dict,
 ):
     """Train the model with the specified configuration."""
     global previous_normalized_rewards, previous_advantages
 
-    # Update dataset type for logging
-    dataset_type = task_type.replace("_", "-").title()
+    # Create a results directory with timestamp
+    results_dir = os.path.join(
+        "results", task_type, datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    )
+    os.makedirs(results_dir, exist_ok=True)
 
-    # Initialize paths
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    checkpoint_dir = os.path.join("checkpoints", task_type, timestamp)
-    os.makedirs(checkpoint_dir, exist_ok=True)
-    model_save_path = os.path.join(checkpoint_dir, "model.pt")
-    log_file = os.path.join(checkpoint_dir, "log.jsonl")
+    # Define paths for model and log file
+    model_save_path = os.path.join(results_dir, "model")
+    log_file = os.path.join(results_dir, "log.jsonl")
 
+    # If resuming, load the latest checkpoint and log file
     if resume:
-        model_save_path, log_file = get_latest_checkpoint_and_log(dataset_type)
-        with open(log_file, "r") as f:
-            lines = f.readlines()
-            hyperparameters = json.loads(lines[0])["hyperparameters"]
+        latest_checkpoint, latest_log = get_latest_result_and_log(task_type)
+        if latest_checkpoint and latest_log:
+            # Load model and optimizer states
+            checkpoint = torch.load(latest_checkpoint)
+            model.load_state_dict(checkpoint["model_state_dict"])
+            model_optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
-            # Repopulate previous values from log
-            previous_normalized_rewards = []
-            previous_advantages = []
-            for line in lines[1:]:  # Skip hyperparameters line
-                log_entry = json.loads(line)
-                if "normalized_rewards" in log_entry:
-                    previous_normalized_rewards.extend(log_entry["normalized_rewards"])
-                if "advantages" in log_entry:
-                    previous_advantages.extend(log_entry["advantages"])
+            # Load previous training state
+            start_batch, hyperparameters = load_training_state(latest_log)
 
-            start_batch = len(lines) - 1
-            print(f"Resuming from batch {start_batch}")
-            print(f"Loaded {len(previous_normalized_rewards)} previous rewards")
-            print(f"Loaded {len(previous_advantages)} previous advantages")
+            # Load previous rewards and advantages for EI
+            previous_normalized_rewards, previous_advantages = (
+                load_previous_rewards_and_advantages(latest_log)
+            )
+        else:
+            start_batch = 0
     else:
         start_batch = 0
         previous_normalized_rewards = []
         previous_advantages = []
-        # Get default hyperparameters
-        defaults = get_default_hyperparameters(
-            task_type=task_type,
-            model_type=model_type,
-            training_methods={"use_ppo": use_ppo, "use_ei": use_ei, "use_pg": use_pg},
-        )
-
-        # Override defaults with any provided hyperparameters
-        hyperparameters = {**defaults, **(hyperparameters or {})}
-
-        # Initialize logging
-        with open(log_file, "w") as f:
-            json.dump({"hyperparameters": hyperparameters}, f)
-            f.write("\n")
 
     model, frozen_model, tokenizer, device = load_model(model_type)
 
@@ -1129,22 +1119,22 @@ def main(
     use_ppo: bool = False,
     use_pg: bool = False,
     model_type: str = "llama",
-    cot_length: int = None,
-    batch_size: int = None,
-    gradient_accumulation_steps: int = None,
-    normalize_loss: bool = None,
 ):
     """Main entry point with command-line parameter handling."""
-    hyperparameters = {}
-    if cot_length is not None:
-        hyperparameters["cot_length"] = cot_length
-    if batch_size is not None:
-        hyperparameters["batch_size"] = batch_size
-    if gradient_accumulation_steps is not None:
-        hyperparameters["gradient_accumulation_steps"] = gradient_accumulation_steps
-    if normalize_loss is not None:
-        hyperparameters["normalize_loss"] = normalize_loss
+    # 1. Get default hyperparameters based on task, model, and training methods
+    hyperparameters = get_default_hyperparameters(
+        task_type=task_type,
+        model_type=model_type,
+        training_methods={"use_ppo": use_ppo, "use_ei": use_ei, "use_pg": use_pg},
+    )
 
+    # 3. Validate training method selection
+    if not (use_ei or use_pg or use_ppo):
+        raise ValueError(
+            "At least one of --use_ei, --use_pg, or --use_ppo must be specified."
+        )
+
+    # 4. Call train with fully prepared hyperparameters
     train(
         task_type=task_type,
         resume=resume,
@@ -1152,7 +1142,7 @@ def main(
         use_ppo=use_ppo,
         use_pg=use_pg,
         model_type=model_type,
-        hyperparameters=hyperparameters if hyperparameters else None,
+        hyperparameters=hyperparameters,
     )
 
 
@@ -1202,31 +1192,7 @@ if __name__ == "__main__":
         default="llama",
         help="Choose between Llama and Mistral models",
     )
-    # Hyperparameter overrides
-    parser.add_argument(
-        "--cot_length",
-        type=int,
-        default=None,
-        help="Length of chain-of-thought reasoning",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=None,
-        help="Batch size for training",
-    )
-    parser.add_argument(
-        "--gradient_accumulation_steps",
-        type=int,
-        default=None,
-        help="Number of gradient accumulation steps",
-    )
-    parser.add_argument(
-        "--normalize_loss",
-        type=bool,
-        default=None,
-        help="Whether to normalize the loss (default: True)",
-    )
+
     args = parser.parse_args()
 
     if not (args.use_ei or args.use_pg or args.use_ppo):
@@ -1241,8 +1207,4 @@ if __name__ == "__main__":
         use_ppo=args.use_ppo,
         use_pg=args.use_pg,
         model_type=args.model_type,
-        cot_length=args.cot_length,
-        batch_size=args.batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        normalize_loss=args.normalize_loss,
     )
