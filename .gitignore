@@ -1,11 +1,4 @@
 *.pyc
 *__pycache__/
 *.egg*
-*.html
-*.png
-*.txt
-*.json
-training_rao_test/*
-saved_weights_and_losses/*
-wandb
-sweep_config.json
+*.pt
