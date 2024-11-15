@@ -13,6 +13,7 @@ from datasets import load_dataset
 import re
 import os
 import glob
+import subprocess
 
 # Global variables
 previous_normalized_rewards = []
@@ -1111,6 +1112,24 @@ def train(
                 model_save_path,
             )
 
+        # Periodically plot training metrics (every 10 batches)
+        if batch_index > 0 and batch_index % 10 == 0:
+            try:
+                # Call plot_training_metrics.py with the current log file
+                subprocess.run(
+                    [
+                        "python",
+                        "src/plot_training_metrics.py",
+                        "--log_file",
+                        log_file,
+                        "--window_size",
+                        "10",
+                    ],
+                    check=True,
+                )
+            except subprocess.CalledProcessError as e:
+                print(f"Error plotting metrics: {e}")
+
 
 def main(
     task_type: str,
@@ -1144,6 +1163,28 @@ def main(
         model_type=model_type,
         hyperparameters=hyperparameters,
     )
+
+
+def get_latest_log_file():
+    """
+    Find the most recent log file in the results directory.
+    Searches across all task subdirectories.
+    """
+    results_dir = "results"
+
+    # Find all log files recursively
+    log_files = []
+    for root, dirs, files in os.walk(results_dir):
+        for file in files:
+            if file == "log.jsonl" or file.endswith(".log"):
+                log_file_path = os.path.join(root, file)
+                log_files.append(log_file_path)
+
+    if not log_files:
+        raise FileNotFoundError("No log files found in results directory.")
+
+    # Return the most recently modified log file
+    return max(log_files, key=os.path.getmtime)
 
 
 if __name__ == "__main__":
