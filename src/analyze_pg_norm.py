@@ -3,7 +3,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from collections import defaultdict
 import os
-import glob
 import argparse
 import math
 
@@ -14,56 +13,69 @@ def moving_average(data, window_size):
 
 def get_latest_log_file():
     """
-    Find the most recent log.jsonl file in the checkpoints directory.
+    Find the most recent log.jsonl file in the results directory.
     Searches across all task subdirectories.
     """
-    checkpoints_dir = "checkpoints"
+    results_dir = "results"
 
     # Find all log.jsonl files recursively
     log_files = []
-    for root, dirs, files in os.walk(checkpoints_dir):
-        if "log.jsonl" in files:
-            log_file_path = os.path.join(root, "log.jsonl")
-            log_files.append(log_file_path)
+    for root, dirs, files in os.walk(results_dir):
+        for file in files:
+            if file.endswith(".log") or file == "log.jsonl":
+                log_file_path = os.path.join(root, file)
+                log_files.append(log_file_path)
 
     if not log_files:
-        raise FileNotFoundError("No log.jsonl files found in checkpoints directory.")
+        raise FileNotFoundError("No log files found in results directory.")
 
     # Return the most recently modified log file
     return max(log_files, key=os.path.getmtime)
 
 
 def plot_metrics(file_path, window_size=16, output_file=None):
+    # Read the entire file contents first
     with open(file_path, "r") as f:
-        lines = f.readlines()
+        file_contents = f.readlines()
 
-    # Parse the hyperparameters from the first line
-    hyperparameters = json.loads(lines[0])
+    # Check if the first line is a JSON object with hyperparameters
+    first_line = file_contents[0].strip()
+    try:
+        hyperparameters = json.loads(first_line)
+        if "hyperparameters" in hyperparameters:
+            hyperparameters = hyperparameters["hyperparameters"]
+    except json.JSONDecodeError:
+        # If first line is not JSON, use default hyperparameters
+        hyperparameters = {}
+
     print("Hyperparameters:")
-    print("hyperparameters:", hyperparameters)
+    print(hyperparameters)
 
-    # If no output file is specified, create a default one in the current directory
+    # If no output file is specified, create one in the same directory as the log file
     if output_file is None:
-        # Create output directory if it doesn't exist
-        os.makedirs("plots", exist_ok=True)
-        output_file = os.path.join("plots", "pg_norm_plot.png")
+        # Create a plot filename based on the log file
+        log_dir = os.path.dirname(file_path)
+        log_filename = os.path.splitext(os.path.basename(file_path))[0]
+        os.makedirs(log_dir, exist_ok=True)
+        output_file = os.path.join(log_dir, f"{log_filename}_plot.png")
 
     normalize_loss = hyperparameters.get("normalize_loss", True)
 
     # Parse the log entries
     metrics = defaultdict(list)
-    for line in lines[1:]:
-        entry = json.loads(line)
-        for key, value in entry.items():
-            if isinstance(value, (int, float)):
-                metrics[key].append(value)
-            elif key == "Is Correct" and isinstance(value, bool):
-                metrics["Fraction Correct"].append(int(value))
+    for line in file_contents[1:]:  # Skip the first line with hyperparameters
+        try:
+            entry = json.loads(line)
+            for key, value in entry.items():
+                if isinstance(value, (int, float)):
+                    metrics[key].append(value)
+                elif key == "Is Correct" and isinstance(value, bool):
+                    metrics["Fraction Correct"].append(int(value))
+        except json.JSONDecodeError:
+            continue
 
     # Determine if this is an EI run
-    use_ei = any(
-        "Use EI" in entry and entry["Use EI"] for entry in map(json.loads, lines[1:])
-    )
+    use_ei = hyperparameters.get("use_ei", False)
 
     # Define the metrics to plot
     plot_info = [
@@ -191,4 +203,4 @@ if __name__ == "__main__":
 
     print(f"Analyzing log file: {log_file}")
     plot_metrics(log_file, window_size=args.window_size, output_file=args.output_file)
-    print(f"Plot saved as pg_norm_plot.png with window size {args.window_size}")
+    print(f"Plot saved with window size {args.window_size}")
