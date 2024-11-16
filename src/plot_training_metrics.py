@@ -5,7 +5,8 @@ from collections import defaultdict
 import os
 import argparse
 import math
-from src.train import get_latest_log_file
+from train import get_latest_log_file
+from constants import EI_SKIP_INITIAL
 
 
 def moving_average(data, window_size):
@@ -62,7 +63,7 @@ def plot_metrics(file_path, window_size=10, output_file=None):
 
     # Define the metrics to plot
     plot_info = [
-        ("Aggregate loss", "Aggregate Loss", "Batch", "Loss"),
+        ("Loss", "Loss", "Batch", "Loss"),
         ("Grad Norm", "Gradient Norm", "Batch", "Norm"),
         (
             "Avg Log Prob",
@@ -139,9 +140,19 @@ def plot_metrics(file_path, window_size=10, output_file=None):
 
     # Plot the metrics
     for i, (metric, title, xlabel, ylabel, *extra) in enumerate(plot_info):
-        if metric in metrics and len(metrics[metric]) > window_size:
-            smoothed_data = moving_average(metrics[metric], window_size)
-            axs[i].plot(smoothed_data)
+        if metric in metrics:
+            data = metrics[metric][EI_SKIP_INITIAL:]
+            smoothed_data = moving_average(data, window_size)
+            offset = window_size // 2
+            axs[i].scatter(range(EI_SKIP_INITIAL, EI_SKIP_INITIAL + len(data)), data)
+            axs[i].plot(
+                range(
+                    EI_SKIP_INITIAL + offset,
+                    EI_SKIP_INITIAL + offset + len(smoothed_data),
+                ),
+                smoothed_data,
+                color="red",
+            )
             axs[i].set_title(title)
             axs[i].set_xlabel(xlabel)
             axs[i].set_ylabel(ylabel)

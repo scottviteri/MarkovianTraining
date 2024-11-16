@@ -9,8 +9,6 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from scipy.signal import savgol_filter
-
-# Import from your existing modules
 from train import calculate_answer_log_probs, find_latest_result
 
 
@@ -234,25 +232,26 @@ def plot_perturbation_results(log_file, window_size=40):
 
 def main():
     parser = argparse.ArgumentParser(description="Perturbation Analysis Tool")
-    parser.add_argument("log_file", nargs="?", help="Log file to analyze (optional)")
-    parser.add_argument("--plot", action="store_true", help="Plot perturbation results")
+    parser.add_argument("--log_file", help="Log file to analyze")
     parser.add_argument(
         "--window_size", type=int, default=40, help="Smoothing window size"
     )
 
     args = parser.parse_args()
 
-    # If no log file provided, find the most recent log file from checkpoints
-    if not args.log_file:
-        latest_log_file = find_latest_result(return_log=True)
-        if latest_log_file:
-            args.log_file = latest_log_file
-            print(f"Using most recent log file: {latest_log_file}")
-        else:
-            print("No log files found in results directory.")
-            return
+    if args.log_file:
+        log_file = args.log_file
+    else:
+        log_file = find_latest_result(return_log=True)
+
+    if not log_file:
+        print("No log file found.")
+        return
+
+    print(f"Using log file: {log_file}")
+
     # Plot the results
-    plot_perturbation_results(args.log_file, window_size=args.window_size)
+    plot_perturbation_results(log_file, window_size=args.window_size)
 
 
 if __name__ == "__main__":

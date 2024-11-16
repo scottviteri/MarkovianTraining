@@ -14,6 +14,8 @@ import re
 import os
 import glob
 import subprocess
+from constants import MISTRAL_INST_START, MISTRAL_INST_END
+from constants import EI_SKIP_INITIAL
 
 # Global variables
 previous_normalized_rewards = []
@@ -135,7 +137,7 @@ def load_model(model_type="mistral"):
 
 
 def calculate_threshold(previous_advantages):
-    if len(previous_advantages) > 15:
+    if len(previous_advantages) > EI_SKIP_INITIAL:
         return np.mean(previous_advantages) + np.std(previous_advantages)
     return float("inf")
 
@@ -183,16 +185,11 @@ def load_gsm8k_dataset(chunk_size: int = 1000):
 
 
 def get_model_specific_tokens(model_type):
-    """
-    Return model-specific tokens for prompt construction.
-
-    !!! DO NOT MODIFY THIS FUNCTION!!!
-    These tokens are specific to each model's training format and changing them will break the model.
-    """
+    """Return model-specific tokens for prompt construction."""
     if model_type == "mistral":
         return {
-            "inst_start": "[INST]",
-            "inst_end": "[/INST]",
+            "inst_start": MISTRAL_INST_START,
+            "inst_end": MISTRAL_INST_END,
         }
     else:  # llama
         return {
@@ -201,7 +198,7 @@ def get_model_specific_tokens(model_type):
         }
 
 
-def construct_prompts(task_type, question, model_type, hyperparameters, reasoning=None):
+def construct_prompts(question, hyperparameters, reasoning=None):
     """
     Construct both partial and full prompts.
     Returns (partial_prompt, full_prompt). full_prompt will be None if reasoning or answer is None.
@@ -210,12 +207,12 @@ def construct_prompts(task_type, question, model_type, hyperparameters, reasonin
     full_prompt: Used for calculating log probs, includes everything including answer
 
     Args:
-        task_type: Type of task ('arithmetic', 'wiki_compression', 'wiki_continuation', 'gsm8k')
         question: The input question or text
-        model_type: Type of model ('mistral' or 'llama')
         hyperparameters: Dictionary containing model hyperparameters
         reasoning: Optional reasoning text to include
     """
+    model_type = hyperparameters["model_type"]
+    task_type = hyperparameters["task_type"]
 
     tokens = get_model_specific_tokens(model_type)
 
@@ -403,8 +400,6 @@ def calculate_answer_log_probs(
     questions,
     reasoning_tokens,
     answers,
-    task_type,
-    model_type,
     hyperparameters,
 ):
     """Calculate the log probabilities of the answers given the reasoning."""
@@ -412,9 +407,7 @@ def calculate_answer_log_probs(
     # Update full prompts based on dataset type
     partial_prompts = [
         construct_prompts(
-            task_type=task_type,
             question=q,
-            model_type=model_type,
             hyperparameters=hyperparameters,
             reasoning=r,
         )
@@ -428,7 +421,7 @@ def calculate_answer_log_probs(
     ).to(device)
 
     extracted_generated_answers = None
-    if task_type == "gsm8k":
+    if hyperparameters["task_type"] == "gsm8k":
         tokenized_partial_prompts = tokenizer(
             partial_prompts, padding=True, return_tensors="pt"
         ).to(device)
@@ -451,7 +444,7 @@ def calculate_answer_log_probs(
     # if llama, find last occurrence of [16533, 25] and use 25's index + 1
     answer_start_positions = []
     for input_ids in tokenized_full_prompts.input_ids:
-        if model_type == "mistral":
+        if hyperparameters["model_type"] == "mistral":
             matching_indices = (
                 (input_ids[:-1] == 26307)
                 & (
@@ -531,8 +524,6 @@ def calculate_advantages(
     questions,
     answers,
     hyperparameters,
-    task_type,
-    model_type,
 ):
     global previous_normalized_rewards, previous_advantages
 
@@ -550,8 +541,6 @@ def calculate_advantages(
             questions,
             reasoning_tokens,
             answers,
-            task_type,
-            model_type,
             hyperparameters,
         )
     )
@@ -567,8 +556,6 @@ def calculate_advantages(
             questions,
             baseline_reasoning_tokens,
             answers,
-            task_type,
-            model_type,
             hyperparameters,
         )[0]
         normalized_reward = (
@@ -589,19 +576,13 @@ def calculate_advantages(
     previous_normalized_rewards.extend(normalized_reward.detach().float().cpu().numpy())
     previous_advantages.extend(advantage.detach().float().cpu().numpy())
 
-    if len(previous_normalized_rewards) > 1000:
-        previous_normalized_rewards = previous_normalized_rewards[-1000:]
-        previous_advantages = previous_advantages[-1000:]
-
+    training_mask = None
     if use_ei:
         threshold = calculate_threshold(previous_advantages)
-        mask = (advantage > threshold).float()
-        if not (hyperparameters["use_pg"] or hyperparameters["use_ppo"]):
-            # If only use_ei is enabled, set advantage to 1 where mask is 1
-            advantage = mask
-        else:
-            # When use_ei is combined with use_pg or use_ppo, zero out advantages below threshold
-            advantage = advantage * mask
+        training_mask = (advantage > threshold).float()
+        # if not (hyperparameters["use_pg"] or hyperparameters["use_ppo"]):
+        #    # If only use_ei is enabled, set advantage to 1 where mask is 1
+        #    advantage = mask
 
     return (
         advantage,
@@ -610,6 +591,7 @@ def calculate_advantages(
         log_prob_ans_given_default_reasoning,
         normalized_reward,
         extracted_generated_answers,
+        training_mask,
     )
 
 
@@ -630,35 +612,17 @@ def calculate_losses(
             - frozen_avg_log_probs_reasoning_given_question
         )
         clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
-        policy_loss = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
+        losses = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
         # Get number of non-zero advantages
-        num_active = torch.sum(advantage != 0).item()
-        if num_active > 0:
-            policy_loss = (
-                policy_loss.sum() / num_active
-            )  # Average only over active samples
-        else:
-            policy_loss = (
-                policy_loss.sum() * 0.0
-            )  # Return zero loss if no active samples
     elif use_ei or use_pg:
         # Standard Policy Gradient loss
-        policy_loss = (
-            -unfrozen_avg_log_probs_reasoning_given_question * advantage.detach()
-        )
-        num_active = torch.sum(advantage != 0).item()
-        if num_active > 0:
-            policy_loss = policy_loss.sum() / num_active
-        else:
-            policy_loss = policy_loss.sum() * 0.0
+        losses = -unfrozen_avg_log_probs_reasoning_given_question * advantage.detach()
         ppo_ratio = None
         clipped_ratio = None
     else:
         raise ValueError("At least one of use_pg, use_ppo, or use_ei must be True.")
 
-    total_loss = policy_loss
-
-    return total_loss, policy_loss, ppo_ratio, clipped_ratio, num_active
+    return losses, ppo_ratio, clipped_ratio
 
 
 def get_latest_result_and_log(dataset_type):
@@ -747,6 +711,8 @@ def get_default_hyperparameters(
     """
     # Base default hyperparameters
     defaults = {
+        "task_type": task_type,
+        "model_type": model_type,
         "model_learning_rate": 0.0001,
         "num_batches": 10000,
         "normalize_loss": True,
@@ -758,16 +724,16 @@ def get_default_hyperparameters(
             "gsm8k": 10,
             "wiki_compression": 6,
             "wiki_continuation": 6,
-            "arithmetic": 2,  # Added default for arithmetic
-            "arithmetic_negative": 8,  # Added default for negative arithmetic
+            "arithmetic": 4,  # Added default for arithmetic
+            "arithmetic_negative": 4,  # Added default for negative arithmetic
             "default": 6,
         },
         "mistral": {
             "gsm8k": 10,
             "wiki_compression": 2,
             "wiki_continuation": 2,
-            "arithmetic": 8,  # Added default for arithmetic
-            "arithmetic_negative": 8,  # Added default for negative arithmetic
+            "arithmetic": 4,  # Added default for arithmetic
+            "arithmetic_negative": 4,  # Added default for negative arithmetic
             "default": 2,
         },
     }
@@ -925,6 +891,7 @@ def train(
     )
 
     model_optimizer.zero_grad()
+    grad_accum_count = 0
 
     # Iterate over generator directly
     for batch_index in range(start_batch, hyperparameters["num_batches"]):
@@ -941,9 +908,7 @@ def train(
         # Use construct_prompts for creating prompts
         prompts = [
             construct_prompts(
-                task_type=task_type,
                 question=q,
-                model_type=model_type,
                 hyperparameters=hyperparameters,
             )
             for q in questions
@@ -982,6 +947,7 @@ def train(
             log_prob_ans_given_default_reasoning,
             normalized_reward,
             extracted_generated_answers,
+            training_mask,
         ) = calculate_advantages(
             model,
             frozen_model,
@@ -993,8 +959,6 @@ def train(
             questions,
             answers,
             hyperparameters,
-            task_type,
-            model_type,
         )
 
         full_attention_mask = torch.cat(
@@ -1029,25 +993,26 @@ def train(
             dim=1
         )
 
-        total_loss, policy_loss, ppo_ratio, clipped_ratio, num_active = (
-            calculate_losses(
-                unfrozen_avg_log_probs_reasoning_given_question,
-                frozen_avg_log_probs_reasoning_given_question,
-                advantage,
-                hyperparameters,
-            )
+        losses, ppo_ratio, clipped_ratio = calculate_losses(
+            unfrozen_avg_log_probs_reasoning_given_question,
+            frozen_avg_log_probs_reasoning_given_question,
+            advantage,
+            hyperparameters,
         )
 
-        # Only accumulate gradients if we have active samples
+        grad_acc_steps = hyperparameters["gradient_accumulation_steps"]
+        num_active = training_mask.sum().item()
+        grad_accum_count += num_active
         if num_active > 0:
-            loss = total_loss / hyperparameters["gradient_accumulation_steps"]
+            loss = (losses * training_mask).sum() / grad_acc_steps
             loss.backward()
 
-            grad_norm = get_grad_norm(model.parameters())
+        grad_norm = get_grad_norm(model.parameters())
+        if grad_accum_count >= grad_acc_steps:
             clip_grad_norm_(model.parameters(), 1.0)
-        else:
-            loss = torch.tensor(0.0)
-            grad_norm = 0.0
+            model_optimizer.step()
+            model_optimizer.zero_grad()
+            grad_accum_count = 0
 
         # Update logging to include fraction of active samples
         fraction_active = num_active / hyperparameters["batch_size"]
@@ -1084,9 +1049,8 @@ def train(
         log_entry = {
             k: tensor_to_python(v)
             for k, v in {
-                "Aggregate loss": loss.item()
-                * hyperparameters["gradient_accumulation_steps"],
-                "Batch Index": batch_index,
+                "Loss": losses.mean().item(),
+                "Batch Index": hyperparameters["batch_size"],
                 "Prev Observation": f"{'Context' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Question'}: {q}",
                 "Action": f"{'Helpful Text' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Reasoning'}: {reasoning_text_first}",
                 "Observation": f"Answer: {ans}",
@@ -1094,9 +1058,7 @@ def train(
                 "Avg Log Prob": avg_log_prob,
                 "Normalized Reward": normalized_reward[0].item(),
                 "Advantage": advantage_value,
-                "Policy Loss": policy_loss.item(),
-                "Total Loss": total_loss.item(),
-                "Grad Norm": grad_norm,
+                "Grad Norm": grad_norm / grad_acc_steps,
                 "Use EI": hyperparameters["use_ei"],
                 "Mean Previous Advantage": mean_prev_advantage,
                 "Std Previous Advantage": std_prev_advantage,
@@ -1162,14 +1124,13 @@ def train(
         if batch_index > 0 and batch_index % 10 == 0:
             try:
                 # Call plot_training_metrics.py with the current log file
+                print("\n")
                 subprocess.run(
                     [
                         "python",
                         "src/plot_training_metrics.py",
                         "--log_file",
                         log_file,
-                        "--window_size",
-                        "10",
                     ],
                     check=True,
                 )
