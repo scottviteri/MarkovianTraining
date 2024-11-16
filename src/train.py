@@ -730,22 +730,12 @@ def get_default_hyperparameters(
         },
         "mistral": {
             "gsm8k": 10,
-            "wiki_compression": 2,
-            "wiki_continuation": 2,
-            "arithmetic": 4,  # Added default for arithmetic
-            "arithmetic_negative": 4,  # Added default for negative arithmetic
+            "wiki_compression": 1,
+            "wiki_continuation": 1,
+            "arithmetic": 6,  # Added default for arithmetic
+            "arithmetic_negative": 6,  # Added default for negative arithmetic
             "default": 2,
         },
-    }
-
-    # Gradient accumulation steps
-    grad_accumulation_defaults = {
-        "gsm8k": 32,
-        "wiki_compression": 8,
-        "wiki_continuation": 8,
-        "arithmetic": 8,  # Added default for arithmetic
-        "arithmetic_negative": 8,  # Added default for negative arithmetic
-        "default": 8,
     }
 
     # Chain of thought length defaults
@@ -754,8 +744,8 @@ def get_default_hyperparameters(
             "gsm8k": 60,
             "wiki_compression": 150,
             "wiki_continuation": 150,
-            "arithmetic": 120,
-            "arithmetic_negative": 120,
+            "arithmetic": 110,
+            "arithmetic_negative": 110,
             "default": 150,
         },
         "mistral": {
@@ -773,13 +763,19 @@ def get_default_hyperparameters(
         task_type, batch_size_defaults[model_type]["default"]
     )
 
-    defaults["gradient_accumulation_steps"] = grad_accumulation_defaults.get(
-        task_type, grad_accumulation_defaults["default"]
-    )
-
     defaults["cot_length"] = cot_length_defaults.get(model_type, {}).get(
         task_type, cot_length_defaults[model_type]["default"]
     )
+
+    # Calculate gradient_accumulation_steps based on cot_length
+    if defaults["cot_length"] <= 50:
+        defaults["gradient_accumulation_steps"] = 32
+    elif defaults["cot_length"] <= 75:
+        defaults["gradient_accumulation_steps"] = 8  
+    elif defaults["cot_length"] <= 100:
+        defaults["gradient_accumulation_steps"] = 4
+    else:
+        defaults["gradient_accumulation_steps"] = 2
 
     # Task-specific length parameters
     if task_type in ["wiki_compression", "wiki_continuation"]:
