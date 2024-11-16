@@ -12,7 +12,14 @@ from scipy.signal import savgol_filter
 from train import calculate_answer_log_probs, find_latest_result
 
 
-def load_model_and_tokenizer(model_name):
+def load_model_and_tokenizer(model_type):
+    if model_type == "mistral":
+        model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+    elif model_type == "llama":
+        model_name = "meta-llama/Llama-3.1-8B-Instruct"
+    else:
+        raise ValueError(f"Unsupported model_type: {model_type}")
+
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.pad_token = tokenizer.eos_token
     model = AutoModelForCausalLM.from_pretrained(
@@ -68,11 +75,6 @@ def run_perturbations(log_file):
     Returns:
         list: Perturbation analysis results
     """
-    # Load models
-    mistral_model_name = "mistralai/Mistral-7B-Instruct-v0.2"
-    mistral_model, mistral_tokenizer, mistral_device = load_model_and_tokenizer(
-        mistral_model_name
-    )
 
     # Define perturbation configurations
     perturbations = {
@@ -90,7 +92,9 @@ def run_perturbations(log_file):
 
     # Extract hyperparameters from the first line of the log file
     hyperparameters = log_data[0]
-
+    mistral_model, mistral_tokenizer, mistral_device = load_model_and_tokenizer(
+        hyperparameters["model_type"]
+    )
     # Extract perturbation-related metrics
     for entry in log_data:
         # Skip entries without Action or Observation
@@ -134,8 +138,6 @@ def run_perturbations(log_file):
                 questions=[question],
                 reasoning_tokens=tokenized_input,
                 answers=[observation],
-                task_type=task_type,
-                model_type=model_type,
                 hyperparameters=hyperparameters,
             )
             avg_log_prob_value = avg_log_prob[0].item()
