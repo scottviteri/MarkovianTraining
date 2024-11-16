@@ -754,8 +754,8 @@ def get_default_hyperparameters(
             "gsm8k": 60,
             "wiki_compression": 150,
             "wiki_continuation": 150,
-            "arithmetic": 250,
-            "arithmetic_negative": 250,
+            "arithmetic": 120,
+            "arithmetic_negative": 120,
             "default": 150,
         },
         "mistral": {
@@ -786,13 +786,12 @@ def get_default_hyperparameters(
         defaults["question_length"] = 500
         defaults["target_length"] = 500
 
+    defaults["r"] = 0.5
     # Training method specific parameters
     if training_methods.get("use_ppo", False):
         defaults["ppo_epsilon"] = 0.2
-        defaults["r"] = 1.0
     else:
         defaults["ppo_epsilon"] = None
-        defaults["r"] = None
 
     # Add training method flags
     defaults.update(training_methods)
