@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Array of hosts (top 4 from config)
-hosts=("Wiki" "LlamaCtxt200" "Llama30add" "4mst" "5ei_wiki" "6pg_wiki" "7ei" "8pg")
+hosts=("rightleft" "right" "left" "leftright")
 
 # Check if arguments were provided
 if [ $# -eq 0 ]; then
@@ -32,6 +32,12 @@ for i in $indices; do
         port_option="-P $port"
     fi
     
-    # Download the specific file with a unique name
-    scp $port_option "$hostname:/root/MarkovianTraining/src/AnalyzeResults/pg_norm_plot.png" "./results_${i}_${hostname}_pg_norm_plot.png"
+    # Create a unique directory for each host
+    mkdir -p "./results_${i}_${hostname}"
+    
+    # Find the most recently edited pg_norm_plot.png file in the results directory and its subdirectories
+    latest_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'log_metrics.png' -print0 | xargs -0 ls -t | head -1")
+    
+    # Download the most recent pg_norm_plot.png file
+    scp $port_option "$hostname:$latest_file" "./results_${i}_${hostname}/"
 done
