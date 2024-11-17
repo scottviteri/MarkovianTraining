@@ -697,6 +697,8 @@ def get_default_hyperparameters(
     cot_length: int = None,
     r: float = None,
     temperature: float = 1.0,
+    question_length: int = 200,
+    target_length: int = 200,
 ):
     """
     Get default hyperparameters based on task, model, and training methods.
@@ -782,8 +784,8 @@ def get_default_hyperparameters(
 
     # Task-specific length parameters
     if task_type in ["wiki_compression", "wiki_continuation"]:
-        defaults["question_length"] = 200
-        defaults["target_length"] = 200
+        defaults["question_length"] = question_length
+        defaults["target_length"] = target_length
 
     # Set the discount factor 'r'
     defaults["r"] = r  # Use the provided value
@@ -1153,6 +1155,8 @@ def main(
     cot_length: int = None,
     r: float = None,
     temperature: float = 1.0,
+    question_length: int = 200,
+    target_length: int = 200,
 ):
     """Main entry point with command-line parameter handling."""
     # Get default hyperparameters
@@ -1161,8 +1165,10 @@ def main(
         model_type=model_type,
         training_methods={"use_ppo": use_ppo, "use_ei": use_ei, "use_pg": use_pg},
         cot_length=cot_length,
-        r=r,  # Pass the r value here
-        temperature=temperature,  # Pass the 'temperature' value here
+        r=r,
+        temperature=temperature,
+        question_length=question_length,
+        target_length=target_length,
     )
 
     # Validate training method selection
@@ -1269,6 +1275,18 @@ if __name__ == "__main__":
         default=1.0,
         help="Temperature for text generation",
     )
+    parser.add_argument(
+        "--question_length",
+        type=int,
+        default=200,
+        help="Length of question/context for wiki tasks (default: 200)",
+    )
+    parser.add_argument(
+        "--target_length",
+        type=int,
+        default=200,
+        help="Length of target/continuation for wiki tasks (default: 200)",
+    )
 
     args = parser.parse_args()
 
@@ -1285,6 +1303,8 @@ if __name__ == "__main__":
         use_pg=args.use_pg,
         model_type=args.model_type,
         cot_length=args.cot_length,
-        r=args.r,  # Pass the 'r' argument here
-        temperature=args.temperature,  # Pass the 'temperature' argument here
+        r=args.r,
+        temperature=args.temperature,
+        question_length=args.question_length,
+        target_length=args.target_length,
     )
