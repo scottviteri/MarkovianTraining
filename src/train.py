@@ -775,21 +775,13 @@ def get_default_hyperparameters(
         defaults["cot_length"] = cot_length
 
     # Calculate gradient_accumulation_steps based on cot_length
-    if defaults["cot_length"] <= 50:
-        defaults["gradient_accumulation_steps"] = 32
-    elif defaults["cot_length"] <= 75:
-        defaults["gradient_accumulation_steps"] = 16
-    elif defaults["cot_length"] <= 100:
-        defaults["gradient_accumulation_steps"] = 8
-    else:
-        defaults["gradient_accumulation_steps"] = 4
-
+    defaults["gradient_accumulation_steps"] = 8
     # Task-specific length parameters
     if task_type in ["wiki_compression", "wiki_continuation"]:
         defaults["question_length"] = 500
         defaults["target_length"] = 500
 
-    defaults["r"] = 0.5
+    defaults["r"] = 0.25
     # Training method specific parameters
     if training_methods.get("use_ppo", False):
         defaults["ppo_epsilon"] = 0.2
