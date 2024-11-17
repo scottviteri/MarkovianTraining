@@ -699,6 +699,7 @@ def get_default_hyperparameters(
     temperature: float = 1.0,
     question_length: int = 200,
     target_length: int = 200,
+    shrink_cot: bool = False,
 ):
     """
     Get default hyperparameters based on task, model, and training methods.
@@ -726,6 +727,7 @@ def get_default_hyperparameters(
         "model_learning_rate": 0.0001,
         "num_batches": 10000,
         "normalize_loss": True,
+        "shrink_cot": shrink_cot,
     }
 
     # Increase learning rate for wiki_* tasks
@@ -918,10 +920,11 @@ def train(
     model_optimizer.zero_grad()
     grad_accum_count = 0
 
-    # Initialize list to track recent log probabilities
+    # Initialize list to track recent log probabilities only if shrink_cot is enabled
     recent_log_probs = []
-    initial_cot_length = hyperparameters["cot_length"]
-    min_cot_length = max(10, initial_cot_length // 10)  # Don't go below 10 tokens
+    if hyperparameters["shrink_cot"]:
+        initial_cot_length = hyperparameters["cot_length"]
+        min_cot_length = max(10, initial_cot_length // 10)  # Don't go below 10 tokens
 
     # Iterate over generator directly
     for batch_index in range(start_batch, hyperparameters["num_batches"]):
@@ -1077,22 +1080,23 @@ def train(
             mean_prev_advantage = None
             std_prev_advantage = None
 
-        # Track log probabilities and adjust cot_length if needed
-        recent_log_probs.append(avg_log_prob)
+        # Track log probabilities and adjust cot_length if enabled
+        if hyperparameters["shrink_cot"]:
+            recent_log_probs.append(avg_log_prob)
 
-        if should_decrease_cot_length(recent_log_probs):
-            new_cot_length = max(
-                min_cot_length,
-                int(hyperparameters["cot_length"] * 0.9),  # Decrease by 10%
-            )
-            if new_cot_length < hyperparameters["cot_length"]:
-                colored_print(
-                    "Decreasing CoT Length:",
-                    f"{hyperparameters['cot_length']} -> {new_cot_length}",
-                    Colors.YELLOW,
+            if should_decrease_cot_length(recent_log_probs):
+                new_cot_length = max(
+                    min_cot_length,
+                    int(hyperparameters["cot_length"] * 0.9),  # Decrease by 10%
                 )
-                hyperparameters["cot_length"] = new_cot_length
-                recent_log_probs = []  # Reset tracking after adjustment
+                if new_cot_length < hyperparameters["cot_length"]:
+                    colored_print(
+                        "Decreasing CoT Length:",
+                        f"{hyperparameters['cot_length']} -> {new_cot_length}",
+                        Colors.YELLOW,
+                    )
+                    hyperparameters["cot_length"] = new_cot_length
+                    recent_log_probs = []  # Reset tracking after adjustment
 
         log_entry = {
             k: tensor_to_python(v)
@@ -1200,6 +1204,7 @@ def main(
     temperature: float = 1.0,
     question_length: int = 200,
     target_length: int = 200,
+    shrink_cot: bool = False,
 ):
     """Main entry point with command-line parameter handling."""
     # Get default hyperparameters
@@ -1212,6 +1217,7 @@ def main(
         temperature=temperature,
         question_length=question_length,
         target_length=target_length,
+        shrink_cot=shrink_cot,
     )
 
     # Validate training method selection
@@ -1330,6 +1336,12 @@ if __name__ == "__main__":
         default=200,
         help="Length of target/continuation for wiki tasks (default: 200)",
     )
+    parser.add_argument(
+        "--shrink_cot",
+        action="store_true",
+        default=False,
+        help="Enable automatic reduction of chain of thought length based on performance",
+    )
 
     args = parser.parse_args()
 
@@ -1350,4 +1362,5 @@ if __name__ == "__main__":
         temperature=args.temperature,
         question_length=args.question_length,
         target_length=args.target_length,
+        shrink_cot=args.shrink_cot,
     )
