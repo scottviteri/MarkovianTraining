@@ -1252,13 +1252,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--cot_length",
         type=int,
-        default=None,
+        default=100,
         help="Chain of thought length (overrides default based on task and model)",
     )
     parser.add_argument(
         "--r",
         type=float,
-        default=None,
+        default=0.5,
         help="Discount factor for the exponential weighted average (overrides default)",
     )
     parser.add_argument(
