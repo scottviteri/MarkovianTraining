@@ -566,11 +566,10 @@ def calculate_advantages(
         log_prob_ans_given_default_reasoning = None
 
     if len(previous_normalized_rewards) > 0 and r is not None:
-        avg_previous_reward = exponential_weighted_average(
-            previous_normalized_rewards, r
-        )
-        advantage = normalized_reward - avg_previous_reward
+        value = exponential_weighted_average(previous_normalized_rewards, r)
+        advantage = normalized_reward - value
     else:
+        value = None
         advantage = normalized_reward
 
     previous_normalized_rewards.extend(normalized_reward.detach().float().cpu().numpy())
@@ -592,6 +591,7 @@ def calculate_advantages(
         normalized_reward,
         extracted_generated_answers,
         training_mask,
+        value,
     )
 
 
@@ -951,6 +951,7 @@ def train(
             normalized_reward,
             extracted_generated_answers,
             training_mask,
+            value,
         ) = calculate_advantages(
             model,
             frozen_model,
@@ -1073,6 +1074,7 @@ def train(
                 "Fraction Active Samples": fraction_active,
                 "Num Active Samples": num_active,
                 "Batch Size": hyperparameters["batch_size"],
+                "Value": value,
             }.items()
         }
 
