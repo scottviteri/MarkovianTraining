@@ -1258,7 +1258,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--r",
         type=float,
-        default=0.5,
+        default=0.9,
         help="Discount factor for the exponential weighted average (overrides default)",
     )
     parser.add_argument(
