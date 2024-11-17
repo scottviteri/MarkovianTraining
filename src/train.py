@@ -136,10 +136,24 @@ def load_model(model_type="mistral"):
     return model, frozen_model, tokenizer, device
 
 
-def calculate_threshold(previous_advantages):
-    if len(previous_advantages) > EI_SKIP_INITIAL:
-        return np.mean(previous_advantages) + np.std(previous_advantages)
-    return float("inf")
+def calculate_threshold(previous_advantages, fixed_threshold=None):
+    """
+    Calculate threshold for expert iteration.
+
+    Args:
+        previous_advantages: List of previous advantage values
+        fixed_threshold: If provided, use this fixed value instead of statistical threshold
+
+    Returns:
+        float: Threshold value (inf if not enough previous advantages)
+    """
+    if len(previous_advantages) <= EI_SKIP_INITIAL:
+        return float("inf")
+
+    if fixed_threshold is not None:
+        return fixed_threshold
+
+    return np.mean(previous_advantages) + np.std(previous_advantages)
 
 
 def generate_arithmetic_pairs(task_type: str, num_examples: int = 1000):
@@ -577,7 +591,9 @@ def calculate_advantages(
 
     training_mask = None
     if use_ei:
-        threshold = calculate_threshold(previous_advantages)
+        threshold = calculate_threshold(
+            previous_advantages, fixed_threshold=hyperparameters.get("ei_threshold")
+        )
         training_mask = (advantage > threshold).float()
         # if not (hyperparameters["use_pg"] or hyperparameters["use_ppo"]):
         #    # If only use_ei is enabled, set advantage to 1 where mask is 1
@@ -700,6 +716,7 @@ def get_default_hyperparameters(
     question_length: int = 200,
     target_length: int = 200,
     shrink_cot: bool = False,
+    ei_threshold: float = None,  # Add new parameter
 ):
     """
     Get default hyperparameters based on task, model, and training methods.
@@ -728,6 +745,7 @@ def get_default_hyperparameters(
         "num_batches": 10000,
         "normalize_loss": True,
         "shrink_cot": shrink_cot,
+        "ei_threshold": ei_threshold,  # Add to defaults
     }
 
     # Increase learning rate for wiki_* tasks
@@ -1205,6 +1223,7 @@ def main(
     question_length: int = 200,
     target_length: int = 200,
     shrink_cot: bool = False,
+    ei_threshold: float = None,  # Add new parameter
 ):
     """Main entry point with command-line parameter handling."""
     # Get default hyperparameters
@@ -1218,6 +1237,7 @@ def main(
         question_length=question_length,
         target_length=target_length,
         shrink_cot=shrink_cot,
+        ei_threshold=ei_threshold,  # Pass to get_default_hyperparameters
     )
 
     # Validate training method selection
@@ -1283,9 +1303,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--use_ei",
-        action="store_true",
-        default=False,
-        help="Use Expert Iteration",
+        type=float,
+        nargs="?",  # Makes the argument optional
+        const=None,  # Value if flag is present but no value given
+        default=False,  # Value if flag is not present
+        help="Use Expert Iteration. Optionally specify a fixed threshold value.",
     )
     parser.add_argument(
         "--use_ppo",
@@ -1345,15 +1367,16 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    if not (args.use_ei or args.use_pg or args.use_ppo):
-        raise ValueError(
-            "At least one of --use_ei, --use_pg, or --use_ppo must be specified."
-        )
+    # Convert use_ei argument to bool/float for main
+    use_ei = bool(
+        args.use_ei is not False
+    )  # True if any value (including None) provided
+    ei_threshold = args.use_ei if isinstance(args.use_ei, float) else None
 
     main(
         task_type=args.task_type,
         resume=args.resume,
-        use_ei=args.use_ei,
+        use_ei=use_ei,
         use_ppo=args.use_ppo,
         use_pg=args.use_pg,
         model_type=args.model_type,
@@ -1363,4 +1386,5 @@ if __name__ == "__main__":
         question_length=args.question_length,
         target_length=args.target_length,
         shrink_cot=args.shrink_cot,
+        ei_threshold=ei_threshold,  # Pass to main
     )
