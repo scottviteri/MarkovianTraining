@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Array of hosts (top 4 from config)
-hosts=("left" "leftright" "rightleft" "right")
+hosts=("left" "leftright" "rightleft" "right" "left2" "leftright2" "rightleft2" "right2")
 
 # Check if arguments were provided
 if [ $# -eq 0 ]; then

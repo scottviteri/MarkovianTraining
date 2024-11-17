@@ -696,6 +696,7 @@ def get_default_hyperparameters(
     training_methods: dict,
     cot_length: int = None,
     r: float = None,
+    temperature: float = 1.0,
 ):
     """
     Get default hyperparameters based on task, model, and training methods.
@@ -711,6 +712,7 @@ def get_default_hyperparameters(
             }
         cot_length: Optional chain of thought length
         r: Optional discount factor for exponential weighted average
+        temperature: Optional; Temperature for text generation.
 
     Returns:
         Dictionary of default hyperparameters
@@ -794,6 +796,9 @@ def get_default_hyperparameters(
 
     # Add training method flags
     defaults.update(training_methods)
+
+    # Add temperature to defaults
+    defaults["temperature"] = temperature
 
     return defaults
 
@@ -925,7 +930,7 @@ def train(
                 max_new_tokens=hyperparameters["cot_length"],
                 min_new_tokens=hyperparameters["cot_length"],
                 do_sample=True,
-                temperature=1.0,
+                temperature=hyperparameters["temperature"],
                 pad_token_id=tokenizer.pad_token_id,
             )
             baseline_outputs = frozen_model.generate(
@@ -934,7 +939,7 @@ def train(
                 max_new_tokens=hyperparameters["cot_length"],
                 min_new_tokens=hyperparameters["cot_length"],
                 do_sample=True,
-                temperature=1.0,
+                temperature=hyperparameters["temperature"],
                 pad_token_id=tokenizer.pad_token_id,
             )
 
@@ -1145,6 +1150,7 @@ def main(
     model_type: str = "llama",
     cot_length: int = None,
     r: float = None,
+    temperature: float = 1.0,
 ):
     """Main entry point with command-line parameter handling."""
     # Get default hyperparameters
@@ -1154,6 +1160,7 @@ def main(
         training_methods={"use_ppo": use_ppo, "use_ei": use_ei, "use_pg": use_pg},
         cot_length=cot_length,
         r=r,  # Pass the r value here
+        temperature=temperature,  # Pass the 'temperature' value here
     )
 
     # Validate training method selection
@@ -1254,6 +1261,12 @@ if __name__ == "__main__":
         default=None,
         help="Discount factor for the exponential weighted average (overrides default)",
     )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=1.0,
+        help="Temperature for text generation",
+    )
 
     args = parser.parse_args()
 
@@ -1271,4 +1284,5 @@ if __name__ == "__main__":
         model_type=args.model_type,
         cot_length=args.cot_length,
         r=args.r,  # Pass the 'r' argument here
+        temperature=args.temperature,  # Pass the 'temperature' argument here
     )
