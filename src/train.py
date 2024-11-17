@@ -831,6 +831,26 @@ def print_debug_info(
         colored_print("Generated Answer:", extracted_generated_answers[0], Colors.RED)
 
 
+def should_decrease_cot_length(recent_log_probs, threshold=-1.0, window_size=10):
+    """
+    Check if we should decrease the cot_length based on recent log probabilities.
+
+    Args:
+        recent_log_probs: List of recent log probabilities
+        threshold: Threshold value for log probabilities (default: -1.0)
+        window_size: Number of consecutive values needed above threshold (default: 10)
+
+    Returns:
+        bool: True if cot_length should be decreased
+    """
+    if len(recent_log_probs) < window_size:
+        return False
+
+    # Check last window_size values
+    recent_window = recent_log_probs[-window_size:]
+    return all(prob > threshold for prob in recent_window)
+
+
 def train(
     task_type: str,
     resume: bool,
@@ -897,6 +917,11 @@ def train(
 
     model_optimizer.zero_grad()
     grad_accum_count = 0
+
+    # Initialize list to track recent log probabilities
+    recent_log_probs = []
+    initial_cot_length = hyperparameters["cot_length"]
+    min_cot_length = max(10, initial_cot_length // 10)  # Don't go below 10 tokens
 
     # Iterate over generator directly
     for batch_index in range(start_batch, hyperparameters["num_batches"]):
@@ -1052,6 +1077,23 @@ def train(
             mean_prev_advantage = None
             std_prev_advantage = None
 
+        # Track log probabilities and adjust cot_length if needed
+        recent_log_probs.append(avg_log_prob)
+
+        if should_decrease_cot_length(recent_log_probs):
+            new_cot_length = max(
+                min_cot_length,
+                int(hyperparameters["cot_length"] * 0.9),  # Decrease by 10%
+            )
+            if new_cot_length < hyperparameters["cot_length"]:
+                colored_print(
+                    "Decreasing CoT Length:",
+                    f"{hyperparameters['cot_length']} -> {new_cot_length}",
+                    Colors.YELLOW,
+                )
+                hyperparameters["cot_length"] = new_cot_length
+                recent_log_probs = []  # Reset tracking after adjustment
+
         log_entry = {
             k: tensor_to_python(v)
             for k, v in {
@@ -1077,6 +1119,7 @@ def train(
                 "Num Active Samples": num_active,
                 "Batch Size": hyperparameters["batch_size"],
                 "Value": value,
+                "CoT Length": hyperparameters["cot_length"],
             }.items()
         }
 
