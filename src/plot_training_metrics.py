@@ -128,6 +128,14 @@ def plot_metrics(file_path, window_size=10, output_file=None):
             )
         )
 
+    if "Value" in metrics:
+        plot_info.extend(
+            [
+                ("Value", "Value Function", "Batch", "Value"),
+                ("Advantage", "Advantage (Reward - Value)", "Batch", "Advantage"),
+            ]
+        )
+
     # Create the figure and axes
     num_plots = len(plot_info)
     num_cols = 2
