@@ -1109,7 +1109,7 @@ def train(
             json.dump(log_entry, f)
             f.write("\n")
 
-        if batch_index % 200 == 0 and batch_index > 0:
+        if batch_index % 1000 == 0 and batch_index > 0:
             print(f"Saving model weights at batch {batch_index}")
 
             # Save model weights
