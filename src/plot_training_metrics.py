@@ -72,6 +72,7 @@ def plot_metrics(file_path, window_size=10, output_file=None):
             "Log Probability",
             {"ylim": (None, 0)},
         ),
+        ("CoT Length", "Chain of Thought Length", "Batch", "Tokens"),
     ]
 
     # Only add Reasoning Contains Answer for non-wiki tasks
@@ -134,11 +135,8 @@ def plot_metrics(file_path, window_size=10, output_file=None):
         )
 
     if "Value" in metrics:
-        plot_info.extend(
-            [
-                ("Value", "Value Function", "Batch", "Value"),
-                ("Advantage", "Advantage (Reward - Value)", "Batch", "Advantage"),
-            ]
+        plot_info.append(
+            ("Value", "Value Function", "Batch", "Value"),
         )
 
     # Create the figure and axes
