@@ -72,14 +72,19 @@ def plot_metrics(file_path, window_size=10, output_file=None):
             "Log Probability",
             {"ylim": (None, 0)},
         ),
-        (
-            "Reasoning Contains Answer",
-            "Reasoning Contains Answer",
-            "Batch",
-            "Proportion",
-            {"ylim": (0, 1)},
-        ),
     ]
+
+    # Only add Reasoning Contains Answer for non-wiki tasks
+    if not ("task_type" in hyperparameters and "wiki" in hyperparameters["task_type"]):
+        plot_info.append(
+            (
+                "Reasoning Contains Answer",
+                "Reasoning Contains Answer",
+                "Batch",
+                "Proportion",
+                {"ylim": (0, 1)},
+            )
+        )
 
     if normalize_loss:
         plot_info.extend(
