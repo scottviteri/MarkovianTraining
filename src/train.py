@@ -833,13 +833,13 @@ def print_debug_info(
         colored_print("Generated Answer:", extracted_generated_answers[0], Colors.RED)
 
 
-def should_decrease_cot_length(recent_log_probs, threshold=-1.0, window_size=10):
+def should_decrease_cot_length(recent_log_probs, threshold=-0.5, window_size=10):
     """
     Check if we should decrease the cot_length based on recent log probabilities.
 
     Args:
         recent_log_probs: List of recent log probabilities
-        threshold: Threshold value for log probabilities (default: -1.0)
+        threshold: Threshold value for log probabilities (default: -0.5)
         window_size: Number of consecutive values needed above threshold (default: 10)
 
     Returns:
