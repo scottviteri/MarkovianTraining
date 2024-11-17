@@ -691,7 +691,11 @@ def tensor_to_python(value):
 
 
 def get_default_hyperparameters(
-    task_type: str, model_type: str, training_methods: dict, cot_length: int = None
+    task_type: str,
+    model_type: str,
+    training_methods: dict,
+    cot_length: int = None,
+    r: float = None,
 ):
     """
     Get default hyperparameters based on task, model, and training methods.
@@ -705,6 +709,8 @@ def get_default_hyperparameters(
                 'use_ei': bool,
                 'use_pg': bool
             }
+        cot_length: Optional chain of thought length
+        r: Optional discount factor for exponential weighted average
 
     Returns:
         Dictionary of default hyperparameters
@@ -718,7 +724,7 @@ def get_default_hyperparameters(
         "normalize_loss": True,
     }
 
-    # Increase learning rate by an order of magnitude for wiki_* tasks
+    # Increase learning rate for wiki_* tasks
     if task_type.startswith("wiki_"):
         defaults["model_learning_rate"] = 0.001
 
@@ -728,16 +734,16 @@ def get_default_hyperparameters(
             "gsm8k": 10,
             "wiki_compression": 1,
             "wiki_continuation": 1,
-            "arithmetic": 4,  # Added default for arithmetic
-            "arithmetic_negative": 4,  # Added default for negative arithmetic
+            "arithmetic": 4,
+            "arithmetic_negative": 4,
             "default": 6,
         },
         "mistral": {
             "gsm8k": 10,
             "wiki_compression": 1,
             "wiki_continuation": 1,
-            "arithmetic": 6,  # Added default for arithmetic
-            "arithmetic_negative": 6,  # Added default for negative arithmetic
+            "arithmetic": 6,
+            "arithmetic_negative": 6,
             "default": 2,
         },
     }
@@ -767,21 +773,19 @@ def get_default_hyperparameters(
         task_type, batch_size_defaults[model_type]["default"]
     )
 
-    if cot_length is None:
-        defaults["cot_length"] = cot_length_defaults.get(model_type, {}).get(
-            task_type, cot_length_defaults[model_type]["default"]
-        )
-    else:
-        defaults["cot_length"] = cot_length
+    defaults["cot_length"] = cot_length
 
-    # Calculate gradient_accumulation_steps based on cot_length
+    # Set gradient accumulation steps
     defaults["gradient_accumulation_steps"] = 8
+
     # Task-specific length parameters
     if task_type in ["wiki_compression", "wiki_continuation"]:
-        defaults["question_length"] = 500
-        defaults["target_length"] = 500
+        defaults["question_length"] = 200
+        defaults["target_length"] = 200
 
-    defaults["r"] = 0.25
+    # Set the discount factor 'r'
+    defaults["r"] = r  # Use the provided value
+
     # Training method specific parameters
     if training_methods.get("use_ppo", False):
         defaults["ppo_epsilon"] = 0.2
@@ -1140,23 +1144,25 @@ def main(
     use_pg: bool = False,
     model_type: str = "llama",
     cot_length: int = None,
+    r: float = None,
 ):
     """Main entry point with command-line parameter handling."""
-    # 1. Get default hyperparameters based on task, model, and training methods
+    # Get default hyperparameters
     hyperparameters = get_default_hyperparameters(
         task_type=task_type,
         model_type=model_type,
         training_methods={"use_ppo": use_ppo, "use_ei": use_ei, "use_pg": use_pg},
         cot_length=cot_length,
+        r=r,  # Pass the r value here
     )
 
-    # 3. Validate training method selection
+    # Validate training method selection
     if not (use_ei or use_pg or use_ppo):
         raise ValueError(
             "At least one of --use_ei, --use_pg, or --use_ppo must be specified."
         )
 
-    # 4. Call train with fully prepared hyperparameters
+    # Call the training function
     train(
         task_type=task_type,
         resume=resume,
@@ -1242,6 +1248,12 @@ if __name__ == "__main__":
         default=None,
         help="Chain of thought length (overrides default based on task and model)",
     )
+    parser.add_argument(
+        "--r",
+        type=float,
+        default=None,
+        help="Discount factor for the exponential weighted average (overrides default)",
+    )
 
     args = parser.parse_args()
 
@@ -1258,4 +1270,5 @@ if __name__ == "__main__":
         use_pg=args.use_pg,
         model_type=args.model_type,
         cot_length=args.cot_length,
+        r=args.r,  # Pass the 'r' argument here
     )
