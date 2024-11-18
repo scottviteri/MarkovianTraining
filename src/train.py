@@ -731,10 +731,6 @@ def get_default_hyperparameters(
         "gradient_accumulation_steps": gradient_accumulation_steps,
     }
 
-    # Increase learning rate for wiki_* tasks
-    if task_type.startswith("wiki_"):
-        defaults["model_learning_rate"] = 0.001
-
     # Task-specific batch sizes and gradient accumulation
     batch_size_defaults = {
         "llama": {
