@@ -591,15 +591,14 @@ def calculate_advantages(
     previous_normalized_rewards.extend(normalized_reward.detach().float().cpu().numpy())
     previous_advantages.extend(advantage.detach().float().cpu().numpy())
 
-    training_mask = None
+    training_mask = torch.ones_like(advantage).float()
     if use_ei:
-        threshold = calculate_threshold(
-            previous_advantages, fixed_threshold=hyperparameters.get("ei_threshold")
-        )
+        threshold = calculate_threshold(previous_advantages)
         training_mask = (advantage > threshold).float()
-        # if not (hyperparameters["use_pg"] or hyperparameters["use_ppo"]):
-        #    # If only use_ei is enabled, set advantage to 1 where mask is 1
-        #    advantage = mask
+
+    # Compute number of active samples
+    num_active = training_mask.sum().item()
+    fraction_active = num_active / len(training_mask)
 
     return (
         advantage,
@@ -620,6 +619,8 @@ def calculate_losses(
     advantage,
     hyperparameters,
 ):
+    use_ei = hyperparameters["use_ei"]
+    use_pg = hyperparameters["use_pg"]
     use_ppo = hyperparameters["use_ppo"]
     ppo_epsilon = hyperparameters.get("ppo_epsilon", 0.2)
     kl_penalty = hyperparameters.get("kl_penalty", None)
@@ -633,18 +634,18 @@ def calculate_losses(
     ).squeeze(-1)
 
     # Sum log probs across sequence length for policy gradient
-    unfrozen_mean_log_prob = unfrozen_token_log_probs.mean(dim=1)
-    frozen_mean_log_prob = frozen_token_log_probs.mean(dim=1)
+    unfrozen_total_log_prob = unfrozen_token_log_probs.sum(dim=1)
+    frozen_total_log_prob = frozen_token_log_probs.sum(dim=1)
 
     # Calculate KL between distributions at each position
     unfrozen_probs = torch.exp(unfrozen_log_probs)
     kl_per_token = (unfrozen_probs * (unfrozen_log_probs - frozen_log_probs)).sum(
         dim=-1
     )
-    kl = kl_per_token.mean(dim=1)  # [batch]
+    kl = kl_per_token.sum(dim=1)  # [batch]
 
     # Calculate policy gradient component
-    pg_loss = -unfrozen_mean_log_prob * advantage.detach()
+    pg_loss = -unfrozen_total_log_prob * advantage.detach()
 
     # Start with base policy gradient loss
     losses = pg_loss
@@ -659,7 +660,7 @@ def calculate_losses(
     ppo_ratio = None
     clipped_ratio = None
     if use_ppo:
-        ppo_ratio = torch.exp(unfrozen_mean_log_prob - frozen_mean_log_prob)
+        ppo_ratio = torch.exp(unfrozen_total_log_prob - frozen_total_log_prob)
         clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
         losses = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
 
