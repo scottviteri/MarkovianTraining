@@ -235,7 +235,7 @@ def construct_prompts(question, hyperparameters, reasoning=None):
     # Construct base prompt
     if task_type == "wiki_compression":
         base_prompt = (
-            f"You will need to reconstruct the following {hyperparameters['target_length']} tokens, which you will need to reconstruct given {hyperparameters["cot_length"]} memory tokens which you can write for yourself."
+            f"You will need to reconstruct the following {hyperparameters['target_length']} tokens, which you will need to reconstruct given {hyperparameters['cot_length']} memory tokens which you can write for yourself."
             f"Feel free to be creative in your chosen compression strategy!\n\nFull Text:"
         )
         prompt_type = "Compression:"
@@ -867,41 +867,21 @@ def should_decrease_cot_length(recent_log_probs, threshold=-0.5, window_size=10)
     return all(prob > threshold for prob in recent_window)
 
 
-def train(
-    task_type: str,
-    resume: bool,
-    use_ei: bool,
-    use_ppo: bool,
-    use_pg: bool,
-    model_type: str,
-    hyperparameters: dict,
-):
-    """Train the model with the specified configuration."""
-    global previous_normalized_rewards, previous_advantages
-
-    # Create a results directory with timestamp
+def setup_training_environment(task_type, resume):
+    """Set up the results directory and load checkpoints if resuming."""
     results_dir = os.path.join(
         "results", task_type, datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     )
     os.makedirs(results_dir, exist_ok=True)
 
-    # Define paths for model and log file
     model_save_path = os.path.join(results_dir, "model")
     log_file = os.path.join(results_dir, "log.jsonl")
 
-    # If resuming, load the latest checkpoint and log file
     if resume:
         latest_checkpoint, latest_log = get_latest_result_and_log(task_type)
         if latest_checkpoint and latest_log:
-            # Load model and optimizer states
             checkpoint = torch.load(latest_checkpoint)
-            model.load_state_dict(checkpoint["model_state_dict"])
-            model_optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-
-            # Load previous training state
             start_batch, hyperparameters = load_training_state(latest_log)
-
-            # Load previous rewards and advantages for EI
             previous_normalized_rewards, previous_advantages = (
                 load_previous_rewards_and_advantages(latest_log)
             )
@@ -911,18 +891,224 @@ def train(
         start_batch = 0
         previous_normalized_rewards = []
         previous_advantages = []
-        # Write hyperparameters as the first line in the log file
         with open(log_file, "w") as f:
             json.dump(hyperparameters, f)
             f.write("\n")
 
-    model, frozen_model, tokenizer, device = load_model(model_type)
+    return results_dir, model_save_path, log_file, start_batch, previous_normalized_rewards, previous_advantages
 
+
+def initialize_model_and_optimizer(model_type, hyperparameters):
+    """Initialize the model, frozen model, tokenizer, device, and optimizer."""
+    model, frozen_model, tokenizer, device = load_model(model_type)
     model_optimizer = bitsandbytes.optim.AdamW8bit(
         model.parameters(), lr=hyperparameters["model_learning_rate"]
     )
+    return model, frozen_model, tokenizer, device, model_optimizer
 
-    # Create generator instead of materializing all batches
+
+def process_batch(
+    model, frozen_model, tokenizer, device, qa_batch, hyperparameters
+):
+    """Process a single batch of data."""
+    questions, answers = zip(*qa_batch)
+    prompts = [
+        construct_prompts(
+            question=q,
+            hyperparameters=hyperparameters,
+        )
+        for q in questions
+    ]
+
+    tokenized_inputs = tokenizer(
+        prompts,
+        padding=True,
+        return_tensors="pt",
+    ).to(device)
+
+    with torch.no_grad():
+        outputs = model.generate(
+            tokenized_inputs.input_ids,
+            attention_mask=tokenized_inputs.attention_mask,
+            max_new_tokens=hyperparameters["cot_length"],
+            min_new_tokens=hyperparameters["cot_length"],
+            do_sample=True,
+            temperature=hyperparameters["temperature"],
+            pad_token_id=tokenizer.pad_token_id,
+        )
+        baseline_outputs = frozen_model.generate(
+            tokenized_inputs.input_ids,
+            attention_mask=tokenized_inputs.attention_mask,
+            max_new_tokens=hyperparameters["cot_length"],
+            min_new_tokens=hyperparameters["cot_length"],
+            do_sample=True,
+            temperature=hyperparameters["temperature"],
+            pad_token_id=tokenizer.pad_token_id,
+        )
+
+    return questions, answers, tokenized_inputs, outputs, baseline_outputs
+
+
+def calculate_and_apply_gradients(
+    model, frozen_model, tokenizer, device, tokenized_inputs, outputs, baseline_outputs, questions, answers, hyperparameters, model_optimizer, training_mask
+):
+    """Calculate advantages, losses, and apply gradients."""
+    (
+        advantage,
+        reasoning_tokens,
+        answer_start_positions,
+        log_prob_ans_given_reasoning,
+        log_prob_ans_given_default_reasoning,
+        normalized_reward,
+        extracted_generated_answers,
+        training_mask,
+        value,
+    ) = calculate_advantages(
+        model,
+        frozen_model,
+        tokenizer,
+        device,
+        tokenized_inputs,
+        outputs,
+        baseline_outputs,
+        questions,
+        answers,
+        hyperparameters,
+    )
+
+    full_attention_mask = torch.cat(
+        [tokenized_inputs.attention_mask, torch.ones_like(reasoning_tokens)], dim=1
+    )
+    unfrozen_outputs = model(input_ids=outputs, attention_mask=full_attention_mask)
+    frozen_outputs = frozen_model(
+        input_ids=outputs, attention_mask=full_attention_mask
+    )
+    unfrozen_logits = unfrozen_outputs.logits[
+        :, tokenized_inputs.input_ids.shape[1] - 1 : -1, :
+    ]
+    frozen_logits = frozen_outputs.logits[
+        :, tokenized_inputs.input_ids.shape[1] - 1 : -1, :
+    ]
+
+    unfrozen_log_probs = torch.nn.functional.log_softmax(unfrozen_logits, dim=-1)
+    frozen_log_probs = torch.nn.functional.log_softmax(frozen_logits, dim=-1)
+
+    reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] : -1]
+
+    losses, ppo_ratio, clipped_ratio, kl, pg_loss, weighted_kl = calculate_losses(
+        unfrozen_log_probs,
+        frozen_log_probs,
+        reasoning_tokens,
+        advantage,
+        hyperparameters,
+    )
+
+    grad_acc_steps = hyperparameters["gradient_accumulation_steps"]
+    num_active = training_mask.sum().item()
+    grad_accum_count += num_active
+    if num_active > 0:
+        loss = (losses * training_mask).sum() / grad_acc_steps
+        loss.backward()
+
+    grad_norm = get_grad_norm(model.parameters())
+    if grad_accum_count >= grad_acc_steps:
+        clip_grad_norm_(model.parameters(), 1.0)
+        model_optimizer.step()
+        model_optimizer.zero_grad()
+        grad_accum_count = 0
+
+    return advantage, reasoning_tokens, log_prob_ans_given_reasoning, log_prob_ans_given_default_reasoning, extracted_generated_answers, grad_norm
+
+
+def log_and_save_results(
+    batch_index, task_type, questions, answers, reasoning_tokens, log_prob_ans_given_reasoning, extracted_generated_answers, advantage, grad_norm, hyperparameters, log_file, model_save_path, model_optimizer, tokenizer, losses, normalized_reward, previous_advantages, value, kl, pg_loss, weighted_kl, grad_acc_steps, fraction_active, num_active
+):
+    """Log results and save model checkpoints."""
+    q = questions[0]
+    ans = answers[0]
+    reasoning_text_first = tokenizer.decode(
+        reasoning_tokens[0], skip_special_tokens=True
+    )
+    avg_log_prob = log_prob_ans_given_reasoning[0].item()
+    advantage_value = advantage[0].item()
+
+    print_debug_info(
+        task_type,
+        q,
+        reasoning_text_first,
+        ans,
+        avg_log_prob,
+        extracted_generated_answers,
+    )
+
+    mean_prev_advantage = np.mean(previous_advantages) if previous_advantages else None
+    std_prev_advantage = np.std(previous_advantages) if previous_advantages else None
+
+    log_entry = {
+        k: tensor_to_python(v)
+        for k, v in {
+            "Loss": losses.mean().item(),
+            "Batch Index": batch_index,
+            "Prev Observation": f"{'Context' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Question'}: {q}",
+            "Action": f"{'Helpful Text' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Reasoning'}: {reasoning_text_first}",
+            "Observation": f"Answer: {ans}",
+            "Reasoning Contains Answer": str(ans) in reasoning_text_first,
+            "Avg Log Prob": avg_log_prob,
+            "Normalized Reward": normalized_reward[0].item(),
+            "Advantage": advantage_value,
+            "Grad Norm": grad_norm / grad_acc_steps,
+            "Use EI": hyperparameters["use_ei"],
+            "Mean Previous Advantage": mean_prev_advantage,
+            "Std Previous Advantage": std_prev_advantage,
+            "EI Threshold": (
+                calculate_threshold(previous_advantages)
+                if hyperparameters["use_ei"]
+                else None
+            ),
+            "Fraction Active Samples": fraction_active,
+            "Num Active Samples": num_active,
+            "Batch Size": hyperparameters["batch_size"],
+            "Value": value,
+            "CoT Length": hyperparameters["cot_length"],
+            "KL Divergence": kl[0].item(),
+            "PG Loss": pg_loss[0].item(),
+            "Weighted KL": (
+                weighted_kl[0].item() if weighted_kl is not None else None
+            ),
+        }.items()
+    }
+
+    with open(log_file, "a") as f:
+        json.dump(log_entry, f)
+        f.write("\n")
+
+    if batch_index % 1000 == 0 and batch_index > 0:
+        print(f"Saving model weights at batch {batch_index}")
+
+        torch.save(
+            {
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": model_optimizer.state_dict(),
+                "batch_index": batch_index,
+                "hyperparameters": hyperparameters,
+            },
+            model_save_path,
+        )
+
+
+def train(
+    task_type: str,
+    resume: bool,
+    model_type: str,
+    hyperparameters: dict,
+):
+    """Train the model with the specified configuration."""
+    global previous_normalized_rewards, previous_advantages
+
+    results_dir, model_save_path, log_file, start_batch, previous_normalized_rewards, previous_advantages = setup_training_environment(task_type, resume)
+
+    model, frozen_model, tokenizer, device, model_optimizer = initialize_model_and_optimizer(model_type, hyperparameters)
+
     qa_generator = generate_question_answer_batches(
         num_batches=hyperparameters["num_batches"],
         batch_size=hyperparameters["batch_size"],
@@ -934,16 +1120,6 @@ def train(
     model_optimizer.zero_grad()
     grad_accum_count = 0
 
-    # Initialize list to track recent log probabilities only if shrink_cot is enabled
-    recent_log_probs = []
-    if hyperparameters["shrink_cot"]:
-        initial_cot_length = hyperparameters["cot_length"]
-        min_cot_length = max(10, initial_cot_length // 2)  # Don't go below 10 tokens
-
-    recent_pg_losses = []
-    print_interval = 100  # Print average every 100 batches
-
-    # Iterate over generator directly
     for batch_index in range(start_batch, hyperparameters["num_batches"]):
         print_batch_delimiter()
         colored_print("Batch:", str(batch_index), Colors.BOLD, inline=True)
@@ -953,276 +1129,29 @@ def train(
             print("Reached end of dataset")
             break
 
-        questions, answers = zip(*qa_batch)
-
-        # Use construct_prompts for creating prompts
-        prompts = [
-            construct_prompts(
-                question=q,
-                hyperparameters=hyperparameters,
-            )
-            for q in questions
-        ]
-
-        tokenized_inputs = tokenizer(
-            prompts,
-            padding=True,
-            return_tensors="pt",
-        ).to(device)
-
-        with torch.no_grad():
-            outputs = model.generate(
-                tokenized_inputs.input_ids,
-                attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=hyperparameters["cot_length"],
-                min_new_tokens=hyperparameters["cot_length"],
-                do_sample=True,
-                temperature=hyperparameters["temperature"],
-                pad_token_id=tokenizer.pad_token_id,
-            )
-            baseline_outputs = frozen_model.generate(
-                tokenized_inputs.input_ids,
-                attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=hyperparameters["cot_length"],
-                min_new_tokens=hyperparameters["cot_length"],
-                do_sample=True,
-                temperature=hyperparameters["temperature"],
-                pad_token_id=tokenizer.pad_token_id,
-            )
-
-        (
-            advantage,
-            reasoning_tokens,
-            answer_start_positions,
-            log_prob_ans_given_reasoning,
-            log_prob_ans_given_default_reasoning,
-            normalized_reward,
-            extracted_generated_answers,
-            training_mask,
-            value,
-        ) = calculate_advantages(
-            model,
-            frozen_model,
-            tokenizer,
-            device,
-            tokenized_inputs,
-            outputs,
-            baseline_outputs,
-            questions,
-            answers,
-            hyperparameters,
+        questions, answers, tokenized_inputs, outputs, baseline_outputs = process_batch(
+            model, frozen_model, tokenizer, device, qa_batch, hyperparameters
         )
 
-        full_attention_mask = torch.cat(
-            [tokenized_inputs.attention_mask, torch.ones_like(reasoning_tokens)], dim=1
+        advantage, reasoning_tokens, log_prob_ans_given_reasoning, log_prob_ans_given_default_reasoning, extracted_generated_answers, grad_norm = calculate_and_apply_gradients(
+            model, frozen_model, tokenizer, device, tokenized_inputs, outputs, baseline_outputs, questions, answers, hyperparameters, model_optimizer, training_mask
         )
-        unfrozen_outputs = model(input_ids=outputs, attention_mask=full_attention_mask)
-        frozen_outputs = frozen_model(
-            input_ids=outputs, attention_mask=full_attention_mask
-        )
-        unfrozen_logits = unfrozen_outputs.logits[
-            :, tokenized_inputs.input_ids.shape[1] - 1 : -1, :
-        ]
-        frozen_logits = frozen_outputs.logits[
-            :, tokenized_inputs.input_ids.shape[1] - 1 : -1, :
-        ]
 
-        unfrozen_log_probs = torch.nn.functional.log_softmax(unfrozen_logits, dim=-1)
-        frozen_log_probs = torch.nn.functional.log_softmax(frozen_logits, dim=-1)
-
-        reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] : -1]
-
-        losses, ppo_ratio, clipped_ratio, kl, pg_loss, weighted_kl = calculate_losses(
+        # Calculate additional variables needed for logging
+        losses, _, _, kl, pg_loss, weighted_kl = calculate_losses(
             unfrozen_log_probs,
             frozen_log_probs,
             reasoning_tokens,
             advantage,
             hyperparameters,
         )
-
-        grad_acc_steps = hyperparameters["gradient_accumulation_steps"]
+        normalized_reward = log_prob_ans_given_reasoning - log_prob_ans_given_default_reasoning
+        fraction_active = training_mask.sum().item() / hyperparameters["batch_size"]
         num_active = training_mask.sum().item()
-        grad_accum_count += num_active
-        if num_active > 0:
-            loss = (losses * training_mask).sum() / grad_acc_steps
-            loss.backward()
 
-        grad_norm = get_grad_norm(model.parameters())
-        if grad_accum_count >= grad_acc_steps:
-            clip_grad_norm_(model.parameters(), 1.0)
-            model_optimizer.step()
-            model_optimizer.zero_grad()
-            grad_accum_count = 0
-
-        # Update logging to include fraction of active samples
-        fraction_active = num_active / hyperparameters["batch_size"]
-
-        q = questions[0]
-        ans = answers[0]
-        reasoning_text_first = tokenizer.decode(
-            reasoning_tokens[0], skip_special_tokens=True
+        log_and_save_results(
+            batch_index, task_type, questions, answers, reasoning_tokens, log_prob_ans_given_reasoning, extracted_generated_answers, advantage, grad_norm, hyperparameters, log_file, model_save_path, model_optimizer, tokenizer, losses, normalized_reward, previous_advantages, value, kl, pg_loss, weighted_kl, hyperparameters["gradient_accumulation_steps"], fraction_active, num_active
         )
-        avg_log_prob = log_prob_ans_given_reasoning[0].item()
-        baseline_avg_log_prob = (
-            log_prob_ans_given_default_reasoning[0].item()
-            if log_prob_ans_given_default_reasoning is not None
-            else None
-        )
-        advantage_value = advantage[0].item()
-
-        print_debug_info(
-            task_type,
-            q,
-            reasoning_text_first,
-            ans,
-            avg_log_prob,
-            extracted_generated_answers,
-        )
-
-        if previous_advantages:
-            mean_prev_advantage = np.mean(previous_advantages)
-            std_prev_advantage = np.std(previous_advantages)
-        else:
-            mean_prev_advantage = None
-            std_prev_advantage = None
-
-        # Track log probabilities and adjust cot_length if enabled
-        if (
-            hyperparameters["shrink_cot"] is not None
-        ):  # Check if any shrinking is enabled
-            if isinstance(hyperparameters["shrink_cot"], int):
-                # Linear schedule
-                target_batch = hyperparameters["shrink_cot"]
-                if batch_index < target_batch:
-                    progress = batch_index / target_batch
-                    hyperparameters["cot_length"] = int(
-                        initial_cot_length
-                        - progress * (initial_cot_length - min_cot_length)
-                    )
-            elif hyperparameters["shrink_cot"] is True:
-                # Adaptive shrinking based on performance
-                recent_log_probs.append(avg_log_prob)
-                if should_decrease_cot_length(recent_log_probs):
-                    new_cot_length = max(
-                        min_cot_length, int(hyperparameters["cot_length"] * 0.9)
-                    )
-                    if new_cot_length < hyperparameters["cot_length"]:
-                        colored_print(
-                            "Decreasing CoT Length:",
-                            f"{hyperparameters['cot_length']} -> {new_cot_length}",
-                            Colors.YELLOW,
-                        )
-                        hyperparameters["cot_length"] = new_cot_length
-                        recent_log_probs = []
-
-        # Track and print average PG loss
-        recent_pg_losses.append(pg_loss.mean().item())
-        if batch_index % print_interval == 0 and recent_pg_losses:
-            avg_pg_loss = sum(recent_pg_losses) / len(recent_pg_losses)
-            colored_print(
-                f"Batch {batch_index}",
-                f"Average PG Loss: {avg_pg_loss:.4f}",
-                Colors.CYAN,
-            )
-            recent_pg_losses = []  # Reset for next window
-
-        log_entry = {
-            k: tensor_to_python(v)
-            for k, v in {
-                "Loss": losses.mean().item(),
-                "Batch Index": batch_index,
-                "Prev Observation": f"{'Context' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Question'}: {q}",
-                "Action": f"{'Helpful Text' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Reasoning'}: {reasoning_text_first}",
-                "Observation": f"Answer: {ans}",
-                "Reasoning Contains Answer": str(ans) in reasoning_text_first,
-                "Avg Log Prob": avg_log_prob,
-                "Normalized Reward": normalized_reward[0].item(),
-                "Advantage": advantage_value,
-                "Grad Norm": grad_norm / grad_acc_steps,
-                "Use EI": hyperparameters["use_ei"],
-                "Mean Previous Advantage": mean_prev_advantage,
-                "Std Previous Advantage": std_prev_advantage,
-                "EI Threshold": (
-                    calculate_threshold(previous_advantages)
-                    if hyperparameters["use_ei"]
-                    else None
-                ),
-                "Fraction Active Samples": fraction_active,
-                "Num Active Samples": num_active,
-                "Batch Size": hyperparameters["batch_size"],
-                "Value": value,
-                "CoT Length": hyperparameters["cot_length"],
-                "KL Divergence": kl[0].item(),
-                "PG Loss": pg_loss[0].item(),
-                "Weighted KL": (
-                    weighted_kl[0].item() if weighted_kl is not None else None
-                ),
-            }.items()
-        }
-
-        if baseline_avg_log_prob is not None:
-            log_entry["Baseline Avg Log Prob"] = tensor_to_python(baseline_avg_log_prob)
-
-        if hyperparameters["use_ppo"] and ppo_ratio is not None:
-            log_entry.update(
-                {
-                    "PPO Ratio": tensor_to_python(ppo_ratio[0]),
-                    "PPO Clipped Ratio": tensor_to_python(clipped_ratio[0]),
-                }
-            )
-
-        if task_type == "gsm8k" and extracted_generated_answers is not None:
-            true_answers = [extract_answer(answer) for answer in answers]
-            correct_count = sum(
-                gen_ans == true_ans
-                for gen_ans, true_ans in zip(extracted_generated_answers, true_answers)
-            )
-            fraction_correct = correct_count / len(answers)
-
-            true_answer = true_answers[0]
-            log_entry.update(
-                {
-                    "Generated Answer": extracted_generated_answers[0],
-                    "True Answer": true_answer,
-                    "Is Correct": extracted_generated_answers[0] == true_answer,
-                    "Fraction Correct": fraction_correct,
-                }
-            )
-
-        with open(log_file, "a") as f:
-            json.dump(log_entry, f)
-            f.write("\n")
-
-        if batch_index % 1000 == 0 and batch_index > 0:
-            print(f"Saving model weights at batch {batch_index}")
-
-            # Save model weights
-            torch.save(
-                {
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": model_optimizer.state_dict(),
-                    "batch_index": batch_index,
-                    "hyperparameters": hyperparameters,
-                },
-                model_save_path,
-            )
-
-        # Periodically plot training metrics (every 10 batches)
-        if batch_index > 0 and batch_index % 10 == 0:
-            try:
-                # Call plot_training_metrics.py with the current log file
-                print("\n")
-                subprocess.run(
-                    [
-                        "python",
-                        "src/plot_training_metrics.py",
-                        "--log_file",
-                        log_file,
-                    ],
-                    check=True,
-                )
-            except subprocess.CalledProcessError as e:
-                print(f"Error plotting metrics: {e}")
 
 
 def main(
