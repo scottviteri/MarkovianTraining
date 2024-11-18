@@ -61,23 +61,31 @@ def plot_metrics(file_path, window_size=10, output_file=None):
     # Determine if this is an EI run
     use_ei = hyperparameters.get("use_ei", False)
 
+    # For Total Loss, get y-limits from last 100 samples
+    if "Loss" in metrics and len(metrics["Loss"]) > 0:
+        recent_loss = metrics["Loss"][-100:]
+        loss_min = min(recent_loss)
+        loss_max = max(recent_loss)
+        # Add some padding (10% of range)
+        loss_range = loss_max - loss_min
+        loss_ylim = (loss_min - 0.1 * loss_range, loss_max + 0.1 * loss_range)
+    else:
+        loss_ylim = None
+
     # For PG Loss, get y-limits from last 100 samples
     if "PG Loss" in metrics and len(metrics["PG Loss"]) > 0:
         recent_pg = metrics["PG Loss"][-100:]
-        if len(recent_pg) > 0:  # Check if we have any valid values
-            pg_min = np.min(recent_pg)
-            pg_max = np.max(recent_pg)
-            # Add some padding (10% of range)
-            pg_range = pg_max - pg_min
-            pg_ylim = (pg_min - 0.1 * pg_range, pg_max + 0.1 * pg_range)
-        else:
-            pg_ylim = None
+        pg_min = min(recent_pg)
+        pg_max = max(recent_pg)
+        # Add some padding (10% of range)
+        pg_range = pg_max - pg_min
+        pg_ylim = (pg_min - 0.1 * pg_range, pg_max + 0.1 * pg_range)
     else:
         pg_ylim = None
 
     # Define the metrics to plot
     plot_info = [
-        ("Loss", "Total Loss", "Batch", "Loss"),
+        ("Loss", "Total Loss", "Batch", "Loss", {"ylim": loss_ylim}),
         ("PG Loss", "Policy Gradient Loss", "Batch", "Loss", {"ylim": pg_ylim}),
         ("Weighted KL", "Weighted KL Divergence", "Batch", "Loss"),
         ("Grad Norm", "Gradient Norm", "Batch", "Norm"),
