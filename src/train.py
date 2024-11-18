@@ -613,8 +613,9 @@ def calculate_advantages(
 
 
 def calculate_losses(
-    unfrozen_avg_log_probs_reasoning_given_question,
-    frozen_avg_log_probs_reasoning_given_question,
+    unfrozen_log_probs,  # [batch, seq_len, vocab_size]
+    frozen_log_probs,  # [batch, seq_len, vocab_size]
+    reasoning_tokens,  # [batch, seq_len]
     advantage,
     hyperparameters,
 ):
@@ -624,29 +625,41 @@ def calculate_losses(
     ppo_epsilon = hyperparameters.get("ppo_epsilon", 0.2)
     ppo_kl_coef = hyperparameters.get("ppo_kl_coef", None)
 
-    # Calculate KL divergence regardless of method
-    kl = (
-        unfrozen_avg_log_probs_reasoning_given_question
-        - frozen_avg_log_probs_reasoning_given_question
-    )
+    # Get token-specific log probs for policy gradient
+    unfrozen_token_log_probs = unfrozen_log_probs.gather(
+        2, reasoning_tokens.unsqueeze(-1)
+    ).squeeze(-1)
+    frozen_token_log_probs = frozen_log_probs.gather(
+        2, reasoning_tokens.unsqueeze(-1)
+    ).squeeze(-1)
+
+    # Sum log probs across sequence length for policy gradient
+    unfrozen_total_log_prob = unfrozen_token_log_probs.sum(dim=1)
+    frozen_total_log_prob = frozen_token_log_probs.sum(dim=1)
+
+    # Calculate KL between distributions at each position
+    # KL(p||q) = sum_v p(v) * (log p(v) - log q(v))
+    # Since we have log_probs, we can use exp(log_p) * (log_p - log_q)
+    unfrozen_probs = torch.exp(unfrozen_log_probs)  # [batch, seq_len, vocab_size]
+    kl_per_token = (unfrozen_probs * (unfrozen_log_probs - frozen_log_probs)).sum(
+        dim=-1
+    )  # [batch, seq_len]
+    kl = kl_per_token.sum(dim=1)  # Sum across sequence length [batch]
 
     if use_ppo:
         if ppo_kl_coef is not None:
             # Use PG loss with KL penalty
-            losses = (
-                -unfrozen_avg_log_probs_reasoning_given_question * advantage.detach()
-                + ppo_kl_coef * kl
-            )
+            losses = -unfrozen_total_log_prob * advantage.detach() + ppo_kl_coef * kl
             ppo_ratio = None
             clipped_ratio = None
         else:
             # Standard PPO loss
-            ppo_ratio = torch.exp(kl)
+            ppo_ratio = torch.exp(unfrozen_total_log_prob - frozen_total_log_prob)
             clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
             losses = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
     elif use_ei or use_pg:
         # Standard Policy Gradient loss
-        losses = -unfrozen_avg_log_probs_reasoning_given_question * advantage.detach()
+        losses = -unfrozen_total_log_prob * advantage.detach()
         ppo_ratio = None
         clipped_ratio = None
     else:
@@ -1038,8 +1051,9 @@ def train(
         )
 
         losses, ppo_ratio, clipped_ratio, kl = calculate_losses(
-            unfrozen_avg_log_probs_reasoning_given_question,
-            frozen_avg_log_probs_reasoning_given_question,
+            unfrozen_log_probs,
+            frozen_log_probs,
+            reasoning_tokens,
             advantage,
             hyperparameters,
         )
