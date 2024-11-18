@@ -66,7 +66,6 @@ def plot_metrics(file_path, window_size=10, output_file=None):
         ("Loss", "Total Loss", "Batch", "Loss"),
         ("PG Loss", "Policy Gradient Loss", "Batch", "Loss"),
         ("Weighted KL", "Weighted KL Divergence", "Batch", "Loss"),
-        ("KL Divergence", "KL Divergence (Unweighted)", "Batch", "KL"),
         ("Grad Norm", "Gradient Norm", "Batch", "Norm"),
         (
             "Avg Log Prob",

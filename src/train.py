@@ -953,6 +953,9 @@ def train(
         initial_cot_length = hyperparameters["cot_length"]
         min_cot_length = max(10, initial_cot_length // 2)  # Don't go below 10 tokens
 
+    recent_pg_losses = []
+    print_interval = 100  # Print average every 100 batches
+
     # Iterate over generator directly
     for batch_index in range(start_batch, hyperparameters["num_batches"]):
         print_batch_delimiter()
@@ -1123,6 +1126,17 @@ def train(
                         )
                         hyperparameters["cot_length"] = new_cot_length
                         recent_log_probs = []
+
+        # Track and print average PG loss
+        recent_pg_losses.append(pg_loss.mean().item())
+        if batch_index % print_interval == 0 and recent_pg_losses:
+            avg_pg_loss = sum(recent_pg_losses) / len(recent_pg_losses)
+            colored_print(
+                f"Batch {batch_index}",
+                f"Average PG Loss: {avg_pg_loss:.4f}",
+                Colors.CYAN,
+            )
+            recent_pg_losses = []  # Reset for next window
 
         log_entry = {
             k: tensor_to_python(v)
