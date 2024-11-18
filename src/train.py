@@ -641,7 +641,7 @@ def calculate_losses(
     kl_per_token = (unfrozen_probs * (unfrozen_log_probs - frozen_log_probs)).sum(
         dim=-1
     )
-    kl = kl_per_token.sum(dim=1)  # [batch]
+    kl = kl_per_token.mean(dim=1)  # [batch]
 
     # Calculate policy gradient component
     pg_loss = -unfrozen_mean_log_prob * advantage.detach()
