@@ -1362,7 +1362,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--r",
         type=float,
-        default=0.8,
+        default=0.9,
         help="Discount factor for the exponential weighted average (overrides default)",
     )
     parser.add_argument(
@@ -1374,13 +1374,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--question_length",
         type=int,
-        default=200,
+        default=50,
         help="Length of question/context for wiki tasks (default: 200)",
     )
     parser.add_argument(
         "--target_length",
         type=int,
-        default=200,
+        default=50,
         help="Length of target/continuation for wiki tasks (default: 200)",
     )
     parser.add_argument(
