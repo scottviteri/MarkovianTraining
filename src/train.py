@@ -634,8 +634,8 @@ def calculate_losses(
     ).squeeze(-1)
 
     # Sum log probs across sequence length for policy gradient
-    unfrozen_total_log_prob = unfrozen_token_log_probs.sum(dim=1)
-    frozen_total_log_prob = frozen_token_log_probs.sum(dim=1)
+    unfrozen_mean_log_prob = unfrozen_token_log_probs.mean(dim=1)
+    frozen_mean_log_prob = frozen_token_log_probs.mean(dim=1)
 
     # Calculate KL between distributions at each position
     unfrozen_probs = torch.exp(unfrozen_log_probs)
@@ -645,7 +645,7 @@ def calculate_losses(
     kl = kl_per_token.sum(dim=1)  # [batch]
 
     # Calculate policy gradient component
-    pg_loss = -unfrozen_total_log_prob * advantage.detach()
+    pg_loss = -unfrozen_mean_log_prob * advantage.detach()
 
     # Start with base policy gradient loss
     losses = pg_loss
@@ -660,7 +660,7 @@ def calculate_losses(
     ppo_ratio = None
     clipped_ratio = None
     if use_ppo:
-        ppo_ratio = torch.exp(unfrozen_total_log_prob - frozen_total_log_prob)
+        ppo_ratio = torch.exp(unfrozen_mean_log_prob - frozen_mean_log_prob)
         clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
         losses = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
 

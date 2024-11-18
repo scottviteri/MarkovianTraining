@@ -2,35 +2,19 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Perturbation Analysis",
-            "type": "python",
-            "request": "launch",
-            "program": "${workspaceFolder}/src/perturbation_analysis.py",
-            "args": [
-                "--plot"
-            ],
-            "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            }
-        },
-        {
-            "name": "Train Model",
+            "name": "Python: Train Wiki Compression",
             "type": "python",
             "request": "launch",
             "program": "${workspaceFolder}/src/train.py",
             "args": [
-                "--model_type",
-                "llama",
-                "--use_ei",
-                "--use_ppo"
+                "--task_type", "wiki_compression",
+                "--question_length", "25",
+                "--cot_length", "13", 
+                "--target_length", "25",
+                "--use_pg"
             ],
             "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}",
-            "env": {
-                "PYTHONPATH": "${workspaceFolder}"
-            }
+            "justMyCode": true
         }
     ]
 }
