@@ -492,9 +492,6 @@ def calculate_answer_log_probs(
             or decoded_answer[-3:] != expected_answer[-3:]
         ):
             colored_print("Answer mismatch at index", str(i), Colors.RED)
-            # print(f"Decoded:  {decoded_answer}")
-            # print(f"Expected: {expected_answer}")
-        # assert decoded_answer == expected_answer, f"Answer mismatch at index {i}"
 
     with torch.no_grad():
         outputs = model(
@@ -513,14 +510,11 @@ def calculate_answer_log_probs(
 
     avg_log_probs = list(map(lambda x: x.mean(), answer_log_probs))
     # print("Log Probs:", answer_log_probs[0])
-    return torch.stack(avg_log_probs), extracted_generated_answers
-
-
-# def calculate_ppo_loss(current_log_probs, old_log_probs, advantages, epsilon=0.2):
-#    ratio = torch.exp(current_log_probs - old_log_probs)
-#    clipped_ratio = torch.clamp(ratio, 1 - epsilon, 1 + epsilon)
-#    loss = -torch.min(ratio * advantages, clipped_ratio * advantages)
-#    return loss.mean()
+    return (
+        torch.stack(avg_log_probs),
+        answer_start_positions,
+        extracted_generated_answers,
+    )
 
 
 def exponential_weighted_average(values, r):
@@ -549,16 +543,18 @@ def calculate_advantages(
 
     reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] :]
 
-    log_prob_ans_given_reasoning, extracted_generated_answers = (
-        calculate_answer_log_probs(
-            frozen_model,
-            tokenizer,
-            device,
-            questions,
-            reasoning_tokens,
-            answers,
-            hyperparameters,
-        )
+    (
+        log_prob_ans_given_reasoning,
+        answer_start_positions,
+        extracted_generated_answers,
+    ) = calculate_answer_log_probs(
+        frozen_model,
+        tokenizer,
+        device,
+        questions,
+        reasoning_tokens,
+        answers,
+        hyperparameters,
     )
 
     if normalize_loss:
@@ -596,13 +592,10 @@ def calculate_advantages(
         threshold = calculate_threshold(previous_advantages)
         training_mask = (advantage > threshold).float()
 
-    # Compute number of active samples
-    num_active = training_mask.sum().item()
-    fraction_active = num_active / len(training_mask)
-
     return (
         advantage,
         reasoning_tokens,
+        answer_start_positions,
         log_prob_ans_given_reasoning,
         log_prob_ans_given_default_reasoning,
         normalized_reward,
@@ -642,7 +635,7 @@ def calculate_losses(
     kl_per_token = (unfrozen_probs * (unfrozen_log_probs - frozen_log_probs)).sum(
         dim=-1
     )
-    kl = kl_per_token.sum(dim=1)  # [batch]
+    kl = kl_per_token.mean(dim=1)  # [batch]
 
     # Calculate policy gradient component
     pg_loss = -unfrozen_mean_log_prob * advantage.detach()
@@ -763,8 +756,8 @@ def get_default_hyperparameters(
     batch_size_defaults = {
         "llama": {
             "gsm8k": 10,
-            "wiki_compression": 1,
-            "wiki_continuation": 1,
+            "wiki_compression": 2,
+            "wiki_continuation": 2,
             "arithmetic": 4,
             "arithmetic_negative": 4,
             "default": 6,
@@ -1001,6 +994,7 @@ def train(
         (
             advantage,
             reasoning_tokens,
+            answer_start_positions,
             log_prob_ans_given_reasoning,
             log_prob_ans_given_default_reasoning,
             normalized_reward,
