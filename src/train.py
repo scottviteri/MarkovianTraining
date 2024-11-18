@@ -1091,27 +1091,33 @@ def train(
             std_prev_advantage = None
 
         # Track log probabilities and adjust cot_length if enabled
-        if isinstance(hyperparameters["shrink_cot"], (int, float)):
-            target_batch = int(hyperparameters["shrink_cot"])
-            progress = batch_index / target_batch
-            hyperparameters["cot_length"] = max(
-                int(initial_cot_length * (1 - progress) + min_cot_length * progress),
-                min_cot_length,
-            )
-        elif hyperparameters["shrink_cot"]:
-            recent_log_probs.append(avg_log_prob)
-            if should_decrease_cot_length(recent_log_probs):
-                new_cot_length = max(
-                    min_cot_length, int(hyperparameters["cot_length"] * 0.9)
-                )
-                if new_cot_length < hyperparameters["cot_length"]:
-                    colored_print(
-                        "Decreasing CoT Length:",
-                        f"{hyperparameters['cot_length']} -> {new_cot_length}",
-                        Colors.YELLOW,
+        if (
+            hyperparameters["shrink_cot"] is not None
+        ):  # Check if any shrinking is enabled
+            if isinstance(hyperparameters["shrink_cot"], int):
+                # Linear schedule
+                target_batch = hyperparameters["shrink_cot"]
+                if batch_index < target_batch:
+                    progress = batch_index / target_batch
+                    hyperparameters["cot_length"] = int(
+                        initial_cot_length
+                        - progress * (initial_cot_length - min_cot_length)
                     )
-                    hyperparameters["cot_length"] = new_cot_length
-                    recent_log_probs = []
+            elif hyperparameters["shrink_cot"] is True:
+                # Adaptive shrinking based on performance
+                recent_log_probs.append(avg_log_prob)
+                if should_decrease_cot_length(recent_log_probs):
+                    new_cot_length = max(
+                        min_cot_length, int(hyperparameters["cot_length"] * 0.9)
+                    )
+                    if new_cot_length < hyperparameters["cot_length"]:
+                        colored_print(
+                            "Decreasing CoT Length:",
+                            f"{hyperparameters['cot_length']} -> {new_cot_length}",
+                            Colors.YELLOW,
+                        )
+                        hyperparameters["cot_length"] = new_cot_length
+                        recent_log_probs = []
 
         log_entry = {
             k: tensor_to_python(v)
@@ -1367,7 +1373,7 @@ if __name__ == "__main__":
         type=float,
         nargs="?",  # Makes the argument optional
         const=True,  # Value if flag is present but no value given
-        default=False,  # Value if flag is not present
+        default=None,  # Value if flag is not present
         help="Enable CoT length reduction. If number provided, linearly decrease until that batch.",
     )
     parser.add_argument(
