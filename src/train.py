@@ -934,7 +934,7 @@ def train(
     recent_log_probs = []
     if hyperparameters["shrink_cot"]:
         initial_cot_length = hyperparameters["cot_length"]
-        min_cot_length = max(10, initial_cot_length // 10)  # Don't go below 10 tokens
+        min_cot_length = max(10, initial_cot_length // 2)  # Don't go below 10 tokens
 
     # Iterate over generator directly
     for batch_index in range(start_batch, hyperparameters["num_batches"]):
@@ -1091,13 +1091,18 @@ def train(
             std_prev_advantage = None
 
         # Track log probabilities and adjust cot_length if enabled
-        if hyperparameters["shrink_cot"]:
+        if isinstance(hyperparameters["shrink_cot"], (int, float)):
+            target_batch = int(hyperparameters["shrink_cot"])
+            progress = batch_index / target_batch
+            hyperparameters["cot_length"] = max(
+                int(initial_cot_length * (1 - progress) + min_cot_length * progress),
+                min_cot_length,
+            )
+        elif hyperparameters["shrink_cot"]:
             recent_log_probs.append(avg_log_prob)
-
             if should_decrease_cot_length(recent_log_probs):
                 new_cot_length = max(
-                    min_cot_length,
-                    int(hyperparameters["cot_length"] * 0.9),  # Decrease by 10%
+                    min_cot_length, int(hyperparameters["cot_length"] * 0.9)
                 )
                 if new_cot_length < hyperparameters["cot_length"]:
                     colored_print(
@@ -1106,13 +1111,13 @@ def train(
                         Colors.YELLOW,
                     )
                     hyperparameters["cot_length"] = new_cot_length
-                    recent_log_probs = []  # Reset tracking after adjustment
+                    recent_log_probs = []
 
         log_entry = {
             k: tensor_to_python(v)
             for k, v in {
                 "Loss": losses.mean().item(),
-                "Batch Index": hyperparameters["batch_size"],
+                "Batch Index": batch_index,
                 "Prev Observation": f"{'Context' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Question'}: {q}",
                 "Action": f"{'Helpful Text' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Reasoning'}: {reasoning_text_first}",
                 "Observation": f"Answer: {ans}",
@@ -1134,6 +1139,7 @@ def train(
                 "Batch Size": hyperparameters["batch_size"],
                 "Value": value,
                 "CoT Length": hyperparameters["cot_length"],
+                "KL Divergence": kl[0].item(),
             }.items()
         }
 
