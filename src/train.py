@@ -235,16 +235,15 @@ def construct_prompts(question, hyperparameters, reasoning=None):
     # Construct base prompt
     if task_type == "wiki_compression":
         base_prompt = (
-            f"The following text is the {hyperparameters['target_length']} characters, which you will need to reconstruct."
-            f"You can write {hyperparameters['cot_length']} tokens as your memory during the reconstruction. "
-            f"Feel free to be creative!\n\nFull Text:"
+            f"You will need to reconstruct the following {hyperparameters['target_length']} tokens, which you will need to reconstruct given {hyperparameters["cot_length"]} memory tokens which you can write for yourself."
+            f"Feel free to be creative in your chosen compression strategy!\n\nFull Text:"
         )
         prompt_type = "Compression:"
     elif task_type == "wiki_continuation":
         base_prompt = (
-            f"Given this opening text from an article, write whatever "
-            f"{hyperparameters['cot_length']} tokens you suspect might help you "
-            f"predict the next {hyperparameters['target_length']} tokens. Be creative!\n\nOpening text:"
+            "You will need to predict the next {hyperparameters['target_length']} tokens which follow the provided passage."
+            f"You can write {hyperparameters['cot_length']} thinking tokens which will be your sole context for prediction."
+            f"Feel free to be creative in your thinking strategy!\n\nOpening text:"
         )
         prompt_type = "Helpful Text:"
     else:  # arithmetic/gsm8k
