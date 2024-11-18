@@ -63,7 +63,10 @@ def plot_metrics(file_path, window_size=10, output_file=None):
 
     # Define the metrics to plot
     plot_info = [
-        ("Loss", "Loss", "Batch", "Loss"),
+        ("Loss", "Total Loss", "Batch", "Loss"),
+        ("PG Loss", "Policy Gradient Loss", "Batch", "Loss"),
+        ("Weighted KL", "Weighted KL Divergence", "Batch", "Loss"),
+        ("KL Divergence", "KL Divergence (Unweighted)", "Batch", "KL"),
         ("Grad Norm", "Gradient Norm", "Batch", "Norm"),
         (
             "Avg Log Prob",
@@ -73,7 +76,6 @@ def plot_metrics(file_path, window_size=10, output_file=None):
             {"ylim": (None, 0)},
         ),
         ("CoT Length", "Chain of Thought Length", "Batch", "Tokens"),
-        ("KL Divergence", "KL Divergence", "Batch", "KL"),
     ]
 
     # Only add Reasoning Contains Answer for non-wiki tasks

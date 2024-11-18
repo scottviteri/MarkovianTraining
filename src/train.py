@@ -638,18 +638,20 @@ def calculate_losses(
     frozen_total_log_prob = frozen_token_log_probs.sum(dim=1)
 
     # Calculate KL between distributions at each position
-    # KL(p||q) = sum_v p(v) * (log p(v) - log q(v))
-    # Since we have log_probs, we can use exp(log_p) * (log_p - log_q)
-    unfrozen_probs = torch.exp(unfrozen_log_probs)  # [batch, seq_len, vocab_size]
+    unfrozen_probs = torch.exp(unfrozen_log_probs)
     kl_per_token = (unfrozen_probs * (unfrozen_log_probs - frozen_log_probs)).sum(
         dim=-1
-    )  # [batch, seq_len]
-    kl = kl_per_token.sum(dim=1)  # Sum across sequence length [batch]
+    )
+    kl = kl_per_token.sum(dim=1)  # [batch]
+
+    # Calculate policy gradient component
+    pg_loss = -unfrozen_total_log_prob * advantage.detach()
 
     if use_ppo:
         if ppo_kl_coef is not None:
             # Use PG loss with KL penalty
-            losses = -unfrozen_total_log_prob * advantage.detach() + ppo_kl_coef * kl
+            weighted_kl = ppo_kl_coef * kl
+            losses = pg_loss + weighted_kl
             ppo_ratio = None
             clipped_ratio = None
         else:
@@ -657,15 +659,17 @@ def calculate_losses(
             ppo_ratio = torch.exp(unfrozen_total_log_prob - frozen_total_log_prob)
             clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
             losses = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
+            weighted_kl = None
     elif use_ei or use_pg:
         # Standard Policy Gradient loss
-        losses = -unfrozen_total_log_prob * advantage.detach()
+        losses = pg_loss
         ppo_ratio = None
         clipped_ratio = None
+        weighted_kl = None
     else:
         raise ValueError("At least one of use_pg, use_ppo, or use_ei must be True.")
 
-    return losses, ppo_ratio, clipped_ratio, kl
+    return losses, ppo_ratio, clipped_ratio, kl, pg_loss, weighted_kl
 
 
 def get_latest_result_and_log(dataset_type):
@@ -1036,21 +1040,8 @@ def train(
         frozen_log_probs = torch.nn.functional.log_softmax(frozen_logits, dim=-1)
 
         reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] : -1]
-        unfrozen_token_log_probs = unfrozen_log_probs.gather(
-            2, reasoning_tokens.unsqueeze(-1)
-        ).squeeze(-1)
-        frozen_token_log_probs = frozen_log_probs.gather(
-            2, reasoning_tokens.unsqueeze(-1)
-        ).squeeze(-1)
 
-        unfrozen_avg_log_probs_reasoning_given_question = unfrozen_token_log_probs.mean(
-            dim=1
-        )
-        frozen_avg_log_probs_reasoning_given_question = frozen_token_log_probs.mean(
-            dim=1
-        )
-
-        losses, ppo_ratio, clipped_ratio, kl = calculate_losses(
+        losses, ppo_ratio, clipped_ratio, kl, pg_loss, weighted_kl = calculate_losses(
             unfrozen_log_probs,
             frozen_log_probs,
             reasoning_tokens,
@@ -1160,6 +1151,10 @@ def train(
                 "Value": value,
                 "CoT Length": hyperparameters["cot_length"],
                 "KL Divergence": kl[0].item(),
+                "PG Loss": pg_loss[0].item(),
+                "Weighted KL": (
+                    weighted_kl[0].item() if weighted_kl is not None else None
+                ),
             }.items()
         }
 
