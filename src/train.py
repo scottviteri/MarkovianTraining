@@ -716,28 +716,10 @@ def get_default_hyperparameters(
     question_length: int = 200,
     target_length: int = 200,
     shrink_cot: bool = False,
-    ei_threshold: float = None,  # Add new parameter
+    ei_threshold: float = None,
+    gradient_accumulation_steps: int = 8,
 ):
-    """
-    Get default hyperparameters based on task, model, and training methods.
-
-    Args:
-        task_type: Type of task (e.g., 'gsm8k', 'wiki_compression')
-        model_type: Type of model (e.g., 'llama', 'mistral')
-        training_methods: Dictionary of training method flags
-            {
-                'use_ppo': bool,
-                'use_ei': bool,
-                'use_pg': bool
-            }
-        cot_length: Optional chain of thought length
-        r: Optional discount factor for exponential weighted average
-        temperature: Optional; Temperature for text generation.
-
-    Returns:
-        Dictionary of default hyperparameters
-    """
-    # Base default hyperparameters
+    """Get default hyperparameters based on task, model, and training methods."""
     defaults = {
         "task_type": task_type,
         "model_type": model_type,
@@ -745,7 +727,8 @@ def get_default_hyperparameters(
         "num_batches": 10000,
         "normalize_loss": True,
         "shrink_cot": shrink_cot,
-        "ei_threshold": ei_threshold,  # Add to defaults
+        "ei_threshold": ei_threshold,
+        "gradient_accumulation_steps": gradient_accumulation_steps,
     }
 
     # Increase learning rate for wiki_* tasks
@@ -798,9 +781,6 @@ def get_default_hyperparameters(
     )
 
     defaults["cot_length"] = cot_length
-
-    # Set gradient accumulation steps
-    defaults["gradient_accumulation_steps"] = 8
 
     # Task-specific length parameters
     if task_type in ["wiki_compression", "wiki_continuation"]:
@@ -1223,7 +1203,8 @@ def main(
     question_length: int = 200,
     target_length: int = 200,
     shrink_cot: bool = False,
-    ei_threshold: float = None,  # Add new parameter
+    ei_threshold: float = None,
+    gradient_accumulation_steps: int = 8,
 ):
     """Main entry point with command-line parameter handling."""
     # Get default hyperparameters
@@ -1237,7 +1218,8 @@ def main(
         question_length=question_length,
         target_length=target_length,
         shrink_cot=shrink_cot,
-        ei_threshold=ei_threshold,  # Pass to get_default_hyperparameters
+        ei_threshold=ei_threshold,
+        gradient_accumulation_steps=gradient_accumulation_steps,
     )
 
     # Validate training method selection
@@ -1364,6 +1346,12 @@ if __name__ == "__main__":
         default=False,
         help="Enable automatic reduction of chain of thought length based on performance",
     )
+    parser.add_argument(
+        "--gradient_accumulation_steps",
+        type=int,
+        default=8,
+        help="Number of steps to accumulate gradients over (default: 8)",
+    )
 
     args = parser.parse_args()
 
@@ -1386,5 +1374,6 @@ if __name__ == "__main__":
         question_length=args.question_length,
         target_length=args.target_length,
         shrink_cot=args.shrink_cot,
-        ei_threshold=ei_threshold,  # Pass to main
+        ei_threshold=ei_threshold,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
     )
