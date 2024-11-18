@@ -726,13 +726,13 @@ def get_default_hyperparameters(
     training_methods: dict,
     cot_length: int = None,
     r: float = None,
-    temperature: float = 1.0,
+    temperature: float,
     question_length: int = 200,
-    target_length: int = 200,
+    target_length: int,
     shrink_cot: Union[bool, int] = False,
     ei_threshold: float = None,
-    gradient_accumulation_steps: int = 8,
-    ppo_kl_coef: float = None,
+    gradient_accumulation_steps: int,
+    ppo_kl_coef: float,
 ):
     """Get default hyperparameters based on task, model, and training methods."""
     defaults = {
@@ -1367,7 +1367,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--gradient_accumulation_steps",
         type=int,
-        default=8,
+        default=1,
         help="Number of steps to accumulate gradients over (default: 8)",
     )
 
