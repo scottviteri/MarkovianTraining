@@ -78,6 +78,7 @@ class Colors:
     YELLOW = "\033[93m"
     BOLD = "\033[1m"
     UNDERLINE = "\033[4m"
+    CYAN = "\033[96m"
     END = "\033[0m"
 
 
