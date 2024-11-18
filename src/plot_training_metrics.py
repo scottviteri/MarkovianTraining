@@ -61,10 +61,21 @@ def plot_metrics(file_path, window_size=10, output_file=None):
     # Determine if this is an EI run
     use_ei = hyperparameters.get("use_ei", False)
 
+    # For PG Loss, get y-limits from last 100 samples
+    if "PG Loss" in metrics and len(metrics["PG Loss"]) > 0:
+        recent_pg = metrics["PG Loss"][-100:]
+        pg_min = recent_pg.min()
+        pg_max = recent_pg.max()
+        # Add some padding (10% of range)
+        pg_range = pg_max - pg_min
+        pg_ylim = (pg_min - 0.1 * pg_range, pg_max + 0.1 * pg_range)
+    else:
+        pg_ylim = None
+
     # Define the metrics to plot
     plot_info = [
         ("Loss", "Total Loss", "Batch", "Loss"),
-        ("PG Loss", "Policy Gradient Loss", "Batch", "Loss"),
+        ("PG Loss", "Policy Gradient Loss", "Batch", "Loss", {"ylim": pg_ylim}),
         ("Weighted KL", "Weighted KL Divergence", "Batch", "Loss"),
         ("Grad Norm", "Gradient Norm", "Batch", "Norm"),
         (
