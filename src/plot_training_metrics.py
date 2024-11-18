@@ -43,6 +43,9 @@ def plot_metrics(file_path, window_size=10, output_file=None):
 
     normalize_loss = hyperparameters.get("normalize_loss", True)
 
+    # Extract use_ei from hyperparameters
+    use_ei = hyperparameters.get("use_ei", False)
+
     # Parse the log entries
     metrics = defaultdict(list)
     for line in file_contents[1:]:  # Skip the first line with hyperparameters
@@ -140,6 +143,7 @@ def plot_metrics(file_path, window_size=10, output_file=None):
             ]
         )
 
+    # Only add EI-related plots if use_ei is True
     if use_ei:
         plot_info.extend(
             [
