@@ -619,11 +619,9 @@ def calculate_losses(
     advantage,
     hyperparameters,
 ):
-    use_ei = hyperparameters["use_ei"]
-    use_pg = hyperparameters["use_pg"]
     use_ppo = hyperparameters["use_ppo"]
     ppo_epsilon = hyperparameters.get("ppo_epsilon", 0.2)
-    ppo_kl_coef = hyperparameters.get("ppo_kl_coef", None)
+    kl_penalty = hyperparameters.get("kl_penalty", None)
 
     # Get token-specific log probs for policy gradient
     unfrozen_token_log_probs = unfrozen_log_probs.gather(
@@ -647,27 +645,22 @@ def calculate_losses(
     # Calculate policy gradient component
     pg_loss = -unfrozen_total_log_prob * advantage.detach()
 
+    # Start with base policy gradient loss
+    losses = pg_loss
+
+    # Add KL penalty if specified
+    weighted_kl = None
+    if kl_penalty is not None:
+        weighted_kl = kl_penalty * kl
+        losses = losses + weighted_kl
+
+    # Apply PPO if specified
+    ppo_ratio = None
+    clipped_ratio = None
     if use_ppo:
-        if ppo_kl_coef is not None:
-            # Use PG loss with KL penalty
-            weighted_kl = ppo_kl_coef * kl
-            losses = pg_loss + weighted_kl
-            ppo_ratio = None
-            clipped_ratio = None
-        else:
-            # Standard PPO loss
-            ppo_ratio = torch.exp(unfrozen_total_log_prob - frozen_total_log_prob)
-            clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
-            losses = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
-            weighted_kl = None
-    elif use_ei or use_pg:
-        # Standard Policy Gradient loss
-        losses = pg_loss
-        ppo_ratio = None
-        clipped_ratio = None
-        weighted_kl = None
-    else:
-        raise ValueError("At least one of use_pg, use_ppo, or use_ei must be True.")
+        ppo_ratio = torch.exp(unfrozen_total_log_prob - frozen_total_log_prob)
+        clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
+        losses = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
 
     return losses, ppo_ratio, clipped_ratio, kl, pg_loss, weighted_kl
 
@@ -749,9 +742,8 @@ def get_default_hyperparameters(
     shrink_cot: Union[bool, int],
     ei_threshold: float,
     gradient_accumulation_steps: int,
-    ppo_kl_coef: float,
+    kl_penalty: float = None,
 ):
-    """Get default hyperparameters based on task, model, and training methods."""
     defaults = {
         "task_type": task_type,
         "model_type": model_type,
@@ -761,7 +753,8 @@ def get_default_hyperparameters(
         "shrink_cot": shrink_cot,
         "ei_threshold": ei_threshold,
         "gradient_accumulation_steps": gradient_accumulation_steps,
-        "ppo_kl_coef": ppo_kl_coef,
+        "kl_penalty": kl_penalty,
+        "ppo_epsilon": 0.2 if training_methods.get("use_ppo", False) else None,
     }
 
     # Task-specific batch sizes and gradient accumulation
@@ -1252,7 +1245,7 @@ def main(
     shrink_cot: Union[bool, int],
     ei_threshold: float,
     gradient_accumulation_steps: int,
-    ppo_kl_coef: float = None,
+    kl_penalty: float = None,
 ):
     """Main entry point with command-line parameter handling."""
     # Get default hyperparameters
@@ -1268,7 +1261,7 @@ def main(
         shrink_cot=shrink_cot,
         ei_threshold=ei_threshold,
         gradient_accumulation_steps=gradient_accumulation_steps,
-        ppo_kl_coef=ppo_kl_coef,
+        kl_penalty=kl_penalty,
     )
 
     # Validate training method selection
@@ -1342,11 +1335,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--use_ppo",
-        type=float,
-        nargs="?",  # Makes the argument optional
-        const=True,  # Value if flag is present but no value given
-        default=False,  # Value if flag is not present
-        help="Use PPO. Optionally specify a KL penalty coefficient.",
+        action="store_true",
+        default=False,
+        help="Use PPO with clipping",
     )
     parser.add_argument(
         "--use_pg",
@@ -1405,6 +1396,12 @@ if __name__ == "__main__":
         default=1,
         help="Number of steps to accumulate gradients over (default: 8)",
     )
+    parser.add_argument(
+        "--kl_penalty",
+        type=float,
+        default=None,
+        help="KL penalty coefficient. If specified, adds k*KL to the loss.",
+    )
 
     args = parser.parse_args()
 
@@ -1443,5 +1440,5 @@ if __name__ == "__main__":
         shrink_cot=shrink_cot,
         ei_threshold=ei_threshold,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
-        ppo_kl_coef=ppo_kl_coef,
+        kl_penalty=args.kl_penalty,
     )
