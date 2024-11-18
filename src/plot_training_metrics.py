@@ -58,9 +58,6 @@ def plot_metrics(file_path, window_size=10, output_file=None):
         except json.JSONDecodeError:
             continue
 
-    # Determine if this is an EI run
-    use_ei = hyperparameters.get("use_ei", False)
-
     # For Total Loss, get y-limits from last 100 samples
     if "Loss" in metrics and len(metrics["Loss"]) > 0:
         recent_loss = metrics["Loss"][-100:]
@@ -83,21 +80,37 @@ def plot_metrics(file_path, window_size=10, output_file=None):
     else:
         pg_ylim = None
 
+    # Check if KL penalty is used
+    kl_penalty = hyperparameters.get("kl_penalty", None)
+
     # Define the metrics to plot
     plot_info = [
         ("Loss", "Total Loss", "Batch", "Loss", {"ylim": loss_ylim}),
         ("PG Loss", "Policy Gradient Loss", "Batch", "Loss", {"ylim": pg_ylim}),
-        ("Weighted KL", "Weighted KL Divergence", "Batch", "Loss"),
-        ("Grad Norm", "Gradient Norm", "Batch", "Norm"),
-        (
-            "Avg Log Prob",
-            "Average Log Probability",
-            "Batch",
-            "Log Probability",
-            {"ylim": (None, 0)},
-        ),
-        ("CoT Length", "Chain of Thought Length", "Batch", "Tokens"),
     ]
+
+    # Add KL metric based on whether KL penalty is used
+    if kl_penalty is None:
+        # If no KL penalty, plot unweighted KL
+        plot_info.append(("KL Divergence", "KL Divergence", "Batch", "KL"))
+    else:
+        # If KL penalty is used, plot weighted KL
+        plot_info.append(("Weighted KL", "Weighted KL Divergence", "Batch", "Loss"))
+
+    # Rest of the plot_info remains the same
+    plot_info.extend(
+        [
+            ("Grad Norm", "Gradient Norm", "Batch", "Norm"),
+            (
+                "Avg Log Prob",
+                "Average Log Probability",
+                "Batch",
+                "Log Probability",
+                {"ylim": (None, 0)},
+            ),
+            ("CoT Length", "Chain of Thought Length", "Batch", "Tokens"),
+        ]
+    )
 
     # Only add Reasoning Contains Answer for non-wiki tasks
     if not ("task_type" in hyperparameters and "wiki" in hyperparameters["task_type"]):
