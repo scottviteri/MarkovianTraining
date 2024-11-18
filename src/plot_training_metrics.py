@@ -64,11 +64,14 @@ def plot_metrics(file_path, window_size=10, output_file=None):
     # For PG Loss, get y-limits from last 100 samples
     if "PG Loss" in metrics and len(metrics["PG Loss"]) > 0:
         recent_pg = metrics["PG Loss"][-100:]
-        pg_min = recent_pg.min()
-        pg_max = recent_pg.max()
-        # Add some padding (10% of range)
-        pg_range = pg_max - pg_min
-        pg_ylim = (pg_min - 0.1 * pg_range, pg_max + 0.1 * pg_range)
+        if len(recent_pg) > 0:  # Check if we have any valid values
+            pg_min = np.min(recent_pg)
+            pg_max = np.max(recent_pg)
+            # Add some padding (10% of range)
+            pg_range = pg_max - pg_min
+            pg_ylim = (pg_min - 0.1 * pg_range, pg_max + 0.1 * pg_range)
+        else:
+            pg_ylim = None
     else:
         pg_ylim = None
 
