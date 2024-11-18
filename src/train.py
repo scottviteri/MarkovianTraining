@@ -16,6 +16,7 @@ import glob
 import subprocess
 from constants import MISTRAL_INST_START, MISTRAL_INST_END
 from constants import EI_SKIP_INITIAL
+from typing import Union
 
 # Global variables
 previous_normalized_rewards = []
@@ -621,15 +622,28 @@ def calculate_losses(
     use_pg = hyperparameters["use_pg"]
     use_ppo = hyperparameters["use_ppo"]
     ppo_epsilon = hyperparameters.get("ppo_epsilon", 0.2)
+    ppo_kl_coef = hyperparameters.get("ppo_kl_coef", None)
+
+    # Calculate KL divergence regardless of method
+    kl = (
+        unfrozen_avg_log_probs_reasoning_given_question
+        - frozen_avg_log_probs_reasoning_given_question
+    )
 
     if use_ppo:
-        ppo_ratio = torch.exp(
-            unfrozen_avg_log_probs_reasoning_given_question
-            - frozen_avg_log_probs_reasoning_given_question
-        )
-        clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
-        losses = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
-        # Get number of non-zero advantages
+        if ppo_kl_coef is not None:
+            # Use PG loss with KL penalty
+            losses = (
+                -unfrozen_avg_log_probs_reasoning_given_question * advantage.detach()
+                + ppo_kl_coef * kl
+            )
+            ppo_ratio = None
+            clipped_ratio = None
+        else:
+            # Standard PPO loss
+            ppo_ratio = torch.exp(kl)
+            clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
+            losses = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
     elif use_ei or use_pg:
         # Standard Policy Gradient loss
         losses = -unfrozen_avg_log_probs_reasoning_given_question * advantage.detach()
@@ -638,7 +652,7 @@ def calculate_losses(
     else:
         raise ValueError("At least one of use_pg, use_ppo, or use_ei must be True.")
 
-    return losses, ppo_ratio, clipped_ratio
+    return losses, ppo_ratio, clipped_ratio, kl
 
 
 def get_latest_result_and_log(dataset_type):
@@ -715,9 +729,10 @@ def get_default_hyperparameters(
     temperature: float = 1.0,
     question_length: int = 200,
     target_length: int = 200,
-    shrink_cot: bool = False,
+    shrink_cot: Union[bool, int] = False,
     ei_threshold: float = None,
     gradient_accumulation_steps: int = 8,
+    ppo_kl_coef: float = None,
 ):
     """Get default hyperparameters based on task, model, and training methods."""
     defaults = {
@@ -729,6 +744,7 @@ def get_default_hyperparameters(
         "shrink_cot": shrink_cot,
         "ei_threshold": ei_threshold,
         "gradient_accumulation_steps": gradient_accumulation_steps,
+        "ppo_kl_coef": ppo_kl_coef,
     }
 
     # Task-specific batch sizes and gradient accumulation
@@ -1021,7 +1037,7 @@ def train(
             dim=1
         )
 
-        losses, ppo_ratio, clipped_ratio = calculate_losses(
+        losses, ppo_ratio, clipped_ratio, kl = calculate_losses(
             unfrozen_avg_log_probs_reasoning_given_question,
             frozen_avg_log_probs_reasoning_given_question,
             advantage,
@@ -1198,9 +1214,10 @@ def main(
     temperature: float = 1.0,
     question_length: int = 200,
     target_length: int = 200,
-    shrink_cot: bool = False,
+    shrink_cot: Union[bool, int] = False,
     ei_threshold: float = None,
     gradient_accumulation_steps: int = 8,
+    ppo_kl_coef: float = None,
 ):
     """Main entry point with command-line parameter handling."""
     # Get default hyperparameters
@@ -1216,6 +1233,7 @@ def main(
         shrink_cot=shrink_cot,
         ei_threshold=ei_threshold,
         gradient_accumulation_steps=gradient_accumulation_steps,
+        ppo_kl_coef=ppo_kl_coef,
     )
 
     # Validate training method selection
@@ -1289,9 +1307,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--use_ppo",
-        action="store_true",
-        default=False,
-        help="Use Proximal Policy Optimization",
+        type=float,
+        nargs="?",  # Makes the argument optional
+        const=True,  # Value if flag is present but no value given
+        default=False,  # Value if flag is not present
+        help="Use PPO. Optionally specify a KL penalty coefficient.",
     )
     parser.add_argument(
         "--use_pg",
@@ -1338,9 +1358,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--shrink_cot",
-        action="store_true",
-        default=False,
-        help="Enable automatic reduction of chain of thought length based on performance",
+        type=float,
+        nargs="?",  # Makes the argument optional
+        const=True,  # Value if flag is present but no value given
+        default=False,  # Value if flag is not present
+        help="Enable CoT length reduction. If number provided, linearly decrease until that batch.",
     )
     parser.add_argument(
         "--gradient_accumulation_steps",
@@ -1357,11 +1379,25 @@ if __name__ == "__main__":
     )  # True if any value (including None) provided
     ei_threshold = args.use_ei if isinstance(args.use_ei, float) else None
 
+    # Convert use_ppo argument to bool/float for main
+    use_ppo = bool(
+        args.use_ppo is not False
+    )  # True if any value (including None) provided
+    ppo_kl_coef = args.use_ppo if isinstance(args.use_ppo, float) else None
+
+    # Convert shrink_cot argument
+    shrink_cot = args.shrink_cot
+    if isinstance(shrink_cot, float):
+        if shrink_cot.is_integer():
+            shrink_cot = int(shrink_cot)  # Convert to int if it's a whole number
+        else:
+            raise ValueError("--shrink_cot value must be a whole number if provided")
+
     main(
         task_type=args.task_type,
         resume=args.resume,
         use_ei=use_ei,
-        use_ppo=args.use_ppo,
+        use_ppo=use_ppo,
         use_pg=args.use_pg,
         model_type=args.model_type,
         cot_length=args.cot_length,
@@ -1369,7 +1405,8 @@ if __name__ == "__main__":
         temperature=args.temperature,
         question_length=args.question_length,
         target_length=args.target_length,
-        shrink_cot=args.shrink_cot,
+        shrink_cot=shrink_cot,
         ei_threshold=ei_threshold,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
+        ppo_kl_coef=ppo_kl_coef,
     )

@@ -73,6 +73,7 @@ def plot_metrics(file_path, window_size=10, output_file=None):
             {"ylim": (None, 0)},
         ),
         ("CoT Length", "Chain of Thought Length", "Batch", "Tokens"),
+        ("KL Divergence", "KL Divergence", "Batch", "KL"),
     ]
 
     # Only add Reasoning Contains Answer for non-wiki tasks
