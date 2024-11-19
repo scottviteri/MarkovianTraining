@@ -732,7 +732,9 @@ def calculate_losses(
     R_mean_actor_logprobs,
     R_mean_critic_logprobs,
     advantages,
+    normalized_rewards,
     previous_advantages,
+    previous_normalized_rewards,
     hyperparameters
 ):
     """Calculate training losses using specified methods (PG/PPO/EI).
@@ -784,8 +786,8 @@ def calculate_losses(
     # Apply Expert Iteration mask if specified
     training_mask = None
     if hyperparameters.get("use_ei", False):
-        threshold = calculate_threshold(previous_advantages, hyperparameters["ei_threshold"])
-        training_mask = (advantages > threshold).float()
+        threshold = calculate_threshold(previous_normalized_rewards, hyperparameters["ei_threshold"])
+        training_mask = (normalized_rewards > threshold).float()
         metrics['ei_threshold'] = threshold
         metrics['ei_mask'] = training_mask
 
@@ -1221,7 +1223,9 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         reasoning_output.R_mean_actor_logprobs,
         reasoning_output.R_mean_critic_logprobs,
         advantage_output.advantages,
+        advantage_output.normalized_rewards,
         state.previous_advantages,
+        state.previous_normalized_rewards,
         state.hyperparameters,
     )
     
