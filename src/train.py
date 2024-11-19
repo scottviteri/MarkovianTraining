@@ -646,8 +646,8 @@ def generate_reasoning_and_kl(state: TrainingState, questions: List[str]) -> Rea
         )
 
     # Get logits from both models on actor's reasoning
-    q_R_actor_logits = state.actor_model(q_R_tokens).logits
-    q_R_critic_logits = state.critic_model(q_R_tokens).logits
+    q_R_actor_logits = state.actor_model(q_R_tokens).logits / state.hyperparameters.temperature
+    q_R_critic_logits = state.critic_model(q_R_tokens).logits / state.hyperparameters.temperature
 
     # Calculate log probabilities and KL
     R_actor_logprobs = q_R_actor_logits[:,-state.hyperparameters["cot_length"]-1:-1,:].log_softmax(dim=-1)
