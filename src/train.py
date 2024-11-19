@@ -256,11 +256,7 @@ def construct_prompts(
     base_with_type = f"{tokens['inst_start']} {base_prompt} <Redacted> {tokens['inst_end']}\n{prompt_type}"
 
     # Add model-specific answer header to partial prompt
-    if model_type == "mistral":
-        partial_prompt = base_with_type + reasoning + " Answer: "
-    else:  # llama -- maybe the space afterwards is important
-        partial_prompt = base_with_type + reasoning + f" Answer: "
-    return partial_prompt
+    return base_with_type + reasoning + f" Answer: "
 
 
 def get_text_with_token_length(
@@ -586,7 +582,7 @@ class TrainingState:
     def initialize(cls, task_type: str, resume: bool, model_type: str, hyperparameters: dict):
         """Factory method to create a new TrainingState"""
         model_save_path, log_file, start_batch, prev_rewards, prev_advantages = setup_training_environment(
-            task_type, resume
+            task_type, resume, hyperparameters
         )
         
         actor_model, critic_model, tokenizer, device, actor_optimizer = initialize_model_and_optimizer(
@@ -670,8 +666,8 @@ def generate_reasoning_and_kl(state: TrainingState, questions: List[str]) -> Rea
     kl = calculate_mean_kl(q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"])
 
     # Decode reasoning text
-    actor_reasoning = state.tokenizer.batch_decode(q_R_tokens, skip_special_tokens=True)
-    critic_reasoning = state.tokenizer.batch_decode(q_r_tokens, skip_special_tokens=True)
+    actor_reasoning = state.tokenizer.batch_decode(q_R_tokens[:,-state.hyperparameters["cot_length"]:], skip_special_tokens=True)
+    critic_reasoning = state.tokenizer.batch_decode(q_r_tokens[:,-state.hyperparameters["cot_length"]:], skip_special_tokens=True)
 
     return ReasoningOutput(
         actor_reasoning=actor_reasoning,
@@ -1010,7 +1006,7 @@ def should_decrease_cot_length(recent_log_probs, threshold=-0.5, window_size=10)
     return all(prob > threshold for prob in recent_window)
 
 
-def setup_training_environment(task_type, resume):
+def setup_training_environment(task_type, resume, hyperparameters):
     """Set up the results directory and load checkpoints if resuming."""
     results_dir = os.path.join(
         "results", task_type, datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1109,7 +1105,7 @@ class LogMetrics:
             ppo_clipped_ratio=batch_data.metrics.get('clipped_ratios', [0])[0].item() if batch_data.metrics.get('clipped_ratios') is not None else None,
             advantage=batch_data.advantages[0].item(),
             normalized_reward=batch_data.normalized_rewards[0].item(),
-            gradient_norm=grad_norm / grad_accum_count,
+            gradient_norm=grad_norm,
             num_active=num_active,
             fraction_active=num_active / batch_size,
             ei_threshold=batch_data.metrics.get('ei_threshold', None),
@@ -1141,9 +1137,9 @@ def log_batch_results(
     colored_print("Answer:", a, Colors.GREEN)
     colored_print("Advantage:", f"{metrics.advantage:.4f}", Colors.BOLD, inline=True)
 
-    # Create log entry
+    # Create log entry with explicit type conversion
     log_entry = {
-        "Batch Index": state.batch_index,
+        "Batch Index": int(state.batch_index),
         "Task Type": state.hyperparameters["task_type"],
         "Example": {
             "Question": q,
@@ -1153,29 +1149,29 @@ def log_batch_results(
             "Contains Answer": str(a) in actor_reasoning_text,
         },
         "Training Metrics": {
-            "Loss": metrics.loss,
-            "Policy Gradient Loss": metrics.pg_loss,
-            "KL Penalty": metrics.kl_penalty,
-            "PPO Ratio": metrics.ppo_ratio,
-            "PPO Clipped Ratio": metrics.ppo_clipped_ratio,
-            "Advantage": metrics.advantage,
-            "Normalized Reward": metrics.normalized_reward,
-            "Gradient Norm": metrics.gradient_norm,
+            "Loss": float(metrics.loss),
+            "Policy Gradient Loss": float(metrics.pg_loss),
+            "KL Penalty": float(metrics.kl_penalty) if metrics.kl_penalty is not None else None,
+            "PPO Ratio": float(metrics.ppo_ratio) if metrics.ppo_ratio is not None else None,
+            "PPO Clipped Ratio": float(metrics.ppo_clipped_ratio) if metrics.ppo_clipped_ratio is not None else None,
+            "Advantage": float(metrics.advantage),
+            "Normalized Reward": float(metrics.normalized_reward),
+            "Gradient Norm": float(metrics.gradient_norm),
             "Active Samples": {
-                "Count": metrics.num_active,
-                "Fraction": metrics.fraction_active,
+                "Count": int(metrics.num_active),
+                "Fraction": float(metrics.fraction_active),
             },
         },
         "EI Metrics": {
-            "Use EI": state.hyperparameters["use_ei"],
-            "Mean Previous Advantage": metrics.mean_prev_advantage,
-            "Std Previous Advantage": metrics.std_prev_advantage,
-            "Threshold": metrics.ei_threshold,
+            "Use EI": bool(state.hyperparameters["use_ei"]),
+            "Mean Previous Advantage": float(metrics.mean_prev_advantage) if metrics.mean_prev_advantage is not None else None,
+            "Std Previous Advantage": float(metrics.std_prev_advantage) if metrics.std_prev_advantage is not None else None,
+            "Threshold": float(metrics.ei_threshold) if metrics.ei_threshold is not None else None,
         },
         "Hyperparameters": {
-            "Batch Size": state.hyperparameters["batch_size"],
-            "CoT Length": state.hyperparameters["cot_length"],
-            "Temperature": state.hyperparameters["temperature"],
+            "Batch Size": int(state.hyperparameters["batch_size"]),
+            "CoT Length": int(state.hyperparameters["cot_length"]),
+            "Temperature": float(state.hyperparameters["temperature"]),
         }
     }
 
@@ -1345,13 +1341,10 @@ def main(
             "At least one of --use_ei, --use_pg, or --use_ppo must be specified."
         )
 
-    # Call the training function
+    # Call the training function with only the expected arguments
     train(
         task_type=task_type,
         resume=resume,
-        use_ei=use_ei,
-        use_ppo=use_ppo,
-        use_pg=use_pg,
         model_type=model_type,
         hyperparameters=hyperparameters,
     )

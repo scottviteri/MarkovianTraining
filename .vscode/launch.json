@@ -14,7 +14,25 @@
                 "--use_pg"
             ],
             "console": "integratedTerminal",
-            "justMyCode": true
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/root/MarkovianTraining"
+            }
+        },
+        {
+            "name": "Python: Train Arithmetic",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/train.py",
+            "args": [
+                "--task_type", "arithmetic",
+                "--use_pg"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/root/MarkovianTraining"
+            }
         }
     ]
 }
