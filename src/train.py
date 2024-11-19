@@ -869,7 +869,8 @@ def get_default_hyperparameters(
     shrink_cot: Union[bool, int],
     ei_threshold: float,
     gradient_accumulation_steps: int,
-    kl_penalty: float = None,
+    kl_penalty: float,
+    batch_size: int
 ):
     defaults = {
         "task_type": task_type,
@@ -1330,7 +1331,8 @@ def main(
     shrink_cot: Union[bool, int],
     ei_threshold: float,
     gradient_accumulation_steps: int,
-    kl_penalty: float = None,
+    kl_penalty: float,
+    batch_size: int
 ):
     """Main entry point with command-line parameter handling."""
     # Get default hyperparameters
@@ -1347,6 +1349,7 @@ def main(
         ei_threshold=ei_threshold,
         gradient_accumulation_steps=gradient_accumulation_steps,
         kl_penalty=kl_penalty,
+        batch_size=batch_size
     )
 
     # Call the training function with only the expected arguments
@@ -1472,6 +1475,12 @@ if __name__ == "__main__":
         default=None,
         help="KL penalty coefficient. If specified, adds k*KL to the loss.",
     )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=None,
+        help="Batch size (overrides default based on task and model)",
+    )
 
     args = parser.parse_args()
 
@@ -1510,4 +1519,5 @@ if __name__ == "__main__":
         ei_threshold=ei_threshold,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         kl_penalty=args.kl_penalty,
+        batch_size=args.batch_size
     )
