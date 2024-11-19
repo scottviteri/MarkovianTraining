@@ -33,6 +33,17 @@
             "env": {
                 "PYTHONPATH": "/root/MarkovianTraining"
             }
+        },
+        {
+            "name": "Python: Plot Training Metrics",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/plot_training_metrics.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/root/MarkovianTraining"
+            }
         }
     ]
 }

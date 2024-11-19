@@ -13,8 +13,8 @@ import argparse
 from datasets import load_dataset
 import re
 import os
-from src.constants import MISTRAL_INST_START, MISTRAL_INST_END
-from src.constants import EI_SKIP_INITIAL
+from constants import MISTRAL_INST_START, MISTRAL_INST_END, EI_SKIP_INITIAL
+from constants import EI_SKIP_INITIAL
 from typing import Union, List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 
@@ -716,7 +716,7 @@ def calculate_advantages(
     r = state.hyperparameters.get("r", None)
     if len(state.previous_normalized_rewards) > 0 and r is not None:
         value = exponential_weighted_average(state.previous_normalized_rewards, r)
-        advantages = normalized_rewards - value
+        advantages = (normalized_rewards - value) 
     else:
         advantages = normalized_rewards
 
@@ -772,21 +772,15 @@ def calculate_losses(
         metrics['weighted_kl'] = weighted_kl
 
     # Apply PPO if specified
-    prob_ratios = None
-    clipped_ratios = None
+    prob_ratios = torch.exp(R_mean_actor_logprobs - R_mean_critic_logprobs)
+    clipped_ratios = torch.clamp(prob_ratios, 1 - ppo_epsilon, 1 + ppo_epsilon)
+    metrics['prob_ratios'] = prob_ratios
+    metrics['clipped_ratios'] = clipped_ratios
     if use_ppo:
-        # Calculate probability ratio between actor and critic
-        prob_ratios = torch.exp(R_mean_actor_logprobs - R_mean_critic_logprobs)
-        # Clip probability ratios
-        clipped_ratios = torch.clamp(prob_ratios, 1 - ppo_epsilon, 1 + ppo_epsilon)
-        # Take minimum of clipped and unclipped objectives
         losses = -torch.min(
             prob_ratios * advantages,
             clipped_ratios * advantages
         )
-        metrics['prob_ratios'] = prob_ratios
-        metrics['clipped_ratios'] = clipped_ratios
-
     # Apply Expert Iteration mask if specified
     training_mask = None
     if hyperparameters.get("use_ei", False):
@@ -887,7 +881,7 @@ def get_default_hyperparameters(
         "ei_threshold": ei_threshold,
         "gradient_accumulation_steps": gradient_accumulation_steps,
         "kl_penalty": kl_penalty,
-        "ppo_epsilon": 0.2 if training_methods.get("use_ppo", False) else None,
+        "ppo_epsilon": 0.2,
     }
 
     # Task-specific batch sizes and gradient accumulation
@@ -945,11 +939,7 @@ def get_default_hyperparameters(
     # Set the discount factor 'r'
     defaults["r"] = r  # Use the provided value
 
-    # Training method specific parameters
-    if training_methods.get("use_ppo", False):
-        defaults["ppo_epsilon"] = 0.2
-    else:
-        defaults["ppo_epsilon"] = None
+    defaults["ppo_epsilon"] = 0.2
 
     # Add training method flags
     defaults.update(training_methods)
@@ -1073,7 +1063,9 @@ class LogMetrics:
     """Holds metrics for logging"""
     loss: float
     pg_loss: float
-    kl_penalty: Optional[float]
+    actor_logprobs: float
+    kl: float  # Raw KL divergence
+    weighted_kl: Optional[float]  # KL penalty (weighted KL if weight provided)
     ppo_ratio: Optional[float]
     ppo_clipped_ratio: Optional[float]
     advantage: float
@@ -1097,12 +1089,27 @@ class LogMetrics:
         """Create LogMetrics from batch data and training state"""
         num_active = batch_data.training_mask.sum().item() if batch_data.training_mask is not None else len(batch_data.losses)
         
+        # Get PPO metrics
+        ppo_ratio = batch_data.metrics.get('prob_ratios', [None])[0]
+        ppo_clipped_ratio = batch_data.metrics.get('clipped_ratios', [None])[0]
+        
+        # Convert to float if they exist
+        ppo_ratio = float(ppo_ratio.item()) if ppo_ratio is not None else None
+        ppo_clipped_ratio = float(ppo_clipped_ratio.item()) if ppo_clipped_ratio is not None else None
+        
+        # Get KL values
+        raw_kl = batch_data.kl[0].item()
+        weighted_kl = batch_data.metrics.get('weighted_kl', [None])[0]
+        weighted_kl = float(weighted_kl.item()) if weighted_kl is not None else None
+        
         return cls(
             loss=batch_data.losses.mean().item(),
             pg_loss=batch_data.metrics['pg_losses'][0].item(),
-            kl_penalty=batch_data.metrics.get('weighted_kl', [0])[0].item() if batch_data.metrics.get('weighted_kl') is not None else None,
-            ppo_ratio=batch_data.metrics.get('prob_ratios', [0])[0].item() if batch_data.metrics.get('prob_ratios') is not None else None,
-            ppo_clipped_ratio=batch_data.metrics.get('clipped_ratios', [0])[0].item() if batch_data.metrics.get('clipped_ratios') is not None else None,
+            actor_logprobs=batch_data.R_mean_actor_logprobs[0].item(),
+            kl=raw_kl,
+            weighted_kl=weighted_kl,
+            ppo_ratio=ppo_ratio,
+            ppo_clipped_ratio=ppo_clipped_ratio,
             advantage=batch_data.advantages[0].item(),
             normalized_reward=batch_data.normalized_rewards[0].item(),
             gradient_norm=grad_norm,
@@ -1137,7 +1144,10 @@ def log_batch_results(
     colored_print("Answer:", a, Colors.GREEN)
     colored_print("Advantage:", f"{metrics.advantage:.4f}", Colors.BOLD, inline=True)
 
-    # Create log entry with explicit type conversion
+    # Determine which KL value to log
+    kl_to_log = metrics.weighted_kl if metrics.weighted_kl is not None else metrics.kl
+    kl_label = "Weighted KL" if metrics.weighted_kl is not None else "KL"
+    
     log_entry = {
         "Batch Index": int(state.batch_index),
         "Task Type": state.hyperparameters["task_type"],
@@ -1151,7 +1161,9 @@ def log_batch_results(
         "Training Metrics": {
             "Loss": float(metrics.loss),
             "Policy Gradient Loss": float(metrics.pg_loss),
-            "KL Penalty": float(metrics.kl_penalty) if metrics.kl_penalty is not None else None,
+            "Actor Log Probs": float(metrics.actor_logprobs),
+            "KL": float(kl_to_log),  # Single KL field that's either weighted or raw
+            "KL Type": kl_label,  # Add label to indicate which type of KL
             "PPO Ratio": float(metrics.ppo_ratio) if metrics.ppo_ratio is not None else None,
             "PPO Clipped Ratio": float(metrics.ppo_clipped_ratio) if metrics.ppo_clipped_ratio is not None else None,
             "Advantage": float(metrics.advantage),
@@ -1242,7 +1254,10 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
         loss = (batch_data.losses * (batch_data.training_mask if batch_data.training_mask is not None else 1.0)).sum()
         loss.backward()
     
-    grad_norm = get_grad_norm(state.actor_model.parameters())
+    if state.grad_accum_count > 0:
+        grad_norm = get_grad_norm(state.actor_model.parameters())  / state.grad_accum_count
+    else:
+        grad_norm = 0
     
     if state.grad_accum_count >= state.hyperparameters["gradient_accumulation_steps"]:
         for p in state.actor_model.parameters():
@@ -1306,7 +1321,6 @@ def main(
     resume: bool,
     use_ei: bool,
     use_ppo: bool,
-    use_pg: bool,
     model_type: str,
     cot_length: int,
     r: float,
@@ -1323,7 +1337,7 @@ def main(
     hyperparameters = get_default_hyperparameters(
         task_type=task_type,
         model_type=model_type,
-        training_methods={"use_ppo": use_ppo, "use_ei": use_ei, "use_pg": use_pg},
+        training_methods={"use_ppo": use_ppo, "use_ei": use_ei},
         cot_length=cot_length,
         r=r,
         temperature=temperature,
@@ -1334,12 +1348,6 @@ def main(
         gradient_accumulation_steps=gradient_accumulation_steps,
         kl_penalty=kl_penalty,
     )
-
-    # Validate training method selection
-    if not (use_ei or use_pg or use_ppo):
-        raise ValueError(
-            "At least one of --use_ei, --use_pg, or --use_ppo must be specified."
-        )
 
     # Call the training function with only the expected arguments
     train(
@@ -1406,12 +1414,6 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Use PPO with clipping",
-    )
-    parser.add_argument(
-        "--use_pg",
-        action="store_true",
-        default=False,
-        help="Use Policy Gradient",
     )
     parser.add_argument(
         "--model_type",
@@ -1498,7 +1500,6 @@ if __name__ == "__main__":
         resume=args.resume,
         use_ei=use_ei,
         use_ppo=use_ppo,
-        use_pg=args.use_pg,
         model_type=args.model_type,
         cot_length=args.cot_length,
         r=args.r,

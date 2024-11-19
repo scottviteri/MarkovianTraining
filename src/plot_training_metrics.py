@@ -39,7 +39,8 @@ def plot_metrics(file_path, window_size=10, output_file=None):
     plot_info = [
         ("Training Metrics.Loss", "Total Loss", "Batch", "Loss"),
         ("Training Metrics.Policy Gradient Loss", "Policy Gradient Loss", "Batch", "Loss"),
-        ("Training Metrics.KL Penalty", "KL Penalty", "Batch", "Loss"),
+        ("Training Metrics.Actor Log Probs", "Actor Log Probs", "Batch", "Log Prob"),
+        ("Training Metrics.KL", "KL Divergence", "Batch", "KL"),
         ("Training Metrics.Gradient Norm", "Gradient Norm", "Batch", "Norm"),
         ("Training Metrics.Advantage", "Advantage", "Batch", "Value"),
         ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value"),
@@ -80,18 +81,26 @@ def plot_metrics(file_path, window_size=10, output_file=None):
             value = value[key]
         return value
 
-    # Plot the metrics
+    # Add title suffix based on KL type
+    def get_plot_title(entry, title):
+        if title == "KL Divergence" and "Training Metrics" in entry and "KL Type" in entry["Training Metrics"]:
+            return f"{title} ({entry['Training Metrics']['KL Type']})"
+        return title
+
+    # Modify plotting loop to use dynamic titles
     for i, (metric_path, title, xlabel, ylabel, *extra) in enumerate(plot_info):
-        # Extract data using the metric path
         data = [
             get_nested_value(entry, metric_path) 
             for entry in entries[EI_SKIP_INITIAL:]
             if get_nested_value(entry, metric_path) is not None
         ]
         
-        if data:  # Only plot if we have data
+        if data:
             smoothed_data = moving_average(data, window_size)
             offset = window_size // 2
+            
+            # Get dynamic title for KL plot
+            plot_title = get_plot_title(entries[0], title)
             
             axs[i].scatter(range(len(data)), data, alpha=0.3)
             axs[i].plot(
@@ -100,7 +109,7 @@ def plot_metrics(file_path, window_size=10, output_file=None):
                 color="red",
                 linewidth=2
             )
-            axs[i].set_title(title)
+            axs[i].set_title(plot_title)
             axs[i].set_xlabel(xlabel)
             axs[i].set_ylabel(ylabel)
             if extra:
