@@ -134,7 +134,7 @@ def load_model(model_type="mistral"):
     return model, frozen_model, tokenizer, device
 
 
-def calculate_threshold(previous_advantages, fixed_threshold=None):
+def calculate_threshold(previous_advantages, fixed_threshold):
     """
     Calculate threshold for expert iteration.
 
@@ -784,7 +784,7 @@ def calculate_losses(
     # Apply Expert Iteration mask if specified
     training_mask = None
     if hyperparameters.get("use_ei", False):
-        threshold = calculate_threshold(previous_advantages)
+        threshold = calculate_threshold(previous_advantages, hyperparameters["ei_threshold"])
         training_mask = (advantages > threshold).float()
         metrics['ei_threshold'] = threshold
         metrics['ei_mask'] = training_mask
@@ -933,8 +933,6 @@ def get_default_hyperparameters(
         defaults["batch_size"] = batch_size_defaults.get(model_type, {}).get(
             task_type, batch_size_defaults[model_type]["default"]
         )
-
-    defaults["cot_length"] = cot_length
 
     # Task-specific length parameters
     if task_type in ["wiki_compression", "wiki_continuation"]:
