@@ -1,5 +1,6 @@
 import datetime
 import torch
+from torch import nn
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import LoraConfig, get_peft_model
 import bitsandbytes
@@ -16,7 +17,8 @@ import glob
 import subprocess
 from constants import MISTRAL_INST_START, MISTRAL_INST_END
 from constants import EI_SKIP_INITIAL
-from typing import Union
+from typing import Union, List, Tuple, Optional, Dict, Any
+from dataclasses import dataclass
 
 
 def find_latest_result(return_log=False):
@@ -210,18 +212,21 @@ def get_model_specific_tokens(model_type):
         }
 
 
-def construct_prompts(question, hyperparameters, reasoning=None):
+def construct_prompts(
+    question: str,
+    hyperparameters: Dict[str, Any],
+    reasoning: Optional[str] = None
+) -> str:
     """
-    Construct both partial and full prompts.
-    Returns (partial_prompt, full_prompt). full_prompt will be None if reasoning or answer is None.
-
-    partial_prompt: Used for generating reasoning, includes all formatting except answer
-    full_prompt: Used for calculating log probs, includes everything including answer
-
+    Construct prompt for model input.
+    
     Args:
         question: The input question or text
-        hyperparameters: Dictionary containing model hyperparameters
+        hyperparameters: Dictionary containing model and task configuration
         reasoning: Optional reasoning text to include
+        
+    Returns:
+        str: Formatted prompt
     """
     model_type = hyperparameters["model_type"]
     task_type = hyperparameters["task_type"]
@@ -405,57 +410,83 @@ def extract_answer(answer):
 
 
 def calculate_answer_log_probs(
-    model,
+    frozen_model,
     tokenizer,
     device,
     questions,
-    reasoning_tokens,
+    reasoning,
     answers,
     hyperparameters,
 ):
-    """Calculate the log probabilities of the answers given the reasoning."""
-    reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
-    # Update full prompts based on dataset type
+    """Calculate the log probabilities of the answers given the reasoning.
+    
+    Args:
+        frozen_model: The critic model (frozen)
+        questions: List of question strings
+        reasoning: List of reasoning strings (from either actor or critic)
+        answers: List of answer strings
+        
+    Returns:
+        tuple: (
+            mean_answer_logprobs,  # Average log prob of each answer token
+            answer_logprobs,       # Full sequence of answer token log probs
+            extracted_answers      # Only for GSM8K: extracted numerical answers
+        )
+    """
+    # Create prompts with reasoning
     partial_prompts = [
         construct_prompts(
             question=q,
             hyperparameters=hyperparameters,
             reasoning=r,
         )
-        for q, r in zip(questions, reasoning_text)
+        for q, r in zip(questions, reasoning)
     ]
-    full_prompts = [x + y for x, y in zip(partial_prompts, answers)]
-    tokenized_full_prompts = tokenizer(
-        full_prompts,
+    
+    # Add answers to create full prompts
+    q_r_a_prompts = [x + y for x, y in zip(partial_prompts, answers)]
+    
+    # Tokenize full prompts
+    q_r_a_tokens = tokenizer(
+        q_r_a_prompts,
         padding=True,
         return_tensors="pt",
     ).to(device)
 
+    # For GSM8K, we also generate answers to extract numerical values
     extracted_generated_answers = None
     if hyperparameters["task_type"] == "gsm8k":
-        tokenized_partial_prompts = tokenizer(
-            partial_prompts, padding=True, return_tensors="pt"
+        # Tokenize partial prompts (without answers) for generation
+        q_r_tokens = tokenizer(
+            partial_prompts, 
+            padding=True, 
+            return_tensors="pt"
         ).to(device)
+        
+        # Generate answer tokens
         max_answer_length = 15
         with torch.no_grad():
-            generated_outputs = model.generate(
-                input_ids=tokenized_partial_prompts.input_ids,
-                attention_mask=tokenized_partial_prompts.attention_mask,
+            q_r_a_generated = frozen_model.generate(
+                input_ids=q_r_tokens.input_ids,
+                attention_mask=q_r_tokens.attention_mask,
                 max_new_tokens=max_answer_length,
-                # min_new_tokens=10,
                 do_sample=False,
                 pad_token_id=tokenizer.pad_token_id,
             )
-
+        
+        # Decode and extract numerical answers
         generated_answers = tokenizer.batch_decode(
-            generated_outputs[:, -max_answer_length - 1 :], skip_special_tokens=True
+            q_r_a_generated[:, -max_answer_length - 1 :], 
+            skip_special_tokens=True
         )
-        selected_answers = [x.split("\n")[-1] for x in generated_answers]  # check this
+        selected_answers = [x.split("\n")[-1] for x in generated_answers]
         extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
-    # if llama, find last occurrence of [16533, 25] and use 25's index + 1
+
+    # Find the starting positions of answers in the full prompts
     answer_start_positions = []
-    for input_ids in tokenized_full_prompts.input_ids:
+    for input_ids in q_r_a_tokens.input_ids:
         if hyperparameters["model_type"] == "mistral":
+            # Find "Answer:" token sequence
             matching_indices = (
                 (input_ids[:-1] == 26307)
                 & (
@@ -466,20 +497,17 @@ def calculate_answer_log_probs(
             ).nonzero(as_tuple=True)[0]
             pos = matching_indices[-1].item() + 2
         else:  # llama
-            # could potentially do
-            # tokenizer.encode(" [Answer] ")
-            # [128000, 510 =[, 16533=Answer, 60=], 220] <- unnecessary, just remove Answer: from dataset
             matching_indices = (
                 ((input_ids[:-1] == 16533) | (input_ids[:-1] == 22559))
                 & (input_ids[1:] == 25)
             ).nonzero(as_tuple=True)[0]
-            pos = matching_indices[-1].item() + 2  # to account for Answer:
+            pos = matching_indices[-1].item() + 2
         answer_start_positions.append(pos)
 
-    # Assert that the decoded tokens after each start position match the expected answers
+    # Verify answer positions are correct
     for i in range(len(answers)):
         decoded_answer = tokenizer.decode(
-            tokenized_full_prompts.input_ids[i][answer_start_positions[i] :]
+            q_r_a_tokens.input_ids[i][answer_start_positions[i] :]
         ).strip()
         expected_answer = answers[i].strip()
         if (
@@ -488,28 +516,28 @@ def calculate_answer_log_probs(
         ):
             colored_print("Answer mismatch at index", str(i), Colors.RED)
 
+    # Calculate log probabilities
     with torch.no_grad():
-        outputs = model(
-            input_ids=tokenized_full_prompts.input_ids,
-            attention_mask=tokenized_full_prompts.attention_mask,
-        )
-        logits = outputs.logits
+        q_r_a_critic_logits = frozen_model(
+            input_ids=q_r_a_tokens.input_ids,
+            attention_mask=q_r_a_tokens.attention_mask,
+        ).logits
 
-    logprobs = torch.nn.functional.log_softmax(logits, dim=-1)
+    # Convert to log probabilities
+    q_r_a_logprobs = torch.nn.functional.log_softmax(q_r_a_critic_logits, dim=-1)
+    
+    # Get log probs for each answer token
     answer_logprobs = [
-        logprobs[i, start - 1 : -1]
-        .gather(1, tokenized_full_prompts.input_ids[i, start:].unsqueeze(-1))
+        q_r_a_logprobs[i, start - 1 : -1]
+        .gather(1, q_r_a_tokens.input_ids[i, start:].unsqueeze(-1))
         .squeeze(-1)
         for i, start in enumerate(answer_start_positions)
     ]
 
-    avg_log_probs = list(map(lambda x: x.mean(), answer_logprobs))
-    # print("Log Probs:", answer_log_probs[0])
-    return (
-        torch.stack(avg_log_probs),
-        answer_logprobs,
-        extracted_generated_answers,
-    )
+    # Calculate mean log prob per answer
+    mean_answer_logprobs = torch.stack([x.mean() for x in answer_logprobs])
+
+    return mean_answer_logprobs, extracted_generated_answers
 
 
 def exponential_weighted_average(values, r):
@@ -518,105 +546,262 @@ def exponential_weighted_average(values, r):
     return np.sum(weights * np.array(values))
 
 
-def calculate_advantages(
-    frozen_model,
-    tokenizer,
-    device,
-    tokenized_inputs,
-    outputs,
-    baseline_outputs,
-    questions,
-    answers,
-    previous_normalized_rewards,
-    hyperparameters,
-):
+@dataclass
+class ReasoningOutput:
+    """Holds the output from reasoning generation"""
+    actor_reasoning: List[str]
+    critic_reasoning: List[str]
+    R_mean_actor_logprobs: torch.Tensor
+    R_mean_critic_logprobs: torch.Tensor
+    kl: torch.Tensor
 
-    use_ei = hyperparameters["use_ei"]
-    r = hyperparameters.get("r", None)
-    normalize_loss = hyperparameters.get("normalize_loss", True)
+@dataclass
+class AdvantageOutput:
+    """Holds the output from advantage calculation"""
+    advantages: torch.Tensor
+    normalized_rewards: torch.Tensor
+    extracted_answers: Optional[List[Any]]
 
-    reasoning_tokens = outputs[:, tokenized_inputs.input_ids.shape[1] :]
+@dataclass
+class TrainingState:
+    """Holds the state of the training process"""
+    batch_index: int
+    previous_normalized_rewards: List[float]
+    previous_advantages: List[float]
+    grad_accum_count: int
+    
+    # Models and optimization
+    actor_model: nn.Module
+    critic_model: nn.Module
+    actor_optimizer: torch.optim.Optimizer
+    tokenizer: Any
+    device: torch.device
+    
+    # Paths and logging
+    model_save_path: str
+    log_file: str
+    
+    # Configuration
+    hyperparameters: Dict[str, Any]
+    
+    @classmethod
+    def initialize(cls, task_type: str, resume: bool, model_type: str, hyperparameters: dict):
+        """Factory method to create a new TrainingState"""
+        model_save_path, log_file, start_batch, prev_rewards, prev_advantages = setup_training_environment(
+            task_type, resume
+        )
+        
+        actor_model, critic_model, tokenizer, device, actor_optimizer = initialize_model_and_optimizer(
+            model_type, hyperparameters
+        )
+        
+        return cls(
+            batch_index=start_batch,
+            previous_normalized_rewards=prev_rewards,
+            previous_advantages=prev_advantages,
+            grad_accum_count=0,
+            actor_model=actor_model,
+            critic_model=critic_model,
+            actor_optimizer=actor_optimizer,
+            tokenizer=tokenizer,
+            device=device,
+            model_save_path=model_save_path,
+            log_file=log_file,
+            hyperparameters=hyperparameters
+        )
 
-    (
-        log_prob_ans_given_reasoning,
-        answer_critic_logprobs,
-        extracted_generated_answers,
-    ) = calculate_answer_log_probs(
-        frozen_model,
-        tokenizer,
-        device,
-        questions,
-        reasoning_tokens,
-        answers,
-        hyperparameters,
+def generate_reasoning_and_kl(state: TrainingState, questions: List[str]) -> ReasoningOutput:
+    """Generate reasoning from both models and calculate KL divergence."""
+    # Create prompts for each question
+    prompts = [
+        construct_prompts(
+            question=q,
+            hyperparameters=state.hyperparameters,
+        )
+        for q in questions
+    ]
+
+    # Tokenize inputs
+    tokenized_inputs = state.tokenizer(
+        prompts,
+        padding=True,
+        return_tensors="pt",
+    ).to(state.device)
+
+    # Generate reasoning tokens from both models
+    with torch.no_grad():
+        # Actor (unfrozen) generates reasoning
+        q_R_tokens = state.actor_model.generate(
+            tokenized_inputs.input_ids,
+            attention_mask=tokenized_inputs.attention_mask,
+            max_new_tokens=state.hyperparameters["cot_length"],
+            min_new_tokens=state.hyperparameters["cot_length"],
+            do_sample=True,
+            temperature=state.hyperparameters["temperature"],
+            pad_token_id=state.tokenizer.pad_token_id,
+        )
+        # Critic (frozen) generates reasoning
+        q_r_tokens = state.critic_model.generate(
+            tokenized_inputs.input_ids,
+            attention_mask=tokenized_inputs.attention_mask,
+            max_new_tokens=state.hyperparameters["cot_length"],
+            min_new_tokens=state.hyperparameters["cot_length"],
+            do_sample=True,
+            temperature=state.hyperparameters["temperature"],
+            pad_token_id=state.tokenizer.pad_token_id,
+        )
+
+    # Get logits from both models on actor's reasoning
+    q_R_actor_logits = state.actor_model(q_R_tokens).logits
+    q_R_critic_logits = state.critic_model(q_R_tokens).logits
+
+    # Calculate log probabilities and KL
+    R_actor_logprobs = q_R_actor_logits[:,-state.hyperparameters["cot_length"]-1:-1,:].log_softmax(dim=-1)
+    R_critic_logprobs = q_R_critic_logits[:,-state.hyperparameters["cot_length"]-1:-1,:].log_softmax(dim=-1)
+
+    R_mean_actor_logprobs = R_actor_logprobs.gather(
+        2, 
+        q_R_tokens[:,-state.hyperparameters["cot_length"]:].unsqueeze(-1)
+    ).squeeze(-1).mean(dim=1)
+    
+    R_mean_critic_logprobs = R_critic_logprobs.gather(
+        2, 
+        q_R_tokens[:,-state.hyperparameters["cot_length"]:].unsqueeze(-1)
+    ).squeeze(-1).mean(dim=1)
+
+    kl = calculate_mean_kl(q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"])
+
+    # Decode reasoning text
+    actor_reasoning = state.tokenizer.batch_decode(q_R_tokens, skip_special_tokens=True)
+    critic_reasoning = state.tokenizer.batch_decode(q_r_tokens, skip_special_tokens=True)
+
+    return ReasoningOutput(
+        actor_reasoning=actor_reasoning,
+        critic_reasoning=critic_reasoning,
+        R_mean_actor_logprobs=R_mean_actor_logprobs,
+        R_mean_critic_logprobs=R_mean_critic_logprobs,
+        kl=kl
     )
 
-    if normalize_loss:
-        baseline_reasoning_tokens = baseline_outputs[
-            :, tokenized_inputs.input_ids.shape[1] :
-        ]
-        log_prob_ans_given_default_reasoning,_,_ = calculate_answer_log_probs(
-            frozen_model,
-            tokenizer,
-            device,
+def calculate_advantages(
+    state: TrainingState,
+    questions: List[str],
+    answers: List[str],
+    reasoning_output: ReasoningOutput,
+) -> AdvantageOutput:
+    """Calculate advantages by comparing answer probabilities under different reasoning."""
+    
+    # Calculate log probs of answers given actor's reasoning
+    actor_answer_logprobs, extracted_answers = calculate_answer_log_probs(
+        state.critic_model,
+        state.tokenizer,
+        state.device,
+        questions,
+        reasoning_output.actor_reasoning,
+        answers,
+        state.hyperparameters,
+    )
+
+    if state.hyperparameters.get("normalize_loss", True):
+        # Calculate log probs of answers given critic's reasoning (baseline)
+        critic_answer_logprobs,_ = calculate_answer_log_probs(
+            state.critic_model,
+            state.tokenizer,
+            state.device,
             questions,
-            baseline_reasoning_tokens,
+            reasoning_output.critic_reasoning,
             answers,
-            hyperparameters,
-        )[0]
-        normalized_reward = (
-            log_prob_ans_given_reasoning - log_prob_ans_given_default_reasoning
+            state.hyperparameters,
         )
+        # Normalize reward as improvement over baseline
+        normalized_rewards = actor_answer_logprobs - critic_answer_logprobs
     else:
-        normalized_reward = log_prob_ans_given_reasoning
-        log_prob_ans_given_default_reasoning = None
+        normalized_rewards = actor_answer_logprobs
 
-    if len(previous_normalized_rewards) > 0 and r is not None:
-        value = exponential_weighted_average(previous_normalized_rewards, r)
-        advantage = normalized_reward - value
+    # Calculate advantage using exponential moving average baseline
+    r = state.hyperparameters.get("r", None)
+    if len(state.previous_normalized_rewards) > 0 and r is not None:
+        value = exponential_weighted_average(state.previous_normalized_rewards, r)
+        advantages = normalized_rewards - value
     else:
-        value = None
-        advantage = normalized_reward
+        advantages = normalized_rewards
 
-    return advantage, normalized_reward
+    return AdvantageOutput(
+        advantages=advantages,
+        normalized_rewards=normalized_rewards,
+        extracted_answers=extracted_answers
+    )
 
 
 def calculate_losses(
     kl,
-    ppo_ratio,
-    unfrozen_mean_log_prob,
-    advantage,
+    R_mean_actor_logprobs,
+    R_mean_critic_logprobs,
+    advantages,
     previous_advantages,
     hyperparameters
 ):
+    """Calculate training losses using specified methods (PG/PPO/EI).
+    
+    Args:
+        kl: KL divergence between actor and critic distributions
+        R_mean_actor_logprobs: Mean log probs of actor's reasoning under actor
+        R_mean_critic_logprobs: Mean log probs of actor's reasoning under critic
+        advantages: Advantage values for actor's reasoning
+        previous_advantages: History of advantages for EI threshold
+        hyperparameters: Training configuration
+        
+    Returns:
+        tuple: (
+            losses,         # Final loss values for backprop
+            training_mask,  # Binary mask for active training examples (EI)
+            metrics        # Dictionary of metrics for logging
+        )
+    """
     use_ppo = hyperparameters["use_ppo"]
     ppo_epsilon = hyperparameters.get("ppo_epsilon", 0.2)
     kl_penalty = hyperparameters.get("kl_penalty", None)
 
-    pg_loss = -unfrozen_mean_log_prob * advantage.detach()
+    # Initialize metrics dictionary
+    metrics = {}
 
-    # Start with base policy gradient loss
-    losses = pg_loss
+    # Base policy gradient loss
+    pg_losses = -R_mean_actor_logprobs * advantages.detach()
+    metrics['pg_losses'] = pg_losses
+    losses = pg_losses
 
     # Add KL penalty if specified
     weighted_kl = None
     if kl_penalty is not None:
         weighted_kl = kl_penalty * kl
         losses = losses + weighted_kl
+        metrics['weighted_kl'] = weighted_kl
 
     # Apply PPO if specified
-    clipped_ratio = None
+    prob_ratios = None
+    clipped_ratios = None
     if use_ppo:
-        clipped_ratio = torch.clamp(ppo_ratio, 1 - ppo_epsilon, 1 + ppo_epsilon)
-        losses = -torch.min(ppo_ratio * advantage, clipped_ratio * advantage)
+        # Calculate probability ratio between actor and critic
+        prob_ratios = torch.exp(R_mean_actor_logprobs - R_mean_critic_logprobs)
+        # Clip probability ratios
+        clipped_ratios = torch.clamp(prob_ratios, 1 - ppo_epsilon, 1 + ppo_epsilon)
+        # Take minimum of clipped and unclipped objectives
+        losses = -torch.min(
+            prob_ratios * advantages,
+            clipped_ratios * advantages
+        )
+        metrics['prob_ratios'] = prob_ratios
+        metrics['clipped_ratios'] = clipped_ratios
 
-    if use_ei:
-        training_mask = torch.ones_like(advantage).float()
+    # Apply Expert Iteration mask if specified
+    training_mask = None
+    if hyperparameters.get("use_ei", False):
         threshold = calculate_threshold(previous_advantages)
-        training_mask = (advantage > threshold).float()
-        losses *= training_mask
-    # add clipped_ratio, pg_loss, and weighted_kl to log
-    return losses
+        training_mask = (advantages > threshold).float()
+        metrics['ei_threshold'] = threshold
+        metrics['ei_mask'] = training_mask
+
+    return losses, training_mask, metrics
 
 
 def get_latest_result_and_log(dataset_type):
@@ -867,213 +1052,259 @@ def initialize_model_and_optimizer(model_type, hyperparameters):
     return model, frozen_model, tokenizer, device, model_optimizer
 
 
-def generate_reasoning(
-    model, frozen_model, tokenizer, device, questions, hyperparameters
-):
-    """Process a single batch of data."""
-    prompts = [
-        construct_prompts(
-            question=q,
-            hyperparameters=hyperparameters,
+def calculate_mean_kl(q_R_actor_logits, q_R_critic_logits, cot_length):
+    """Calculate mean KL divergence between actor and critic distributions."""
+    actor_logprobs = q_R_actor_logits[:,-cot_length:,:].log_softmax(dim=-1)
+    critic_logprobs = q_R_critic_logits[:,-cot_length:,:].log_softmax(dim=-1)
+    return (torch.exp(actor_logprobs) * (actor_logprobs - critic_logprobs)).sum(dim=-1).mean(dim=1)
+
+@dataclass
+class BatchData:
+    """Holds data for a single training batch"""
+    questions: List[str]
+    answers: List[str]
+    actor_reasoning: List[str]
+    critic_reasoning: List[str]
+    R_mean_actor_logprobs: torch.Tensor
+    R_mean_critic_logprobs: torch.Tensor
+    kl: torch.Tensor
+    advantages: torch.Tensor
+    normalized_rewards: torch.Tensor
+    losses: torch.Tensor
+    training_mask: Optional[torch.Tensor]
+    metrics: Dict[str, Any]
+
+@dataclass
+class LogMetrics:
+    """Holds metrics for logging"""
+    loss: float
+    pg_loss: float
+    kl_penalty: Optional[float]
+    ppo_ratio: Optional[float]
+    ppo_clipped_ratio: Optional[float]
+    advantage: float
+    normalized_reward: float
+    gradient_norm: float
+    num_active: int
+    fraction_active: float
+    ei_threshold: Optional[float]
+    mean_prev_advantage: Optional[float]
+    std_prev_advantage: Optional[float]
+
+    @classmethod
+    def from_batch(
+        cls,
+        batch_data: BatchData,
+        grad_norm: float,
+        grad_accum_count: int,
+        previous_advantages: List[float],
+        batch_size: int,
+    ):
+        """Create LogMetrics from batch data and training state"""
+        num_active = batch_data.training_mask.sum().item() if batch_data.training_mask is not None else len(batch_data.losses)
+        
+        return cls(
+            loss=batch_data.losses.mean().item(),
+            pg_loss=batch_data.metrics['pg_losses'][0].item(),
+            kl_penalty=batch_data.metrics.get('weighted_kl', [0])[0].item() if batch_data.metrics.get('weighted_kl') is not None else None,
+            ppo_ratio=batch_data.metrics.get('prob_ratios', [0])[0].item() if batch_data.metrics.get('prob_ratios') is not None else None,
+            ppo_clipped_ratio=batch_data.metrics.get('clipped_ratios', [0])[0].item() if batch_data.metrics.get('clipped_ratios') is not None else None,
+            advantage=batch_data.advantages[0].item(),
+            normalized_reward=batch_data.normalized_rewards[0].item(),
+            gradient_norm=grad_norm / grad_accum_count,
+            num_active=num_active,
+            fraction_active=num_active / batch_size,
+            ei_threshold=batch_data.metrics.get('ei_threshold', None),
+            mean_prev_advantage=np.mean(previous_advantages) if previous_advantages else None,
+            std_prev_advantage=np.std(previous_advantages) if previous_advantages else None,
         )
-        for q in questions
-    ]
 
-    tokenized_inputs = tokenizer(
-        prompts,
-        padding=True,
-        return_tensors="pt",
-    ).to(device)
-
-    with torch.no_grad():
-        q_R_tokens = model.generate(
-            tokenized_inputs.input_ids,
-            attention_mask=tokenized_inputs.attention_mask,
-            max_new_tokens=hyperparameters["cot_length"],
-            min_new_tokens=hyperparameters["cot_length"],
-            do_sample=True,
-            temperature=hyperparameters["temperature"],
-            pad_token_id=tokenizer.pad_token_id,
-        )
-        q_r_tokens = frozen_model.generate(
-            tokenized_inputs.input_ids,
-            attention_mask=tokenized_inputs.attention_mask,
-            max_new_tokens=hyperparameters["cot_length"],
-            min_new_tokens=hyperparameters["cot_length"],
-            do_sample=True,
-            temperature=hyperparameters["temperature"],
-            pad_token_id=tokenizer.pad_token_id,
-        )
-    R_actor_logprobs = model(q_R_tokens).logits[:,-hyperparameters["cot_length"]-1:-1,:].log_softmax(dim=-1)
-    R_critic_logprobs = frozen_model(q_R_tokens).logits[:,-hyperparameters["cot_length"]-1:-1,:].log_softmax(dim=-1)
-    return tokenized_inputs, q_R_tokens, q_r_tokens, R_actor_logprobs, R_critic_logprobs 
-
-
-def calculate_and_apply_gradients(
-    model, advantage, frozen_model, tokenized_inputs, outputs, hyperparameters, model_optimizer
+def log_batch_results(
+    state: TrainingState,
+    batch_data: BatchData,
+    metrics: LogMetrics,
 ):
-    """Calculate advantages, losses, and apply gradients."""
+    """Log training results for current batch"""
+    # Print debug information
+    q = batch_data.questions[0]
+    a = batch_data.answers[0]
+    actor_reasoning_text = batch_data.actor_reasoning[0]
+    critic_reasoning_text = batch_data.critic_reasoning[0]
 
-    grad_acc_steps = hyperparameters["gradient_accumulation_steps"]
-    num_active = training_mask.sum().item()
-    grad_accum_count += num_active
-    if num_active > 0:
-        loss = (losses * training_mask).sum() / grad_acc_steps
-        loss.backward()
+    if state.hyperparameters["task_type"] in ["wiki_compression", "wiki_continuation"]:
+        colored_print("Context:", q, Colors.BLUE)
+        colored_print("Actor Reasoning:", actor_reasoning_text, Colors.YELLOW)
+        colored_print("Critic Reasoning:", critic_reasoning_text, Colors.CYAN)
+    else:  # arithmetic or gsm8k
+        colored_print("Question:", q, Colors.BLUE)
+        colored_print("Actor Reasoning:", actor_reasoning_text, Colors.YELLOW)
+        colored_print("Critic Reasoning:", critic_reasoning_text, Colors.CYAN)
 
-    grad_norm = get_grad_norm(model.parameters())
-    if grad_accum_count >= grad_acc_steps:
-        clip_grad_norm_(model.parameters(), 1.0)
-        model_optimizer.step()
-        model_optimizer.zero_grad()
-        grad_accum_count = 0
+    colored_print("Answer:", a, Colors.GREEN)
+    colored_print("Advantage:", f"{metrics.advantage:.4f}", Colors.BOLD, inline=True)
 
-    return grad_norm
-
-
-def log_and_save_results(
-    batch_index, task_type, questions, answers, reasoning_tokens, log_prob_ans_given_reasoning, extracted_generated_answers, advantage, grad_norm, hyperparameters, log_file, model_save_path, model_optimizer, tokenizer, losses, normalized_reward, previous_advantages, value, kl, pg_loss, weighted_kl, grad_acc_steps, fraction_active, num_active
-):
-    """Log results and save model checkpoints."""
-    q = questions[0]
-    ans = answers[0]
-    reasoning_text_first = tokenizer.decode(
-        reasoning_tokens[0], skip_special_tokens=True
-    )
-    avg_log_prob = log_prob_ans_given_reasoning[0].item()
-    advantage_value = advantage[0].item()
-
-    print_debug_info(
-        task_type,
-        q,
-        reasoning_text_first,
-        ans,
-        avg_log_prob,
-        extracted_generated_answers,
-    )
-
-    mean_prev_advantage = np.mean(previous_advantages) if previous_advantages else None
-    std_prev_advantage = np.std(previous_advantages) if previous_advantages else None
-
+    # Create log entry
     log_entry = {
-        k: tensor_to_python(v)
-        for k, v in {
-            "Loss": losses.mean().item(),
-            "Batch Index": batch_index,
-            "Prev Observation": f"{'Context' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Question'}: {q}",
-            "Action": f"{'Helpful Text' if task_type in ['wiki_compression', 'wiki_continuation'] else 'Reasoning'}: {reasoning_text_first}",
-            "Observation": f"Answer: {ans}",
-            "Reasoning Contains Answer": str(ans) in reasoning_text_first,
-            "Avg Log Prob": avg_log_prob,
-            "Normalized Reward": normalized_reward[0].item(),
-            "Advantage": advantage_value,
-            "Grad Norm": grad_norm / grad_acc_steps,
-            "Use EI": hyperparameters["use_ei"],
-            "Mean Previous Advantage": mean_prev_advantage,
-            "Std Previous Advantage": std_prev_advantage,
-            "EI Threshold": (
-                calculate_threshold(previous_advantages)
-                if hyperparameters["use_ei"]
-                else None
-            ),
-            "Fraction Active Samples": fraction_active,
-            "Num Active Samples": num_active,
-            "Batch Size": hyperparameters["batch_size"],
-            "Value": value,
-            "CoT Length": hyperparameters["cot_length"],
-            "KL Divergence": kl[0].item(),
-            "PG Loss": pg_loss[0].item(),
-            "Weighted KL": (
-                weighted_kl[0].item() if weighted_kl is not None else None
-            ),
-        }.items()
+        "Batch Index": state.batch_index,
+        "Task Type": state.hyperparameters["task_type"],
+        "Example": {
+            "Question": q,
+            "Actor Reasoning": actor_reasoning_text,
+            "Critic Reasoning": critic_reasoning_text,
+            "Answer": a,
+            "Contains Answer": str(a) in actor_reasoning_text,
+        },
+        "Training Metrics": {
+            "Loss": metrics.loss,
+            "Policy Gradient Loss": metrics.pg_loss,
+            "KL Penalty": metrics.kl_penalty,
+            "PPO Ratio": metrics.ppo_ratio,
+            "PPO Clipped Ratio": metrics.ppo_clipped_ratio,
+            "Advantage": metrics.advantage,
+            "Normalized Reward": metrics.normalized_reward,
+            "Gradient Norm": metrics.gradient_norm,
+            "Active Samples": {
+                "Count": metrics.num_active,
+                "Fraction": metrics.fraction_active,
+            },
+        },
+        "EI Metrics": {
+            "Use EI": state.hyperparameters["use_ei"],
+            "Mean Previous Advantage": metrics.mean_prev_advantage,
+            "Std Previous Advantage": metrics.std_prev_advantage,
+            "Threshold": metrics.ei_threshold,
+        },
+        "Hyperparameters": {
+            "Batch Size": state.hyperparameters["batch_size"],
+            "CoT Length": state.hyperparameters["cot_length"],
+            "Temperature": state.hyperparameters["temperature"],
+        }
     }
 
-    with open(log_file, "a") as f:
+    # Write to log file
+    with open(state.log_file, "a") as f:
         json.dump(log_entry, f)
         f.write("\n")
 
-    if batch_index % 1000 == 0 and batch_index > 0:
-        print(f"Saving model weights at batch {batch_index}")
+def save_checkpoint(state: TrainingState):
+    """Save model checkpoint"""
+    colored_print("Checkpoint", f"Saving model at batch {state.batch_index}", Colors.BOLD)
+    torch.save(
+        {
+            "model_state_dict": state.actor_model.state_dict(),
+            "optimizer_state_dict": state.actor_optimizer.state_dict(),
+            "batch_index": state.batch_index,
+            "hyperparameters": state.hyperparameters,
+        },
+        state.model_save_path,
+    )
 
-        torch.save(
-            {
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": model_optimizer.state_dict(),
-                "batch_index": batch_index,
-                "hyperparameters": hyperparameters,
-            },
-            model_save_path,
-        )
+def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> BatchData:
+    """Process a single batch of data"""
+    questions, answers = zip(*qa_batch)
+    
+    # Generate reasoning from both models and compute KL
+    reasoning_output = generate_reasoning_and_kl(state, questions)
+    
+    # Calculate advantages
+    advantage_output = calculate_advantages(
+        state,
+        questions,
+        answers,
+        reasoning_output,
+    )
+    
+    # Calculate losses
+    losses, training_mask, metrics = calculate_losses(
+        reasoning_output.kl,
+        reasoning_output.R_mean_actor_logprobs,
+        reasoning_output.R_mean_critic_logprobs,
+        advantage_output.advantages,
+        state.previous_advantages,
+        state.hyperparameters,
+    )
+    
+    return BatchData(
+        questions=questions,
+        answers=answers,
+        actor_reasoning=reasoning_output.actor_reasoning,
+        critic_reasoning=reasoning_output.critic_reasoning,
+        R_mean_actor_logprobs=reasoning_output.R_mean_actor_logprobs,
+        R_mean_critic_logprobs=reasoning_output.R_mean_critic_logprobs,
+        kl=reasoning_output.kl,
+        advantages=advantage_output.advantages,
+        normalized_rewards=advantage_output.normalized_rewards,
+        losses=losses,
+        training_mask=training_mask,
+        metrics=metrics
+    )
 
+def update_model(state: TrainingState, batch_data: BatchData) -> float:
+    """Perform model update and return gradient norm"""
+    num_active = batch_data.training_mask.sum().item() if batch_data.training_mask is not None else len(batch_data.losses)
+    state.grad_accum_count += num_active
+    
+    if num_active > 0:
+        loss = (batch_data.losses * (batch_data.training_mask if batch_data.training_mask is not None else 1.0)).sum()
+        loss.backward()
+    
+    grad_norm = get_grad_norm(state.actor_model.parameters())
+    
+    if state.grad_accum_count >= state.hyperparameters["gradient_accumulation_steps"]:
+        for p in state.actor_model.parameters():
+            if p.grad is not None:
+                p.grad.data.div_(state.grad_accum_count)
+        
+        clip_grad_norm_(state.actor_model.parameters(), 1.0)
+        state.actor_optimizer.step()
+        state.actor_optimizer.zero_grad()
+        state.grad_accum_count = 0
+    
+    return grad_norm
 
-def train(
-    task_type: str,
-    resume: bool,
-    model_type: str,
-    hyperparameters: dict,
-):
-    """Train the model with the specified configuration."""
-    model_save_path, log_file, start_batch, previous_normalized_rewards, previous_advantages = setup_training_environment(task_type, resume)
-
-    model, frozen_model, tokenizer, device, model_optimizer = initialize_model_and_optimizer(model_type, hyperparameters)
-
+def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
+    """Main training loop"""
+    state = TrainingState.initialize(task_type, resume, model_type, hyperparameters)
+    
     qa_generator = generate_question_answer_batches(
         num_batches=hyperparameters["num_batches"],
         batch_size=hyperparameters["batch_size"],
         task_type=task_type,
-        tokenizer=tokenizer,
+        tokenizer=state.tokenizer,
         hyperparameters=hyperparameters,
     )
-
-    model_optimizer.zero_grad()
-    grad_accum_count = 0
-
-    for batch_index in range(start_batch, hyperparameters["num_batches"]):
+    
+    for batch_index in range(state.batch_index, hyperparameters["num_batches"]):
+        state.batch_index = batch_index
         print_batch_delimiter()
         colored_print("Batch:", str(batch_index), Colors.BOLD, inline=True)
+        
         try:
             qa_batch = next(qa_generator)
         except StopIteration:
             print("Reached end of dataset")
             break
-
-        questions, answers = zip(*qa_batch)
-        tokenized_inputs, q_R_tokens, q_r_tokens, R_actor_logprobs, R_critic_logprob = generate_reasoning(
-            model, frozen_model, tokenizer, device, questions, hyperparameters
+            
+        batch_data = process_batch(state, qa_batch)
+        grad_norm = update_model(state, batch_data)
+        
+        # Update history
+        state.previous_normalized_rewards.extend(batch_data.normalized_rewards.detach().float().cpu().numpy())
+        state.previous_advantages.extend(batch_data.advantages.detach().float().cpu().numpy())
+        
+        # Log results
+        metrics = LogMetrics.from_batch(
+            batch_data,
+            grad_norm,
+            state.grad_accum_count,
+            state.previous_advantages,
+            state.hyperparameters["batch_size"]
         )
-
-        advantage, normalized_reward = calculate_advantages(
-            frozen_model,
-            tokenizer,
-            device,
-            tokenized_inputs,
-            outputs,
-            baseline_outputs,
-            questions,
-            answers,
-            previous_normalized_rewards,
-            hyperparameters,
-        )
-        losses = calculate_losses(
-            kl, 
-            ppo_ratio,
-            unfrozen_mean_log_prob,
-            advantage,
-            previous_advantages,
-            hyperparameters,
-        )
-        previous_normalized_rewards.extend(normalized_reward.detach().float().cpu().numpy())
-        previous_advantages.extend(advantage.detach().float().cpu().numpy())
-
-        grad_norm = calculate_and_apply_gradients(
-            model, advantage, frozen_model, tokenizer, device, tokenized_inputs, q_R_tokens, q_r_tokens, questions, answers, hyperparameters, model_optimizer
-        )
-
-        # let's create a logging object to pass and return along every step so we don't need so many args
-        #log_and_save_results(
-        #    batch_index, task_type, questions, answers, reasoning_tokens, log_prob_ans_given_reasoning, extracted_generated_answers, advantage, grad_norm, hyperparameters, log_file, model_save_path, model_optimizer, tokenizer, losses, normalized_reward, previous_advantages, value, kl, pg_loss, weighted_kl, hyperparameters["gradient_accumulation_steps"], fraction_active, num_active
-        #)
+        log_batch_results(state, batch_data, metrics)
+        
+        # Save checkpoint periodically
+        if batch_index % 1000 == 0 and batch_index > 0:
+            save_checkpoint(state)
 
 
 def main(

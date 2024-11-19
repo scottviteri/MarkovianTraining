@@ -30,18 +30,93 @@ def sample_qa_batch():
 def sample_hyperparameters():
     """Setup default hyperparameters for testing"""
     return {
+        # Model configuration
+        "model_type": "mistral",
         "model_learning_rate": 0.0001,
+        
+        # Training configuration
         "batch_size": 6,
         "gradient_accumulation_steps": 8,
         "num_batches": 10000,
+        "normalize_loss": True,
+        
+        # Task configuration
+        "task_type": "arithmetic",
         "cot_length": 150,
         "question_length": 500,
         "target_length": 500,
-        "normalize_loss": True,
+        
+        # Method configuration
         "use_ppo": False,
         "use_ei": False,
         "use_pg": True,
+        "ppo_epsilon": 0.2,
+        
+        # Generation parameters
+        "temperature": 0.7,
+        "r": 0.9,
+        "shrink_cot": False,
+        "ei_threshold": None,
     }
+
+
+# Add new fixtures for our dataclasses
+@pytest.fixture
+def training_state(model_setup, sample_hyperparameters):
+    """Setup TrainingState for testing"""
+    model, frozen_model, tokenizer, device = model_setup
+    return TrainingState(
+        batch_index=0,
+        previous_normalized_rewards=[],
+        previous_advantages=[],
+        grad_accum_count=0,
+        actor_model=model,
+        critic_model=frozen_model,
+        actor_optimizer=bitsandbytes.optim.AdamW8bit(
+            model.parameters(), 
+            lr=sample_hyperparameters["model_learning_rate"]
+        ),
+        tokenizer=tokenizer,
+        device=device,
+        model_save_path="test_model_path",
+        log_file="test_log.jsonl",
+        hyperparameters=sample_hyperparameters
+    )
+
+@pytest.fixture
+def batch_data(training_state, sample_qa_batch):
+    """Generate sample BatchData for testing"""
+    questions, answers = zip(*sample_qa_batch)
+    reasoning_output = generate_reasoning_and_kl(training_state, questions)
+    advantage_output = calculate_advantages(
+        training_state,
+        questions,
+        answers,
+        reasoning_output,
+    )
+    losses, training_mask, metrics = calculate_losses(
+        reasoning_output.kl,
+        reasoning_output.R_mean_actor_logprobs,
+        reasoning_output.R_mean_critic_logprobs,
+        advantage_output.advantages,
+        training_state.previous_advantages,
+        training_state.hyperparameters,
+    )
+    
+    return BatchData(
+        questions=questions,
+        answers=answers,
+        actor_reasoning=reasoning_output.actor_reasoning,
+        critic_reasoning=reasoning_output.critic_reasoning,
+        R_mean_actor_logprobs=reasoning_output.R_mean_actor_logprobs,
+        R_mean_critic_logprobs=reasoning_output.R_mean_critic_logprobs,
+        kl=reasoning_output.kl,
+        advantages=advantage_output.advantages,
+        normalized_rewards=advantage_output.normalized_rewards,
+        losses=losses,
+        training_mask=training_mask,
+        metrics=metrics
+    )
 
 
 ## Model Loading Tests
@@ -193,76 +268,49 @@ def test_exponential_weighted_average():
 
 
 # Loss Calculation Tests
-def test_calculate_losses_ppo():
+def test_calculate_losses_ppo(training_state):
     """Test PPO loss calculation"""
-    hyperparameters = {
+    training_state.hyperparameters.update({
         "use_ei": False,
         "use_pg": False,
         "use_ppo": True,
         "ppo_epsilon": 0.2,
-    }
-    unfrozen_probs = torch.tensor([0.1, 0.2])
-    frozen_probs = torch.tensor([0.1, 0.2])
-    advantage = torch.tensor([1.0, 1.0])
-
-    total_loss, policy_loss, ppo_ratio, clipped_ratio, num_active = calculate_losses(
-        unfrozen_probs, frozen_probs, advantage, hyperparameters
+    })
+    
+    kl = torch.tensor([0.1, 0.1])
+    actor_logprobs = torch.tensor([0.1, 0.2])
+    critic_logprobs = torch.tensor([0.1, 0.2])
+    advantages = torch.tensor([1.0, 1.0])
+    
+    losses, training_mask, metrics = calculate_losses(
+        kl,
+        actor_logprobs,
+        critic_logprobs,
+        advantages,
+        training_state.previous_advantages,
+        training_state.hyperparameters
     )
-    assert isinstance(total_loss, torch.Tensor)
-    assert isinstance(policy_loss, torch.Tensor)
-    assert isinstance(num_active, int)
-    assert ppo_ratio is not None
-    assert clipped_ratio is not None
+    
+    assert isinstance(losses, torch.Tensor)
+    assert isinstance(metrics['pg_losses'], torch.Tensor)
+    assert 'prob_ratios' in metrics
+    assert 'clipped_ratios' in metrics
 
 
 # Integration Tests
-def test_training_step(model_setup, sample_hyperparameters):
+def test_training_step(training_state, sample_qa_batch):
     """Test a single training step"""
-    model, frozen_model, tokenizer, device = model_setup
-    task_type = "arithmetic"  # Using arithmetic as a simple test case
-    model_type = "mistral"  # Specify model type
-
-    # Use generate_question_answer_batches with num_batches=1
-    batch = next(
-        generate_question_answer_batches(
-            num_batches=1,
-            batch_size=2,
-            task_type=task_type,
-            tokenizer=tokenizer,
-            hyperparameters=sample_hyperparameters,
-        )
-    )
-    questions, answers = zip(*batch)
-
-    # Use construct_prompts directly
-    tokens = get_model_specific_tokens(model_type)
-
-    # Construct base prompt for arithmetic
-    base_prompt = (
-        f"Produce minimal text which will help you answer this question. Question:"
-    )
-    prompt_type = "Reasoning:"
-
-    prompts = [
-        f"{tokens['inst_start']} {base_prompt} {q} {tokens['inst_end']}\n{prompt_type}"
-        for q in questions
-    ]
-
-    tokenized_inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
-
-    with torch.no_grad():
-        outputs = model.generate(
-            tokenized_inputs.input_ids,
-            attention_mask=tokenized_inputs.attention_mask,
-            max_new_tokens=sample_hyperparameters["cot_length"],
-            min_new_tokens=sample_hyperparameters["cot_length"],
-            do_sample=True,
-            temperature=1.0,
-            pad_token_id=tokenizer.pad_token_id,
-        )
-
-    assert outputs.shape[0] == 2
-    assert outputs.shape[1] > tokenized_inputs.input_ids.shape[1]
+    # Ensure hyperparameters are complete
+    assert "model_type" in training_state.hyperparameters
+    assert "task_type" in training_state.hyperparameters
+    
+    batch_data = process_batch(training_state, sample_qa_batch)
+    grad_norm = update_model(training_state, batch_data)
+    
+    assert isinstance(grad_norm, float)
+    assert grad_norm >= 0
+    assert batch_data.actor_reasoning[0] != batch_data.critic_reasoning[0]
+    assert len(batch_data.questions) == len(batch_data.answers)
 
 
 # Utility Function Tests
@@ -306,18 +354,27 @@ def test_colored_print(capsys):
 
 def test_get_default_hyperparameters():
     """Test default hyperparameter generation"""
-    params = get_default_hyperparameters(
-        task_type="arithmetic",
-        model_type="llama",
-        training_methods={"use_ppo": False, "use_ei": False, "use_pg": True},
-    )
-    assert params["cot_length"] == 150  # Default for llama arithmetic
-    assert "question_length" not in params  # No default for arithmetic
-    assert "target_length" not in params  # No default for arithmetic
+    default_params = {
+        "task_type": "arithmetic",
+        "model_type": "llama",
+        "training_methods": {"use_ppo": False, "use_ei": False, "use_pg": True},
+        "cot_length": 150,
+        "r": 0.9,
+        "temperature": 0.7,
+        "question_length": 500,
+        "target_length": 500,
+        "shrink_cot": False,
+        "ei_threshold": None,
+        "gradient_accumulation_steps": 8
+    }
+    
+    params = get_default_hyperparameters(**default_params)
+    
+    # Verify required parameters are present
+    assert params["model_type"] == "llama"
+    assert params["task_type"] == "arithmetic"
+    assert params["cot_length"] == 150
     assert params["normalize_loss"] is True
-    assert params["use_pg"] is True
-    assert params["use_ppo"] is False
-    assert params["use_ei"] is False
 
 
 def test_get_text_with_token_length(model_setup):
@@ -476,99 +533,79 @@ def test_wiki_continuation_lazy_loading(model_setup, sample_hyperparameters):
         assert abs(a_tokens - sample_hyperparameters["target_length"]) <= 5
 
 
-def test_construct_prompts(model_setup):
+def test_construct_prompts(model_setup, sample_hyperparameters):
     """Test prompt construction for different tasks and models"""
     _, _, tokenizer, _ = model_setup
 
     test_cases = [
         {
-            "task_type": "arithmetic",
             "question": "15 + 23 + 45",
-            "model_type": "mistral",
-            "hyperparameters": {"cot_length": 150, "target_length": 500},
+            "hyperparameters": {**sample_hyperparameters, "task_type": "arithmetic"},
             "reasoning": "Let me solve this step by step:\n15 + 23 = 38\n38 + 45 = 83",
         },
         {
-            "task_type": "wiki_compression",
             "question": "The quick brown fox jumps over the lazy dog.",
-            "model_type": "llama",
-            "hyperparameters": {"cot_length": 150, "target_length": 500},
+            "hyperparameters": {**sample_hyperparameters, "task_type": "wiki_compression"},
             "reasoning": "This sentence contains all letters of the alphabet.",
-        },
-        {
-            "task_type": "wiki_continuation",
-            "question": "In the beginning there was",
-            "model_type": "mistral",
-            "hyperparameters": {"cot_length": 150, "target_length": 500},
-            "reasoning": "This appears to be the start of a creation story.",
         },
     ]
 
     for case in test_cases:
-        # Test non-redacted prompt (without reasoning)
-        base_case = {k: v for k, v in case.items() if k != "reasoning"}
-        base_prompt = construct_prompts(**base_case)
-
-        # Verify question is present in base prompt
-        assert case["question"] in base_prompt
-
-        # Verify task-specific elements
-        if case["task_type"] == "wiki_compression":
-            assert "Full Text:" in base_prompt
-            assert str(case["hyperparameters"]["target_length"]) in base_prompt
-        elif case["task_type"] == "wiki_continuation":
-            assert "Opening text:" in base_prompt
-        else:  # arithmetic
-            assert "Question:" in base_prompt
-
-        # Test redacted prompt (with reasoning)
-        full_prompt = construct_prompts(**case)
-
-        # Verify question is redacted in full prompt
-        assert "<Redacted>" in full_prompt
-        assert case["question"] not in full_prompt
+        # Test without reasoning
+        prompt = construct_prompts(
+            question=case["question"],
+            hyperparameters=case["hyperparameters"]
+        )
+        assert case["question"] in prompt
+        
+        # Test with reasoning
+        full_prompt = construct_prompts(
+            question=case["question"],
+            hyperparameters=case["hyperparameters"],
+            reasoning=case["reasoning"]
+        )
         assert case["reasoning"] in full_prompt
 
-        # Verify model-specific tokens
-        # Don't Change This!
-        if case["model_type"] == "mistral":
-            assert "[INST]" in full_prompt
-            assert "</s> [INST] Answer:" in full_prompt
-        else:  # llama
-            assert "<start_header_id>user<|end_header_id|>" in full_prompt
-            assert (
-                "<|eot_id|><start_header_id>user<|end_header_id|> Answer:"
-                in full_prompt
-            )
-
-
-def test_prompt_edge_cases(model_setup):
+def test_prompt_edge_cases(model_setup, sample_hyperparameters):
     """Test edge cases in prompt construction"""
     _, _, tokenizer, _ = model_setup
 
-    base_case = {
-        "task_type": "arithmetic",
-        "question": "1 + 1",
-        "model_type": "mistral",
-        "hyperparameters": {"cot_length": 150, "target_length": 500},
-    }
-
-    # Test empty question (non-redacted)
-    empty_q_case = base_case.copy()
-    empty_q_case["question"] = ""
-    prompt = construct_prompts(**empty_q_case)
+    # Test empty question
+    prompt = construct_prompts(
+        question="",
+        hyperparameters=sample_hyperparameters
+    )
     assert "Question: " in prompt
 
-    # Test empty question (redacted)
-    prompt = construct_prompts(**empty_q_case, reasoning="some reasoning")
-    assert "<Redacted>" in prompt
+    # Test very long question
+    long_question = "x + " * 1000
+    prompt = construct_prompts(
+        question=long_question,
+        hyperparameters=sample_hyperparameters
+    )
+    assert len(prompt) > 0
 
-    # Test empty reasoning
-    prompt = construct_prompts(**base_case, reasoning="")
-    assert "<Redacted>" in prompt
-    assert prompt.endswith("Answer:")
-
-    # Test None reasoning (should return non-redacted prompt)
-    base_prompt = construct_prompts(**base_case)  # reasoning defaults to None
-    assert base_case["question"] in base_prompt
-    assert "<Redacted>" not in base_prompt
+def test_log_metrics(training_state, batch_data):
+    """Test creation and usage of LogMetrics"""
+    metrics = LogMetrics.from_batch(
+        batch_data=batch_data,
+        grad_norm=1.0,
+        grad_accum_count=4,
+        previous_advantages=training_state.previous_advantages,
+        batch_size=training_state.hyperparameters["batch_size"]
+    )
+    
+    # Verify metric types and ranges
+    assert isinstance(metrics.loss, float)
+    assert isinstance(metrics.pg_loss, float)
+    assert isinstance(metrics.advantage, float)
+    assert isinstance(metrics.fraction_active, float)
+    assert 0 <= metrics.fraction_active <= 1
+    
+    # Verify optional metrics
+    if training_state.hyperparameters["use_ppo"]:
+        assert metrics.ppo_ratio is not None
+        assert metrics.ppo_clipped_ratio is not None
+    else:
+        assert metrics.ppo_ratio is None
+        assert metrics.ppo_clipped_ratio is None

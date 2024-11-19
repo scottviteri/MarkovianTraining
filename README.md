@@ -15,7 +15,7 @@ pip install transformers wandb scipy datasets==2.14.6 torchtyping==0.1.4 && pip 
 To run tests, first set the PYTHONPATH to include the current directory:
 
 ```bash
-export PYTHONPATH=$PYTHONPATH:$(pwd)
+export PYTHONPATH=$PYTHONPATH:$(pwd)/src
 pytest
 ```
 
