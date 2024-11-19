@@ -876,6 +876,9 @@ def get_default_hyperparameters(
         "task_type": task_type,
         "model_type": model_type,
         "model_learning_rate": 0.0001,
+        "cot_length": cot_length,
+        "r": r,
+        "temperature": temperature,
         "num_batches": 10000,
         "normalize_loss": True,
         "shrink_cot": shrink_cot,
@@ -883,6 +886,7 @@ def get_default_hyperparameters(
         "gradient_accumulation_steps": gradient_accumulation_steps,
         "kl_penalty": kl_penalty,
         "ppo_epsilon": 0.2,
+        "batch_size": batch_size,
     }
 
     # Task-specific batch sizes and gradient accumulation
@@ -937,16 +941,8 @@ def get_default_hyperparameters(
         defaults["question_length"] = question_length
         defaults["target_length"] = target_length
 
-    # Set the discount factor 'r'
-    defaults["r"] = r  # Use the provided value
-
-    defaults["ppo_epsilon"] = 0.2
-
     # Add training method flags
     defaults.update(training_methods)
-
-    # Add temperature to defaults
-    defaults["temperature"] = temperature
 
     return defaults
 
