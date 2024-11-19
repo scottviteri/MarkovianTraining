@@ -15,8 +15,8 @@ import re
 import os
 import glob
 import subprocess
-from constants import MISTRAL_INST_START, MISTRAL_INST_END
-from constants import EI_SKIP_INITIAL
+from src.constants import MISTRAL_INST_START, MISTRAL_INST_END
+from src.constants import EI_SKIP_INITIAL
 from typing import Union, List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 

@@ -1,7 +1,7 @@
 import pytest
 import torch
 import numpy as np
-from train import *
+from src.train import *
 
 
 # Fixtures
