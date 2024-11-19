@@ -151,7 +151,7 @@ def calculate_threshold(previous_advantages, fixed_threshold):
     if fixed_threshold is not None:
         return fixed_threshold
 
-    return np.mean(previous_advantages) + np.std(previous_advantages)
+    return np.mean(previous_advantages) + 2*np.std(previous_advantages)
 
 
 def generate_arithmetic_pairs(task_type: str, num_examples: int = 1000):
@@ -641,7 +641,7 @@ def generate_reasoning_and_kl(state: TrainingState, questions: List[str]) -> Rea
             max_new_tokens=state.hyperparameters["cot_length"],
             min_new_tokens=state.hyperparameters["cot_length"],
             do_sample=True,
-            temperature=state.hyperparameters["temperature"],
+            temperature=1.0,
             pad_token_id=state.tokenizer.pad_token_id,
         )
 
