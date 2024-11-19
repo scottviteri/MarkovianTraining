@@ -888,8 +888,8 @@ def get_default_hyperparameters(
     batch_size_defaults = {
         "llama": {
             "gsm8k": 10,
-            "wiki_compression": 2,
-            "wiki_continuation": 2,
+            "wiki_compression": 16,
+            "wiki_continuation": 16,
             "arithmetic": 4,
             "arithmetic_negative": 4,
             "default": 6,
