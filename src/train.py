@@ -925,10 +925,10 @@ def get_default_hyperparameters(
         },
     }
 
-    # Get specific or default values
-    defaults["batch_size"] = batch_size_defaults.get(model_type, {}).get(
-        task_type, batch_size_defaults[model_type]["default"]
-    )
+    if batch_size is None:
+        defaults["batch_size"] = batch_size_defaults.get(model_type, {}).get(
+            task_type, batch_size_defaults[model_type]["default"]
+        )
 
     defaults["cot_length"] = cot_length
 
