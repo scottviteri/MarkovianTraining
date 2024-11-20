@@ -16,7 +16,7 @@ import os
 from constants import MISTRAL_INST_START, MISTRAL_INST_END, EI_SKIP_INITIAL
 from constants import EI_SKIP_INITIAL
 from typing import Union, List, Tuple, Optional, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 
 def find_latest_result(return_log=False):
@@ -151,7 +151,7 @@ def calculate_threshold(previous_advantages, fixed_threshold):
     if fixed_threshold is not None:
         return fixed_threshold
 
-    return np.mean(previous_advantages) + 2*np.std(previous_advantages)
+    return np.mean(previous_advantages) + 2 * np.std(previous_advantages)
 
 
 def generate_arithmetic_pairs(task_type: str, num_examples: int = 1000):
@@ -211,18 +211,16 @@ def get_model_specific_tokens(model_type):
 
 
 def construct_prompts(
-    question: str,
-    hyperparameters: Dict[str, Any],
-    reasoning: Optional[str] = None
+    question: str, hyperparameters: Dict[str, Any], reasoning: Optional[str] = None
 ) -> str:
     """
     Construct prompt for model input.
-    
+
     Args:
         question: The input question or text
         hyperparameters: Dictionary containing model and task configuration
         reasoning: Optional reasoning text to include
-        
+
     Returns:
         str: Formatted prompt
     """
@@ -413,13 +411,13 @@ def calculate_answer_log_probs(
     hyperparameters,
 ):
     """Calculate the log probabilities of the answers given the reasoning.
-    
+
     Args:
         frozen_model: The critic model (frozen)
         questions: List of question strings
         reasoning: List of reasoning strings (from either actor or critic)
         answers: List of answer strings
-        
+
     Returns:
         tuple: (
             mean_answer_logprobs,  # Average log prob of each answer token
@@ -436,10 +434,10 @@ def calculate_answer_log_probs(
         )
         for q, r in zip(questions, reasoning)
     ]
-    
+
     # Add answers to create full prompts
     q_r_a_prompts = [x + y for x, y in zip(partial_prompts, answers)]
-    
+
     # Tokenize full prompts
     q_r_a_tokens = tokenizer(
         q_r_a_prompts,
@@ -451,12 +449,10 @@ def calculate_answer_log_probs(
     extracted_generated_answers = None
     if hyperparameters["task_type"] == "gsm8k":
         # Tokenize partial prompts (without answers) for generation
-        q_r_tokens = tokenizer(
-            partial_prompts, 
-            padding=True, 
-            return_tensors="pt"
-        ).to(device)
-        
+        q_r_tokens = tokenizer(partial_prompts, padding=True, return_tensors="pt").to(
+            device
+        )
+
         # Generate answer tokens
         max_answer_length = 15
         with torch.no_grad():
@@ -467,11 +463,10 @@ def calculate_answer_log_probs(
                 do_sample=False,
                 pad_token_id=tokenizer.pad_token_id,
             )
-        
+
         # Decode and extract numerical answers
         generated_answers = tokenizer.batch_decode(
-            q_r_a_generated[:, -max_answer_length - 1 :], 
-            skip_special_tokens=True
+            q_r_a_generated[:, -max_answer_length - 1 :], skip_special_tokens=True
         )
         selected_answers = [x.split("\n")[-1] for x in generated_answers]
         extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
@@ -519,7 +514,7 @@ def calculate_answer_log_probs(
 
     # Convert to log probabilities
     q_r_a_logprobs = torch.nn.functional.log_softmax(q_r_a_critic_logits, dim=-1)
-    
+
     # Get log probs for each answer token
     answer_logprobs = [
         q_r_a_logprobs[i, start - 1 : -1]
@@ -543,52 +538,59 @@ def exponential_weighted_average(values, r):
 @dataclass
 class ReasoningOutput:
     """Holds the output from reasoning generation"""
+
     actor_reasoning: List[str]
     critic_reasoning: List[str]
     R_mean_actor_logprobs: torch.Tensor
     R_mean_critic_logprobs: torch.Tensor
     kl: torch.Tensor
 
+
 @dataclass
 class AdvantageOutput:
     """Holds the output from advantage calculation"""
+
     advantages: torch.Tensor
     normalized_rewards: torch.Tensor
     extracted_answers: Optional[List[Any]]
 
+
 @dataclass
 class TrainingState:
     """Holds the state of the training process"""
+
     batch_index: int
     previous_normalized_rewards: List[float]
     previous_advantages: List[float]
     grad_accum_count: int
-    
+
     # Models and optimization
     actor_model: nn.Module
     critic_model: nn.Module
     actor_optimizer: torch.optim.Optimizer
     tokenizer: Any
     device: torch.device
-    
+
     # Paths and logging
     model_save_path: str
     log_file: str
-    
+
     # Configuration
     hyperparameters: Dict[str, Any]
-    
+
     @classmethod
-    def initialize(cls, task_type: str, resume: bool, model_type: str, hyperparameters: dict):
+    def initialize(
+        cls, task_type: str, resume: bool, model_type: str, hyperparameters: dict
+    ):
         """Factory method to create a new TrainingState"""
-        model_save_path, log_file, start_batch, prev_rewards, prev_advantages = setup_training_environment(
-            task_type, resume, hyperparameters
+        model_save_path, log_file, start_batch, prev_rewards, prev_advantages = (
+            setup_training_environment(task_type, resume, hyperparameters)
         )
-        
-        actor_model, critic_model, tokenizer, device, actor_optimizer = initialize_model_and_optimizer(
-            model_type, hyperparameters
+
+        actor_model, critic_model, tokenizer, device, actor_optimizer = (
+            initialize_model_and_optimizer(model_type, hyperparameters)
         )
-        
+
         return cls(
             batch_index=start_batch,
             previous_normalized_rewards=prev_rewards,
@@ -601,10 +603,13 @@ class TrainingState:
             device=device,
             model_save_path=model_save_path,
             log_file=log_file,
-            hyperparameters=hyperparameters
+            hyperparameters=hyperparameters,
         )
 
-def generate_reasoning_and_kl(state: TrainingState, questions: List[str]) -> ReasoningOutput:
+
+def generate_reasoning_and_kl(
+    state: TrainingState, questions: List[str]
+) -> ReasoningOutput:
     """Generate reasoning from both models and calculate KL divergence."""
     # Create prompts for each question
     prompts = [
@@ -646,36 +651,57 @@ def generate_reasoning_and_kl(state: TrainingState, questions: List[str]) -> Rea
         )
 
     # Get logits from both models on actor's reasoning
-    q_R_actor_logits = state.actor_model(q_R_tokens).logits / state.hyperparameters["temperature"]
-    q_R_critic_logits = state.critic_model(q_R_tokens).logits / state.hyperparameters["temperature"]
+    q_R_actor_logits = (
+        state.actor_model(q_R_tokens).logits / state.hyperparameters["temperature"]
+    )
+    q_R_critic_logits = (
+        state.critic_model(q_R_tokens).logits / state.hyperparameters["temperature"]
+    )
 
     # Calculate log probabilities and KL
-    R_actor_logprobs = q_R_actor_logits[:,-state.hyperparameters["cot_length"]-1:-1,:].log_softmax(dim=-1)
-    R_critic_logprobs = q_R_critic_logits[:,-state.hyperparameters["cot_length"]-1:-1,:].log_softmax(dim=-1)
+    R_actor_logprobs = q_R_actor_logits[
+        :, -state.hyperparameters["cot_length"] - 1 : -1, :
+    ].log_softmax(dim=-1)
+    R_critic_logprobs = q_R_critic_logits[
+        :, -state.hyperparameters["cot_length"] - 1 : -1, :
+    ].log_softmax(dim=-1)
 
-    R_mean_actor_logprobs = R_actor_logprobs.gather(
-        2, 
-        q_R_tokens[:,-state.hyperparameters["cot_length"]:].unsqueeze(-1)
-    ).squeeze(-1).mean(dim=1)
-    
-    R_mean_critic_logprobs = R_critic_logprobs.gather(
-        2, 
-        q_R_tokens[:,-state.hyperparameters["cot_length"]:].unsqueeze(-1)
-    ).squeeze(-1).mean(dim=1)
+    R_mean_actor_logprobs = (
+        R_actor_logprobs.gather(
+            2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
+        )
+        .squeeze(-1)
+        .mean(dim=1)
+    )
 
-    kl = calculate_mean_kl(q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"])
+    R_mean_critic_logprobs = (
+        R_critic_logprobs.gather(
+            2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
+        )
+        .squeeze(-1)
+        .mean(dim=1)
+    )
+
+    kl = calculate_mean_kl(
+        q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"]
+    )
 
     # Decode reasoning text
-    actor_reasoning = state.tokenizer.batch_decode(q_R_tokens[:,-state.hyperparameters["cot_length"]:], skip_special_tokens=True)
-    critic_reasoning = state.tokenizer.batch_decode(q_r_tokens[:,-state.hyperparameters["cot_length"]:], skip_special_tokens=True)
+    actor_reasoning = state.tokenizer.batch_decode(
+        q_R_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
+    )
+    critic_reasoning = state.tokenizer.batch_decode(
+        q_r_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
+    )
 
     return ReasoningOutput(
         actor_reasoning=actor_reasoning,
         critic_reasoning=critic_reasoning,
         R_mean_actor_logprobs=R_mean_actor_logprobs,
         R_mean_critic_logprobs=R_mean_critic_logprobs,
-        kl=kl
+        kl=kl,
     )
+
 
 def calculate_advantages(
     state: TrainingState,
@@ -684,7 +710,7 @@ def calculate_advantages(
     reasoning_output: ReasoningOutput,
 ) -> AdvantageOutput:
     """Calculate advantages by comparing answer probabilities under different reasoning."""
-    
+
     # Calculate log probs of answers given actor's reasoning
     actor_answer_logprobs, extracted_answers = calculate_answer_log_probs(
         state.critic_model,
@@ -698,7 +724,7 @@ def calculate_advantages(
 
     if state.hyperparameters.get("normalize_loss", True):
         # Calculate log probs of answers given critic's reasoning (baseline)
-        critic_answer_logprobs,_ = calculate_answer_log_probs(
+        critic_answer_logprobs, _ = calculate_answer_log_probs(
             state.critic_model,
             state.tokenizer,
             state.device,
@@ -716,14 +742,14 @@ def calculate_advantages(
     r = state.hyperparameters.get("r", None)
     if len(state.previous_normalized_rewards) > 0 and r is not None:
         value = exponential_weighted_average(state.previous_normalized_rewards, r)
-        advantages = (normalized_rewards - value) 
+        advantages = normalized_rewards - value
     else:
         advantages = normalized_rewards
 
     return AdvantageOutput(
         advantages=advantages,
         normalized_rewards=normalized_rewards,
-        extracted_answers=extracted_answers
+        extracted_answers=extracted_answers,
     )
 
 
@@ -735,10 +761,10 @@ def calculate_losses(
     normalized_rewards,
     previous_advantages,
     previous_normalized_rewards,
-    hyperparameters
+    hyperparameters,
 ):
     """Calculate training losses using specified methods (PG/PPO/EI).
-    
+
     Args:
         kl: KL divergence between actor and critic distributions
         R_mean_actor_logprobs: Mean log probs of actor's reasoning under actor
@@ -746,7 +772,7 @@ def calculate_losses(
         advantages: Advantage values for actor's reasoning
         previous_advantages: History of advantages for EI threshold
         hyperparameters: Training configuration
-        
+
     Returns:
         tuple: (
             losses,         # Final loss values for backprop
@@ -763,7 +789,7 @@ def calculate_losses(
 
     # Base policy gradient loss
     pg_losses = -R_mean_actor_logprobs * advantages.detach()
-    metrics['pg_losses'] = pg_losses
+    metrics["pg_losses"] = pg_losses
     losses = pg_losses
 
     # Add KL penalty if specified
@@ -771,27 +797,30 @@ def calculate_losses(
     if kl_penalty is not None:
         weighted_kl = kl_penalty * kl
         losses = losses + weighted_kl
-        metrics['weighted_kl'] = weighted_kl
+        metrics["weighted_kl"] = weighted_kl
 
     # Apply PPO if specified
     prob_ratios = torch.exp(R_mean_actor_logprobs - R_mean_critic_logprobs)
     clipped_ratios = torch.clamp(prob_ratios, 1 - ppo_epsilon, 1 + ppo_epsilon)
-    metrics['prob_ratios'] = prob_ratios
-    metrics['clipped_ratios'] = clipped_ratios
+    metrics["prob_ratios"] = prob_ratios
+    metrics["clipped_ratios"] = clipped_ratios
     if use_ppo:
-        losses = -torch.min(
-            prob_ratios * advantages,
-            clipped_ratios * advantages
-        )
+        losses = -torch.min(prob_ratios * advantages, clipped_ratios * advantages)
     # Apply Expert Iteration mask if specified
     training_mask = None
     if hyperparameters.get("use_ei", False):
-        threshold = calculate_threshold(previous_normalized_rewards, hyperparameters["ei_threshold"])
+        threshold = calculate_threshold(
+            previous_normalized_rewards, hyperparameters["ei_threshold"]
+        )
         training_mask = (normalized_rewards > threshold).float()
-        metrics['ei_threshold'] = threshold
-        metrics['ei_mask'] = training_mask
+        metrics["ei_threshold"] = threshold
+        metrics["ei_mask"] = training_mask
 
-    return losses, training_mask, metrics
+    return (
+        -R_mean_actor_logprobs if hyperparameters["flatten"] else losses,
+        training_mask,
+        metrics,
+    )
 
 
 def get_latest_result_and_log(dataset_type):
@@ -873,65 +902,13 @@ def get_default_hyperparameters(
     gradient_accumulation_steps: int,
     kl_penalty: float,
     batch_size: int,
-    normalize_loss: bool
+    normalize_loss: bool,
 ):
     defaults = {
-        "task_type": task_type,
-        "model_type": model_type,
         "model_learning_rate": 0.0001,
-        "cot_length": cot_length,
-        "r": r,
-        "temperature": temperature,
         "num_batches": 10000,
-        "normalize_loss": normalize_loss,
-        "shrink_cot": shrink_cot,
-        "ei_threshold": ei_threshold,
-        "gradient_accumulation_steps": gradient_accumulation_steps,
-        "kl_penalty": kl_penalty,
         "ppo_epsilon": 0.2,
-        "batch_size": batch_size,
     }
-
-    # Task-specific batch sizes and gradient accumulation
-    batch_size_defaults = {
-        "llama": {
-            "gsm8k": 10,
-            "wiki_compression": 8,
-            "wiki_continuation": 8,
-            "arithmetic": 4,
-            "arithmetic_negative": 4,
-            "default": 6,
-        },
-        "mistral": {
-            "gsm8k": 10,
-            "wiki_compression": 1,
-            "wiki_continuation": 1,
-            "arithmetic": 6,
-            "arithmetic_negative": 6,
-            "default": 2,
-        },
-    }
-
-    # Chain of thought length defaults
-    cot_length_defaults = {
-        "llama": {
-            "gsm8k": 60,
-            "wiki_compression": 150,
-            "wiki_continuation": 150,
-            "arithmetic": 120,
-            "arithmetic_negative": 120,
-            "default": 150,
-        },
-        "mistral": {
-            "gsm8k": 80,
-            "wiki_compression": 200,
-            "wiki_continuation": 200,
-            "arithmetic": 400,
-            "arithmetic_negative": 400,
-            "default": 400,
-        },
-    }
-
     # Task-specific length parameters
     if task_type in ["wiki_compression", "wiki_continuation"]:
         defaults["question_length"] = question_length
@@ -1017,7 +994,13 @@ def setup_training_environment(task_type, resume, hyperparameters):
             json.dump(hyperparameters, f)
             f.write("\n")
 
-    return model_save_path, log_file, start_batch, previous_normalized_rewards, previous_advantages
+    return (
+        model_save_path,
+        log_file,
+        start_batch,
+        previous_normalized_rewards,
+        previous_advantages,
+    )
 
 
 def initialize_model_and_optimizer(model_type, hyperparameters):
@@ -1031,13 +1014,19 @@ def initialize_model_and_optimizer(model_type, hyperparameters):
 
 def calculate_mean_kl(q_R_actor_logits, q_R_critic_logits, cot_length):
     """Calculate mean KL divergence between actor and critic distributions."""
-    actor_logprobs = q_R_actor_logits[:,-cot_length:,:].log_softmax(dim=-1)
-    critic_logprobs = q_R_critic_logits[:,-cot_length:,:].log_softmax(dim=-1)
-    return (torch.exp(actor_logprobs) * (actor_logprobs - critic_logprobs)).sum(dim=-1).mean(dim=1)
+    actor_logprobs = q_R_actor_logits[:, -cot_length:, :].log_softmax(dim=-1)
+    critic_logprobs = q_R_critic_logits[:, -cot_length:, :].log_softmax(dim=-1)
+    return (
+        (torch.exp(actor_logprobs) * (actor_logprobs - critic_logprobs))
+        .sum(dim=-1)
+        .mean(dim=1)
+    )
+
 
 @dataclass
 class BatchData:
     """Holds data for a single training batch"""
+
     questions: List[str]
     answers: List[str]
     actor_reasoning: List[str]
@@ -1051,9 +1040,11 @@ class BatchData:
     training_mask: Optional[torch.Tensor]
     metrics: Dict[str, Any]
 
+
 @dataclass
 class LogMetrics:
     """Holds metrics for logging"""
+
     loss: float
     pg_loss: float
     actor_logprobs: float
@@ -1080,24 +1071,30 @@ class LogMetrics:
         batch_size: int,
     ):
         """Create LogMetrics from batch data and training state"""
-        num_active = batch_data.training_mask.sum().item() if batch_data.training_mask is not None else len(batch_data.losses)
-        
+        num_active = (
+            batch_data.training_mask.sum().item()
+            if batch_data.training_mask is not None
+            else len(batch_data.losses)
+        )
+
         # Get PPO metrics
-        ppo_ratio = batch_data.metrics.get('prob_ratios', [None])[0]
-        ppo_clipped_ratio = batch_data.metrics.get('clipped_ratios', [None])[0]
-        
+        ppo_ratio = batch_data.metrics.get("prob_ratios", [None])[0]
+        ppo_clipped_ratio = batch_data.metrics.get("clipped_ratios", [None])[0]
+
         # Convert to float if they exist
         ppo_ratio = float(ppo_ratio.item()) if ppo_ratio is not None else None
-        ppo_clipped_ratio = float(ppo_clipped_ratio.item()) if ppo_clipped_ratio is not None else None
-        
+        ppo_clipped_ratio = (
+            float(ppo_clipped_ratio.item()) if ppo_clipped_ratio is not None else None
+        )
+
         # Get KL values
         raw_kl = batch_data.kl[0].item()
-        weighted_kl = batch_data.metrics.get('weighted_kl', [None])[0]
+        weighted_kl = batch_data.metrics.get("weighted_kl", [None])[0]
         weighted_kl = float(weighted_kl.item()) if weighted_kl is not None else None
-        
+
         return cls(
             loss=batch_data.losses.mean().item(),
-            pg_loss=batch_data.metrics['pg_losses'][0].item(),
+            pg_loss=batch_data.metrics["pg_losses"][0].item(),
             actor_logprobs=batch_data.R_mean_actor_logprobs[0].item(),
             kl=raw_kl,
             weighted_kl=weighted_kl,
@@ -1108,10 +1105,15 @@ class LogMetrics:
             gradient_norm=grad_norm,
             num_active=num_active,
             fraction_active=num_active / batch_size,
-            ei_threshold=batch_data.metrics.get('ei_threshold', None),
-            mean_prev_advantage=np.mean(previous_advantages) if previous_advantages else None,
-            std_prev_advantage=np.std(previous_advantages) if previous_advantages else None,
+            ei_threshold=batch_data.metrics.get("ei_threshold", None),
+            mean_prev_advantage=(
+                np.mean(previous_advantages) if previous_advantages else None
+            ),
+            std_prev_advantage=(
+                np.std(previous_advantages) if previous_advantages else None
+            ),
         )
+
 
 def log_batch_results(
     state: TrainingState,
@@ -1140,7 +1142,7 @@ def log_batch_results(
     # Determine which KL value to log
     kl_to_log = metrics.weighted_kl if metrics.weighted_kl is not None else metrics.kl
     kl_label = "Weighted KL" if metrics.weighted_kl is not None else "KL"
-    
+
     log_entry = {
         "Batch Index": int(state.batch_index),
         "Task Type": state.hyperparameters["task_type"],
@@ -1157,8 +1159,14 @@ def log_batch_results(
             "Actor Log Probs": float(metrics.actor_logprobs),
             "KL": float(kl_to_log),  # Single KL field that's either weighted or raw
             "KL Type": kl_label,  # Add label to indicate which type of KL
-            "PPO Ratio": float(metrics.ppo_ratio) if metrics.ppo_ratio is not None else None,
-            "PPO Clipped Ratio": float(metrics.ppo_clipped_ratio) if metrics.ppo_clipped_ratio is not None else None,
+            "PPO Ratio": (
+                float(metrics.ppo_ratio) if metrics.ppo_ratio is not None else None
+            ),
+            "PPO Clipped Ratio": (
+                float(metrics.ppo_clipped_ratio)
+                if metrics.ppo_clipped_ratio is not None
+                else None
+            ),
             "Advantage": float(metrics.advantage),
             "Normalized Reward": float(metrics.normalized_reward),
             "Gradient Norm": float(metrics.gradient_norm),
@@ -1169,15 +1177,27 @@ def log_batch_results(
         },
         "EI Metrics": {
             "Use EI": bool(state.hyperparameters["use_ei"]),
-            "Mean Previous Advantage": float(metrics.mean_prev_advantage) if metrics.mean_prev_advantage is not None else None,
-            "Std Previous Advantage": float(metrics.std_prev_advantage) if metrics.std_prev_advantage is not None else None,
-            "Threshold": float(metrics.ei_threshold) if metrics.ei_threshold is not None else None,
+            "Mean Previous Advantage": (
+                float(metrics.mean_prev_advantage)
+                if metrics.mean_prev_advantage is not None
+                else None
+            ),
+            "Std Previous Advantage": (
+                float(metrics.std_prev_advantage)
+                if metrics.std_prev_advantage is not None
+                else None
+            ),
+            "Threshold": (
+                float(metrics.ei_threshold)
+                if metrics.ei_threshold is not None
+                else None
+            ),
         },
         "Hyperparameters": {
             "Batch Size": int(state.hyperparameters["batch_size"]),
             "CoT Length": int(state.hyperparameters["cot_length"]),
             "Temperature": float(state.hyperparameters["temperature"]),
-        }
+        },
     }
 
     # Write to log file
@@ -1185,9 +1205,12 @@ def log_batch_results(
         json.dump(log_entry, f)
         f.write("\n")
 
+
 def save_checkpoint(state: TrainingState):
     """Save model checkpoint"""
-    colored_print("Checkpoint", f"Saving model at batch {state.batch_index}", Colors.BOLD)
+    colored_print(
+        "Checkpoint", f"Saving model at batch {state.batch_index}", Colors.BOLD
+    )
     torch.save(
         {
             "model_state_dict": state.actor_model.state_dict(),
@@ -1198,13 +1221,14 @@ def save_checkpoint(state: TrainingState):
         state.model_save_path,
     )
 
+
 def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> BatchData:
     """Process a single batch of data"""
     questions, answers = zip(*qa_batch)
-    
+
     # Generate reasoning from both models and compute KL
     reasoning_output = generate_reasoning_and_kl(state, questions)
-    
+
     # Calculate advantages
     advantage_output = calculate_advantages(
         state,
@@ -1212,7 +1236,7 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         answers,
         reasoning_output,
     )
-    
+
     # Calculate losses
     losses, training_mask, metrics = calculate_losses(
         reasoning_output.kl,
@@ -1224,7 +1248,7 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         state.previous_normalized_rewards,
         state.hyperparameters,
     )
-    
+
     return BatchData(
         questions=questions,
         answers=answers,
@@ -1237,39 +1261,54 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         normalized_rewards=advantage_output.normalized_rewards,
         losses=losses,
         training_mask=training_mask,
-        metrics=metrics
+        metrics=metrics,
     )
+
 
 def update_model(state: TrainingState, batch_data: BatchData) -> float:
     """Perform model update and return gradient norm"""
-    num_active = batch_data.training_mask.sum().item() if batch_data.training_mask is not None else len(batch_data.losses)
+    num_active = (
+        batch_data.training_mask.sum().item()
+        if batch_data.training_mask is not None
+        else len(batch_data.losses)
+    )
     state.grad_accum_count += num_active
-    
+
     if num_active > 0:
-        loss = (batch_data.losses * (batch_data.training_mask if batch_data.training_mask is not None else 1.0)).sum()
+        loss = (
+            batch_data.losses
+            * (
+                batch_data.training_mask
+                if batch_data.training_mask is not None
+                else 1.0
+            )
+        ).sum()
         loss.backward()
-    
+
     if state.grad_accum_count > 0:
-        grad_norm = get_grad_norm(state.actor_model.parameters())  / state.grad_accum_count
+        grad_norm = (
+            get_grad_norm(state.actor_model.parameters()) / state.grad_accum_count
+        )
     else:
         grad_norm = 0
-    
+
     if state.grad_accum_count >= state.hyperparameters["gradient_accumulation_steps"]:
         for p in state.actor_model.parameters():
             if p.grad is not None:
                 p.grad.data.div_(state.grad_accum_count)
-        
+
         clip_grad_norm_(state.actor_model.parameters(), 1.0)
         state.actor_optimizer.step()
         state.actor_optimizer.zero_grad()
         state.grad_accum_count = 0
-    
+
     return grad_norm
+
 
 def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     """Main training loop"""
     state = TrainingState.initialize(task_type, resume, model_type, hyperparameters)
-    
+
     qa_generator = generate_question_answer_batches(
         num_batches=hyperparameters["num_batches"],
         batch_size=hyperparameters["batch_size"],
@@ -1277,110 +1316,127 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
         tokenizer=state.tokenizer,
         hyperparameters=hyperparameters,
     )
-    
+
     for batch_index in range(state.batch_index, hyperparameters["num_batches"]):
         state.batch_index = batch_index
         print_batch_delimiter()
         colored_print("Batch:", str(batch_index), Colors.BOLD, inline=True)
-        
+
         try:
             qa_batch = next(qa_generator)
         except StopIteration:
             print("Reached end of dataset")
             break
-            
+
         batch_data = process_batch(state, qa_batch)
         grad_norm = update_model(state, batch_data)
-        
+
         # Update history
-        state.previous_normalized_rewards.extend(batch_data.normalized_rewards.detach().float().cpu().numpy())
-        state.previous_advantages.extend(batch_data.advantages.detach().float().cpu().numpy())
-        
+        state.previous_normalized_rewards.extend(
+            batch_data.normalized_rewards.detach().float().cpu().numpy()
+        )
+        state.previous_advantages.extend(
+            batch_data.advantages.detach().float().cpu().numpy()
+        )
+
         # Log results
         metrics = LogMetrics.from_batch(
             batch_data,
             grad_norm,
             state.grad_accum_count,
             state.previous_advantages,
-            state.hyperparameters["batch_size"]
+            state.hyperparameters["batch_size"],
         )
         log_batch_results(state, batch_data, metrics)
-        
+
         # Save checkpoint periodically
         if batch_index % 1000 == 0 and batch_index > 0:
             save_checkpoint(state)
 
 
-def main(
-    task_type: str,
-    resume: bool,
-    use_ei: bool,
-    use_ppo: bool,
-    model_type: str,
-    cot_length: int,
-    r: float,
-    temperature: float,
-    question_length: int,
-    target_length: int,
-    shrink_cot: Union[bool, int],
-    ei_threshold: float,
-    gradient_accumulation_steps: int,
-    kl_penalty: float,
-    batch_size: int,
+@dataclass
+class TrainingConfig:
+    """Configuration for training run"""
+
+    task_type: str
+    resume: bool
+    use_ei: bool
+    use_ppo: bool
+    model_type: str
+    cot_length: int
+    r: float
+    temperature: float
+    question_length: int
+    target_length: int
+    shrink_cot: Union[bool, int, None]
+    ei_threshold: Optional[float]
+    gradient_accumulation_steps: int
+    kl_penalty: Optional[float]
+    batch_size: Optional[int]
     normalize_loss: bool
-):
-    """Main entry point with command-line parameter handling."""
-    # Get default hyperparameters
-    hyperparameters = get_default_hyperparameters(
-        task_type=task_type,
-        model_type=model_type,
-        training_methods={"use_ppo": use_ppo, "use_ei": use_ei},
-        cot_length=cot_length,
-        r=r,
-        temperature=temperature,
-        question_length=question_length,
-        target_length=target_length,
-        shrink_cot=shrink_cot,
-        ei_threshold=ei_threshold,
-        gradient_accumulation_steps=gradient_accumulation_steps,
-        kl_penalty=kl_penalty,
-        batch_size=batch_size,
-        normalize_loss=normalize_loss
-    )
+    flatten: bool
+    model_learning_rate: float
+    num_batches: int
+    ppo_epsilon: float
 
-    # Call the training function with only the expected arguments
+    @classmethod
+    def from_args(cls, args):
+        """Create config from parsed command line arguments"""
+        # Convert use_ei argument
+        use_ei = bool(args.use_ei is not False)
+        ei_threshold = args.use_ei if isinstance(args.use_ei, float) else None
+
+        # Convert use_ppo argument
+        use_ppo = bool(args.use_ppo is not False)
+
+        # Convert shrink_cot argument
+        shrink_cot = args.shrink_cot
+        if isinstance(shrink_cot, float):
+            if shrink_cot.is_integer():
+                shrink_cot = int(shrink_cot)
+            else:
+                raise ValueError(
+                    "--shrink_cot value must be a whole number if provided"
+                )
+
+        return cls(
+            task_type=args.task_type,
+            resume=args.resume,
+            use_ei=use_ei,
+            use_ppo=use_ppo,
+            model_type=args.model_type,
+            cot_length=args.cot_length,
+            r=args.r,
+            temperature=args.temperature,
+            question_length=args.question_length,
+            target_length=args.target_length,
+            shrink_cot=shrink_cot,
+            ei_threshold=ei_threshold,
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            kl_penalty=args.kl_penalty,
+            batch_size=args.batch_size,
+            normalize_loss=args.normalize_loss,
+            flatten=args.flatten,
+            model_learning_rate=args.model_learning_rate,
+            num_batches=args.num_batches,
+            ppo_epsilon=args.ppo_epsilon,
+        )
+
+
+def main(config: TrainingConfig):
+    """Main entry point with configuration object"""
     train(
-        task_type=task_type,
-        resume=resume,
-        model_type=model_type,
-        hyperparameters=hyperparameters,
+        task_type=config.task_type,
+        resume=config.resume,
+        model_type=config.model_type,
+        hyperparameters=asdict(config),
     )
-
-
-def get_latest_log_file():
-    """
-    Find the most recent log file in the results directory.
-    Searches across all task subdirectories.
-    """
-    results_dir = "results"
-
-    # Find all log files recursively
-    log_files = []
-    for root, dirs, files in os.walk(results_dir):
-        for file in files:
-            if file == "log.jsonl" or file.endswith(".log"):
-                log_file_path = os.path.join(root, file)
-                log_files.append(log_file_path)
-
-    if not log_files:
-        raise FileNotFoundError("No log files found in results directory.")
-
-    # Return the most recently modified log file
-    return max(log_files, key=os.path.getmtime)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the model on various tasks.")
+
+    # Add arguments to match TrainingConfig fields
     parser.add_argument(
         "--task_type",
         type=str,
@@ -1392,135 +1448,30 @@ if __name__ == "__main__":
             "wiki_continuation",
         ],
         default="arithmetic",
-        help="Type of task to train on",
     )
+    parser.add_argument("--resume", action="store_true", default=False)
+    parser.add_argument("--use_ei", type=float, nargs="?", const=None, default=False)
+    parser.add_argument("--use_ppo", action="store_true", default=False)
     parser.add_argument(
-        "--resume",
-        action="store_true",
-        default=False,
-        help="Resume training from the last checkpoint",
+        "--model_type", type=str, choices=["llama", "mistral"], default="llama"
     )
+    parser.add_argument("--cot_length", type=int, default=50)
+    parser.add_argument("--r", type=float, default=0.9)
+    parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--question_length", type=int, default=50)
+    parser.add_argument("--target_length", type=int, default=50)
+    parser.add_argument("--shrink_cot", type=float, nargs="?", const=True, default=None)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
+    parser.add_argument("--kl_penalty", type=float, default=None)
+    parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument(
-        "--use_ei",
-        type=float,
-        nargs="?",  # Makes the argument optional
-        const=None,  # Value if flag is present but no value given
-        default=False,  # Value if flag is not present
-        help="Use Expert Iteration. Optionally specify a fixed threshold value.",
+        "--normalize_loss", type=lambda x: x.lower() == "true", default=True
     )
-    parser.add_argument(
-        "--use_ppo",
-        action="store_true",
-        default=False,
-        help="Use PPO with clipping",
-    )
-    parser.add_argument(
-        "--model_type",
-        type=str,
-        choices=["llama", "mistral"],
-        default="llama",
-        help="Choose between Llama and Mistral models",
-    )
-    parser.add_argument(
-        "--cot_length",
-        type=int,
-        default=50,
-        help="Chain of thought length (overrides default based on task and model)",
-    )
-    parser.add_argument(
-        "--r",
-        type=float,
-        default=0.9,
-        help="Discount factor for the exponential weighted average (overrides default)",
-    )
-    parser.add_argument(
-        "--temperature",
-        type=float,
-        default=1.0,
-        help="Temperature for text generation",
-    )
-    parser.add_argument(
-        "--question_length",
-        type=int,
-        default=50,
-        help="Length of question/context for wiki tasks (default: 200)",
-    )
-    parser.add_argument(
-        "--target_length",
-        type=int,
-        default=50,
-        help="Length of target/continuation for wiki tasks (default: 200)",
-    )
-    parser.add_argument(
-        "--shrink_cot",
-        type=float,
-        nargs="?",  # Makes the argument optional
-        const=True,  # Value if flag is present but no value given
-        default=None,  # Value if flag is not present
-        help="Enable CoT length reduction. If number provided, linearly decrease until that batch.",
-    )
-    parser.add_argument(
-        "--gradient_accumulation_steps",
-        type=int,
-        default=1,
-        help="Number of steps to accumulate gradients over (default: 8)",
-    )
-    parser.add_argument(
-        "--kl_penalty",
-        type=float,
-        default=None,
-        help="KL penalty coefficient. If specified, adds k*KL to the loss.",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=None,
-        help="Batch size (overrides default based on task and model)",
-    )
-    parser.add_argument(
-        "--normalize_loss",
-        type=lambda x: x.lower() == 'true',  # Convert string to boolean
-        default=True,
-        help="Whether to normalize rewards by subtracting baseline (default: True)",
-    )
+    parser.add_argument("--flatten", action="store_true", default=False)
+    parser.add_argument("--model_learning_rate", type=float, default=1e-4)
+    parser.add_argument("--num_batches", type=int, default=10000)
+    parser.add_argument("--ppo_epsilon", type=float, default=0.2)
 
     args = parser.parse_args()
-
-    # Convert use_ei argument to bool/float for main
-    use_ei = bool(
-        args.use_ei is not False
-    )  # True if any value (including None) provided
-    ei_threshold = args.use_ei if isinstance(args.use_ei, float) else None
-
-    # Convert use_ppo argument to bool/float for main
-    use_ppo = bool(
-        args.use_ppo is not False
-    )  # True if any value (including None) provided
-    ppo_kl_coef = args.use_ppo if isinstance(args.use_ppo, float) else None
-
-    # Convert shrink_cot argument
-    shrink_cot = args.shrink_cot
-    if isinstance(shrink_cot, float):
-        if shrink_cot.is_integer():
-            shrink_cot = int(shrink_cot)  # Convert to int if it's a whole number
-        else:
-            raise ValueError("--shrink_cot value must be a whole number if provided")
-
-    main(
-        task_type=args.task_type,
-        resume=args.resume,
-        use_ei=use_ei,
-        use_ppo=use_ppo,
-        model_type=args.model_type,
-        cot_length=args.cot_length,
-        r=args.r,
-        temperature=args.temperature,
-        question_length=args.question_length,
-        target_length=args.target_length,
-        shrink_cot=shrink_cot,
-        ei_threshold=ei_threshold,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        kl_penalty=args.kl_penalty,
-        batch_size=args.batch_size,
-        normalize_loss=args.normalize_loss
-    )
+    config = TrainingConfig.from_args(args)
+    main(config)
