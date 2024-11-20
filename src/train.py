@@ -134,13 +134,13 @@ def load_model(model_type="mistral"):
     return model, frozen_model, tokenizer, device
 
 
-def calculate_threshold(previous_advantages, fixed_threshold):
+def calculate_threshold(previous_advantages, ei_std_multiplier):
     """
     Calculate threshold for expert iteration.
 
     Args:
         previous_advantages: List of previous advantage values
-        fixed_threshold: If provided, use this fixed value instead of statistical threshold
+        ei_std_multiplier: Number of standard deviations above mean for threshold
 
     Returns:
         float: Threshold value (inf if not enough previous advantages)
@@ -148,10 +148,9 @@ def calculate_threshold(previous_advantages, fixed_threshold):
     if len(previous_advantages) <= EI_SKIP_INITIAL:
         return float("inf")
 
-    if fixed_threshold is not None:
-        return fixed_threshold
-
-    return np.mean(previous_advantages) + np.std(previous_advantages)
+    return np.mean(previous_advantages) + ei_std_multiplier * np.std(
+        previous_advantages
+    )
 
 
 def generate_arithmetic_pairs(task_type: str, num_examples: int = 1000):
@@ -809,7 +808,7 @@ def calculate_losses(
     training_mask = None
     if hyperparameters.get("use_ei", False):
         threshold = calculate_threshold(
-            previous_normalized_rewards, hyperparameters["ei_threshold"]
+            previous_normalized_rewards, hyperparameters["ei_std_multiplier"]
         )
         training_mask = (normalized_rewards > threshold).float()
         metrics["ei_threshold"] = threshold
@@ -1390,7 +1389,7 @@ class TrainingConfig:
     question_length: int
     target_length: int
     shrink_cot: Union[bool, int, None]
-    ei_threshold: Optional[float]
+    ei_std_multiplier: Optional[float]
     gradient_accumulation_steps: int
     kl_penalty: Optional[float]
     batch_size: Optional[int]
@@ -1400,12 +1399,17 @@ class TrainingConfig:
     num_batches: int
     ppo_epsilon: float
 
+    @property
+    def use_ei(self) -> bool:
+        """Whether Expert Iteration is enabled"""
+        return self.ei_std_multiplier is not None
+
     @classmethod
     def from_args(cls, args):
         """Create config from parsed command line arguments"""
-        # Convert use_ei argument
-        use_ei = bool(args.use_ei is not False)
-        ei_threshold = args.use_ei if isinstance(args.use_ei, float) else None
+        # Convert use_ei argument to bool and get std multiplier
+        use_ei = args.use_ei is not None
+        ei_std_multiplier = args.use_ei  # Will be float or None
 
         # Convert use_ppo argument
         use_ppo = bool(args.use_ppo is not False)
@@ -1432,7 +1436,7 @@ class TrainingConfig:
             question_length=args.question_length,
             target_length=args.target_length,
             shrink_cot=shrink_cot,
-            ei_threshold=ei_threshold,
+            ei_std_multiplier=ei_std_multiplier,
             gradient_accumulation_steps=args.gradient_accumulation_steps,
             kl_penalty=args.kl_penalty,
             batch_size=args.batch_size,
@@ -1471,7 +1475,14 @@ if __name__ == "__main__":
         default="arithmetic",
     )
     parser.add_argument("--resume", action="store_true", default=False)
-    parser.add_argument("--use_ei", type=float, nargs="?", const=None, default=False)
+    parser.add_argument(
+        "--use_ei",
+        type=float,
+        nargs="?",
+        const=2.0,  # Default multiplier when flag is used without value
+        default=None,  # None when flag is not used
+        help="Use Expert Iteration with specified number of standard deviations (default: 2.0)",
+    )
     parser.add_argument("--use_ppo", action="store_true", default=False)
     parser.add_argument(
         "--model_type", type=str, choices=["llama", "mistral"], default="llama"
