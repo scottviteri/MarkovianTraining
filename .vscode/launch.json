@@ -44,6 +44,18 @@
             "env": {
                 "PYTHONPATH": "/root/MarkovianTraining"
             }
+        },
+        {
+            "name": "Python: Resume",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/train.py",
+            "args": ["--resume"],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/root/MarkovianTraining"
+            }
         }
     ]
 }

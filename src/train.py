@@ -950,15 +950,10 @@ def setup_training_environment(task_type, resume, hyperparameters):
         if latest_checkpoint_path is None or latest_log_path is None:
             raise ValueError(f"No previous run found for task type: {task_type}")
 
-        start_batch, loaded_hyperparameters = load_training_state(latest_log_path)
+        start_batch, hyperparameters = load_training_state(latest_log_path)
         previous_normalized_rewards, previous_advantages = (
             load_previous_rewards_and_advantages(latest_log_path)
         )
-
-        # Use loaded hyperparameters but allow overrides from current hyperparameters
-        loaded_hyperparameters.update(hyperparameters)
-        hyperparameters = loaded_hyperparameters
-
         # Use the same directory as the loaded checkpoint
         results_dir = os.path.dirname(latest_checkpoint_path)
         model_save_path = latest_checkpoint_path
@@ -1168,8 +1163,8 @@ def log_batch_results(
         "EI Metrics": {
             "Use EI": (
                 float(state.hyperparameters["use_ei"])
-                if state.hyperparameters["use_ei"]
-                else False
+                if state.hyperparameters["use_ei"] is not None
+                else None
             ),
             "Mean Previous Advantage": (
                 float(metrics.mean_prev_advantage)
