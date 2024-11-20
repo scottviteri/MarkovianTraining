@@ -806,9 +806,9 @@ def calculate_losses(
         losses = -torch.min(prob_ratios * advantages, clipped_ratios * advantages)
     # Apply Expert Iteration mask if specified
     training_mask = None
-    if hyperparameters.get("use_ei", False):
+    if hyperparameters["use_ei"] is not None:
         threshold = calculate_threshold(
-            previous_normalized_rewards, hyperparameters["ei_std_multiplier"]
+            previous_normalized_rewards, hyperparameters["use_ei"]
         )
         training_mask = (normalized_rewards > threshold).float()
         metrics["ei_threshold"] = threshold
@@ -884,39 +884,6 @@ def tensor_to_python(value):
     elif isinstance(value, np.int32) or isinstance(value, np.int64):
         return int(value)
     return value
-
-
-def get_default_hyperparameters(
-    task_type: str,
-    model_type: str,
-    training_methods: dict,
-    cot_length: int,
-    r: float,
-    temperature: float,
-    question_length: int,
-    target_length: int,
-    shrink_cot: Union[bool, int],
-    ei_threshold: float,
-    gradient_accumulation_steps: int,
-    kl_penalty: float,
-    batch_size: int,
-    normalize_loss: bool,
-):
-    defaults = {
-        "model_learning_rate": 0.0001,
-        "num_batches": 10000,
-        "ppo_epsilon": 0.2,
-    }
-    # Task-specific length parameters
-    if task_type in ["wiki_compression", "wiki_continuation"]:
-        defaults["question_length"] = question_length
-        defaults["target_length"] = target_length
-
-    # Add training method flags
-    defaults.update(training_methods)
-
-    return defaults
-
 
 def print_debug_info(
     task_type,
@@ -1005,7 +972,7 @@ def initialize_model_and_optimizer(model_type, hyperparameters):
     """Initialize the model, frozen model, tokenizer, device, and optimizer."""
     model, frozen_model, tokenizer, device = load_model(model_type)
     model_optimizer = bitsandbytes.optim.AdamW8bit(
-        model.parameters(), lr=hyperparameters["model_learning_rate"]
+        model.parameters(), lr=hyperparameters["lr"]
     )
     return model, frozen_model, tokenizer, device, model_optimizer
 
@@ -1377,72 +1344,56 @@ def get_latest_log_file():
 @dataclass
 class TrainingConfig:
     """Configuration for training run"""
-
     task_type: str
-    resume: bool
-    use_ei: bool
-    use_ppo: bool
     model_type: str
+    resume: bool
+    use_ei : float 
+    use_ppo: bool
     cot_length: int
     r: float
     temperature: float
     question_length: int
     target_length: int
     shrink_cot: Union[bool, int, None]
-    ei_std_multiplier: Optional[float]
     gradient_accumulation_steps: int
     kl_penalty: Optional[float]
-    batch_size: Optional[int]
+    batch_size: int
     normalize_loss: bool
     flatten: bool
-    model_learning_rate: float
+    lr: float
     num_batches: int
     ppo_epsilon: float
-
-    @property
-    def use_ei(self) -> bool:
-        """Whether Expert Iteration is enabled"""
-        return self.ei_std_multiplier is not None
 
     @classmethod
     def from_args(cls, args):
         """Create config from parsed command line arguments"""
-        # Convert use_ei argument to bool and get std multiplier
-        use_ei = args.use_ei is not None
-        ei_std_multiplier = args.use_ei  # Will be float or None
-
-        # Convert use_ppo argument
-        use_ppo = bool(args.use_ppo is not False)
-
         # Convert shrink_cot argument
         shrink_cot = args.shrink_cot
         if isinstance(shrink_cot, float):
             if shrink_cot.is_integer():
                 shrink_cot = int(shrink_cot)
             else:
-                raise ValueError(
-                    "--shrink_cot value must be a whole number if provided"
-                )
+                raise ValueError("--shrink_cot value must be a whole number if provided")
 
+        # Create config with all arguments
         return cls(
             task_type=args.task_type,
-            resume=args.resume,
-            use_ei=use_ei,
-            use_ppo=use_ppo,
             model_type=args.model_type,
+            resume=args.resume,
+            use_ei=args.use_ei,
+            use_ppo=args.use_ppo,
             cot_length=args.cot_length,
             r=args.r,
             temperature=args.temperature,
             question_length=args.question_length,
             target_length=args.target_length,
             shrink_cot=shrink_cot,
-            ei_std_multiplier=ei_std_multiplier,
             gradient_accumulation_steps=args.gradient_accumulation_steps,
             kl_penalty=args.kl_penalty,
             batch_size=args.batch_size,
             normalize_loss=args.normalize_loss,
             flatten=args.flatten,
-            model_learning_rate=args.model_learning_rate,
+            lr=args.lr,
             num_batches=args.num_batches,
             ppo_epsilon=args.ppo_epsilon,
         )
@@ -1461,10 +1412,11 @@ def main(config: TrainingConfig):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train the model on various tasks.")
 
-    # Add arguments to match TrainingConfig fields
+    # Arguments with defaults
     parser.add_argument(
         "--task_type",
         type=str,
+        default="wiki_continuation",
         choices=[
             "arithmetic",
             "arithmetic_negative",
@@ -1472,35 +1424,35 @@ if __name__ == "__main__":
             "wiki_compression",
             "wiki_continuation",
         ],
-        default="arithmetic",
+        help="Task type (default: wiki_continuation)",
     )
-    parser.add_argument("--resume", action="store_true", default=False)
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        default="llama",
+        choices=["llama", "mistral"],
+        help="Model type (default: llama)",
+    )
+    parser.add_argument("--resume", action="store_true")
     parser.add_argument(
         "--use_ei",
         type=float,
-        nargs="?",
-        const=2.0,  # Default multiplier when flag is used without value
-        default=None,  # None when flag is not used
-        help="Use Expert Iteration with specified number of standard deviations (default: 2.0)",
+        default=None,
+        help="Use Expert Iteration with specified number of standard deviations",
     )
-    parser.add_argument("--use_ppo", action="store_true", default=False)
-    parser.add_argument(
-        "--model_type", type=str, choices=["llama", "mistral"], default="llama"
-    )
+    parser.add_argument("--use_ppo", action="store_true")
     parser.add_argument("--cot_length", type=int, default=50)
     parser.add_argument("--r", type=float, default=0.9)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--question_length", type=int, default=50)
     parser.add_argument("--target_length", type=int, default=50)
-    parser.add_argument("--shrink_cot", type=float, nargs="?", const=True, default=None)
+    parser.add_argument("--shrink_cot", type=float, nargs="?", const=True)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--kl_penalty", type=float, default=None)
-    parser.add_argument("--batch_size", type=int, default=None)
-    parser.add_argument(
-        "--normalize_loss", type=lambda x: x.lower() == "true", default=True
-    )
-    parser.add_argument("--flatten", action="store_true", default=False)
-    parser.add_argument("--model_learning_rate", type=float, default=1e-4)
+    parser.add_argument("--kl_penalty", type=float)
+    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--normalize_loss", type=lambda x: x.lower() == "true", default=True)
+    parser.add_argument("--flatten", action="store_true")
+    parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--num_batches", type=int, default=10000)
     parser.add_argument("--ppo_epsilon", type=float, default=0.2)
 
