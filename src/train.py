@@ -1166,7 +1166,7 @@ def log_batch_results(
             },
         },
         "EI Metrics": {
-            "Use EI": bool(state.hyperparameters["use_ei"]),
+            "Use EI": float(state.hyperparameters["use_ei"]),
             "Mean Previous Advantage": (
                 float(metrics.mean_prev_advantage)
                 if metrics.mean_prev_advantage is not None
