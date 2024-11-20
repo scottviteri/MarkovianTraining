@@ -238,7 +238,7 @@ def construct_prompts(
         prompt_type = "Compression:"
     elif task_type == "wiki_continuation":
         base_prompt = (
-            "You will need to predict the next {hyperparameters['target_length']} tokens which follow the provided passage."
+            f"You will need to predict the next {hyperparameters['target_length']} tokens which follow the provided passage."
             f"You can write {hyperparameters['cot_length']} thinking tokens which will be your sole context for prediction."
             f"Feel free to be creative in your thinking strategy!\n\nOpening text:"
         )
