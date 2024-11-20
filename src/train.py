@@ -932,11 +932,6 @@ def get_default_hyperparameters(
         },
     }
 
-    if batch_size is None:
-        defaults["batch_size"] = batch_size_defaults.get(model_type, {}).get(
-            task_type, batch_size_defaults[model_type]["default"]
-        )
-
     # Task-specific length parameters
     if task_type in ["wiki_compression", "wiki_continuation"]:
         defaults["question_length"] = question_length
