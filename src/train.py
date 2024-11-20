@@ -1479,7 +1479,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--normalize_loss",
-        type=bool,
+        type=lambda x: x.lower() == 'true',  # Convert string to boolean
         default=True,
         help="Whether to normalize rewards by subtracting baseline (default: True)",
     )
