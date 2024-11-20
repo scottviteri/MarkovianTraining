@@ -1168,7 +1168,7 @@ def log_batch_results(
         "EI Metrics": {
             "Use EI": (
                 float(state.hyperparameters["use_ei"])
-                if state.hyperparameters
+                if state.hyperparameters["use_ei"]
                 else False
             ),
             "Mean Previous Advantage": (
