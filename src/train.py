@@ -307,7 +307,7 @@ def generate_question_answer_batches(
     """Generate batches of Q&A pairs lazily."""
     total_examples_needed = num_batches * batch_size
     qa_pairs = []
-    chunk_size = 1000  
+    chunk_size = 1000
 
     if task_type in ["wiki_compression", "wiki_continuation"]:
         wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
@@ -582,12 +582,21 @@ class TrainingState:
         cls, task_type: str, resume: bool, model_type: str, hyperparameters: dict
     ):
         """Factory method to create a new TrainingState"""
-        model_save_path, log_file, start_batch, prev_rewards, prev_advantages = (
-            setup_training_environment(task_type, resume, hyperparameters)
-        )
+        (
+            model_save_path,
+            log_file,
+            start_batch,
+            prev_rewards,
+            prev_advantages,
+            updated_hyperparameters,  # Receive the updated hyperparameters
+        ) = setup_training_environment(task_type, resume, hyperparameters)
 
         actor_model, critic_model, tokenizer, device, actor_optimizer = (
-            initialize_model_and_optimizer(model_type, hyperparameters)
+            initialize_model_and_optimizer(
+                model_type,
+                updated_hyperparameters,
+                checkpoint_path=model_save_path if resume else None,
+            )
         )
         critic_model.generation_config.temperature = None
         critic_model.generation_config.top_p = None
@@ -604,7 +613,7 @@ class TrainingState:
             device=device,
             model_save_path=model_save_path,
             log_file=log_file,
-            hyperparameters=hyperparameters,
+            hyperparameters=updated_hyperparameters,  # Use the updated hyperparameters
         )
 
 
@@ -861,7 +870,7 @@ def load_training_state(log_file):
 
     hyperparameters = json.loads(lines[0])
 
-    return last_batch_index, hyperparameters
+    return last_batch_index + 1, hyperparameters
 
 
 def load_previous_rewards_and_advantages(log_file):
@@ -936,25 +945,31 @@ def should_decrease_cot_length(recent_log_probs, threshold=-0.5, window_size=10)
 
 def setup_training_environment(task_type, resume, hyperparameters):
     """Set up the results directory and load checkpoints if resuming."""
-    results_dir = os.path.join(
-        "results", task_type, datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    )
-    os.makedirs(results_dir, exist_ok=True)
-
-    model_save_path = os.path.join(results_dir, "model")
-    log_file = os.path.join(results_dir, "log.jsonl")
-
     if resume:
-        latest_checkpoint, latest_log = get_latest_result_and_log(task_type)
-        if latest_checkpoint and latest_log:
-            checkpoint = torch.load(latest_checkpoint)
-            start_batch, hyperparameters = load_training_state(latest_log)
-            previous_normalized_rewards, previous_advantages = (
-                load_previous_rewards_and_advantages(latest_log)
-            )
-        else:
-            start_batch = 0
+        latest_checkpoint_path, latest_log_path = get_latest_result_and_log(task_type)
+        if latest_checkpoint_path is None or latest_log_path is None:
+            raise ValueError(f"No previous run found for task type: {task_type}")
+
+        start_batch, loaded_hyperparameters = load_training_state(latest_log_path)
+        previous_normalized_rewards, previous_advantages = (
+            load_previous_rewards_and_advantages(latest_log_path)
+        )
+
+        # Use loaded hyperparameters but allow overrides from current hyperparameters
+        loaded_hyperparameters.update(hyperparameters)
+        hyperparameters = loaded_hyperparameters
+
+        # Use the same directory as the loaded checkpoint
+        results_dir = os.path.dirname(latest_checkpoint_path)
+        model_save_path = latest_checkpoint_path
+        log_file = latest_log_path
     else:
+        results_dir = os.path.join(
+            "results", task_type, datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        )
+        os.makedirs(results_dir, exist_ok=True)
+        model_save_path = os.path.join(results_dir, "model")
+        log_file = os.path.join(results_dir, "log.jsonl")
         start_batch = 0
         previous_normalized_rewards = []
         previous_advantages = []
@@ -968,15 +983,22 @@ def setup_training_environment(task_type, resume, hyperparameters):
         start_batch,
         previous_normalized_rewards,
         previous_advantages,
+        hyperparameters,  # Now returning the potentially updated hyperparameters
     )
 
 
-def initialize_model_and_optimizer(model_type, hyperparameters):
+def initialize_model_and_optimizer(model_type, hyperparameters, checkpoint_path=None):
     """Initialize the model, frozen model, tokenizer, device, and optimizer."""
     model, frozen_model, tokenizer, device = load_model(model_type)
     model_optimizer = bitsandbytes.optim.AdamW8bit(
         model.parameters(), lr=hyperparameters["lr"]
     )
+
+    if checkpoint_path is not None:
+        checkpoint = torch.load(checkpoint_path)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model_optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
     return model, frozen_model, tokenizer, device, model_optimizer
 
 
