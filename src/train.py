@@ -872,7 +872,8 @@ def get_default_hyperparameters(
     ei_threshold: float,
     gradient_accumulation_steps: int,
     kl_penalty: float,
-    batch_size: int
+    batch_size: int,
+    normalize_loss: bool
 ):
     defaults = {
         "task_type": task_type,
@@ -882,7 +883,7 @@ def get_default_hyperparameters(
         "r": r,
         "temperature": temperature,
         "num_batches": 10000,
-        "normalize_loss": True,
+        "normalize_loss": normalize_loss,
         "shrink_cot": shrink_cot,
         "ei_threshold": ei_threshold,
         "gradient_accumulation_steps": gradient_accumulation_steps,
@@ -1330,7 +1331,8 @@ def main(
     ei_threshold: float,
     gradient_accumulation_steps: int,
     kl_penalty: float,
-    batch_size: int
+    batch_size: int,
+    normalize_loss: bool
 ):
     """Main entry point with command-line parameter handling."""
     # Get default hyperparameters
@@ -1347,7 +1349,8 @@ def main(
         ei_threshold=ei_threshold,
         gradient_accumulation_steps=gradient_accumulation_steps,
         kl_penalty=kl_penalty,
-        batch_size=batch_size
+        batch_size=batch_size,
+        normalize_loss=normalize_loss
     )
 
     # Call the training function with only the expected arguments
@@ -1479,6 +1482,12 @@ if __name__ == "__main__":
         default=None,
         help="Batch size (overrides default based on task and model)",
     )
+    parser.add_argument(
+        "--normalize_loss",
+        type=bool,
+        default=True,
+        help="Whether to normalize rewards by subtracting baseline (default: True)",
+    )
 
     args = parser.parse_args()
 
@@ -1517,5 +1526,6 @@ if __name__ == "__main__":
         ei_threshold=ei_threshold,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         kl_penalty=args.kl_penalty,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        normalize_loss=args.normalize_loss
     )
