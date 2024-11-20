@@ -645,8 +645,7 @@ def generate_reasoning_and_kl(
             attention_mask=tokenized_inputs.attention_mask,
             max_new_tokens=state.hyperparameters["cot_length"],
             min_new_tokens=state.hyperparameters["cot_length"],
-            do_sample=True,
-            temperature=1.0,
+            do_sample=False,
             pad_token_id=state.tokenizer.pad_token_id,
         )
 
