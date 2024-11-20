@@ -589,6 +589,8 @@ class TrainingState:
         actor_model, critic_model, tokenizer, device, actor_optimizer = (
             initialize_model_and_optimizer(model_type, hyperparameters)
         )
+        critic_model.generation_config.temperature = None
+        critic_model.generation_config.top_p = None
 
         return cls(
             batch_index=start_batch,
@@ -884,6 +886,7 @@ def tensor_to_python(value):
     elif isinstance(value, np.int32) or isinstance(value, np.int64):
         return int(value)
     return value
+
 
 def print_debug_info(
     task_type,
@@ -1344,10 +1347,11 @@ def get_latest_log_file():
 @dataclass
 class TrainingConfig:
     """Configuration for training run"""
+
     task_type: str
     model_type: str
     resume: bool
-    use_ei : float 
+    use_ei: float
     use_ppo: bool
     cot_length: int
     r: float
@@ -1373,7 +1377,9 @@ class TrainingConfig:
             if shrink_cot.is_integer():
                 shrink_cot = int(shrink_cot)
             else:
-                raise ValueError("--shrink_cot value must be a whole number if provided")
+                raise ValueError(
+                    "--shrink_cot value must be a whole number if provided"
+                )
 
         # Create config with all arguments
         return cls(
@@ -1450,7 +1456,9 @@ if __name__ == "__main__":
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--kl_penalty", type=float)
     parser.add_argument("--batch_size", type=int, default=8)
-    parser.add_argument("--normalize_loss", type=lambda x: x.lower() == "true", default=True)
+    parser.add_argument(
+        "--normalize_loss", type=lambda x: x.lower() == "true", default=True
+    )
     parser.add_argument("--flatten", action="store_true")
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--num_batches", type=int, default=10000)
