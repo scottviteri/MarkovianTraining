@@ -208,7 +208,13 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         with open(file_path, "r") as f:
             file_contents = f.readlines()
 
-        # Skip hyperparameters line
+        # Get hyperparameters from first line
+        hyperparameters = json.loads(file_contents[0].strip())
+
+        # Create label from hyperparameters
+        label = f"t{hyperparameters['temperature']}ei{hyperparameters['use_ei']}"
+
+        # Skip hyperparameters line for data
         entries = [json.loads(line) for line in file_contents[1:]]
 
         # Get normalized reward data
@@ -228,7 +234,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 range(offset, offset + len(smoothed_data)),
                 smoothed_data,
                 linewidth=2,
-                label=host_name,
+                label=label,
             )
 
     ax.set_title("Normalized Reward Comparison")
