@@ -50,7 +50,7 @@ def plot_metrics(
         ]
 
         # Adjust figure size for single plot
-        fig, ax = plt.subplots(1, 1, figsize=(15, 5))
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
         axs = [ax]
         num_plots = 1
     else:
