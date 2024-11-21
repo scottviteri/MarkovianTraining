@@ -199,11 +199,11 @@ def plot_metrics(
     print(f"Plot saved to {output_file}")
 
 
-def plot_combined_metrics(file_paths, window_size=10, output_file=None):
+def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None):
     """Plot normalized reward from multiple files on the same plot."""
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
 
-    for file_path in file_paths:
+    for file_path, host_name in zip(file_paths, host_names):
         # Read the file
         with open(file_path, "r") as f:
             file_contents = f.readlines()
@@ -224,14 +224,11 @@ def plot_combined_metrics(file_paths, window_size=10, output_file=None):
             smoothed_data = moving_average(data, window_size)
             offset = window_size // 2
 
-            # Use filename as label
-            label = os.path.basename(file_path).replace(".jsonl", "")
-
             ax.plot(
                 range(offset, offset + len(smoothed_data)),
                 smoothed_data,
                 linewidth=2,
-                label=label,
+                label=host_name,
             )
 
     ax.set_title("Normalized Reward Comparison")
@@ -240,6 +237,7 @@ def plot_combined_metrics(file_paths, window_size=10, output_file=None):
     ax.set_ylim(-0.5, 0.5)
     ax.legend()
 
+    # Set default output file name if none provided
     if output_file is None:
         output_file = "combined_metrics.png"
 
@@ -307,8 +305,9 @@ if __name__ == "__main__":
         # Use all indices if none specified
         indices = args.indices if args.indices else range(1, len(hosts) + 1)
 
-        # Collect files to plot
+        # Collect files and corresponding host names to plot
         files_to_plot = []
+        host_names_to_plot = []
         for i in indices:
             if i < 1 or i > len(hosts):
                 print(f"Invalid index: {i} (must be between 1 and {len(hosts)})")
@@ -317,12 +316,16 @@ if __name__ == "__main__":
             log_path = f"./results_{i}_{hostname}/log.jsonl"
             if os.path.exists(log_path):
                 files_to_plot.append(log_path)
+                host_names_to_plot.append(
+                    hosts[i - 1]
+                )  # Use original host name from array
             else:
                 print(f"Warning: Could not find log file for index {i} ({log_path})")
 
         if files_to_plot:
             plot_combined_metrics(
                 files_to_plot,
+                host_names_to_plot,
                 window_size=args.window_size,
                 output_file=args.output_file,
             )
