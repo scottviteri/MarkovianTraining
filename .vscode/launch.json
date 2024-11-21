@@ -56,6 +56,56 @@
             "env": {
                 "PYTHONPATH": "/root/MarkovianTraining"
             }
+        },
+        {
+            "name": "Process Perturbations",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/perturbation_analysis.py",
+            "args": [
+                "--log_file", "results_2_mid/log.jsonl",
+                "--stride", "10",
+                "--process_only"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/root/MarkovianTraining"
+            }
+        },
+        {
+            "name": "Plot Perturbations (Debug)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/perturbation_analysis.py",
+            "args": [
+                "--log_file", "results_2_mid/log.jsonl",
+                "--window_size", "40",
+                "--debug",
+                "--max_index", "1200",
+                "--plot_only"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/root/MarkovianTraining"
+            }
+        },
+        {
+            "name": "Plot Perturbations (Regular)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/perturbation_analysis.py",
+            "args": [
+                "--log_file", "results_2_mid/log.jsonl",
+                "--window_size", "1",
+                "--plot_only"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/root/MarkovianTraining"
+            }
         }
     ]
 }
