@@ -1482,7 +1482,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--flatten", action="store_true")
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--num_batches", type=int, default=10000)
+    parser.add_argument("--num_batches", type=int, default=100000)
     parser.add_argument("--ppo_epsilon", type=float, default=0.2)
 
     args = parser.parse_args()
