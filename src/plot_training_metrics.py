@@ -173,7 +173,10 @@ def plot_metrics(
             # Get dynamic title for KL plot
             plot_title = get_plot_title(entries[0], title)
 
-            axs[i].scatter(range(len(data)), data, alpha=0.3)
+            # Only show scatter plot if not in normalized_reward_only mode
+            if not normalized_reward_only:
+                axs[i].scatter(range(len(data)), data, alpha=0.3)
+
             axs[i].plot(
                 range(offset, offset + len(smoothed_data)),
                 smoothed_data,
