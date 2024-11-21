@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Array of hosts (top 4 from config)
-hosts=("left" "leftright" "rightleft" "right" "left2" "leftright2" "rightleft2" "right2")
+hosts=("left" "mid" "right" "riight" "left2" "mid2" "right2" "riight2" "left3" "mid3")
 
 # Check if arguments were provided
 if [ $# -eq 0 ]; then
@@ -35,9 +35,14 @@ for i in $indices; do
     # Create a unique directory for each host
     mkdir -p "./results_${i}_${hostname}"
     
+    # Execute the plotting command on the remote machine
+    ssh $port_option "$hostname" "cd /root/MarkovianTraining && python src/plot_training_metrics.py --window_size 100"
+    
     # Find the most recently edited pg_norm_plot.png file in the results directory and its subdirectories
     latest_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'log_metrics.png' -print0 | xargs -0 ls -t | head -1")
-    
+    latest_log_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'log.jsonl' -print0 | xargs -0 ls -t | head -1")
+
     # Download the most recent pg_norm_plot.png file
     scp $port_option "$hostname:$latest_file" "./results_${i}_${hostname}/"
+    #scp $port_option "$hostname:$latest_log_file" "./results_${i}_${hostname}/"
 done
