@@ -36,7 +36,7 @@ for i in $indices; do
     mkdir -p "./results_${i}_${hostname}"
     
     # Execute the plotting command on the remote machine
-    ssh $port_option "$hostname" "cd /root/MarkovianTraining && python src/plot_training_metrics.py --window_size 100"
+    ssh $port_option "$hostname" "cd /root/MarkovianTraining && git pull && python src/plot_training_metrics.py --window_size 100 --normalized_reward_only"
     
     # Find the most recently edited pg_norm_plot.png file in the results directory and its subdirectories
     latest_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'log_metrics.png' -print0 | xargs -0 ls -t | head -1")
@@ -44,5 +44,5 @@ for i in $indices; do
 
     # Download the most recent pg_norm_plot.png file
     scp $port_option "$hostname:$latest_file" "./results_${i}_${hostname}/"
-    #scp $port_option "$hostname:$latest_log_file" "./results_${i}_${hostname}/"
+    scp $port_option "$hostname:$latest_log_file" "./results_${i}_${hostname}/"
 done

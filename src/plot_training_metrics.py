@@ -199,6 +199,55 @@ def plot_metrics(
     print(f"Plot saved to {output_file}")
 
 
+def plot_combined_metrics(file_paths, window_size=10, output_file=None):
+    """Plot normalized reward from multiple files on the same plot."""
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+
+    for file_path in file_paths:
+        # Read the file
+        with open(file_path, "r") as f:
+            file_contents = f.readlines()
+
+        # Skip hyperparameters line
+        entries = [json.loads(line) for line in file_contents[1:]]
+
+        # Get normalized reward data
+        data = [
+            entry["Training Metrics"]["Normalized Reward"]
+            for entry in entries[EI_SKIP_INITIAL:]
+            if "Training Metrics" in entry
+            and "Normalized Reward" in entry["Training Metrics"]
+            and entry["Training Metrics"]["Normalized Reward"] is not None
+        ]
+
+        if data:
+            smoothed_data = moving_average(data, window_size)
+            offset = window_size // 2
+
+            # Use filename as label
+            label = os.path.basename(file_path).replace(".jsonl", "")
+
+            ax.plot(
+                range(offset, offset + len(smoothed_data)),
+                smoothed_data,
+                linewidth=2,
+                label=label,
+            )
+
+    ax.set_title("Normalized Reward Comparison")
+    ax.set_xlabel("Batch")
+    ax.set_ylabel("Value")
+    ax.set_ylim(-0.5, 0.5)
+    ax.legend()
+
+    if output_file is None:
+        output_file = "combined_metrics.png"
+
+    plt.tight_layout()
+    plt.savefig(output_file)
+    print(f"Combined plot saved to {output_file}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot training metrics from log file.")
     parser.add_argument(
@@ -224,14 +273,65 @@ if __name__ == "__main__":
         action="store_true",
         help="Only plot normalized reward with standardized y-axis",
     )
+    parser.add_argument(
+        "--combine_files",
+        action="store_true",
+        help="Plot normalized reward from multiple jsonl files on the same plot",
+    )
+    parser.add_argument(
+        "--indices",
+        nargs="+",
+        type=int,
+        help="Indices of machines to include (1-based indexing)",
+    )
     args = parser.parse_args()
 
     # Use provided log file or find the latest one
     log_file = args.log_file or get_latest_log_file()
 
-    plot_metrics(
-        log_file,
-        window_size=args.window_size,
-        output_file=args.output_file,
-        normalized_reward_only=args.normalized_reward_only,
-    )
+    if args.combine_files:
+        # Define the list of hosts (keep in sync with download.sh)
+        hosts = [
+            "left",
+            "mid",
+            "right",
+            "riight",
+            "left2",
+            "mid2",
+            "right2",
+            "riight2",
+            "left3",
+            "mid3",
+        ]
+
+        # Use all indices if none specified
+        indices = args.indices if args.indices else range(1, len(hosts) + 1)
+
+        # Collect files to plot
+        files_to_plot = []
+        for i in indices:
+            if i < 1 or i > len(hosts):
+                print(f"Invalid index: {i} (must be between 1 and {len(hosts)})")
+                continue
+            hostname = hosts[i - 1].split(":")[0]  # Remove port if present
+            log_path = f"./results_{i}_{hostname}/log.jsonl"
+            if os.path.exists(log_path):
+                files_to_plot.append(log_path)
+            else:
+                print(f"Warning: Could not find log file for index {i} ({log_path})")
+
+        if files_to_plot:
+            plot_combined_metrics(
+                files_to_plot,
+                window_size=args.window_size,
+                output_file=args.output_file,
+            )
+        else:
+            print("No valid files found to plot")
+    else:
+        plot_metrics(
+            log_file,
+            window_size=args.window_size,
+            output_file=args.output_file,
+            normalized_reward_only=args.normalized_reward_only,
+        )
