@@ -213,6 +213,10 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
 
         # Create label from hyperparameters
         label = f"t{hyperparameters['temperature']}ei{hyperparameters['use_ei']}"
+        if (
+            hyperparameters.get("kl_penalty", 0.1) != 0.1
+        ):  # Include KL penalty if not 0.1
+            label += f"kl{hyperparameters['kl_penalty']}"
 
         # Skip hyperparameters line for data
         entries = [json.loads(line) for line in file_contents[1:]]
