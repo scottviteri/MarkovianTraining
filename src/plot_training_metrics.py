@@ -16,7 +16,7 @@ def moving_average(data, window_size):
 
 
 def plot_metrics(
-    file_path, window_size=10, output_file=None, normalized_loss_only=False
+    file_path, window_size=10, output_file=None, normalized_reward_only=False
 ):
     # Read the entire file contents first
     with open(file_path, "r") as f:
@@ -37,7 +37,7 @@ def plot_metrics(
     # Parse all entries
     entries = [json.loads(line) for line in file_contents[1:]]
 
-    if normalized_loss_only:
+    if normalized_reward_only:
         # Only plot normalized reward with fixed y-axis
         plot_info = [
             (
@@ -217,9 +217,9 @@ if __name__ == "__main__":
         help="Output plot file path (optional)",
     )
     parser.add_argument(
-        "--normalized_loss_only",
+        "--normalized_reward_only",
         action="store_true",
-        help="Only plot normalized loss with standardized y-axis",
+        help="Only plot normalized reward with standardized y-axis",
     )
     args = parser.parse_args()
 
@@ -230,5 +230,5 @@ if __name__ == "__main__":
         log_file,
         window_size=args.window_size,
         output_file=args.output_file,
-        normalized_loss_only=args.normalized_loss_only,
+        normalized_reward_only=args.normalized_reward_only,
     )
