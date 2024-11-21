@@ -15,7 +15,9 @@ def moving_average(data, window_size):
     return np.convolve(data, np.ones(window_size), "valid") / window_size
 
 
-def plot_metrics(file_path, window_size=10, output_file=None):
+def plot_metrics(
+    file_path, window_size=10, output_file=None, normalized_loss_only=False
+):
     # Read the entire file contents first
     with open(file_path, "r") as f:
         file_contents = f.readlines()
@@ -35,47 +37,112 @@ def plot_metrics(file_path, window_size=10, output_file=None):
     # Parse all entries
     entries = [json.loads(line) for line in file_contents[1:]]
 
-    # Define the metrics to plot with their paths in the JSON structure
-    plot_info = [
-        ("Training Metrics.Loss", "Total Loss", "Batch", "Loss"),
-        ("Training Metrics.Policy Gradient Loss", "Policy Gradient Loss", "Batch", "Loss"),
-        ("Training Metrics.Actor Log Probs", "Actor Log Probs", "Batch", "Log Prob"),
-        ("Training Metrics.KL", "KL Divergence", "Batch", "KL"),
-        ("Training Metrics.Gradient Norm", "Gradient Norm", "Batch", "Norm"),
-        ("Training Metrics.Advantage", "Advantage", "Batch", "Value"),
-        ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value"),
-        ("Training Metrics.Active Samples.Fraction", "Fraction of Active Samples", "Batch", "Fraction", {"ylim": (0, 1)}),
-    ]
+    if normalized_loss_only:
+        # Only plot normalized reward with fixed y-axis
+        plot_info = [
+            (
+                "Training Metrics.Normalized Reward",
+                "Normalized Reward",
+                "Batch",
+                "Value",
+                {"ylim": (-0.5, 0.5)},
+            ),
+        ]
 
-    # Add PPO metrics if present
-    if entries and "Training Metrics" in entries[0] and "PPO Ratio" in entries[0]["Training Metrics"]:
-        plot_info.extend([
-            ("Training Metrics.PPO Ratio", "PPO Ratio", "Batch", "Ratio"),
-            ("Training Metrics.PPO Clipped Ratio", "PPO Clipped Ratio", "Batch", "Ratio"),
-        ])
+        # Adjust figure size for single plot
+        fig, ax = plt.subplots(1, 1, figsize=(15, 5))
+        axs = [ax]
+        num_plots = 1
+    else:
+        # Define the metrics to plot with their paths in the JSON structure
+        plot_info = [
+            ("Training Metrics.Loss", "Total Loss", "Batch", "Loss"),
+            (
+                "Training Metrics.Policy Gradient Loss",
+                "Policy Gradient Loss",
+                "Batch",
+                "Loss",
+            ),
+            (
+                "Training Metrics.Actor Log Probs",
+                "Actor Log Probs",
+                "Batch",
+                "Log Prob",
+            ),
+            ("Training Metrics.KL", "KL Divergence", "Batch", "KL"),
+            ("Training Metrics.Gradient Norm", "Gradient Norm", "Batch", "Norm"),
+            ("Training Metrics.Advantage", "Advantage", "Batch", "Value"),
+            (
+                "Training Metrics.Normalized Reward",
+                "Normalized Reward",
+                "Batch",
+                "Value",
+            ),
+            (
+                "Training Metrics.Active Samples.Fraction",
+                "Fraction of Active Samples",
+                "Batch",
+                "Fraction",
+                {"ylim": (0, 1)},
+            ),
+        ]
 
-    # Add EI metrics if present
-    if entries and "EI Metrics" in entries[0] and entries[0]["EI Metrics"]["Use EI"]:
-        plot_info.extend([
-            ("EI Metrics.Mean Previous Advantage", "Mean Previous Advantage", "Batch", "Value"),
-            ("EI Metrics.Std Previous Advantage", "Std Previous Advantage", "Batch", "Value"),
-            ("EI Metrics.Threshold", "EI Threshold", "Batch", "Value"),
-        ])
+        # Add PPO metrics if present
+        if (
+            entries
+            and "Training Metrics" in entries[0]
+            and "PPO Ratio" in entries[0]["Training Metrics"]
+        ):
+            plot_info.extend(
+                [
+                    ("Training Metrics.PPO Ratio", "PPO Ratio", "Batch", "Ratio"),
+                    (
+                        "Training Metrics.PPO Clipped Ratio",
+                        "PPO Clipped Ratio",
+                        "Batch",
+                        "Ratio",
+                    ),
+                ]
+            )
 
-    # Create the plots
-    num_plots = len(plot_info)
-    num_cols = 2
-    num_rows = math.ceil(num_plots / num_cols)
-    fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 5 * num_rows))
-    fig.suptitle(f"Training Metrics (Window Size: {window_size})")
+        # Add EI metrics if present
+        if (
+            entries
+            and "EI Metrics" in entries[0]
+            and entries[0]["EI Metrics"]["Use EI"]
+        ):
+            plot_info.extend(
+                [
+                    (
+                        "EI Metrics.Mean Previous Advantage",
+                        "Mean Previous Advantage",
+                        "Batch",
+                        "Value",
+                    ),
+                    (
+                        "EI Metrics.Std Previous Advantage",
+                        "Std Previous Advantage",
+                        "Batch",
+                        "Value",
+                    ),
+                    ("EI Metrics.Threshold", "EI Threshold", "Batch", "Value"),
+                ]
+            )
 
-    # Flatten axs if it's a 2D array
-    axs = axs.flatten() if num_plots > 2 else [axs] if num_plots == 1 else axs
+        # Create the plots
+        num_plots = len(plot_info)
+        num_cols = 2
+        num_rows = math.ceil(num_plots / num_cols)
+        fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 5 * num_rows))
+        fig.suptitle(f"Training Metrics (Window Size: {window_size})")
+
+        # Flatten axs if it's a 2D array
+        axs = axs.flatten() if num_plots > 2 else [axs] if num_plots == 1 else axs
 
     def get_nested_value(entry, path):
         """Helper function to get nested dictionary values using dot notation"""
         value = entry
-        for key in path.split('.'):
+        for key in path.split("."):
             if value is None or key not in value:
                 return None
             value = value[key]
@@ -83,31 +150,35 @@ def plot_metrics(file_path, window_size=10, output_file=None):
 
     # Add title suffix based on KL type
     def get_plot_title(entry, title):
-        if title == "KL Divergence" and "Training Metrics" in entry and "KL Type" in entry["Training Metrics"]:
+        if (
+            title == "KL Divergence"
+            and "Training Metrics" in entry
+            and "KL Type" in entry["Training Metrics"]
+        ):
             return f"{title} ({entry['Training Metrics']['KL Type']})"
         return title
 
     # Modify plotting loop to use dynamic titles
     for i, (metric_path, title, xlabel, ylabel, *extra) in enumerate(plot_info):
         data = [
-            get_nested_value(entry, metric_path) 
+            get_nested_value(entry, metric_path)
             for entry in entries[EI_SKIP_INITIAL:]
             if get_nested_value(entry, metric_path) is not None
         ]
-        
+
         if data:
             smoothed_data = moving_average(data, window_size)
             offset = window_size // 2
-            
+
             # Get dynamic title for KL plot
             plot_title = get_plot_title(entries[0], title)
-            
+
             axs[i].scatter(range(len(data)), data, alpha=0.3)
             axs[i].plot(
                 range(offset, offset + len(smoothed_data)),
                 smoothed_data,
                 color="red",
-                linewidth=2
+                linewidth=2,
             )
             axs[i].set_title(plot_title)
             axs[i].set_xlabel(xlabel)
@@ -145,9 +216,19 @@ if __name__ == "__main__":
         default=None,
         help="Output plot file path (optional)",
     )
+    parser.add_argument(
+        "--normalized_loss_only",
+        action="store_true",
+        help="Only plot normalized loss with standardized y-axis",
+    )
     args = parser.parse_args()
 
     # Use provided log file or find the latest one
     log_file = args.log_file or get_latest_log_file()
 
-    plot_metrics(log_file, window_size=args.window_size, output_file=args.output_file)
+    plot_metrics(
+        log_file,
+        window_size=args.window_size,
+        output_file=args.output_file,
+        normalized_loss_only=args.normalized_loss_only,
+    )
