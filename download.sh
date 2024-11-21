@@ -3,17 +3,76 @@
 # Array of hosts (top 4 from config)
 hosts=("left" "mid" "right" "riight" "left2" "mid2" "right2" "riight2" "left3" "mid3")
 
-# Check if arguments were provided
-if [ $# -eq 0 ]; then
-    # No arguments - use all hosts
-    indices=$(seq 1 ${#hosts[@]})
-else
-    # Use provided indices
-    indices=("$@")
+# Parse options
+COPY_FROM=""
+COPY_TO=""
+INDICES=()
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --copy_from_to)
+            COPY_FROM="$2"
+            COPY_TO="$3"
+            shift 3
+            ;;
+        *)
+            INDICES+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# If no indices provided and not copying, use all hosts
+if [ ${#INDICES[@]} -eq 0 ] && [ -z "$COPY_FROM" ]; then
+    INDICES=($(seq 1 ${#hosts[@]}))
 fi
 
-# Loop through specified indices
-for i in $indices; do
+# Handle copy operation if requested
+if [ ! -z "$COPY_FROM" ] && [ ! -z "$COPY_TO" ]; then
+    if [ "$COPY_FROM" -lt 1 ] || [ "$COPY_FROM" -gt ${#hosts[@]} ] || [ "$COPY_TO" -lt 1 ] || [ "$COPY_TO" -gt ${#hosts[@]} ]; then
+        echo "Invalid indices for copy operation (must be between 1 and ${#hosts[@]})"
+        exit 1
+    fi
+    
+    # Get source and destination hosts
+    src_host="${hosts[$((COPY_FROM-1))]}"
+    dst_host="${hosts[$((COPY_TO-1))]}"
+    
+    # Split hosts and ports
+    IFS=':' read -r src_hostname src_port <<< "$src_host"
+    IFS=':' read -r dst_hostname dst_port <<< "$dst_host"
+    
+    # Set port options
+    src_port_option=""
+    dst_port_option=""
+    if [ ! -z "$src_port" ]; then
+        src_port_option="-P $src_port"
+    fi
+    if [ ! -z "$dst_port" ]; then
+        dst_port_option="-P $dst_port"
+    fi
+    
+    # Get the source directory and log file
+    src_dir="results_${COPY_FROM}_${src_hostname}"
+    src_log="${src_dir}/log.jsonl"
+    
+    if [ ! -f "$src_log" ]; then
+        echo "Source log file not found: $src_log"
+        exit 1
+    fi
+    
+    # Create the same directory structure on target machine
+    echo "Creating directory on target machine..."
+    ssh $dst_port_option "$dst_hostname" "cd /root/MarkovianTraining && mkdir -p $src_dir"
+    
+    # Copy to destination with same directory structure
+    echo "Copying log from host $src_hostname to $dst_hostname..."
+    scp $dst_port_option "$src_log" "$dst_hostname:/root/MarkovianTraining/${src_dir}/log.jsonl"
+    exit 0
+fi
+
+# Original download logic for specified indices
+for i in "${INDICES[@]}"; do
     # Validate index
     if [ "$i" -lt 1 ] || [ "$i" -gt ${#hosts[@]} ]; then
         echo "Invalid index: $i (must be between 1 and ${#hosts[@]})"
