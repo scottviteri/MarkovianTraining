@@ -204,32 +204,50 @@ def plot_metrics(
     print(f"Plot saved to {output_file}")
 
 
-def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, normalized_reward_only=False):
+def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, plot_summary=False):
     """Plot metrics from multiple files on the same plot."""
-    # Read first file to get task type
+    # Read first file to get task type and check available metrics
     with open(file_paths[0], "r") as f:
-        hyperparameters = json.loads(f.readline().strip())
+        file_contents = f.readlines()
+        hyperparameters = json.loads(file_contents[0].strip())
+        first_entry = json.loads(file_contents[1].strip())  # Read first log entry
+    
     task_type = hyperparameters.get('task_type', 'unknown')
-
+    has_answer_logprobs = "Actor Answer Log Probs" in first_entry.get("Training Metrics", {})
+    
     if output_file is None:
         output_file = f"combined_metrics_{task_type}.png"
-
-    if normalized_reward_only:
-        # For arithmetic, include both contains answer and actor log probs
+    
+    if plot_summary:
+        # For arithmetic tasks
         if task_type == 'arithmetic':
             metrics_to_plot = [
-                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Batch", "Value"),  # Moved to first position
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Batch", "Value"),
                 ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (-0.01, 1.01)})
             ]
-            num_rows, num_cols = 1, 2  # Horizontal layout
+        # For wiki tasks
+        elif task_type.startswith('wiki_'):
+            if has_answer_logprobs:
+                metrics_to_plot = [
+                    ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value", {"ylim": (-0.5, 0.5)}),
+                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Batch", "Value")
+                ]
+            else:
+                metrics_to_plot = [
+                    ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value", {"ylim": (-0.5, 0.5)})
+                ]
+        else:
+            # For other tasks, just show normalized reward
+            metrics_to_plot = [
+                ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value")
+            ]
+            
+        # Use horizontal layout for multiple plots, vertical for single plot
+        if len(metrics_to_plot) > 1:
+            num_rows, num_cols = 1, 2
             fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 6))
             axs = np.array(axs).reshape(-1)
         else:
-            # Keep original normalized reward for non-arithmetic tasks
-            metrics_to_plot = [
-                ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value", 
-                 {"ylim": (-0.5, 0.5)} if task_type == 'wiki_prediction' else {})
-            ]
             num_rows, num_cols = 1, 1
             fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 8))
             axs = np.array([axs])
@@ -331,13 +349,13 @@ if __name__ == "__main__":
         help="Output plot file path (optional)",
     )
     parser.add_argument(
-        "--normalized_reward_only",
+        "--plot_summary",
         action="store_true",
-        help="Only plot normalized reward with standardized y-axis",
+        help="Plot summary metrics (varies by task type)",
     )
     parser.add_argument(
         "indices",
-        nargs="*",  # Changed to allow zero or more indices
+        nargs="*",
         type=int,
         help="Indices of machines to include (1-based indexing)",
     )
@@ -384,7 +402,7 @@ if __name__ == "__main__":
                 host_names_to_plot,
                 window_size=args.window_size,
                 output_file=args.output_file,
-                normalized_reward_only=args.normalized_reward_only,
+                plot_summary=args.plot_summary,
             )
         else:
             print("No valid files found to plot")
@@ -396,5 +414,5 @@ if __name__ == "__main__":
             log_file,
             window_size=args.window_size,
             output_file=args.output_file,
-            normalized_reward_only=args.normalized_reward_only,
+            normalized_reward_only=args.plot_summary,
         )
