@@ -94,7 +94,7 @@ def plot_metrics(
                 "Fraction of Active Samples",
                 "Batch",
                 "Fraction",
-                {"ylim": (-0.1, 1.1)},
+                {"ylim": (0, 1)},
             ),
         ]
 
@@ -222,10 +222,11 @@ def plot_combined_metrics(
         if task_type == 'arithmetic':
             metrics_to_plot = [
                 ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value"),
-                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (0, 1)})  # Updated path
+                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (-0.01, 1.01)})  # Updated ylim
             ]
-            num_rows, num_cols = 2, 1  # Stack the plots vertically
-            fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 12))  # Taller to accommodate both plots
+            num_rows, num_cols = 1, 2
+            fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 12))
+            axs = np.array(axs).reshape(-1)
         else:
             metrics_to_plot = [
                 ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value", 
@@ -233,6 +234,7 @@ def plot_combined_metrics(
             ]
             num_rows, num_cols = 1, 1
             fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 8))
+            axs = np.array([axs])  # Wrap single axis in array
     else:
         # Add Contains Answer to full metrics plot for arithmetic
         base_metrics = [
@@ -249,7 +251,7 @@ def plot_combined_metrics(
         
         if task_type == 'arithmetic':
             base_metrics.append(
-                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (0, 1)})  # Updated path
+                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (-0.01, 1.01)})  # Updated ylim
             )
         
         metrics_to_plot = base_metrics
@@ -283,7 +285,7 @@ def plot_combined_metrics(
             
             if data:
                 # Convert "Contains Answer" to 0/1 if that's the metric
-                if metric_path == "Training Metrics.Contains Answer":
+                if metric_path == "Example.Contains Answer":
                     data = [1 if x else 0 for x in data]
                 
                 smoothed_data = moving_average(data, window_size)
@@ -356,6 +358,7 @@ if __name__ == "__main__":
         "left3",
         "mid3",
         "right3",
+        "riight3"
     ]
 
     if len(args.indices) > 0:
