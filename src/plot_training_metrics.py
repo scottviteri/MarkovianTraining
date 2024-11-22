@@ -94,7 +94,7 @@ def plot_metrics(
                 "Fraction of Active Samples",
                 "Batch",
                 "Fraction",
-                {"ylim": (0, 1)},
+                {"ylim": (-0.1, 1.1)},
             ),
         ]
 
@@ -218,55 +218,41 @@ def plot_combined_metrics(
         output_file = f"combined_metrics_{task_type}.png"
 
     if normalized_reward_only:
-        # Only set ylim for wiki_prediction task
-        extra_args = {"ylim": (-0.5, 0.5)} if task_type == "wiki_prediction" else {}
-        metrics_to_plot = [
-            (
-                "Training Metrics.Normalized Reward",
-                "Normalized Reward",
-                "Batch",
-                "Value",
-                extra_args,
-            )
-        ]
-        num_rows, num_cols = 1, 1
-        # Taller figure for normalized reward only
-        fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 8))
-        if not isinstance(axs, np.ndarray):
-            axs = np.array([axs])
+        # For arithmetic, include both normalized reward and contains answer
+        if task_type == 'arithmetic':
+            metrics_to_plot = [
+                ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value"),
+                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (0, 1)})  # Updated path
+            ]
+            num_rows, num_cols = 2, 1  # Stack the plots vertically
+            fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 12))  # Taller to accommodate both plots
+        else:
+            metrics_to_plot = [
+                ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value", 
+                 {"ylim": (-0.5, 0.5)} if task_type == 'wiki_prediction' else {})
+            ]
+            num_rows, num_cols = 1, 1
+            fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 8))
     else:
-        # Original figure size for all metrics
-        metrics_to_plot = [
+        # Add Contains Answer to full metrics plot for arithmetic
+        base_metrics = [
             ("Training Metrics.Loss", "Total Loss", "Batch", "Loss"),
-            (
-                "Training Metrics.Policy Gradient Loss",
-                "Policy Gradient Loss",
-                "Batch",
-                "Loss",
-            ),
-            (
-                "Training Metrics.Actor Log Probs",
-                "Actor Log Probs",
-                "Batch",
-                "Log Prob",
-            ),
+            ("Training Metrics.Policy Gradient Loss", "Policy Gradient Loss", "Batch", "Loss"),
+            ("Training Metrics.Actor Log Probs", "Actor Log Probs", "Batch", "Log Prob"),
             ("Training Metrics.KL", "KL Divergence", "Batch", "KL"),
             ("Training Metrics.Gradient Norm", "Gradient Norm", "Batch", "Norm"),
             ("Training Metrics.Advantage", "Advantage", "Batch", "Value"),
-            (
-                "Training Metrics.Normalized Reward",
-                "Normalized Reward",
-                "Batch",
-                "Value",
-            ),
-            (
-                "Training Metrics.Active Samples.Fraction",
-                "Fraction of Active Samples",
-                "Batch",
-                "Fraction",
-                {"ylim": (0, 1)},
-            ),
+            ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value", 
+             {"ylim": (-0.5, 0.5)} if task_type == 'wiki_prediction' else {}),
+            ("Training Metrics.Active Samples.Fraction", "Fraction of Active Samples", "Batch", "Fraction", {"ylim": (0, 1)})
         ]
+        
+        if task_type == 'arithmetic':
+            base_metrics.append(
+                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (0, 1)})  # Updated path
+            )
+        
+        metrics_to_plot = base_metrics
         num_rows = (len(metrics_to_plot) + 1) // 2
         num_cols = 2
         fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 5 * num_rows))
@@ -281,35 +267,42 @@ def plot_combined_metrics(
         for file_path, host_name in zip(file_paths, host_names):
             with open(file_path, "r") as f:
                 file_contents = f.readlines()
-
+            
+            # Get hyperparameters from first line
             hyperparameters = json.loads(file_contents[0].strip())
-            label = f"t{hyperparameters['temperature']}ei{hyperparameters['use_ei']}"
-            if hyperparameters.get("kl_penalty", 0.1) != 0.1:
-                label += f"kl{hyperparameters['kl_penalty']}"
-
+            
+            # Create label from hyperparameters, keeping use_ei as is
+            label = f"t{hyperparameters['temperature']}ei{hyperparameters['use_ei']}CoT{hyperparameters['cot_length']}"
+            
             entries = [json.loads(line) for line in file_contents[1:]]
-
-            data = []
-            for entry in entries[EI_SKIP_INITIAL:]:
-                value = get_nested_value(entry, metric_path)
-                if value is not None:
-                    data.append(value)
-
+            data = [
+                get_nested_value(entry, metric_path)
+                for entry in entries[EI_SKIP_INITIAL:]
+                if get_nested_value(entry, metric_path) is not None
+            ]
+            
             if data:
+                # Convert "Contains Answer" to 0/1 if that's the metric
+                if metric_path == "Training Metrics.Contains Answer":
+                    data = [1 if x else 0 for x in data]
+                
                 smoothed_data = moving_average(data, window_size)
                 offset = window_size // 2
-
-                axs[metric_idx].plot(
+                
+                line = axs[metric_idx].plot(
                     range(offset, offset + len(smoothed_data)),
                     smoothed_data,
                     linewidth=2,
-                    label=label,
+                    label=label
                 )
-
+        
+        # Only add legend if there are labeled lines in the plot
+        if len(axs[metric_idx].get_lines()) > 0:
+            axs[metric_idx].legend()
+            
         axs[metric_idx].set_title(title)
         axs[metric_idx].set_xlabel(xlabel)
         axs[metric_idx].set_ylabel(ylabel)
-        axs[metric_idx].legend()
         if extra:
             for key, value in extra[0].items():
                 getattr(axs[metric_idx], f"set_{key}")(value)
