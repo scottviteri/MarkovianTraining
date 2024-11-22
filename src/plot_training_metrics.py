@@ -209,22 +209,33 @@ def plot_combined_metrics(
     normalized_reward_only=False,
 ):
     """Plot metrics from multiple files on the same plot."""
-    if len(file_paths) == 0:
-        print("No files to plot")
-        return
+    # Read first file to get task type
+    with open(file_paths[0], "r") as f:
+        hyperparameters = json.loads(f.readline().strip())
+    task_type = hyperparameters.get("task_type", "unknown")
+
+    if output_file is None:
+        output_file = f"combined_metrics_{task_type}.png"
 
     if normalized_reward_only:
+        # Only set ylim for wiki_prediction task
+        extra_args = {"ylim": (-0.5, 0.5)} if task_type == "wiki_prediction" else {}
         metrics_to_plot = [
             (
                 "Training Metrics.Normalized Reward",
                 "Normalized Reward",
                 "Batch",
                 "Value",
-                {"ylim": (-0.5, 0.5)},
+                extra_args,
             )
         ]
         num_rows, num_cols = 1, 1
     else:
+        # Only set ylim for wiki_prediction task
+        norm_reward_extra = (
+            {"ylim": (-0.5, 0.5)} if task_type == "wiki_prediction" else {}
+        )
+
         metrics_to_plot = [
             ("Training Metrics.Loss", "Total Loss", "Batch", "Loss"),
             (
@@ -247,7 +258,7 @@ def plot_combined_metrics(
                 "Normalized Reward",
                 "Batch",
                 "Value",
-                {"ylim": (-0.5, 0.5)},
+                norm_reward_extra,
             ),
             (
                 "Training Metrics.Active Samples.Fraction",
@@ -307,9 +318,6 @@ def plot_combined_metrics(
     # Remove any unused subplots
     for i in range(len(metrics_to_plot), len(axs)):
         fig.delaxes(axs[i])
-
-    if output_file is None:
-        output_file = "combined_metrics.png"
 
     plt.tight_layout()
     plt.savefig(output_file)
