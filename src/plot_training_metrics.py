@@ -230,12 +230,12 @@ def plot_combined_metrics(
             )
         ]
         num_rows, num_cols = 1, 1
+        # Taller figure for normalized reward only
+        fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 8))
+        if not isinstance(axs, np.ndarray):
+            axs = np.array([axs])
     else:
-        # Only set ylim for wiki_prediction task
-        norm_reward_extra = (
-            {"ylim": (-0.5, 0.5)} if task_type == "wiki_prediction" else {}
-        )
-
+        # Original figure size for all metrics
         metrics_to_plot = [
             ("Training Metrics.Loss", "Total Loss", "Batch", "Loss"),
             (
@@ -258,7 +258,6 @@ def plot_combined_metrics(
                 "Normalized Reward",
                 "Batch",
                 "Value",
-                norm_reward_extra,
             ),
             (
                 "Training Metrics.Active Samples.Fraction",
@@ -270,10 +269,10 @@ def plot_combined_metrics(
         ]
         num_rows = (len(metrics_to_plot) + 1) // 2
         num_cols = 2
+        fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 5 * num_rows))
+        if not isinstance(axs, np.ndarray):
+            axs = np.array([axs])
 
-    fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 5 * num_rows))
-    if not isinstance(axs, np.ndarray):
-        axs = np.array([axs])
     axs = axs.flatten()
 
     for metric_idx, (metric_path, title, xlabel, ylabel, *extra) in enumerate(
