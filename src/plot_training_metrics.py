@@ -49,21 +49,24 @@ def plot_metrics(
     entries = [json.loads(line) for line in file_contents[1:]]
 
     if normalized_reward_only:
-        # Only plot normalized reward with fixed y-axis
-        plot_info = [
-            (
-                "Training Metrics.Normalized Reward",
-                "Normalized Reward",
-                "Batch",
-                "Value",
-                {"ylim": (-0.5, 0.5)},
-            ),
-        ]
-
-        # Adjust figure size for single plot
-        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-        axs = [ax]
-        num_plots = 1
+        # For arithmetic, include both contains answer and actor log probs
+        if task_type == 'arithmetic':
+            metrics_to_plot = [
+                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (-0.01, 1.01)}),
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Batch", "Value")
+            ]
+            num_rows, num_cols = 1, 2  # Horizontal layout
+            fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 6))
+            axs = np.array(axs).reshape(-1)
+        else:
+            # Keep original normalized reward for non-arithmetic tasks
+            metrics_to_plot = [
+                ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value", 
+                 {"ylim": (-0.5, 0.5)} if task_type == 'wiki_prediction' else {})
+            ]
+            num_rows, num_cols = 1, 1
+            fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 8))
+            axs = np.array([axs])
     else:
         # Define the metrics to plot with their paths in the JSON structure
         plot_info = [
@@ -201,40 +204,35 @@ def plot_metrics(
     print(f"Plot saved to {output_file}")
 
 
-def plot_combined_metrics(
-    file_paths,
-    host_names,
-    window_size=10,
-    output_file=None,
-    normalized_reward_only=False,
-):
+def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, normalized_reward_only=False):
     """Plot metrics from multiple files on the same plot."""
     # Read first file to get task type
     with open(file_paths[0], "r") as f:
         hyperparameters = json.loads(f.readline().strip())
-    task_type = hyperparameters.get("task_type", "unknown")
+    task_type = hyperparameters.get('task_type', 'unknown')
 
     if output_file is None:
         output_file = f"combined_metrics_{task_type}.png"
 
     if normalized_reward_only:
-        # For arithmetic, include both normalized reward and contains answer
+        # For arithmetic, include both contains answer and actor log probs
         if task_type == 'arithmetic':
             metrics_to_plot = [
-                ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value"),
-                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (-0.01, 1.01)})  # Updated ylim
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Batch", "Value"),  # Moved to first position
+                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (-0.01, 1.01)})
             ]
-            num_rows, num_cols = 1, 2
-            fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 12))
+            num_rows, num_cols = 1, 2  # Horizontal layout
+            fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 6))
             axs = np.array(axs).reshape(-1)
         else:
+            # Keep original normalized reward for non-arithmetic tasks
             metrics_to_plot = [
                 ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value", 
                  {"ylim": (-0.5, 0.5)} if task_type == 'wiki_prediction' else {})
             ]
             num_rows, num_cols = 1, 1
             fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 8))
-            axs = np.array([axs])  # Wrap single axis in array
+            axs = np.array([axs])
     else:
         # Add Contains Answer to full metrics plot for arithmetic
         base_metrics = [
