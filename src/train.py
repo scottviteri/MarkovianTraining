@@ -551,6 +551,7 @@ class AdvantageOutput:
 
     advantages: torch.Tensor
     normalized_rewards: torch.Tensor
+    actor_answer_logprobs: torch.Tensor
     extracted_answers: Optional[List[Any]]
 
 
@@ -758,6 +759,7 @@ def calculate_advantages(
     return AdvantageOutput(
         advantages=advantages,
         normalized_rewards=normalized_rewards,
+        actor_answer_logprobs=actor_answer_logprobs,
         extracted_answers=extracted_answers,
     )
 
@@ -1029,12 +1031,12 @@ class BatchData:
 @dataclass
 class LogMetrics:
     """Holds metrics for logging"""
-
     loss: float
     pg_loss: float
     actor_logprobs: float
-    kl: float  # Raw KL divergence
-    weighted_kl: Optional[float]  # KL penalty (weighted KL if weight provided)
+    actor_answer_logprobs: float  # Added this
+    kl: float
+    weighted_kl: Optional[float]
     ppo_ratio: Optional[float]
     ppo_clipped_ratio: Optional[float]
     advantage: float
@@ -1081,6 +1083,7 @@ class LogMetrics:
             loss=batch_data.losses.mean().item(),
             pg_loss=batch_data.metrics["pg_losses"][0].item(),
             actor_logprobs=batch_data.R_mean_actor_logprobs[0].item(),
+            actor_answer_logprobs=batch_data.advantage_output.actor_answer_logprobs[0].item(),  # Added this
             kl=raw_kl,
             weighted_kl=weighted_kl,
             ppo_ratio=ppo_ratio,
@@ -1142,16 +1145,11 @@ def log_batch_results(
             "Loss": float(metrics.loss),
             "Policy Gradient Loss": float(metrics.pg_loss),
             "Actor Log Probs": float(metrics.actor_logprobs),
-            "KL": float(kl_to_log),  # Single KL field that's either weighted or raw
-            "KL Type": kl_label,  # Add label to indicate which type of KL
-            "PPO Ratio": (
-                float(metrics.ppo_ratio) if metrics.ppo_ratio is not None else None
-            ),
-            "PPO Clipped Ratio": (
-                float(metrics.ppo_clipped_ratio)
-                if metrics.ppo_clipped_ratio is not None
-                else None
-            ),
+            "Actor Answer Log Probs": float(metrics.actor_answer_logprobs),
+            "KL": float(kl_to_log),
+            "KL Type": kl_label,
+            "PPO Ratio": float(metrics.ppo_ratio) if metrics.ppo_ratio is not None else None,
+            "PPO Clipped Ratio": float(metrics.ppo_clipped_ratio) if metrics.ppo_clipped_ratio is not None else None,
             "Advantage": float(metrics.advantage),
             "Normalized Reward": float(metrics.normalized_reward),
             "Gradient Norm": float(metrics.gradient_norm),
@@ -1248,6 +1246,7 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         kl=reasoning_output.kl,
         advantages=advantage_output.advantages,
         normalized_rewards=advantage_output.normalized_rewards,
+        advantage_output=advantage_output,  # Added this
         losses=losses,
         training_mask=training_mask,
         metrics=metrics,
