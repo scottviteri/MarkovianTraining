@@ -307,7 +307,7 @@ def generate_question_answer_batches(
     """Generate batches of Q&A pairs lazily."""
     total_examples_needed = num_batches * batch_size
     qa_pairs = []
-    chunk_size = 1000
+    chunk_size = 5000
 
     if task_type in ["wiki_compression", "wiki_continuation"]:
         wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
