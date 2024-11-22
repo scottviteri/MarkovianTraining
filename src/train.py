@@ -1084,7 +1084,6 @@ class LogMetrics:
             pg_loss=batch_data.metrics["pg_losses"][0].item(),
             actor_logprobs=batch_data.R_mean_actor_logprobs[0].item(),
             actor_answer_logprobs=batch_data.actor_answer_logprobs[0].item(),  # Updated this line
-            actor_answer_logprobs=batch_data.advantage_output.actor_answer_logprobs[0].item(),  # Added this
             kl=raw_kl,
             weighted_kl=weighted_kl,
             ppo_ratio=ppo_ratio,
