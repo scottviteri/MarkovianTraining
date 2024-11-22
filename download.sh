@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Array of hosts
-hosts=("left" "mid" "right" "riight" "left2" "mid2" "right2" "riight2" "left3" "mid3" "right3" "riight3")
+hosts=("left" "mid" "right" "riight" "left2" "mid2" "right2" "riight2" "left3" "mid3" "right3" "riight3" "left4")
 
 # Parse options
 COPY_FROM=""

@@ -206,7 +206,8 @@ if __name__ == "__main__":
         "left3",
         "mid3",
         "right3",
-        "riight3"
+        "riight3",
+        "left4"
     ]
 
     if len(args.indices) > 0:
