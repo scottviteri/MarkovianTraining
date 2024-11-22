@@ -1115,6 +1115,12 @@ def log_batch_results(
     actor_reasoning_text = batch_data.actor_reasoning[0]
     critic_reasoning_text = batch_data.critic_reasoning[0]
 
+    # Calculate fraction of answers contained in reasoning across batch
+    contains_answer_fraction = sum(
+        answer in reasoning 
+        for answer, reasoning in zip(batch_data.answers, batch_data.actor_reasoning)
+    ) / len(batch_data.answers)
+
     if state.hyperparameters["task_type"] in ["wiki_compression", "wiki_continuation"]:
         colored_print("Context:", q, Colors.BLUE)
         colored_print("Actor Reasoning:", actor_reasoning_text, Colors.YELLOW)
@@ -1139,7 +1145,7 @@ def log_batch_results(
             "Actor Reasoning": actor_reasoning_text,
             "Critic Reasoning": critic_reasoning_text,
             "Answer": a,
-            "Contains Answer": str(a) in actor_reasoning_text,
+            "Contains Answer": contains_answer_fraction,
         },
         "Training Metrics": {
             "Loss": float(metrics.loss),
