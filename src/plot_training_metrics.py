@@ -45,7 +45,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         if task_type == 'arithmetic':
             metrics_to_plot = [
                 ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Batch", "Value"),
-                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (-0.01, 1.01)})
+                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction")
             ]
         # For wiki tasks
         elif task_type.startswith('wiki_'):
@@ -74,7 +74,10 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 8))
             axs = np.array([axs])
     else:
-        # Add Contains Answer to full metrics plot for arithmetic
+        # Check if Actor Answer Log Probs is available
+        has_answer_logprobs = "Actor Answer Log Probs" in first_entry.get("Training Metrics", {})
+        
+        # Base metrics that are always included
         base_metrics = [
             ("Training Metrics.Loss", "Total Loss", "Batch", "Loss"),
             ("Training Metrics.Policy Gradient Loss", "Policy Gradient Loss", "Batch", "Loss"),
@@ -84,12 +87,19 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             ("Training Metrics.Advantage", "Advantage", "Batch", "Value"),
             ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value", 
              {"ylim": (-0.5, 0.5)} if task_type == 'wiki_prediction' else {}),
-            ("Training Metrics.Active Samples.Fraction", "Fraction of Active Samples", "Batch", "Fraction", {"ylim": (0, 1)})
+            ("Training Metrics.Active Samples.Fraction", "Fraction of Active Samples", "Batch", "Fraction")
         ]
         
+        # Add Actor Answer Log Probs if available
+        if has_answer_logprobs:
+            base_metrics.append(
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Batch", "Value")
+            )
+        
+        # Add Contains Answer for arithmetic tasks
         if task_type == 'arithmetic':
             base_metrics.append(
-                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (-0.01, 1.01)})  # Updated ylim
+                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (-0.01, 1.01)})
             )
         
         metrics_to_plot = base_metrics
