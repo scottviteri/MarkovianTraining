@@ -1013,7 +1013,6 @@ def calculate_mean_kl(q_R_actor_logits, q_R_critic_logits, cot_length):
 @dataclass
 class BatchData:
     """Holds data for a single training batch"""
-
     questions: List[str]
     answers: List[str]
     actor_reasoning: List[str]
@@ -1023,6 +1022,7 @@ class BatchData:
     kl: torch.Tensor
     advantages: torch.Tensor
     normalized_rewards: torch.Tensor
+    actor_answer_logprobs: torch.Tensor  # Changed from advantage_output to just the tensor we need
     losses: torch.Tensor
     training_mask: Optional[torch.Tensor]
     metrics: Dict[str, Any]
@@ -1083,6 +1083,7 @@ class LogMetrics:
             loss=batch_data.losses.mean().item(),
             pg_loss=batch_data.metrics["pg_losses"][0].item(),
             actor_logprobs=batch_data.R_mean_actor_logprobs[0].item(),
+            actor_answer_logprobs=batch_data.actor_answer_logprobs[0].item(),  # Updated this line
             actor_answer_logprobs=batch_data.advantage_output.actor_answer_logprobs[0].item(),  # Added this
             kl=raw_kl,
             weighted_kl=weighted_kl,
@@ -1246,7 +1247,7 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         kl=reasoning_output.kl,
         advantages=advantage_output.advantages,
         normalized_rewards=advantage_output.normalized_rewards,
-        advantage_output=advantage_output,  # Added this
+        actor_answer_logprobs=advantage_output.actor_answer_logprobs,  # Just pass the tensor
         losses=losses,
         training_mask=training_mask,
         metrics=metrics,
