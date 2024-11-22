@@ -1,11 +1,13 @@
 #!/bin/bash
 
-# Array of hosts (top 4 from config)
+# Array of hosts
 hosts=("left" "mid" "right" "riight" "left2" "mid2" "right2" "riight2" "left3" "mid3")
 
 # Parse options
 COPY_FROM=""
 COPY_TO=""
+PULL=false
+SCP=false
 INDICES=()
 
 while [[ $# -gt 0 ]]; do
@@ -14,6 +16,14 @@ while [[ $# -gt 0 ]]; do
             COPY_FROM="$2"
             COPY_TO="$3"
             shift 3
+            ;;
+        --pull)
+            PULL=true
+            shift
+            ;;
+        --scp)
+            SCP=true
+            shift
             ;;
         *)
             INDICES+=("$1")
@@ -71,7 +81,7 @@ if [ ! -z "$COPY_FROM" ] && [ ! -z "$COPY_TO" ]; then
     exit 0
 fi
 
-# Original download logic for specified indices
+# Process each specified index
 for i in "${INDICES[@]}"; do
     # Validate index
     if [ "$i" -lt 1 ] || [ "$i" -gt ${#hosts[@]} ]; then
@@ -94,14 +104,32 @@ for i in "${INDICES[@]}"; do
     # Create a unique directory for each host
     mkdir -p "./results_${i}_${hostname}"
     
-    # Execute the plotting command on the remote machine
-    ssh $port_option "$hostname" "cd /root/MarkovianTraining && git pull && python src/plot_training_metrics.py --window_size 100 --normalized_reward_only"
+    # Execute git pull if requested
+    if [ "$PULL" = true ]; then
+        echo "Running git pull on host $hostname..."
+        ssh $port_option "$hostname" "cd /root/MarkovianTraining && git pull"
+    fi
     
-    # Find the most recently edited pg_norm_plot.png file in the results directory and its subdirectories
-    latest_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'log_metrics.png' -print0 | xargs -0 ls -t | head -1")
-    latest_log_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'log.jsonl' -print0 | xargs -0 ls -t | head -1")
+    # Execute scp commands if requested
+    if [ "$SCP" = true ]; then
+        echo "Downloading files from host $hostname..."
+        
+        # Find the most recently edited files
+        latest_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'log_metrics.png' -print0 | xargs -0 ls -t | head -1")
+        latest_log_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'log.jsonl' -print0 | xargs -0 ls -t | head -1")
 
-    # Download the most recent pg_norm_plot.png file
-    scp $port_option "$hostname:$latest_file" "./results_${i}_${hostname}/"
-    scp $port_option "$hostname:$latest_log_file" "./results_${i}_${hostname}/"
+        # Download the files
+        scp $port_option "$hostname:$latest_file" "./results_${i}_${hostname}/"
+        scp $port_option "$hostname:$latest_log_file" "./results_${i}_${hostname}/"
+    fi
+    
+    # If neither operation is requested, show usage
+    if [ "$PULL" = false ] && [ "$SCP" = false ] && [ -z "$COPY_FROM" ]; then
+        echo "No operation specified. Use --pull to run git pull or --scp to download files."
+        echo "Usage:"
+        echo "  ./download.sh [indices] --pull    # Run git pull on specified machines"
+        echo "  ./download.sh [indices] --scp     # Download files from specified machines"
+        echo "  ./download.sh --copy_from_to i j  # Copy files from machine i to machine j"
+        exit 1
+    fi
 done
