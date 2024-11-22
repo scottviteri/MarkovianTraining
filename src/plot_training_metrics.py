@@ -122,7 +122,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             hyperparameters = json.loads(file_contents[0].strip())
             
             # Create label from hyperparameters, keeping use_ei as is
-            label = f"t{hyperparameters['temperature']}ei{hyperparameters['use_ei']}CoT{hyperparameters['cot_length']}"
+            label = f"c{hyperparameters['cot_length']}t{hyperparameters['temperature']}ei{hyperparameters['use_ei']}kl{hyperparameters.get('kl_penalty', 'NA')}"
             
             entries = [json.loads(line) for line in file_contents[1:]]
             data = [
