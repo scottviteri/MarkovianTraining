@@ -7,6 +7,17 @@ import argparse
 import math
 from train import get_latest_log_file
 from constants import EI_SKIP_INITIAL
+import sys
+
+
+def get_nested_value(entry, path):
+    """Helper function to get nested dictionary values using dot notation"""
+    value = entry
+    for key in path.split("."):
+        if value is None or key not in value:
+            return None
+        value = value[key]
+    return value
 
 
 def moving_average(data, window_size):
@@ -139,15 +150,6 @@ def plot_metrics(
         # Flatten axs if it's a 2D array
         axs = axs.flatten() if num_plots > 2 else [axs] if num_plots == 1 else axs
 
-    def get_nested_value(entry, path):
-        """Helper function to get nested dictionary values using dot notation"""
-        value = entry
-        for key in path.split("."):
-            if value is None or key not in value:
-                return None
-            value = value[key]
-        return value
-
     # Add title suffix based on KL type
     def get_plot_title(entry, title):
         if (
@@ -199,55 +201,113 @@ def plot_metrics(
     print(f"Plot saved to {output_file}")
 
 
-def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None):
-    """Plot normalized reward from multiple files on the same plot."""
-    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+def plot_combined_metrics(
+    file_paths,
+    host_names,
+    window_size=10,
+    output_file=None,
+    normalized_reward_only=False,
+):
+    """Plot metrics from multiple files on the same plot."""
+    if len(file_paths) == 0:
+        print("No files to plot")
+        return
 
-    for file_path, host_name in zip(file_paths, host_names):
-        # Read the file
-        with open(file_path, "r") as f:
-            file_contents = f.readlines()
-
-        # Get hyperparameters from first line
-        hyperparameters = json.loads(file_contents[0].strip())
-
-        # Create label from hyperparameters
-        label = f"t{hyperparameters['temperature']}ei{hyperparameters['use_ei']}"
-        if (
-            hyperparameters.get("kl_penalty", 0.1) != 0.1
-        ):  # Include KL penalty if not 0.1
-            label += f"kl{hyperparameters['kl_penalty']}"
-
-        # Skip hyperparameters line for data
-        entries = [json.loads(line) for line in file_contents[1:]]
-
-        # Get normalized reward data
-        data = [
-            entry["Training Metrics"]["Normalized Reward"]
-            for entry in entries[EI_SKIP_INITIAL:]
-            if "Training Metrics" in entry
-            and "Normalized Reward" in entry["Training Metrics"]
-            and entry["Training Metrics"]["Normalized Reward"] is not None
-        ]
-
-        if data:
-            smoothed_data = moving_average(data, window_size)
-            offset = window_size // 2
-
-            ax.plot(
-                range(offset, offset + len(smoothed_data)),
-                smoothed_data,
-                linewidth=2,
-                label=label,
+    if normalized_reward_only:
+        metrics_to_plot = [
+            (
+                "Training Metrics.Normalized Reward",
+                "Normalized Reward",
+                "Batch",
+                "Value",
+                {"ylim": (-0.5, 0.5)},
             )
+        ]
+        num_rows, num_cols = 1, 1
+    else:
+        metrics_to_plot = [
+            ("Training Metrics.Loss", "Total Loss", "Batch", "Loss"),
+            (
+                "Training Metrics.Policy Gradient Loss",
+                "Policy Gradient Loss",
+                "Batch",
+                "Loss",
+            ),
+            (
+                "Training Metrics.Actor Log Probs",
+                "Actor Log Probs",
+                "Batch",
+                "Log Prob",
+            ),
+            ("Training Metrics.KL", "KL Divergence", "Batch", "KL"),
+            ("Training Metrics.Gradient Norm", "Gradient Norm", "Batch", "Norm"),
+            ("Training Metrics.Advantage", "Advantage", "Batch", "Value"),
+            (
+                "Training Metrics.Normalized Reward",
+                "Normalized Reward",
+                "Batch",
+                "Value",
+                {"ylim": (-0.5, 0.5)},
+            ),
+            (
+                "Training Metrics.Active Samples.Fraction",
+                "Fraction of Active Samples",
+                "Batch",
+                "Fraction",
+                {"ylim": (0, 1)},
+            ),
+        ]
+        num_rows = (len(metrics_to_plot) + 1) // 2
+        num_cols = 2
 
-    ax.set_title("Normalized Reward Comparison")
-    ax.set_xlabel("Batch")
-    ax.set_ylabel("Value")
-    ax.set_ylim(-0.5, 0.5)
-    ax.legend()
+    fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 5 * num_rows))
+    if not isinstance(axs, np.ndarray):
+        axs = np.array([axs])
+    axs = axs.flatten()
 
-    # Set default output file name if none provided
+    for metric_idx, (metric_path, title, xlabel, ylabel, *extra) in enumerate(
+        metrics_to_plot
+    ):
+        for file_path, host_name in zip(file_paths, host_names):
+            with open(file_path, "r") as f:
+                file_contents = f.readlines()
+
+            hyperparameters = json.loads(file_contents[0].strip())
+            label = f"t{hyperparameters['temperature']}ei{hyperparameters['use_ei']}"
+            if hyperparameters.get("kl_penalty", 0.1) != 0.1:
+                label += f"kl{hyperparameters['kl_penalty']}"
+
+            entries = [json.loads(line) for line in file_contents[1:]]
+
+            data = []
+            for entry in entries[EI_SKIP_INITIAL:]:
+                value = get_nested_value(entry, metric_path)
+                if value is not None:
+                    data.append(value)
+
+            if data:
+                smoothed_data = moving_average(data, window_size)
+                offset = window_size // 2
+
+                axs[metric_idx].plot(
+                    range(offset, offset + len(smoothed_data)),
+                    smoothed_data,
+                    linewidth=2,
+                    label=label,
+                )
+
+        axs[metric_idx].set_title(title)
+        axs[metric_idx].set_xlabel(xlabel)
+        axs[metric_idx].set_ylabel(ylabel)
+        axs[metric_idx].legend()
+        if extra:
+            for key, value in extra[0].items():
+                getattr(axs[metric_idx], f"set_{key}")(value)
+
+    # Remove any unused subplots
+    for i in range(len(metrics_to_plot), len(axs)):
+        fig.delaxes(axs[i])
+
     if output_file is None:
         output_file = "combined_metrics.png"
 
@@ -265,12 +325,6 @@ if __name__ == "__main__":
         help="Window size for moving average (default: 10)",
     )
     parser.add_argument(
-        "--log_file",
-        type=str,
-        default=None,
-        help="Path to the log file to analyze (optional)",
-    )
-    parser.add_argument(
         "--output_file",
         type=str,
         default=None,
@@ -282,43 +336,35 @@ if __name__ == "__main__":
         help="Only plot normalized reward with standardized y-axis",
     )
     parser.add_argument(
-        "--combine_files",
-        action="store_true",
-        help="Plot normalized reward from multiple jsonl files on the same plot",
-    )
-    parser.add_argument(
-        "--indices",
-        nargs="+",
+        "indices",
+        nargs="*",  # Changed to allow zero or more indices
         type=int,
         help="Indices of machines to include (1-based indexing)",
     )
     args = parser.parse_args()
 
-    # Use provided log file or find the latest one
-    log_file = args.log_file or get_latest_log_file()
+    # Define the list of hosts (keep in sync with download.sh)
+    hosts = [
+        "left",
+        "mid",
+        "right",
+        "riight",
+        "left2",
+        "mid2",
+        "right2",
+        "riight2",
+        "left3",
+        "mid3",
+        "right3",
+    ]
 
-    if args.combine_files:
-        # Define the list of hosts (keep in sync with download.sh)
-        hosts = [
-            "left",
-            "mid",
-            "right",
-            "riight",
-            "left2",
-            "mid2",
-            "right2",
-            "riight2",
-            "left3",
-            "mid3",
-        ]
-
-        # Use all indices if none specified
-        indices = args.indices if args.indices else range(1, len(hosts) + 1)
-
+    if len(args.indices) > 0:
         # Collect files and corresponding host names to plot
         files_to_plot = []
         host_names_to_plot = []
-        for i in indices:
+        valid_files = False
+
+        for i in args.indices:
             if i < 1 or i > len(hosts):
                 print(f"Invalid index: {i} (must be between 1 and {len(hosts)})")
                 continue
@@ -326,22 +372,25 @@ if __name__ == "__main__":
             log_path = f"./results_{i}_{hostname}/log.jsonl"
             if os.path.exists(log_path):
                 files_to_plot.append(log_path)
-                host_names_to_plot.append(
-                    hosts[i - 1]
-                )  # Use original host name from array
+                host_names_to_plot.append(hosts[i - 1])
+                valid_files = True
             else:
                 print(f"Warning: Could not find log file for index {i} ({log_path})")
 
-        if files_to_plot:
+        if valid_files:
             plot_combined_metrics(
                 files_to_plot,
                 host_names_to_plot,
                 window_size=args.window_size,
                 output_file=args.output_file,
+                normalized_reward_only=args.normalized_reward_only,
             )
         else:
             print("No valid files found to plot")
+            sys.exit(1)
     else:
+        # Single file plotting (use latest log file)
+        log_file = get_latest_log_file()
         plot_metrics(
             log_file,
             window_size=args.window_size,
