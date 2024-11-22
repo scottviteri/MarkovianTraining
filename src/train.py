@@ -1475,7 +1475,7 @@ if __name__ == "__main__":
     parser.add_argument("--target_length", type=int, default=50)
     parser.add_argument("--shrink_cot", type=float, nargs="?", const=True)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--kl_penalty", type=float)
+    parser.add_argument("--kl_penalty", type=float, default=0.1)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument(
         "--normalize_loss", type=lambda x: x.lower() == "true", default=True
