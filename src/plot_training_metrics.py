@@ -26,7 +26,7 @@ def moving_average(data, window_size):
     return np.convolve(data, np.ones(window_size), "valid") / window_size
 
 
-def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, plot_summary=False):
+def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, plot_summary=False, max_index=None, average=False, show_std=False, show_legend=True, label_size=10):
     """Plot metrics from multiple files on the same plot."""
     # Read first file to get task type and check available metrics
     with open(file_paths[0], "r") as f:
@@ -44,87 +44,71 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         # For arithmetic tasks
         if task_type == 'arithmetic':
             metrics_to_plot = [
-                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Batch", "Value"),
-                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction")
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|BaselineCoT)"),
+                ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
             ]
         # For wiki tasks
         elif task_type.startswith('wiki_'):
             if has_answer_logprobs:
                 metrics_to_plot = [
-                    ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value", {"ylim": (-0.5, 0.5)}),
-                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Batch", "Value")
+                    ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|Default CoT)"),
+                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|BaselineCoT)")
                 ]
             else:
                 metrics_to_plot = [
-                    ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value", {"ylim": (-0.5, 0.5)})
+                    ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|Default CoT)")
                 ]
         else:
-            # For other tasks, just show normalized reward
             metrics_to_plot = [
-                ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value")
+                ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|Default CoT)")
             ]
-            
-        # Use horizontal layout for multiple plots, vertical for single plot
-        if len(metrics_to_plot) > 1:
-            num_rows, num_cols = 1, 2
-            fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 6))
-            axs = np.array(axs).reshape(-1)
-        else:
-            num_rows, num_cols = 1, 1
-            fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 8))
-            axs = np.array([axs])
     else:
-        # Check if Actor Answer Log Probs is available
-        has_answer_logprobs = "Actor Answer Log Probs" in first_entry.get("Training Metrics", {})
-        
-        # Base metrics that are always included
         base_metrics = [
-            ("Training Metrics.Loss", "Total Loss", "Batch", "Loss"),
-            ("Training Metrics.Policy Gradient Loss", "Policy Gradient Loss", "Batch", "Loss"),
-            ("Training Metrics.Actor Log Probs", "Actor Log Probs", "Batch", "Log Prob"),
-            ("Training Metrics.KL", "KL Divergence", "Batch", "KL"),
-            ("Training Metrics.Gradient Norm", "Gradient Norm", "Batch", "Norm"),
-            ("Training Metrics.Advantage", "Advantage", "Batch", "Value"),
-            ("Training Metrics.Normalized Reward", "Normalized Reward", "Batch", "Value", 
-             {"ylim": (-0.5, 0.5)} if task_type == 'wiki_prediction' else {}),
-            ("Training Metrics.Active Samples.Fraction", "Fraction of Active Samples", "Batch", "Fraction")
+            ("Training Metrics.Loss", "Total Loss", "Training Batch No. []", "Loss"),
+            ("Training Metrics.Policy Gradient Loss", "Policy Gradient Loss", "Training Batch No. []", "Loss"),
+            ("Training Metrics.Actor Log Probs", "Actor Log Probs", "Training Batch No. []", "Log Prob"),
+            ("Training Metrics.KL", "KL Divergence", "Training Batch No. []", "KL"),
+            ("Training Metrics.Gradient Norm", "Gradient Norm", "Training Batch No. []", "Norm"),
+            ("Training Metrics.Advantage", "Advantage", "Training Batch No. []", "Value"),
+            ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|Default CoT)"),
+            ("Training Metrics.Active Samples.Fraction", "Fraction of Active Samples", "Training Batch No. []", "Fraction")
         ]
         
-        # Add Actor Answer Log Probs if available
         if has_answer_logprobs:
             base_metrics.append(
-                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Batch", "Value")
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|BaselineCoT)")
             )
-        
-        # Add Contains Answer for arithmetic tasks
-        if task_type == 'arithmetic':
-            base_metrics.append(
-                ("Example.Contains Answer", "Contains Answer", "Batch", "Fraction", {"ylim": (-0.01, 1.01)})
-            )
-        
         metrics_to_plot = base_metrics
-        num_rows = (len(metrics_to_plot) + 1) // 2
+
+    # Calculate required number of rows and columns for subplots
+    if len(metrics_to_plot) > 1:
         num_cols = 2
-        fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 5 * num_rows))
-        if not isinstance(axs, np.ndarray):
-            axs = np.array([axs])
+        num_rows = math.ceil(len(metrics_to_plot) / 2)
+        fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 4 * num_rows))
+        axs = np.array(axs).reshape(-1)
+    else:
+        num_rows, num_cols = 1, 1
+        fig, axs = plt.subplots(num_rows, num_cols, figsize=(10, 5))
+        axs = np.array([axs])
 
     axs = axs.flatten()
 
     for metric_idx, (metric_path, title, xlabel, ylabel, *extra) in enumerate(
         metrics_to_plot
     ):
+        all_data = []  # Store data from all files for averaging
+        
         for file_path, host_name in zip(file_paths, host_names):
             with open(file_path, "r") as f:
                 file_contents = f.readlines()
             
-            # Get hyperparameters from first line
             hyperparameters = json.loads(file_contents[0].strip())
-            
-            # Create label from hyperparameters, keeping use_ei as is
             label = f"c{hyperparameters['cot_length']}t{hyperparameters['temperature']}ei{hyperparameters['use_ei']}kl{hyperparameters.get('kl_penalty', 'NA')}"
             
             entries = [json.loads(line) for line in file_contents[1:]]
+            if max_index is not None:
+                entries = entries[:max_index]
+            
             data = [
                 get_nested_value(entry, metric_path)
                 for entry in entries[EI_SKIP_INITIAL:]
@@ -132,27 +116,79 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             ]
             
             if data:
-                # Convert "Contains Answer" to 0/1 if that's the metric
                 if metric_path == "Example.Contains Answer":
                     data = [1 if x else 0 for x in data]
                 
-                smoothed_data = moving_average(data, window_size)
-                offset = window_size // 2
-                
-                line = axs[metric_idx].plot(
-                    range(offset, offset + len(smoothed_data)),
-                    smoothed_data,
-                    linewidth=2,
-                    label=label
-                )
+                if average:
+                    all_data.append(data)
+                else:
+                    smoothed_data = moving_average(data, window_size)
+                    offset = window_size // 2
+                    axs[metric_idx].plot(
+                        range(offset, offset + len(smoothed_data)),
+                        smoothed_data,
+                        linewidth=2,
+                        label=label
+                    )
         
-        # Only add legend if there are labeled lines in the plot
-        if len(axs[metric_idx].get_lines()) > 0:
-            axs[metric_idx].legend()
+        if average and all_data:
+            # Convert all data to float arrays first
+            all_data = [np.array(d, dtype=float) for d in all_data]
             
-        axs[metric_idx].set_title(title)
-        axs[metric_idx].set_xlabel(xlabel)
-        axs[metric_idx].set_ylabel(ylabel)
+            # Pad shorter sequences with NaN
+            max_len = max(len(d) for d in all_data)
+            padded_data = [np.pad(d, (0, max_len - len(d)), constant_values=np.nan) for d in all_data]
+            padded_array = np.array(padded_data)
+            
+            # Calculate mean and std, ignoring NaN values
+            mean_data = np.nanmean(padded_array, axis=0)
+            std_data = np.nanstd(padded_array, axis=0) if show_std else None
+            
+            # Remove trailing NaN values
+            valid_mask = ~np.isnan(mean_data)
+            mean_data = mean_data[valid_mask]
+            if show_std:
+                std_data = std_data[valid_mask]
+            
+            # Smooth mean and std data
+            smoothed_mean = moving_average(mean_data, window_size)
+            if show_std:
+                smoothed_std = moving_average(std_data, window_size)
+            
+            offset = window_size // 2
+            x_range = range(offset, offset + len(smoothed_mean))
+            
+            # Plot mean line
+            line = axs[metric_idx].plot(
+                x_range,
+                smoothed_mean,
+                linewidth=2,
+                label="Average",
+                color='blue'
+            )[0]
+            
+            # Add std bands if requested
+            if show_std:
+                axs[metric_idx].fill_between(
+                    x_range,
+                    smoothed_mean - smoothed_std,
+                    smoothed_mean + smoothed_std,
+                    alpha=0.2,
+                    color=line.get_color(),
+                    label='±1 SD'
+                )
+
+        # Only add legend if there are labeled lines in the plot and show_legend is True
+        if len(axs[metric_idx].get_lines()) > 0 and show_legend:
+            axs[metric_idx].legend(fontsize=label_size)
+            
+        # Set labels and their sizes
+        axs[metric_idx].set_xlabel(xlabel, fontsize=label_size)
+        axs[metric_idx].set_ylabel(ylabel, fontsize=label_size)
+        # Set tick label sizes
+        axs[metric_idx].tick_params(axis='both', which='major', labelsize=label_size)
+        # Add grid with light gray lines
+        axs[metric_idx].grid(True, linestyle='--', alpha=0.3, color='gray')
         if extra:
             for key, value in extra[0].items():
                 getattr(axs[metric_idx], f"set_{key}")(value)
@@ -186,31 +222,77 @@ if __name__ == "__main__":
         help="Plot summary metrics (varies by task type)",
     )
     parser.add_argument(
+        "--files", "-f",
+        nargs="+",
+        type=str,
+        help="Direct paths to log files to plot",
+    )
+    parser.add_argument(
         "indices",
         nargs="*",
         type=int,
         help="Indices of machines to include (1-based indexing)",
     )
+    parser.add_argument(
+        "--max_index",
+        type=int,
+        help="Maximum index to plot (truncates data after this point)",
+    )
+    parser.add_argument(
+        "--average",
+        action="store_true",
+        help="Average the values across all input files",
+    )
+    parser.add_argument(
+        "--show_std",
+        action="store_true",
+        help="Show standard deviation bands when averaging",
+    )
+    parser.add_argument(
+        "--no_legend",
+        action="store_true",
+        help="Don't show the legend in the plots",
+    )
+    parser.add_argument(
+        "--label-size",
+        type=int,
+        default=10,
+        help="Font size for all labels (axis labels, tick labels, and legend)",
+    )
     args = parser.parse_args()
 
-    # Define the list of hosts (keep in sync with download.sh)
-    hosts = [
-        "left",
-        "mid",
-        "right",
-        "riight",
-        "left2",
-        "mid2",
-        "right2",
-        "riight2",
-        "left3",
-        "mid3",
-        "right3",
-        "riight3",
-        "left4"
-    ]
+    if args.files:
+        # Use directly specified files
+        files_to_plot = []
+        host_names_to_plot = []
+        valid_files = False
 
-    if len(args.indices) > 0:
+        for file_path in args.files:
+            if os.path.exists(file_path):
+                files_to_plot.append(file_path)
+                # Use filename as host name for the legend
+                host_names_to_plot.append(os.path.basename(os.path.dirname(file_path)))
+                valid_files = True
+            else:
+                print(f"Warning: Could not find log file: {file_path}")
+    elif len(args.indices) > 0:
+        # Define the list of hosts (keep in sync with download.sh)
+        hosts = [
+            "left",
+            "mid",
+            "right",
+            "riight",
+            "left2",
+            "mid2",
+            "right2",
+            "riight2",
+            "left3",
+            "mid3",
+            "right3",
+            "riight3",
+            "left4"
+        ]
+
         # Collect files and corresponding host names to plot
         files_to_plot = []
         host_names_to_plot = []
@@ -242,6 +324,11 @@ if __name__ == "__main__":
             window_size=args.window_size,
             output_file=args.output_file,
             plot_summary=args.plot_summary,
+            max_index=args.max_index,
+            average=args.average,
+            show_std=args.show_std,
+            show_legend=not args.no_legend,
+            label_size=args.label_size,
         )
     else:
         print("No valid files found to plot")

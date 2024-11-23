@@ -31,7 +31,7 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
     if model_type == "mistral":
         base_model = "mistralai/Mistral-7B-Instruct-v0.2"
     elif model_type == "llama":
-        base_model = "meta-llama/Llama-3.2-3B-Instruct"
+        base_model = "meta-llama/Llama-3.1-8B-Instruct"
     else:
         raise ValueError("model_type must be either 'mistral' or 'llama'")
 
@@ -173,7 +173,69 @@ def batch_process_answers(
     return extracted_generated_answers
 
 
-def main(model_path, num_samples, batch_size, use_base_model, model_type):
+def get_model_path(provided_path=None):
+    """
+    Get the model path and model type, either from provided path or latest result.
+
+    Args:
+        provided_path (str, optional): Explicitly provided model path
+
+    Returns:
+        tuple: (model_path, model_type)
+    """
+    if provided_path:
+        model_path = provided_path
+        # For provided paths, still try to find log file in same directory
+        log_path = os.path.join(os.path.dirname(model_path), "log.jsonl")
+    else:
+        result_dir = find_latest_result()
+        if not result_dir:
+            raise FileNotFoundError(
+                "No model checkpoint found in the results directory."
+            )
+        model_path = os.path.join(os.path.dirname(result_dir), "model")
+        log_path = os.path.join(os.path.dirname(result_dir), "log.jsonl")
+
+    # Try to get model type from log file
+    model_type = None
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, "r") as f:
+                first_line = f.readline().strip()
+                if first_line:
+                    entry = json.loads(first_line)
+                    model_type = entry.get("model_type")
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Fallback to path inference if log file reading fails
+    if not model_type:
+        model_type = "mistral" if "mistral" in model_path.lower() else "llama"
+        print(
+            f"Warning: Could not read model_type from log file. Inferring type as '{model_type}' from path."
+        )
+
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found at {model_path}")
+
+    return model_path, model_type
+
+
+def main(
+    model_path=None,
+    num_samples=None,
+    batch_size=16,
+    use_base_model=False,
+    model_type=None,
+):
+    # Get model path and type if not explicitly provided
+    if not use_base_model:
+        model_path, inferred_model_type = get_model_path(model_path)
+        if model_type is None:
+            model_type = inferred_model_type
+    else:
+        model_type = model_type or "mistral"  # Default to mistral for base model
+
     model, tokenizer, device = load_model(model_path, use_base_model, model_type)
 
     test_data = load_dataset("openai/gsm8k", "main", split="test")
@@ -215,8 +277,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_path",
         type=str,
-        default=None,  # Remove default path
-        help="Path to the trained model weights",
+        default=None,
+        help="Path to the trained model weights (default: use latest result)",
     )
     parser.add_argument(
         "--num_samples",
@@ -236,30 +298,19 @@ if __name__ == "__main__":
         "--model_type",
         type=str,
         choices=["mistral", "llama"],
-        default="mistral",
-        help="Choose between Mistral and Llama 3.1 models",
+        default=None,
+        help="Choose between Mistral and Llama 3.1 models (default: infer from model path)",
     )
     args = parser.parse_args()
 
-    # If no model path is provided, try to find the latest checkpoint
-    if args.model_path is None:
-        args.model_path = find_latest_result()
-
-        if args.model_path is None:
-            print("Error: No model checkpoint found in the checkpoints directory.")
-            exit(1)
-
-        # Optionally, detect model type from the path
-        args.model_type = "mistral" if "mistral" in args.model_path.lower() else "llama"
-
-    if not args.use_base_model and not os.path.exists(args.model_path):
-        print(f"Error: Model file not found at {args.model_path}")
+    try:
+        main(
+            args.model_path,
+            args.num_samples,
+            args.batch_size,
+            args.use_base_model,
+            args.model_type,
+        )
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
         exit(1)
-
-    main(
-        args.model_path,
-        args.num_samples,
-        args.batch_size,
-        args.use_base_model,
-        args.model_type,
-    )
