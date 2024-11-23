@@ -17,6 +17,7 @@ from constants import MISTRAL_INST_START, MISTRAL_INST_END, EI_SKIP_INITIAL
 from constants import EI_SKIP_INITIAL
 from typing import Union, List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass, asdict
+from tqdm import tqdm
 
 
 def find_latest_result(return_log=False):
@@ -318,17 +319,15 @@ def generate_question_answer_batches(
         wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
         article_idx = 0
         articles_examined = 0
+        
+        # Create progress bar
+        pbar = tqdm(total=chunk_size, desc="Collecting examples")
+        last_qa_pairs_len = 0
 
-        print(f"Collecting {chunk_size} examples...")
         while len(qa_pairs) < chunk_size:
             if article_idx >= len(wiki_dataset):
-                print("Reached end of dataset!")
+                print("\nReached end of dataset!")
                 break
-                
-            if articles_examined % 10 == 0:
-                print(f"\rExamined {articles_examined} articles, "
-                      f"found {len(qa_pairs)} valid examples "
-                      f"(target: {chunk_size})", end="")
             
             article = wiki_dataset[article_idx]
             article_idx += 1
@@ -344,11 +343,7 @@ def generate_question_answer_batches(
             else:
                 required_length = hyperparameters.get("target_length", 0)
             
-            print(f"\nArticle {article_idx}: token length = {token_length} (need {required_length})")
-            
-            # Skip if too short
             if token_length < required_length:
-                print(f"Skipping - too short")
                 continue
             
             if "question_length" in hyperparameters and "target_length" in hyperparameters:
@@ -360,7 +355,6 @@ def generate_question_answer_batches(
                 )
                 
                 if question_chunk is None:
-                    print(f"Failed to get question chunk")
                     continue
                 
                 # Get remaining text after question chunk
@@ -374,10 +368,8 @@ def generate_question_answer_batches(
                 )
                 
                 if target_chunk is None:
-                    print(f"Failed to get target chunk")
                     continue
                     
-                print(f"Got chunks with {actual_q_tokens} + {actual_t_tokens} tokens")
                 qa_pairs.append((question_chunk, target_chunk))
                 
             else:
@@ -389,12 +381,17 @@ def generate_question_answer_batches(
                 )
                 
                 if text_chunk is None:
-                    print(f"Failed to get exact token length chunk")
                     continue
                     
-                print(f"Got chunk with {actual_tokens} tokens")
                 qa_pairs.append((text_chunk, ""))
 
+            # Update progress bar only when we've added new pairs
+            new_pairs = len(qa_pairs) - last_qa_pairs_len
+            if new_pairs > 0:
+                pbar.update(new_pairs)
+                last_qa_pairs_len = len(qa_pairs)
+
+        pbar.close()
         print(f"\nFinished collecting examples. "
               f"Examined {articles_examined} articles to find {len(qa_pairs)} valid examples.")
 
