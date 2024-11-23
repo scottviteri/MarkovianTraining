@@ -41,6 +41,7 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
         hyperparameters=hyperparameters,
         checkpoint_path=None if use_base_model else model_path,
     )
+    tokenizer.pad_token_id = tokenizer.eos_token_id
 
     # Set model to evaluation mode and configure generation parameters
     model.eval()
