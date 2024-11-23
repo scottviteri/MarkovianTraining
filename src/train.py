@@ -325,7 +325,7 @@ def generate_question_answer_batches(
                 print("Reached end of dataset!")
                 break
                 
-            if articles_examined % 100 == 0:
+            if articles_examined % 10 == 0:
                 print(f"\rExamined {articles_examined} articles, "
                       f"found {len(qa_pairs)} valid examples "
                       f"(target: {chunk_size})", end="")
@@ -334,28 +334,74 @@ def generate_question_answer_batches(
             article_idx += 1
             articles_examined += 1
             
-            # Print article text length for debugging
-            print(f"\nArticle {article_idx}: text length = {len(article['text'])}")
+            text = article['text']
+            tokens = tokenizer(text, truncation=False, return_tensors="pt")
+            token_length = tokens.input_ids.size(1)
             
-            try:
-                if task_type == "wiki_compression":
-                    qa_pair = process_wiki_compression(
-                        article["text"], hyperparameters["target_length"], tokenizer
-                    )
-                else:  # wiki_continuation
-                    qa_pair = process_wiki_continuation(
-                        article["text"], hyperparameters["target_length"], tokenizer
-                    )
-                if qa_pair is not None:
-                    qa_pairs.append(qa_pair)
-            except Exception as e:
-                print(f"\nError processing article {article_idx}: {str(e)}")
+            # Calculate required total length based on task type
+            if "question_length" in hyperparameters and "target_length" in hyperparameters:
+                required_length = hyperparameters["question_length"] + hyperparameters["target_length"]
+            else:
+                required_length = hyperparameters.get("target_length", 0)
+            
+            print(f"\nArticle {article_idx}: token length = {token_length} (need {required_length})")
+            
+            # Skip if too short
+            if token_length < required_length:
+                print(f"Skipping - too short")
                 continue
+            
+            if "question_length" in hyperparameters and "target_length" in hyperparameters:
+                # Get question chunk
+                question_chunk, actual_q_tokens = get_text_with_token_length(
+                    text, 
+                    hyperparameters["question_length"], 
+                    tokenizer
+                )
+                
+                if question_chunk is None:
+                    print(f"Failed to get question chunk")
+                    continue
+                
+                # Get remaining text after question chunk
+                remaining_text = text[len(question_chunk):]
+                
+                # Get target chunk from remaining text
+                target_chunk, actual_t_tokens = get_text_with_token_length(
+                    remaining_text,
+                    hyperparameters["target_length"],
+                    tokenizer
+                )
+                
+                if target_chunk is None:
+                    print(f"Failed to get target chunk")
+                    continue
+                    
+                print(f"Got chunks with {actual_q_tokens} + {actual_t_tokens} tokens")
+                qa_pairs.append((question_chunk, target_chunk))
+                
+            else:
+                # Single chunk mode (for base model analysis)
+                text_chunk, actual_tokens = get_text_with_token_length(
+                    text, 
+                    hyperparameters["target_length"], 
+                    tokenizer
+                )
+                
+                if text_chunk is None:
+                    print(f"Failed to get exact token length chunk")
+                    continue
+                    
+                print(f"Got chunk with {actual_tokens} tokens")
+                qa_pairs.append((text_chunk, ""))
 
         print(f"\nFinished collecting examples. "
               f"Examined {articles_examined} articles to find {len(qa_pairs)} valid examples.")
 
-    # ... rest of the function remains the same ...
+    # Yield batches
+    for i in range(0, len(qa_pairs), batch_size):
+        batch = qa_pairs[i:i + batch_size]
+        yield batch
 
 
 def get_grad_norm(parameters):
