@@ -53,14 +53,17 @@ def main():
         model_type="llama"
     )
 
-    # Initialize data generator
+    # Initialize data generator with correct hyperparameters
     print("Initializing data generator...")
     data_gen = generate_question_answer_batches(
         num_batches=args.num_samples,
         batch_size=1,  # Process one at a time for simplicity
         task_type="wiki_continuation",
         tokenizer=tokenizer,
-        hyperparameters={"question_length": args.max_length}
+        hyperparameters={
+            "target_length": args.max_length,  # Changed from question_length to target_length
+            "question_length": args.max_length  # Keep this if needed
+        }
     )
 
     # Initialize arrays to store results
