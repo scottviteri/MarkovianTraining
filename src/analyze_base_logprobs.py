@@ -154,25 +154,29 @@ def plot_results(args):
     with open(args.intermediate_file, 'r') as f:
         data = json.load(f)
     
-    # Calculate average logprobs
-    total_logprobs = np.zeros(args.max_length - 1)
-    counts = np.array(data["counts"])
+    # Get actual sequence length from the data
+    seq_length = len(data["individual_logprobs"][0])  # Length of first sample
+    print(f"Actual sequence length in data: {seq_length}")
     
+    # Initialize arrays with correct size
+    total_logprobs = np.zeros(seq_length)
+    counts = np.array(data["counts"][:seq_length])  # Trim to actual length
+    
+    # Sum up logprobs
     for sample_logprobs in data["individual_logprobs"]:
-        seq_len = min(len(sample_logprobs), args.max_length - 1)
-        total_logprobs[:seq_len] += sample_logprobs[:seq_len]
+        total_logprobs += sample_logprobs[:seq_length]
     
     avg_logprobs = total_logprobs / counts
 
     # Apply smoothing
-    valid_x = np.arange(1, args.max_length - args.window_size + 1)
+    valid_x = np.arange(1, seq_length - args.window_size + 1)
     smoothed_logprobs = smooth_curve(avg_logprobs, args.window_size)
 
     # Create plot
     plt.figure(figsize=(12, 6))
     
     # Plot both raw and smoothed data
-    plt.plot(range(1, args.max_length), avg_logprobs, 'b-', alpha=0.3, label='Raw')
+    plt.plot(range(1, seq_length + 1), avg_logprobs, 'b-', alpha=0.3, label='Raw')
     plt.plot(valid_x, smoothed_logprobs, 'r-', label=f'Smoothed (window={args.window_size})')
     
     plt.axhline(y=-1, color='k', linestyle='--', label='y = -1')
