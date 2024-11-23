@@ -79,12 +79,25 @@ def process_samples(args):
     all_logprobs = []  # Store individual sample logprobs
     processed_samples = 0
     skipped_samples = 0
+    total_samples_seen = 0
     
-    for batch in tqdm(data_gen):
+    print("Starting sample processing loop...")
+    for batch in tqdm(data_gen, desc="Processing articles"):
         if processed_samples >= args.num_samples:
             break
             
+        total_samples_seen += 1
+        if total_samples_seen % 10 == 0:  # Print status every 10 samples
+            print(f"\rSeen: {total_samples_seen}, Processed: {processed_samples}, "
+                  f"Skipped: {skipped_samples}, Target: {args.num_samples}", end="")
+            
         text = batch[0][0]
+        
+        # Print length info for debugging
+        initial_tokens = tokenizer(text, return_tensors="pt", truncation=False)
+        print(f"\nArticle length: {initial_tokens.input_ids.size(1)} tokens "
+              f"(need {args.max_length})")
+        
         token_logprobs = calculate_token_logprobs(model, tokenizer, device, text, args.max_length)
         
         if token_logprobs is None:
@@ -101,7 +114,10 @@ def process_samples(args):
         
         processed_samples += 1
 
-    print(f"Processed {processed_samples} samples, skipped {skipped_samples} samples that were too short")
+    print(f"\nFinal stats:")
+    print(f"Total samples seen: {total_samples_seen}")
+    print(f"Processed {processed_samples} samples")
+    print(f"Skipped {skipped_samples} samples that were too short")
 
     # Save raw data
     data = {
@@ -110,6 +126,7 @@ def process_samples(args):
         "metadata": {
             "processed_samples": processed_samples,
             "skipped_samples": skipped_samples,
+            "total_samples_seen": total_samples_seen,
             "max_length": args.max_length
         }
     }
