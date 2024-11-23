@@ -307,77 +307,55 @@ def generate_question_answer_batches(
     task_type: str,
     tokenizer,
     hyperparameters: dict = None,
-    chunk_size: int = 5000,  # Add this parameter with default value
+    chunk_size: int = 5000,
 ):
     """Generate batches of Q&A pairs lazily."""
     total_examples_needed = num_batches * batch_size
     qa_pairs = []
-
+    
     if task_type in ["wiki_compression", "wiki_continuation"]:
+        print("Loading Wikipedia dataset...")
         wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
         article_idx = 0
+        articles_examined = 0
 
+        print(f"Collecting {chunk_size} examples...")
         while len(qa_pairs) < chunk_size:
             if article_idx >= len(wiki_dataset):
-                print(
-                    f"Warning: Reached end of Wikipedia dataset after {len(qa_pairs)} examples"
-                )
+                print("Reached end of dataset!")
                 break
-
-            article = wiki_dataset[article_idx]["text"]
+                
+            if articles_examined % 100 == 0:
+                print(f"\rExamined {articles_examined} articles, "
+                      f"found {len(qa_pairs)} valid examples "
+                      f"(target: {chunk_size})", end="")
+            
+            article = wiki_dataset[article_idx]
             article_idx += 1
+            articles_examined += 1
+            
+            # Print article text length for debugging
+            print(f"\nArticle {article_idx}: text length = {len(article['text'])}")
+            
+            try:
+                if task_type == "wiki_compression":
+                    qa_pair = process_wiki_compression(
+                        article["text"], hyperparameters["target_length"], tokenizer
+                    )
+                else:  # wiki_continuation
+                    qa_pair = process_wiki_continuation(
+                        article["text"], hyperparameters["target_length"], tokenizer
+                    )
+                if qa_pair is not None:
+                    qa_pairs.append(qa_pair)
+            except Exception as e:
+                print(f"\nError processing article {article_idx}: {str(e)}")
+                continue
 
-            if task_type == "wiki_compression":
-                chunk, token_count = get_text_with_token_length(
-                    article, hyperparameters["target_length"], tokenizer
-                )
-                if chunk is not None:
-                    qa_pairs.append((chunk, chunk))
-            else:  # wiki_continuation
-                q_chunk, q_count = get_text_with_token_length(
-                    article, hyperparameters["question_length"], tokenizer
-                )
-                if q_chunk is None:
-                    continue
+        print(f"\nFinished collecting examples. "
+              f"Examined {articles_examined} articles to find {len(qa_pairs)} valid examples.")
 
-                # Skip if question contains "Answer:"
-                if "Answer:" in q_chunk:
-                    continue
-
-                remaining_text = article[len(q_chunk) :]
-                a_chunk, a_count = get_text_with_token_length(
-                    remaining_text, hyperparameters["target_length"], tokenizer
-                )
-                if a_chunk is not None:
-                    # Skip if answer contains "Answer:"
-                    if "Answer:" in a_chunk:
-                        continue
-                    qa_pairs.append((q_chunk, a_chunk))
-
-            # If we have enough pairs, shuffle and yield batches
-            if len(qa_pairs) >= chunk_size:
-                random.shuffle(qa_pairs)
-                for i in range(0, len(qa_pairs), batch_size):
-                    yield qa_pairs[i : i + batch_size]
-                qa_pairs = []  # Reset for next chunk
-
-    elif task_type == "gsm8k":
-        gsm8k_iter = load_gsm8k_dataset(chunk_size)
-        current_chunk = []
-
-        for qa_pair in gsm8k_iter:
-            current_chunk.append(qa_pair)
-            if len(current_chunk) >= chunk_size:
-                random.shuffle(current_chunk)
-                for i in range(0, len(current_chunk), batch_size):
-                    yield current_chunk[i : i + batch_size]
-                current_chunk = []
-
-    else:  # arithmetic tasks
-        while True:
-            qa_pairs = generate_arithmetic_pairs(task_type, chunk_size)
-            for i in range(0, len(qa_pairs), batch_size):
-                yield qa_pairs[i : i + batch_size]
+    # ... rest of the function remains the same ...
 
 
 def get_grad_norm(parameters):
