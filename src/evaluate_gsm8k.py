@@ -184,8 +184,8 @@ def find_checkpoint_with_index(model_dir, target_index=None):
     return max(checkpoint_files, key=os.path.getctime)
 
 
-def get_model_path(provided_path=None, target_index=None):
-    """Get model path from provided path or find latest with optional index matching."""
+def get_model_path_and_type(provided_path=None, target_index=None):
+    """Get model path and infer model type from log file."""
     if provided_path:
         model_dir = os.path.dirname(provided_path)
         model_path = find_checkpoint_with_index(model_dir, target_index)
@@ -198,7 +198,19 @@ def get_model_path(provided_path=None, target_index=None):
         model_path = find_checkpoint_with_index(latest_dir, target_index)
     
     print(f"Using checkpoint: {model_path}")
-    return model_path
+    
+    # Get model type from log.jsonl in same directory
+    log_path = os.path.join(os.path.dirname(model_path), "log.jsonl")
+    try:
+        with open(log_path, 'r') as f:
+            # First line contains hyperparameters
+            hyperparameters = json.loads(f.readline().strip())
+            model_type = hyperparameters.get("model_type", "mistral")
+    except Exception as e:
+        print(f"Warning: Could not read model type from log file ({e}), defaulting to mistral")
+        model_type = "mistral"
+    
+    return model_path, model_type
 
 
 def main(
@@ -212,7 +224,7 @@ def main(
 ):
     # Get model path and type if not explicitly provided
     if not use_base_model:
-        model_path, inferred_model_type = get_model_path(model_path, training_index)
+        model_path, inferred_model_type = get_model_path_and_type(model_path, training_index)
         if model_type is None:
             model_type = inferred_model_type
             print("Inferred Model Type", model_type)
