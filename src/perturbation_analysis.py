@@ -150,9 +150,10 @@ def load_perturbation_results(log_file, perturb_type):
         return json.load(f)
 
 
-def run_perturbations(log_file, perturb_type, stride=1):
+def run_perturbations(log_file, perturb_type, stride=1, max_index=None):
     """
     Run perturbation analysis on the given log file.
+    max_index: if provided, only process entries with batch_index <= max_index
     """
     if perturb_type not in PERTURBATION_SETS:
         raise ValueError(f"Unknown perturbation type: {perturb_type}")
@@ -169,6 +170,11 @@ def run_perturbations(log_file, perturb_type, stride=1):
     frozen_model, tokenizer, device = load_model_and_tokenizer(
         hyperparameters["model_type"]
     )
+
+    # Filter log data by batch index if max_index is provided
+    if max_index is not None:
+        log_data = [entry for entry in log_data if entry.get("Batch Index", float('inf')) <= max_index]
+        print(f"Processing entries up to batch index {max_index}")
 
     # Extract perturbation-related metrics
     perturbation_data = []
@@ -652,7 +658,12 @@ def main():
     if not args.plot_only:
         for perturb_type in args.perturb:
             print(f"\nProcessing {perturb_type}...")
-            results = run_perturbations(log_file, perturb_type, stride=args.stride)
+            results = run_perturbations(
+                log_file, 
+                perturb_type, 
+                stride=args.stride,
+                max_index=args.max_index
+            )
             if results:
                 save_perturbation_results(results, log_file, perturb_type)
             else:
