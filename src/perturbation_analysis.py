@@ -402,13 +402,11 @@ def plot_perturbation_results(
                 x_values = range(len(effect_difference))
                 effect_smooth = effect_difference
 
-            plt.plot(x_values, effect_smooth, 
-                    label=f"{pert} (Actor vs Critic diff)", 
-                    color=colors[i])
+            plt.plot(x_values, effect_smooth, label=f"{pert}", color=colors[i])
 
         plt.grid(True)
         plt.legend(fontsize=12)
-        plt.ylabel("Difference in Perturbation Effect (Actor - Critic)", fontsize=14)
+        plt.ylabel("Difference in Perturbation Effect\n(Actor - Critic)", fontsize=14)
 
         if window_size > 1:
             plt.title(f"Perturbation Analysis: Actor vs Critic Effect (smoothing={window_size})")
@@ -457,32 +455,37 @@ def plot_multiple_perturbation_results(log_file, perturb_types, window_size=40, 
                 results = results[:max_index]
 
             # Plot differences for each perturbation type
-            for i, (pert, values) in enumerate(results[0]["Avg Log Probs"].items()):
-                if pert == f"{perturb_type.title().replace('_', '')}0%":
-                    continue
+            for i, (pert, _) in enumerate(results[0]["Log Probs"]["Actor"]["Perturbed"].items()):
+                # Calculate differences for Actor
+                actor_orig_values = [-entry["Log Probs"]["Actor"]["Original"] for entry in results]
+                actor_pert_values = [-entry["Log Probs"]["Actor"]["Perturbed"][pert] for entry in results]
+                actor_diff_values = [p - o for p, o in zip(actor_pert_values, actor_orig_values)]
 
-                perturbed_values = [-entry["Avg Log Probs"][pert] for entry in results]
-                baseline_values = [-entry["Avg Log Probs"][f"{perturb_type.title().replace('_', '')}0%"]
-                                 for entry in results]
-                diff_values = [p - o for p, o in zip(perturbed_values, baseline_values)]
+                # Calculate differences for Critic
+                critic_orig_values = [-entry["Log Probs"]["Critic"]["Original"] for entry in results]
+                critic_pert_values = [-entry["Log Probs"]["Critic"]["Perturbed"][pert] for entry in results]
+                critic_diff_values = [p - o for p, o in zip(critic_pert_values, critic_orig_values)]
 
-                if window_size > 1 and len(diff_values) > window_size:
-                    diff_smooth = savgol_filter(diff_values, window_size, 3)
+                # Calculate the difference between Actor and Critic perturbation effects
+                effect_difference = [a - c for a, c in zip(actor_diff_values, critic_diff_values)]
+
+                if window_size > 1 and len(effect_difference) > window_size:
+                    effect_smooth = savgol_filter(effect_difference, window_size, 3)
                     padding = window_size // 2
-                    x_values = range(padding, len(diff_values) - padding)
-                    diff_smooth = diff_smooth[padding:-padding]
+                    x_values = range(padding, len(effect_difference) - padding)
+                    effect_smooth = effect_smooth[padding:-padding]
                 else:
-                    x_values = range(len(diff_values))
-                    diff_smooth = diff_values
+                    x_values = range(len(effect_difference))
+                    effect_smooth = effect_difference
 
-                ax.plot(x_values, diff_smooth, label=f"{pert}", color=colors[i])
+                ax.plot(x_values, effect_smooth, label=f"{pert}", color=colors[i])
 
             ax.grid(True)
             ax.legend(fontsize=10)
             
             # Only show y-label for leftmost plots
             if ax.get_subplotspec().is_first_col():
-                ax.set_ylabel("Diff in Neg Log Prob", fontsize=12)
+                ax.set_ylabel("Diff in Perturbation Effect\n(Actor - Critic)", fontsize=12)
             
             # Only show x-label for bottom plots
             if ax.get_subplotspec().is_last_row():
