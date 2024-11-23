@@ -472,78 +472,71 @@ def plot_multiple_perturbation_results(
 def collate_perturbation_results(log_files, output_dir):
     """
     Average perturbation results across multiple runs and save to a new directory.
-
-    Args:
-        log_files: List of paths to log file directories containing perturbation results
-        output_dir: Directory to save averaged results
     """
-    # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
-
-    # Initialize dictionary to store accumulated results
     accumulated_results = {}
-
+    
     # Process each log file directory
     for log_file in log_files:
         base_dir = os.path.dirname(log_file)
-
-        # Look for all perturbation result files
+        
         for perturb_type in PERTURBATION_SETS.keys():
             try:
                 results = load_perturbation_results(log_file, perturb_type)
-
+                
                 if perturb_type not in accumulated_results:
-                    accumulated_results[perturb_type] = {"results": [], "count": 0}
-
-                accumulated_results[perturb_type]["results"].append(results)
-                accumulated_results[perturb_type]["count"] += 1
-
+                    accumulated_results[perturb_type] = {
+                        'results': [],
+                        'count': 0
+                    }
+                
+                accumulated_results[perturb_type]['results'].append(results)
+                accumulated_results[perturb_type]['count'] += 1
+                
             except FileNotFoundError:
                 print(f"Warning: No results found for {perturb_type} in {log_file}")
                 continue
-
+    
     # Average the results for each perturbation type
     for perturb_type, acc_data in accumulated_results.items():
-        if acc_data["count"] == 0:
+        if acc_data['count'] == 0:
             continue
-
-        results_list = acc_data["results"]
+            
+        results_list = acc_data['results']
         num_runs = len(results_list)
-
-        # Initialize structure for averaged results using first run as template
+        
+        # Find minimum length across all runs
+        min_length = min(len(run) for run in results_list)
+        print(f"Using {min_length} entries for {perturb_type} (shortest common length)")
+        
+        # Initialize structure for averaged results
         averaged_results = []
-        for entry_idx in range(len(results_list[0])):
+        for entry_idx in range(min_length):
             avg_entry = {
                 "Batch Index": results_list[0][entry_idx]["Batch Index"],
                 "Avg Log Probs": {},
-                "Original": {"Actor": 0.0, "Critic": 0.0},
+                "Original": {"Actor": 0.0, "Critic": 0.0}
             }
-
+            
             # Average the Original values
             for run in results_list:
-                avg_entry["Original"]["Actor"] += (
-                    run[entry_idx]["Original"]["Actor"] / num_runs
-                )
-                avg_entry["Original"]["Critic"] += (
-                    run[entry_idx]["Original"]["Critic"] / num_runs
-                )
-
+                avg_entry["Original"]["Actor"] += run[entry_idx]["Original"]["Actor"] / num_runs
+                avg_entry["Original"]["Critic"] += run[entry_idx]["Original"]["Critic"] / num_runs
+            
+            # Get perturbation names from first run
+            pert_names = results_list[0][entry_idx]["Avg Log Probs"].keys()
+            
             # Average the Log Probs for each perturbation level
-            for pert_name in results_list[0][entry_idx]["Avg Log Probs"].keys():
-                avg_entry["Avg Log Probs"][pert_name] = (
-                    sum(
-                        run[entry_idx]["Avg Log Probs"][pert_name]
-                        for run in results_list
-                    )
-                    / num_runs
-                )
-
+            for pert_name in pert_names:
+                avg_entry["Avg Log Probs"][pert_name] = sum(
+                    run[entry_idx]["Avg Log Probs"][pert_name] 
+                    for run in results_list
+                ) / num_runs
+            
             averaged_results.append(avg_entry)
-
+        
         # Save averaged results
-        output_file = os.path.join(
-            output_dir, f"perturbation_results_{perturb_type}.json"
-        )
+        output_file = os.path.join(output_dir, f"perturbation_results_{perturb_type}.json")
         with open(output_file, "w") as f:
             json.dump(averaged_results, f)
         print(f"Averaged results for {perturb_type} saved to {output_file}")
