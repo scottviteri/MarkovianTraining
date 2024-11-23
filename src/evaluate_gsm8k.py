@@ -58,8 +58,28 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
         )
         model = get_peft_model(model, peft_config)
 
-        # Load the trained weights
-        model.load_state_dict(torch.load(model_path, map_location="cpu"), strict=False)
+        # Load the trained weights and verify
+        print(f"Loading weights from {model_path}")
+        checkpoint = torch.load(model_path, map_location="cpu")
+        if "model_state_dict" in checkpoint:
+            state_dict = checkpoint["model_state_dict"]
+        else:
+            state_dict = checkpoint
+        model.load_state_dict(state_dict, strict=False)
+        
+        # Verify some weights changed
+        print("Verifying weight loading...")
+        base_model = AutoModelForCausalLM.from_pretrained(
+            base_model,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+        )
+        for (n1, p1), (n2, p2) in zip(model.named_parameters(), base_model.named_parameters()):
+            if p1.requires_grad and torch.any(p1 != p2):
+                print(f"Verified: weights differ in layer {n1}")
+                break
+        else:
+            print("WARNING: No weight differences found between base and loaded model!")
 
     model.generation_config.temperature = None
     model.generation_config.top_p = None
@@ -226,6 +246,7 @@ def main(
     batch_size=16,
     use_base_model=False,
     model_type=None,
+    stride=1,
 ):
     # Get model path and type if not explicitly provided
     if not use_base_model:
@@ -239,6 +260,11 @@ def main(
 
     test_data = load_dataset("openai/gsm8k", "main", split="test")
     test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
+    
+    # Apply stride to test data
+    if stride > 1:
+        test_data = test_data[::stride]
+        print(f"Using stride={stride}, evaluating on {len(test_data)} examples")
 
     accuracy, results = evaluate_model(
         model, tokenizer, device, test_data, num_samples, batch_size, model_type
@@ -300,6 +326,12 @@ if __name__ == "__main__":
         default=None,
         help="Choose between Mistral and Llama 3.1 models (default: infer from model path)",
     )
+    parser.add_argument(
+        "--stride",
+        type=int,
+        default=1,
+        help="Evaluate every nth example in the test set",
+    )
     args = parser.parse_args()
 
     try:
@@ -309,6 +341,7 @@ if __name__ == "__main__":
             args.batch_size,
             args.use_base_model,
             args.model_type,
+            args.stride,
         )
     except FileNotFoundError as e:
         print(f"Error: {e}")
