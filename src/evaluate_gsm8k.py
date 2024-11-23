@@ -186,33 +186,43 @@ def find_checkpoint_with_index(model_dir, target_index=None):
     return max(checkpoint_files, key=os.path.getctime)
 
 
-def get_model_path_and_type(provided_path=None, target_index=None):
-    """Get model path and infer model type from log file."""
+def find_all_checkpoints(model_dir):
+    """Find all checkpoint files in the directory."""
+    checkpoint_files = glob.glob(os.path.join(model_dir, "model*.pt"))
+    if not checkpoint_files:
+        raise FileNotFoundError(f"No checkpoint files found in {model_dir}")
+    return sorted(checkpoint_files, key=os.path.getctime)  # Sort by creation time
+
+
+def get_model_paths_and_type(provided_path=None, target_index=None, all_checkpoints=False):
+    """Get model path(s) and infer model type from log file."""
     if provided_path:
         model_dir = os.path.dirname(provided_path)
-        model_path = find_checkpoint_with_index(model_dir, target_index)
     else:
         # Find most recent results directory
         results = glob.glob("results/gsm8k/*")
         if not results:
             raise FileNotFoundError("No GSM8K results directory found")
-        latest_dir = max(results, key=os.path.getctime)
-        model_path = find_checkpoint_with_index(latest_dir, target_index)
+        model_dir = max(results, key=os.path.getctime)
     
-    print(f"Using checkpoint: {model_path}")
+    # Get model paths
+    if all_checkpoints:
+        model_paths = find_all_checkpoints(model_dir)
+        print(f"Found {len(model_paths)} checkpoints")
+    else:
+        model_paths = [find_checkpoint_with_index(model_dir, target_index)]
     
-    # Get model type from log.jsonl in same directory
-    log_path = os.path.join(os.path.dirname(model_path), "log.jsonl")
+    # Get model type from log.jsonl (same for all checkpoints in directory)
+    log_path = os.path.join(model_dir, "log.jsonl")
     try:
         with open(log_path, 'r') as f:
-            # First line contains hyperparameters
             hyperparameters = json.loads(f.readline().strip())
             model_type = hyperparameters.get("model_type", "mistral")
     except Exception as e:
         print(f"Warning: Could not read model type from log file ({e}), defaulting to mistral")
         model_type = "mistral"
     
-    return model_path, model_type
+    return model_paths, model_type
 
 
 def main(
@@ -223,53 +233,58 @@ def main(
     model_type=None,
     stride=1,
     training_index=None,
+    all_checkpoints=False,
 ):
-    # Get model path and type if not explicitly provided
+    # Get model path(s) and type if not explicitly provided
     if not use_base_model:
-        model_path, inferred_model_type = get_model_path_and_type(model_path, training_index)
+        model_paths, inferred_model_type = get_model_paths_and_type(
+            model_path, training_index, all_checkpoints
+        )
         if model_type is None:
             model_type = inferred_model_type
-            print("Inferred Model Type", model_type)
+            print(f"Inferred model type: {model_type}")
     else:
-        model_type = model_type or "mistral"  # Default to mistral for base model
+        model_paths = [None]  # For base model
+        model_type = model_type or "mistral"
 
-    model, tokenizer, device = load_model(model_path, use_base_model, model_type)
+    for checkpoint_path in model_paths:
+        if checkpoint_path:
+            print(f"\nEvaluating checkpoint: {checkpoint_path}")
+        
+        model, tokenizer, device = load_model(checkpoint_path, use_base_model, model_type)
+        
+        test_data = load_dataset("openai/gsm8k", "main", split="test")
+        test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
 
-    test_data = load_dataset("openai/gsm8k", "main", split="test")
-    test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
+        if stride > 1:
+            test_data = test_data[::stride]
+            print(f"Using stride={stride}, evaluating on {len(test_data)} examples")
 
-    # Apply stride to test data
-    if stride > 1:
-        test_data = test_data[::stride]
-        print(f"Using stride={stride}, evaluating on {len(test_data)} examples")
-
-    accuracy, results = evaluate_model(
-        model, tokenizer, device, test_data, num_samples, batch_size, model_type
-    )
-
-    print(f"Accuracy: {accuracy:.2%}")
-
-    # Create results directory if it doesn't exist
-    os.makedirs("results/evaluations", exist_ok=True)
-
-    # Generate a timestamp-based filename
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = f"results/evaluations/gsm8k_eval_{model_type}_{timestamp}.json"
-
-    with open(output_file, "w") as f:
-        json.dump(
-            {
-                "accuracy": accuracy,
-                "results": results,
-                "model_path": model_path,
-                "model_type": model_type,
-                "num_samples": num_samples,
-            },
-            f,
-            indent=2,
+        accuracy, results = evaluate_model(
+            model, tokenizer, device, test_data, num_samples, batch_size, model_type
         )
 
-    print(f"Detailed results saved to {output_file}")
+        print(f"Accuracy: {accuracy:.2%}")
+
+        # Save results
+        os.makedirs("results/evaluations", exist_ok=True)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        checkpoint_id = os.path.basename(checkpoint_path).replace(".pt", "") if checkpoint_path else "base"
+        output_file = f"results/evaluations/gsm8k_eval_{model_type}_{checkpoint_id}_{timestamp}.json"
+
+        with open(output_file, "w") as f:
+            json.dump(
+                {
+                    "accuracy": accuracy,
+                    "results": results,
+                    "model_path": checkpoint_path,
+                    "model_type": model_type,
+                    "num_samples": num_samples,
+                },
+                f,
+                indent=2,
+            )
+        print(f"Detailed results saved to {output_file}")
 
 
 if __name__ == "__main__":
@@ -314,6 +329,11 @@ if __name__ == "__main__":
         type=int,
         help="Specific training index to evaluate (e.g., 1000)",
     )
+    parser.add_argument(
+        "--all_checkpoints",
+        action="store_true",
+        help="Evaluate all checkpoints in the directory",
+    )
     args = parser.parse_args()
 
     try:
@@ -325,6 +345,7 @@ if __name__ == "__main__":
             args.model_type,
             args.stride,
             args.training_index,
+            args.all_checkpoints,
         )
     except FileNotFoundError as e:
         print(f"Error: {e}")
