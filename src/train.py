@@ -1013,6 +1013,7 @@ def calculate_mean_kl(q_R_actor_logits, q_R_critic_logits, cot_length):
 @dataclass
 class BatchData:
     """Holds data for a single training batch"""
+
     questions: List[str]
     answers: List[str]
     actor_reasoning: List[str]
@@ -1022,7 +1023,9 @@ class BatchData:
     kl: torch.Tensor
     advantages: torch.Tensor
     normalized_rewards: torch.Tensor
-    actor_answer_logprobs: torch.Tensor  # Changed from advantage_output to just the tensor we need
+    actor_answer_logprobs: (
+        torch.Tensor
+    )  # Changed from advantage_output to just the tensor we need
     losses: torch.Tensor
     training_mask: Optional[torch.Tensor]
     metrics: Dict[str, Any]
@@ -1031,6 +1034,7 @@ class BatchData:
 @dataclass
 class LogMetrics:
     """Holds metrics for logging"""
+
     loss: float
     pg_loss: float
     actor_logprobs: float
@@ -1083,7 +1087,9 @@ class LogMetrics:
             loss=batch_data.losses.mean().item(),
             pg_loss=batch_data.metrics["pg_losses"][0].item(),
             actor_logprobs=batch_data.R_mean_actor_logprobs[0].item(),
-            actor_answer_logprobs=batch_data.actor_answer_logprobs[0].item(),  # Updated this line
+            actor_answer_logprobs=batch_data.actor_answer_logprobs[
+                0
+            ].item(),  # Updated this line
             kl=raw_kl,
             weighted_kl=weighted_kl,
             ppo_ratio=ppo_ratio,
@@ -1117,7 +1123,7 @@ def log_batch_results(
 
     # Calculate fraction of answers contained in reasoning across batch
     contains_answer_fraction = sum(
-        answer in reasoning 
+        answer in reasoning
         for answer, reasoning in zip(batch_data.answers, batch_data.actor_reasoning)
     ) / len(batch_data.answers)
 
@@ -1154,8 +1160,14 @@ def log_batch_results(
             "Actor Answer Log Probs": float(metrics.actor_answer_logprobs),
             "KL": float(kl_to_log),
             "KL Type": kl_label,
-            "PPO Ratio": float(metrics.ppo_ratio) if metrics.ppo_ratio is not None else None,
-            "PPO Clipped Ratio": float(metrics.ppo_clipped_ratio) if metrics.ppo_clipped_ratio is not None else None,
+            "PPO Ratio": (
+                float(metrics.ppo_ratio) if metrics.ppo_ratio is not None else None
+            ),
+            "PPO Clipped Ratio": (
+                float(metrics.ppo_clipped_ratio)
+                if metrics.ppo_clipped_ratio is not None
+                else None
+            ),
             "Advantage": float(metrics.advantage),
             "Normalized Reward": float(metrics.normalized_reward),
             "Gradient Norm": float(metrics.gradient_norm),
@@ -1311,41 +1323,51 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
         hyperparameters=hyperparameters,
     )
 
-    for batch_index in range(state.batch_index, hyperparameters["num_batches"]):
-        state.batch_index = batch_index
-        print_batch_delimiter()
-        colored_print("Batch:", str(batch_index), Colors.BOLD, inline=True)
+    try:
+        for batch_index in range(state.batch_index, hyperparameters["num_batches"]):
+            state.batch_index = batch_index
+            print_batch_delimiter()
+            colored_print("Batch:", str(batch_index), Colors.BOLD, inline=True)
 
-        try:
-            qa_batch = next(qa_generator)
-        except StopIteration:
-            print("Reached end of dataset")
-            break
+            try:
+                qa_batch = next(qa_generator)
+            except StopIteration:
+                print("\nReached end of dataset")
+                break
 
-        batch_data = process_batch(state, qa_batch)
-        grad_norm = update_model(state, batch_data)
+            batch_data = process_batch(state, qa_batch)
+            grad_norm = update_model(state, batch_data)
 
-        # Update history
-        state.previous_normalized_rewards.extend(
-            batch_data.normalized_rewards.detach().float().cpu().numpy()
+            # Update history
+            state.previous_normalized_rewards.extend(
+                batch_data.normalized_rewards.detach().float().cpu().numpy()
+            )
+            state.previous_advantages.extend(
+                batch_data.advantages.detach().float().cpu().numpy()
+            )
+
+            # Log results
+            metrics = LogMetrics.from_batch(
+                batch_data,
+                grad_norm,
+                state.grad_accum_count,
+                state.previous_advantages,
+                state.hyperparameters["batch_size"],
+            )
+            log_batch_results(state, batch_data, metrics)
+
+            # Save checkpoint periodically
+            if batch_index % 1000 == 0 and batch_index > 0:
+                save_checkpoint(state)
+
+    finally:
+        # Save final checkpoint
+        colored_print(
+            "Final Checkpoint",
+            f"Saving model at batch {state.batch_index}",
+            Colors.BOLD,
         )
-        state.previous_advantages.extend(
-            batch_data.advantages.detach().float().cpu().numpy()
-        )
-
-        # Log results
-        metrics = LogMetrics.from_batch(
-            batch_data,
-            grad_norm,
-            state.grad_accum_count,
-            state.previous_advantages,
-            state.hyperparameters["batch_size"],
-        )
-        log_batch_results(state, batch_data, metrics)
-
-        # Save checkpoint periodically
-        if batch_index % 1000 == 0 and batch_index > 0:
-            save_checkpoint(state)
+        save_checkpoint(state)
 
 
 def get_latest_log_file():
