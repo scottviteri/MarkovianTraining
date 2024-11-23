@@ -275,9 +275,7 @@ def run_perturbations(log_file, perturb_type, stride=1, max_index=None):
     return perturbation_data
 
 
-def plot_perturbation_results(
-    results, log_file, perturb_type, window_size=40, debug=False, max_index=None
-):
+def plot_perturbation_results(results, log_file, perturb_type, window_size=40, debug=False, max_index=None):
     """
     Plot the results of perturbation analysis.
     No smoothing is applied if window_size=1.
@@ -303,42 +301,44 @@ def plot_perturbation_results(
         fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 24))
 
         # Plot perturbation results in first three axes
-        for i, (pert, values) in enumerate(results[0]["Avg Log Probs"].items()):
-            if (
-                f"{perturb_type.title().replace('_', '')}0%" == pert
-            ):  # Skip baseline case
+        for i, (pert, _) in enumerate(results[0]["Log Probs"]["Actor"]["Perturbed"].items()):
+            # Skip baseline case
+            if pert == f"{perturb_type.title().replace('_', '')}0%":
                 continue
 
-            perturbed_values = [-entry["Avg Log Probs"][pert] for entry in results]
-            baseline_key = f"{perturb_type.title().replace('_', '')}0%"
-            baseline_values = [
-                -entry["Avg Log Probs"][baseline_key] for entry in results
-            ]
-            diff_values = [p - o for p, o in zip(perturbed_values, baseline_values)]
+            # Get Actor values
+            actor_orig_values = [-entry["Log Probs"]["Actor"]["Original"] for entry in results]
+            actor_pert_values = [-entry["Log Probs"]["Actor"]["Perturbed"][pert] for entry in results]
+            actor_diff_values = [p - o for p, o in zip(actor_pert_values, actor_orig_values)]
 
-            if window_size > 1 and len(perturbed_values) > window_size:
-                perturbed_smooth = savgol_filter(perturbed_values, window_size, 3)
-                baseline_smooth = savgol_filter(baseline_values, window_size, 3)
-                diff_smooth = savgol_filter(diff_values, window_size, 3)
+            # Get Critic values
+            critic_orig_values = [-entry["Log Probs"]["Critic"]["Original"] for entry in results]
+            critic_pert_values = [-entry["Log Probs"]["Critic"]["Perturbed"][pert] for entry in results]
+            critic_diff_values = [p - o for p, o in zip(critic_pert_values, critic_orig_values)]
+
+            if window_size > 1 and len(actor_diff_values) > window_size:
+                actor_smooth = savgol_filter(actor_diff_values, window_size, 3)
+                critic_smooth = savgol_filter(critic_diff_values, window_size, 3)
+                effect_diff_smooth = savgol_filter([a - c for a, c in zip(actor_diff_values, critic_diff_values)], window_size, 3)
 
                 padding = window_size // 2
-                x_values = range(padding, len(perturbed_values) - padding)
-                perturbed_smooth = perturbed_smooth[padding:-padding]
-                baseline_smooth = baseline_smooth[padding:-padding]
-                diff_smooth = diff_smooth[padding:-padding]
+                x_values = range(padding, len(actor_diff_values) - padding)
+                actor_smooth = actor_smooth[padding:-padding]
+                critic_smooth = critic_smooth[padding:-padding]
+                effect_diff_smooth = effect_diff_smooth[padding:-padding]
             else:
-                x_values = range(len(perturbed_values))
-                perturbed_smooth = perturbed_values
-                baseline_smooth = baseline_values
-                diff_smooth = diff_values
+                x_values = range(len(actor_diff_values))
+                actor_smooth = actor_diff_values
+                critic_smooth = critic_diff_values
+                effect_diff_smooth = [a - c for a, c in zip(actor_diff_values, critic_diff_values)]
 
-            ax1.plot(x_values, perturbed_smooth, label=f"{pert}", color=colors[i])
-            ax2.plot(x_values, baseline_smooth, label=f"Baseline (0%)", color=colors[i])
-            ax3.plot(x_values, diff_smooth, label=f"{pert} diff", color=colors[i])
+            ax1.plot(x_values, actor_smooth, label=f"{pert} (Actor)", color=colors[i])
+            ax2.plot(x_values, critic_smooth, label=f"{pert} (Critic)", color=colors[i])
+            ax3.plot(x_values, effect_diff_smooth, label=f"{pert} (Actor - Critic)", color=colors[i])
 
-        # Plot Actor vs Critic difference
-        actor_values = [-entry["Original"]["Actor"] for entry in results]
-        critic_values = [-entry["Original"]["Critic"] for entry in results]
+        # Plot Actor vs Critic original difference
+        actor_values = [-entry["Log Probs"]["Actor"]["Original"] for entry in results]
+        critic_values = [-entry["Log Probs"]["Critic"]["Original"] for entry in results]
         ac_diff_values = [a - c for a, c in zip(actor_values, critic_values)]
 
         if window_size > 1 and len(ac_diff_values) > window_size:
@@ -350,27 +350,22 @@ def plot_perturbation_results(
             x_values = range(len(ac_diff_values))
             ac_diff_smooth = ac_diff_values
 
-        ax4.plot(x_values, ac_diff_smooth, label="Actor - Critic", color="purple")
+        ax4.plot(x_values, ac_diff_smooth, label="Actor - Critic (Original)", color="purple")
 
         # Set titles and labels
         if window_size > 1:
-            ax1.set_title(f"Perturbed Values (smoothing={window_size})", fontsize=16)
-            ax2.set_title(f"Baseline Values (smoothing={window_size})", fontsize=16)
-            ax3.set_title(
-                f"Differences (Perturbed - Baseline) (smoothing={window_size})",
-                fontsize=16,
-            )
-            ax4.set_title(
-                f"Actor vs Critic Difference (smoothing={window_size})", fontsize=16
-            )
+            ax1.set_title(f"Actor Perturbation Effect (smoothing={window_size})", fontsize=16)
+            ax2.set_title(f"Critic Perturbation Effect (smoothing={window_size})", fontsize=16)
+            ax3.set_title(f"Difference in Effects (Actor - Critic) (smoothing={window_size})", fontsize=16)
+            ax4.set_title(f"Original Actor vs Critic Difference (smoothing={window_size})", fontsize=16)
         else:
-            ax1.set_title("Perturbed Values (raw)", fontsize=16)
-            ax2.set_title("Baseline Values (raw)", fontsize=16)
-            ax3.set_title("Differences (Perturbed - Baseline) (raw)", fontsize=16)
-            ax4.set_title("Actor vs Critic Difference (raw)", fontsize=16)
+            ax1.set_title("Actor Perturbation Effect (raw)", fontsize=16)
+            ax2.set_title("Critic Perturbation Effect (raw)", fontsize=16)
+            ax3.set_title("Difference in Effects (Actor - Critic) (raw)", fontsize=16)
+            ax4.set_title("Original Actor vs Critic Difference (raw)", fontsize=16)
 
         for ax in [ax1, ax2, ax3, ax4]:
-            ax.set_ylabel("Negative Log Probability", fontsize=14)
+            ax.set_ylabel("Change in Negative Log Probability", fontsize=14)
             ax.legend(fontsize=12)
             ax.grid(True)
 
@@ -555,24 +550,40 @@ def collate_perturbation_results(log_files, output_dir):
         for entry_idx in range(min_length):
             avg_entry = {
                 "Batch Index": results_list[0][entry_idx]["Batch Index"],
-                "Avg Log Probs": {},
-                "Original": {"Actor": 0.0, "Critic": 0.0}
+                "Log Probs": {
+                    "Actor": {
+                        "Original": 0.0,
+                        "Perturbed": {}
+                    },
+                    "Critic": {
+                        "Original": 0.0,
+                        "Perturbed": {}
+                    }
+                }
             }
             
-            # Average the Original values
+            # Average the Original values for both Actor and Critic
             for run in results_list:
-                avg_entry["Original"]["Actor"] += run[entry_idx]["Original"]["Actor"] / num_runs
-                avg_entry["Original"]["Critic"] += run[entry_idx]["Original"]["Critic"] / num_runs
+                avg_entry["Log Probs"]["Actor"]["Original"] += run[entry_idx]["Log Probs"]["Actor"]["Original"] / num_runs
+                avg_entry["Log Probs"]["Critic"]["Original"] += run[entry_idx]["Log Probs"]["Critic"]["Original"] / num_runs
             
             # Get perturbation names from first run
-            pert_names = results_list[0][entry_idx]["Avg Log Probs"].keys()
+            pert_names = results_list[0][entry_idx]["Log Probs"]["Actor"]["Perturbed"].keys()
             
-            # Average the Log Probs for each perturbation level
+            # Initialize perturbation dictionaries
             for pert_name in pert_names:
-                avg_entry["Avg Log Probs"][pert_name] = sum(
-                    run[entry_idx]["Avg Log Probs"][pert_name] 
-                    for run in results_list
-                ) / num_runs
+                avg_entry["Log Probs"]["Actor"]["Perturbed"][pert_name] = 0.0
+                avg_entry["Log Probs"]["Critic"]["Perturbed"][pert_name] = 0.0
+            
+            # Average the perturbed values for both Actor and Critic
+            for run in results_list:
+                for pert_name in pert_names:
+                    avg_entry["Log Probs"]["Actor"]["Perturbed"][pert_name] += (
+                        run[entry_idx]["Log Probs"]["Actor"]["Perturbed"][pert_name] / num_runs
+                    )
+                    avg_entry["Log Probs"]["Critic"]["Perturbed"][pert_name] += (
+                        run[entry_idx]["Log Probs"]["Critic"]["Perturbed"][pert_name] / num_runs
+                    )
             
             averaged_results.append(avg_entry)
         
