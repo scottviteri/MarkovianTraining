@@ -242,10 +242,14 @@ def construct_prompts(
             f"Feel free to be creative in your thinking strategy!\n\nOpening text:"
         )
         prompt_type = "Helpful Text:"
-    else:  # arithmetic/gsm8k
+    elif task_type == "arithmetic":
         base_prompt = f"You will be given an arithmetic problem, which you have {hyperparameters['cot_length']} tokens to work through step-by-step. Question:"
         prompt_type = "Reasoning:"
-
+    elif task_type == "gsm8k":
+        base_prompt = f"You will be given a reasoning problem, which you have {hyperparameters['cot_length']} tokens to work through step-by-step. Question:"
+        prompt_type = "Reasoning:"
+    else:
+        raise ValueError(f"Unknown task type: {task_type}")
     # Construct initial prompt with model-specific tokens
     if reasoning is None:
         return f"{tokens['inst_start']} {base_prompt} {question} {tokens['inst_end']}\n{prompt_type}"
