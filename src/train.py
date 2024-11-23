@@ -311,16 +311,38 @@ def generate_question_answer_batches(
     chunk_size: int = 5000,
 ):
     """Generate batches of Q&A pairs lazily."""
-    total_examples_needed = num_batches * batch_size
-    qa_pairs = []
-    
-    if task_type in ["wiki_compression", "wiki_continuation"]:
+    if task_type == "gsm8k":
+        # Load GSM8K dataset
+        print("Loading GSM8K dataset...")
+        dataset = load_dataset("gsm8k", "main")["train"]
+        dataset_size = len(dataset)
+        
+        # Create indices for all batches
+        all_indices = list(range(dataset_size))
+        random.shuffle(all_indices)
+        
+        # Yield batches
+        for batch_start in range(0, num_batches * batch_size, batch_size):
+            # Wrap around if we reach the end of the dataset
+            batch_indices = [all_indices[i % dataset_size] for i in range(batch_start, batch_start + batch_size)]
+            
+            # Get batch of examples
+            batch = []
+            for idx in batch_indices:
+                example = dataset[idx]
+                question = example["question"]
+                answer = example["answer"]
+                batch.append((question, answer))
+            
+            yield batch
+            
+    elif task_type in ["wiki_compression", "wiki_continuation"]:
         print("Loading Wikipedia dataset...")
         wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
         article_idx = 0
         articles_examined = 0
+        qa_pairs = []
         
-        # Create progress bar
         pbar = tqdm(total=chunk_size, desc="Collecting examples")
         last_qa_pairs_len = 0
 
@@ -395,10 +417,10 @@ def generate_question_answer_batches(
         print(f"\nFinished collecting examples. "
               f"Examined {articles_examined} articles to find {len(qa_pairs)} valid examples.")
 
-    # Yield batches
-    for i in range(0, len(qa_pairs), batch_size):
-        batch = qa_pairs[i:i + batch_size]
-        yield batch
+        # Yield batches from collected pairs
+        for i in range(0, len(qa_pairs), batch_size):
+            batch = qa_pairs[i:i + batch_size]
+            yield batch
 
 
 def get_grad_norm(parameters):
