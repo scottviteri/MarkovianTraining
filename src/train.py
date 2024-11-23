@@ -1319,6 +1319,15 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     """Main training loop"""
     state = TrainingState.initialize(task_type, resume, model_type, hyperparameters)
 
+    # Get dataset size for tracking full passes
+    if task_type == "gsm8k":
+        dataset_size = len(load_dataset("openai/gsm8k", "main")["train"])
+    else:
+        dataset_size = float('inf')  # For generated datasets
+    
+    batches_per_epoch = dataset_size // hyperparameters["batch_size"]
+    completed_epochs = 0
+
     qa_generator = generate_question_answer_batches(
         num_batches=hyperparameters["num_batches"],
         batch_size=hyperparameters["batch_size"],
@@ -1336,20 +1345,27 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             try:
                 qa_batch = next(qa_generator)
             except StopIteration:
-                print("\nReached end of dataset")
-                # Save final checkpoint when reaching end of dataset
-                colored_print(
-                    "Final Checkpoint",
-                    f"Saving model at batch {state.batch_index}",
-                    Colors.BOLD,
-                )
-                save_checkpoint(state)
-                break
+                # Reset generator if we need more batches
+                if batch_index < hyperparameters["num_batches"] - 1:
+                    qa_generator = generate_question_answer_batches(
+                        num_batches=hyperparameters["num_batches"] - batch_index,
+                        batch_size=hyperparameters["batch_size"],
+                        task_type=task_type,
+                        tokenizer=state.tokenizer,
+                        hyperparameters=hyperparameters,
+                    )
+                    qa_batch = next(qa_generator)
+                    completed_epochs += 1
+                    print(f"\nCompleted epoch {completed_epochs}, restarting dataset")
+                else:
+                    print("\nReached end of training")
+                    save_checkpoint(state)
+                    break
 
             batch_data = process_batch(state, qa_batch)
             grad_norm = update_model(state, batch_data)
 
-            # Update history
+            # Update history and log as before
             state.previous_normalized_rewards.extend(
                 batch_data.normalized_rewards.detach().float().cpu().numpy()
             )
@@ -1357,7 +1373,6 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 batch_data.advantages.detach().float().cpu().numpy()
             )
 
-            # Log results
             metrics = LogMetrics.from_batch(
                 batch_data,
                 grad_norm,
@@ -1367,20 +1382,17 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             )
             log_batch_results(state, batch_data, metrics)
 
-            # Save checkpoint periodically
+            # Save checkpoint periodically regardless of epochs
             if batch_index % 1000 == 0 and batch_index > 0:
                 save_checkpoint(state)
 
-        # Save final checkpoint when reaching max batches
-        colored_print(
-            "Final Checkpoint",
-            f"Saving model at batch {state.batch_index}",
-            Colors.BOLD,
-        )
-        save_checkpoint(state)
-
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
+        if completed_epochs > 0:
+            print("Saving checkpoint as at least one epoch was completed")
+            save_checkpoint(state)
+        else:
+            print("Saving checkpoint (no full epochs completed)")
         return
 
 
