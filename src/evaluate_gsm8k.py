@@ -28,10 +28,17 @@ def extract_answer(answer):
 
 
 def load_model(model_path, use_base_model=False, model_type="mistral"):
+    # Create a minimal hyperparameters dict with required values
+    hyperparameters = {
+        "model_type": model_type,
+        "lr": 1e-4,  # Default learning rate, won't be used in evaluation
+        "gradient_accumulation_steps": 1,  # Won't be used in evaluation
+    }
+    
     # Initialize model using the same function as training
-    model, _, tokenizer, device = initialize_model_and_optimizer(
+    model, _, tokenizer, device, _ = initialize_model_and_optimizer(
         model_type=model_type,
-        hyperparameters={"model_type": model_type},
+        hyperparameters=hyperparameters,
         checkpoint_path=None if use_base_model else model_path
     )
     
