@@ -301,21 +301,21 @@ if __name__ == "__main__":
     elif len(args.indices) > 0:
         # Define the list of hosts (keep in sync with download.sh)
         hosts = [
-            "left",
-            "mid",
-            "right",
-            "riight",
-            "left2",
-            "mid2",
-            "right2",
-            "riight2",
-            "left3",
-            "mid3",
-            "right3",
-            "riight3",
-            "left4"
+            "1",
+            "2",
+            "3",
+            "4",
+            "5",
+            "6",
+            "7",
+            "8",
+            "9",
+            "10",
+            "11",
+            "12",
+            "13",
+            "14",
         ]
-
         # Collect files and corresponding host names to plot
         files_to_plot = []
         host_names_to_plot = []
@@ -326,7 +326,7 @@ if __name__ == "__main__":
                 print(f"Invalid index: {i} (must be between 1 and {len(hosts)})")
                 continue
             hostname = hosts[i - 1].split(":")[0]  # Remove port if present
-            log_path = f"./results_{i}_{hostname}/log.jsonl"
+            log_path = f"./results_{hostname}/log.jsonl"
             if os.path.exists(log_path):
                 files_to_plot.append(log_path)
                 host_names_to_plot.append(hosts[i - 1])
