@@ -26,7 +26,7 @@ def moving_average(data, window_size):
     return np.convolve(data, np.ones(window_size), "valid") / window_size
 
 
-def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, plot_summary=False, max_index=None, average=False, show_std=False, show_legend=True, label_size=10):
+def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, plot_summary=False, max_index=None, average=False, show_std=False, show_legend=True, label_size=10, show_title=True):
     """Plot metrics from multiple files on the same plot."""
     # Read first file to get task type and check available metrics
     with open(file_paths[0], "r") as f:
@@ -44,7 +44,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         # For arithmetic tasks or gsm8k
         if task_type in ['arithmetic', 'gsm8k']:
             metrics_to_plot = [
-                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')"),
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
                 ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
             ]
         # For wiki tasks
@@ -52,16 +52,12 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             if has_answer_logprobs:
                 metrics_to_plot = [
                     ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')"),
-                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
+                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)")
                 ]
             else:
                 metrics_to_plot = [
                     ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
                 ]
-        else:
-            metrics_to_plot = [
-                ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
-            ]
     else:
         base_metrics = [
             ("Training Metrics.Loss", "Total Loss", "Training Batch No. []", "Loss"),
@@ -76,7 +72,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         
         if has_answer_logprobs:
             base_metrics.append(
-                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)")
             )
         metrics_to_plot = base_metrics
 
@@ -211,6 +207,10 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             for key, value in extra[0].items():
                 getattr(axs[metric_idx], f"set_{key}")(value)
 
+        # Set title if enabled
+        if show_title:
+            axs[metric_idx].set_title(title, fontsize=label_size)
+
     # Remove any unused subplots
     for i in range(len(metrics_to_plot), len(axs)):
         fig.delaxes(axs[i])
@@ -276,6 +276,11 @@ if __name__ == "__main__":
         type=int,
         default=10,
         help="Font size for all labels (axis labels, tick labels, and legend)",
+    )
+    parser.add_argument(
+        "--no_title",
+        action="store_true",
+        help="Don't show titles on the plots",
     )
     args = parser.parse_args()
 
@@ -347,6 +352,7 @@ if __name__ == "__main__":
             show_std=args.show_std,
             show_legend=not args.no_legend,
             label_size=args.label_size,
+            show_title=not args.no_title,
         )
     else:
         print("No valid files found to plot")
