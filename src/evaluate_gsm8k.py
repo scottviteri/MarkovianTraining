@@ -47,6 +47,7 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
     model.eval()
     model.generation_config.temperature = None
     model.generation_config.top_p = None
+    model.generation_config.pad_token_id = tokenizer.eos_token_id
 
     return model, tokenizer, device
 
