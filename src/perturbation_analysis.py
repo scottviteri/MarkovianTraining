@@ -199,8 +199,16 @@ def run_perturbations(log_file, perturb_type, stride=1):
         # Prepare entry results
         entry_results = {
             "Batch Index": entry.get("Batch Index", None),
-            "Avg Log Probs": {},
-            "Original": {"Actor": None, "Critic": None},
+            "Log Probs": {
+                "Actor": {
+                    "Original": None,
+                    "Perturbed": {}
+                },
+                "Critic": {
+                    "Original": None,
+                    "Perturbed": {}
+                }
+            }
         }
 
         # Calculate Original log probs for both Actor and Critic
@@ -222,27 +230,39 @@ def run_perturbations(log_file, perturb_type, stride=1):
             answers=[answer],
             hyperparameters=hyperparameters,
         )
-        entry_results["Original"]["Actor"] = actor_log_prob[0].item()
-        entry_results["Original"]["Critic"] = critic_log_prob[0].item()
+        entry_results["Log Probs"]["Actor"]["Original"] = actor_log_prob[0].item()
+        entry_results["Log Probs"]["Critic"]["Original"] = critic_log_prob[0].item()
 
-        # Perform perturbations and calculate log probabilities
+        # Perform perturbations and calculate log probabilities for both Actor and Critic
         for pert_name, pert_config in perturbations.items():
             if pert_name == "Original":
-                perturbed_CoT = actor_CoT  # Use actor CoT for perturbations
-            else:
-                perturbed_CoT = perturb_CoT(actor_CoT, pert_config)
+                continue
 
-            avg_log_prob, _ = calculate_answer_log_probs(
+            # Perturb Actor CoT
+            perturbed_actor_CoT = perturb_CoT(actor_CoT, pert_config)
+            actor_perturbed_log_prob, _ = calculate_answer_log_probs(
                 frozen_model=frozen_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=[question],
-                reasoning=[perturbed_CoT],
+                reasoning=[perturbed_actor_CoT],
                 answers=[answer],
                 hyperparameters=hyperparameters,
             )
-            avg_log_prob_value = avg_log_prob[0].item()
-            entry_results["Avg Log Probs"][pert_name] = avg_log_prob_value
+            entry_results["Log Probs"]["Actor"]["Perturbed"][pert_name] = actor_perturbed_log_prob[0].item()
+
+            # Perturb Critic CoT
+            perturbed_critic_CoT = perturb_CoT(critic_CoT, pert_config)
+            critic_perturbed_log_prob, _ = calculate_answer_log_probs(
+                frozen_model=frozen_model,
+                tokenizer=tokenizer,
+                device=device,
+                questions=[question],
+                reasoning=[perturbed_critic_CoT],
+                answers=[answer],
+                hyperparameters=hyperparameters,
+            )
+            entry_results["Log Probs"]["Critic"]["Perturbed"][pert_name] = critic_perturbed_log_prob[0].item()
 
         perturbation_data.append(entry_results)
 
@@ -353,55 +373,73 @@ def plot_perturbation_results(
         plt.figure(figsize=(12, 6))
 
         # Plot differences for each perturbation type
-        for i, (pert, values) in enumerate(results[0]["Avg Log Probs"].items()):
-            if (
-                f"{perturb_type.title().replace('_', '')}0%" == pert
-            ):  # Skip baseline case
-                continue
+        for i, (pert, _) in enumerate(results[0]["Log Probs"]["Actor"]["Perturbed"].items()):
+            # Calculate differences for Actor
+            actor_orig_values = [-entry["Log Probs"]["Actor"]["Original"] for entry in results]
+            actor_pert_values = [-entry["Log Probs"]["Actor"]["Perturbed"][pert] for entry in results]
+            actor_diff_values = [p - o for p, o in zip(actor_pert_values, actor_orig_values)]
 
-            perturbed_values = [-entry["Avg Log Probs"][pert] for entry in results]
-            baseline_key = f"{perturb_type.title().replace('_', '')}0%"
-            baseline_values = [
-                -entry["Avg Log Probs"][baseline_key] for entry in results
-            ]
-            diff_values = [p - o for p, o in zip(perturbed_values, baseline_values)]
+            # Calculate differences for Critic
+            critic_orig_values = [-entry["Log Probs"]["Critic"]["Original"] for entry in results]
+            critic_pert_values = [-entry["Log Probs"]["Critic"]["Perturbed"][pert] for entry in results]
+            critic_diff_values = [p - o for p, o in zip(critic_pert_values, critic_orig_values)]
 
-            if window_size > 1 and len(diff_values) > window_size:
-                diff_smooth = savgol_filter(diff_values, window_size, 3)
+            # Calculate the difference between Actor and Critic perturbation effects
+            effect_difference = [a - c for a, c in zip(actor_diff_values, critic_diff_values)]
+
+            if window_size > 1 and len(effect_difference) > window_size:
+                effect_smooth = savgol_filter(effect_difference, window_size, 3)
                 padding = window_size // 2
-                x_values = range(padding, len(diff_values) - padding)
-                diff_smooth = diff_smooth[padding:-padding]
+                x_values = range(padding, len(effect_difference) - padding)
+                effect_smooth = effect_smooth[padding:-padding]
             else:
-                x_values = range(len(diff_values))
-                diff_smooth = diff_values
+                x_values = range(len(effect_difference))
+                effect_smooth = effect_difference
 
-            plt.plot(x_values, diff_smooth, label=f"{pert}", color=colors[i])
+            plt.plot(x_values, effect_smooth, 
+                    label=f"{pert} (Actor vs Critic diff)", 
+                    color=colors[i])
 
         plt.grid(True)
         plt.legend(fontsize=12)
-        plt.ylabel("Difference in Negative Log Probability", fontsize=14)
+        plt.ylabel("Difference in Perturbation Effect (Actor - Critic)", fontsize=14)
 
         if window_size > 1:
-            plt.title(f"Perturbation Analysis Results (smoothing={window_size})")
+            plt.title(f"Perturbation Analysis: Actor vs Critic Effect (smoothing={window_size})")
         else:
-            plt.title("Perturbation Analysis Results (raw)")
+            plt.title("Perturbation Analysis: Actor vs Critic Effect (raw)")
 
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Plot saved to {output_file}")
     plt.close()
 
 
-def plot_multiple_perturbation_results(
-    log_file, perturb_types, window_size=40, max_index=None
-):
+def plot_multiple_perturbation_results(log_file, perturb_types, window_size=40, max_index=None):
     """
-    Create a figure with subplots for multiple perturbation types.
+    Create a figure with subplots in a 2-column grid for multiple perturbation types.
     """
-    fig, axes = plt.subplots(
-        len(perturb_types), 1, figsize=(12, 6 * len(perturb_types))
-    )
-    if len(perturb_types) == 1:
-        axes = [axes]  # Make axes iterable when there's only one subplot
+    # Calculate number of rows needed for 2 columns
+    n_rows = (len(perturb_types) + 1) // 2  # Ceiling division
+    n_cols = 2
+    
+    # Create figure with shared axes
+    fig = plt.figure(figsize=(20, 6 * n_rows))
+    
+    # Create subplot grid with shared axes
+    axes = []
+    for i in range(len(perturb_types)):
+        row = i // 2
+        col = i % 2
+        if i == 0:
+            ax = plt.subplot2grid((n_rows, n_cols), (row, col))
+            first_ax = ax
+        else:
+            # Share y-axis within row, share x-axis within column
+            share_y = axes[i-2] if i >= 2 else None  # Share y with plot 2 rows up
+            share_x = axes[i-1] if i % 2 == 1 else None  # Share x with previous plot if in right column
+            ax = plt.subplot2grid((n_rows, n_cols), (row, col), 
+                                sharex=share_x, sharey=share_y)
+        axes.append(ax)
 
     colors = list(mcolors.TABLEAU_COLORS.values())
 
@@ -418,12 +456,8 @@ def plot_multiple_perturbation_results(
                     continue
 
                 perturbed_values = [-entry["Avg Log Probs"][pert] for entry in results]
-                baseline_values = [
-                    -entry["Avg Log Probs"][
-                        f"{perturb_type.title().replace('_', '')}0%"
-                    ]
-                    for entry in results
-                ]
+                baseline_values = [-entry["Avg Log Probs"][f"{perturb_type.title().replace('_', '')}0%"]
+                                 for entry in results]
                 diff_values = [p - o for p, o in zip(perturbed_values, baseline_values)]
 
                 if window_size > 1 and len(diff_values) > window_size:
@@ -439,31 +473,29 @@ def plot_multiple_perturbation_results(
 
             ax.grid(True)
             ax.legend(fontsize=10)
-            ax.set_ylabel("Diff in Neg Log Prob", fontsize=12)
+            
+            # Only show y-label for leftmost plots
+            if ax.get_subplotspec().is_first_col():
+                ax.set_ylabel("Diff in Neg Log Prob", fontsize=12)
+            
+            # Only show x-label for bottom plots
+            if ax.get_subplotspec().is_last_row():
+                ax.set_xlabel("Example Index", fontsize=12)
 
             if window_size > 1:
-                ax.set_title(
-                    f"{perturb_type.replace('_', ' ').title()} (smoothing={window_size})"
-                )
+                ax.set_title(f"{perturb_type.replace('_', ' ').title()} (smoothing={window_size})")
             else:
                 ax.set_title(f"{perturb_type.replace('_', ' ').title()} (raw)")
 
         except FileNotFoundError:
-            ax.text(
-                0.5,
-                0.5,
-                f"No saved results found for {perturb_type}",
-                ha="center",
-                va="center",
-            )
+            ax.text(0.5, 0.5, f"No saved results found for {perturb_type}",
+                   ha="center", va="center")
             ax.set_title(f"{perturb_type.replace('_', ' ').title()}")
 
     plt.tight_layout()
 
     # Use a simple, fixed filename for combined plots
-    output_file = os.path.join(
-        os.path.dirname(log_file), "perturbation_results_combined.png"
-    )
+    output_file = os.path.join(os.path.dirname(log_file), "perturbation_results_combined.png")
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Combined plot saved to {output_file}")
     plt.close()
