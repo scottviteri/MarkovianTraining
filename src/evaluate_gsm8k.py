@@ -8,7 +8,7 @@ from tqdm import tqdm
 import os
 from peft import LoraConfig, get_peft_model
 import datetime
-from train import find_latest_result
+from train import find_latest_result, initialize_model_and_optimizer
 import glob
 
 
@@ -28,64 +28,17 @@ def extract_answer(answer):
 
 
 def load_model(model_path, use_base_model=False, model_type="mistral"):
-    # Load the base model and tokenizer based on model type
-    if model_type == "mistral":
-        base_model = "mistralai/Mistral-7B-Instruct-v0.2"
-    elif model_type == "llama":
-        base_model = "meta-llama/Llama-3.1-8B-Instruct"
-    else:
-        raise ValueError("model_type must be either 'mistral' or 'llama'")
-
-    tokenizer = AutoTokenizer.from_pretrained(base_model, padding_side="left")
-    tokenizer.pad_token = tokenizer.eos_token
-
-    # Load the base model
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model,
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
+    # Initialize model using the same function as training
+    model, _, tokenizer, device = initialize_model_and_optimizer(
+        model_type=model_type,
+        hyperparameters={"model_type": model_type},
+        checkpoint_path=None if use_base_model else model_path
     )
-
-    if not use_base_model:
-        # Define and apply the PEFT configuration
-        peft_config = LoraConfig(
-            task_type="CAUSAL_LM",
-            inference_mode=False,
-            r=8,
-            lora_alpha=16,
-            lora_dropout=0.1,
-            target_modules="all-linear",
-        )
-        model = get_peft_model(model, peft_config)
-
-        # Load the trained weights and verify
-        print(f"Loading weights from {model_path}")
-        checkpoint = torch.load(model_path, map_location="cpu")
-        if "model_state_dict" in checkpoint:
-            state_dict = checkpoint["model_state_dict"]
-        else:
-            state_dict = checkpoint
-        model.load_state_dict(state_dict, strict=False)
-        
-        # Verify some weights changed
-        print("Verifying weight loading...")
-        base_model = AutoModelForCausalLM.from_pretrained(
-            base_model,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-        )
-        for (n1, p1), (n2, p2) in zip(model.named_parameters(), base_model.named_parameters()):
-            if p1.requires_grad and torch.any(p1 != p2):
-                print(f"Verified: weights differ in layer {n1}")
-                break
-        else:
-            print("WARNING: No weight differences found between base and loaded model!")
-
+    
+    # Set model to evaluation mode and configure generation parameters
+    model.eval()
     model.generation_config.temperature = None
     model.generation_config.top_p = None
-    model.eval()
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     return model, tokenizer, device
 
