@@ -1337,6 +1337,13 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 qa_batch = next(qa_generator)
             except StopIteration:
                 print("\nReached end of dataset")
+                # Save final checkpoint when reaching end of dataset
+                colored_print(
+                    "Final Checkpoint",
+                    f"Saving model at batch {state.batch_index}",
+                    Colors.BOLD,
+                )
+                save_checkpoint(state)
                 break
 
             batch_data = process_batch(state, qa_batch)
@@ -1364,14 +1371,17 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             if batch_index % 1000 == 0 and batch_index > 0:
                 save_checkpoint(state)
 
-    finally:
-        # Save final checkpoint
+        # Save final checkpoint when reaching max batches
         colored_print(
             "Final Checkpoint",
             f"Saving model at batch {state.batch_index}",
             Colors.BOLD,
         )
         save_checkpoint(state)
+
+    except KeyboardInterrupt:
+        print("\nTraining interrupted by user")
+        return
 
 
 def get_latest_log_file():
