@@ -1392,7 +1392,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             print("Saving checkpoint as at least one epoch was completed")
             save_checkpoint(state)
         else:
-            print("Saving checkpoint (no full epochs completed)")
+            print("Not saving checkpoint because haven't yet completed one full epock")
         return
 
 
