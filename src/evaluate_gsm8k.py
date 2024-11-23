@@ -61,6 +61,8 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
         # Load the trained weights
         model.load_state_dict(torch.load(model_path, map_location="cpu"), strict=False)
 
+    model.generation_config.temperature = None
+    model.generation_config.top_p = None
     model.eval()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
