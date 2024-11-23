@@ -44,23 +44,23 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         # For arithmetic tasks
         if task_type == 'arithmetic':
             metrics_to_plot = [
-                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|BaselineCoT)"),
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')"),
                 ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
             ]
         # For wiki tasks
         elif task_type.startswith('wiki_'):
             if has_answer_logprobs:
                 metrics_to_plot = [
-                    ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|Default CoT)"),
-                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|BaselineCoT)")
+                    ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')"),
+                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
                 ]
             else:
                 metrics_to_plot = [
-                    ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|Default CoT)")
+                    ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
                 ]
         else:
             metrics_to_plot = [
-                ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|Default CoT)")
+                ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
             ]
     else:
         base_metrics = [
@@ -70,13 +70,13 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             ("Training Metrics.KL", "KL Divergence", "Training Batch No. []", "KL"),
             ("Training Metrics.Gradient Norm", "Gradient Norm", "Training Batch No. []", "Norm"),
             ("Training Metrics.Advantage", "Advantage", "Training Batch No. []", "Value"),
-            ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|Default CoT)"),
+            ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')"),
             ("Training Metrics.Active Samples.Fraction", "Fraction of Active Samples", "Training Batch No. []", "Fraction")
         ]
         
         if has_answer_logprobs:
             base_metrics.append(
-                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln P(Answer|CoT) - ln P(Answer|BaselineCoT)")
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
             )
         metrics_to_plot = base_metrics
 
@@ -189,6 +189,24 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         axs[metric_idx].tick_params(axis='both', which='major', labelsize=label_size)
         # Add grid with light gray lines
         axs[metric_idx].grid(True, linestyle='--', alpha=0.3, color='gray')
+        
+        # Add smoothing window info in bottom right corner
+        axs[metric_idx].text(
+            0.95, 0.05,  # Changed y position to 0.02 for bottom right
+            f"Smoothing window = {window_size}",
+            transform=axs[metric_idx].transAxes,
+            horizontalalignment='right',
+            verticalalignment='bottom',  # Changed to 'bottom'
+            fontsize=label_size * 0.8,
+            bbox=dict(
+                facecolor='white',
+                alpha=0.8,
+                edgecolor='black',  # Added black edge
+                pad=3,
+                boxstyle='round,pad=0.5'  # Added rounded corners
+            )
+        )
+        
         if extra:
             for key, value in extra[0].items():
                 getattr(axs[metric_idx], f"set_{key}")(value)
