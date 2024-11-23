@@ -34,14 +34,14 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
         "lr": 1e-4,  # Default learning rate, won't be used in evaluation
         "gradient_accumulation_steps": 1,  # Won't be used in evaluation
     }
-    
+
     # Initialize model using the same function as training
     model, _, tokenizer, device, _ = initialize_model_and_optimizer(
         model_type=model_type,
         hyperparameters=hyperparameters,
-        checkpoint_path=None if use_base_model else model_path
+        checkpoint_path=None if use_base_model else model_path,
     )
-    
+
     # Set model to evaluation mode and configure generation parameters
     model.eval()
     model.generation_config.temperature = None
@@ -172,7 +172,9 @@ def get_model_path(provided_path=None):
     else:
         model_path = find_latest_result(return_log=False)
         if not model_path:
-            raise FileNotFoundError("No model checkpoint found in the results directory.")
+            raise FileNotFoundError(
+                "No model checkpoint found in the results directory."
+            )
         log_path = os.path.join(os.path.dirname(model_path), "log.jsonl")
 
     # Try to get model type from log file
@@ -213,6 +215,7 @@ def main(
         model_path, inferred_model_type = get_model_path(model_path)
         if model_type is None:
             model_type = inferred_model_type
+            print("Inferred Model Type", model_type)
     else:
         model_type = model_type or "mistral"  # Default to mistral for base model
 
@@ -220,7 +223,7 @@ def main(
 
     test_data = load_dataset("openai/gsm8k", "main", split="test")
     test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
-    
+
     # Apply stride to test data
     if stride > 1:
         test_data = test_data[::stride]
