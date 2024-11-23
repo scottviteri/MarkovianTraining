@@ -1343,8 +1343,10 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     # Get dataset size for tracking full passes
     if task_type == "gsm8k":
         dataset_size = len(load_dataset("openai/gsm8k", "main")["train"])
+        checkpoint_frequency = 500
     else:
         dataset_size = float('inf')  # For generated datasets
+        checkpoint_frequency = 1000
     
     batches_per_epoch = dataset_size // hyperparameters["batch_size"]
     completed_epochs = 0
@@ -1404,8 +1406,26 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             log_batch_results(state, batch_data, metrics)
 
             # Save checkpoint periodically regardless of epochs
-            if batch_index % 1000 == 0 and batch_index > 0:
-                save_checkpoint(state)
+            if batch_index % checkpoint_frequency == 0 and batch_index > 0:
+                if task_type == "gsm8k":
+                    # Save with unique timestamp for GSM8K
+                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    checkpoint_path = f"{state.model_save_path}_{batch_index}_{timestamp}.pt"
+                else:
+                    checkpoint_path = f"{state.model_save_path}.pt"
+                
+                colored_print(
+                    "Checkpoint", f"Saving model at batch {state.batch_index}", Colors.BOLD
+                )
+                torch.save(
+                    {
+                        "model_state_dict": state.actor_model.state_dict(),
+                        "optimizer_state_dict": state.actor_optimizer.state_dict(),
+                        "batch_index": state.batch_index,
+                        "hyperparameters": state.hyperparameters,
+                    },
+                    checkpoint_path
+                )
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
