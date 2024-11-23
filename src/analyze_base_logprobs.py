@@ -12,7 +12,18 @@ import os
 def calculate_token_logprobs(model, tokenizer, device, text, max_length):
     """Calculate log probabilities for each token position."""
     
-    # Tokenize the text
+    # Tokenize the text first to check length
+    tokens = tokenizer(
+        text, 
+        return_tensors="pt",
+        truncation=False  # Don't truncate yet, we want to check full length
+    )
+    
+    # Return None if text is too short
+    if tokens.input_ids.size(1) < max_length:
+        return None
+    
+    # Now tokenize with truncation for processing
     tokens = tokenizer(
         text, 
         return_tensors="pt",
@@ -48,7 +59,7 @@ def process_samples(args):
     # Initialize data generator
     print("Initializing data generator...")
     data_gen = generate_question_answer_batches(
-        num_batches=args.num_samples,
+        num_batches=args.num_samples * 2,  # Request more samples to account for filtering
         batch_size=1,
         task_type="wiki_continuation",
         tokenizer=tokenizer,
@@ -56,7 +67,7 @@ def process_samples(args):
             "target_length": args.max_length,
             "question_length": args.max_length
         },
-        chunk_size=args.num_samples
+        chunk_size=args.num_samples * 2
     )
 
     # Initialize arrays to store results
@@ -66,12 +77,19 @@ def process_samples(args):
     # Process samples
     print("Processing samples...")
     all_logprobs = []  # Store individual sample logprobs
-    for i, batch in enumerate(tqdm(data_gen)):
-        if i >= args.num_samples:
+    processed_samples = 0
+    skipped_samples = 0
+    
+    for batch in tqdm(data_gen):
+        if processed_samples >= args.num_samples:
             break
             
         text = batch[0][0]
         token_logprobs = calculate_token_logprobs(model, tokenizer, device, text, args.max_length)
+        
+        if token_logprobs is None:
+            skipped_samples += 1
+            continue
         
         # Store individual sample data
         all_logprobs.append(token_logprobs.cpu().tolist())
@@ -80,11 +98,20 @@ def process_samples(args):
         seq_len = min(len(token_logprobs), args.max_length - 1)
         total_logprobs[:seq_len] += token_logprobs[:seq_len]
         counts[:seq_len] += 1
+        
+        processed_samples += 1
+
+    print(f"Processed {processed_samples} samples, skipped {skipped_samples} samples that were too short")
 
     # Save raw data
     data = {
         "individual_logprobs": all_logprobs,
         "counts": counts.cpu().tolist(),
+        "metadata": {
+            "processed_samples": processed_samples,
+            "skipped_samples": skipped_samples,
+            "max_length": args.max_length
+        }
     }
     
     with open(args.intermediate_file, 'w') as f:
