@@ -158,6 +158,11 @@ def plot_results(args):
     seq_length = len(data["individual_logprobs"][0])  # Length of first sample
     print(f"Actual sequence length in data: {seq_length}")
     
+    # Adjust window size if it's too large
+    window_size = min(args.window_size, seq_length // 2)
+    if window_size != args.window_size:
+        print(f"Adjusting window size from {args.window_size} to {window_size} due to short sequence length")
+    
     # Initialize arrays with correct size
     total_logprobs = np.zeros(seq_length)
     counts = np.array(data["counts"][:seq_length])  # Trim to actual length
@@ -168,16 +173,32 @@ def plot_results(args):
     
     avg_logprobs = total_logprobs / counts
 
-    # Apply smoothing
-    valid_x = np.arange(1, seq_length - args.window_size + 1)
-    smoothed_logprobs = smooth_curve(avg_logprobs, args.window_size)
-
     # Create plot
     plt.figure(figsize=(12, 6))
     
-    # Plot both raw and smoothed data
+    # Plot raw data
     plt.plot(range(1, seq_length + 1), avg_logprobs, 'b-', alpha=0.3, label='Raw')
-    plt.plot(valid_x, smoothed_logprobs, 'r-', label=f'Smoothed (window={args.window_size})')
+    
+    # Only apply smoothing if we have enough data points
+    if seq_length > window_size:
+        # Apply smoothing
+        valid_x = np.arange(1, seq_length - window_size + 2)
+        smoothed_logprobs = smooth_curve(avg_logprobs, window_size)
+        
+        # Plot smoothed data
+        plt.plot(valid_x, smoothed_logprobs, 'r-', 
+                label=f'Smoothed (window={window_size})')
+        
+        # Find crossing point on smoothed curve
+        crossing_point = find_crossing_point(valid_x, smoothed_logprobs)
+        if crossing_point is not None:
+            plt.annotate(f'Smoothed curve crosses -1 at position {int(crossing_point)}',
+                        xy=(crossing_point, -1),
+                        xytext=(crossing_point + 50, -0.8),
+                        arrowprops=dict(facecolor='black', shrink=0.05))
+    else:
+        print(f"Warning: Sequence length ({seq_length}) too short for smoothing with window size {window_size}")
+        smoothed_logprobs = avg_logprobs  # Use raw data for statistics
     
     plt.axhline(y=-1, color='k', linestyle='--', label='y = -1')
     plt.xlabel('Token Position')
@@ -185,26 +206,20 @@ def plot_results(args):
     plt.title('Average Token Log Probabilities in LLaMA Base Model')
     plt.grid(True)
     plt.legend()
-    
-    # Find crossing point on smoothed curve
-    crossing_point = find_crossing_point(valid_x, smoothed_logprobs)
-    if crossing_point is not None:
-        plt.annotate(f'Smoothed curve crosses -1 at position {int(crossing_point)}',
-                    xy=(crossing_point, -1),
-                    xytext=(crossing_point + 50, -0.8),
-                    arrowprops=dict(facecolor='black', shrink=0.05))
 
     plt.savefig(args.output)
     print(f"Plot saved to {args.output}")
 
     # Print statistics
     print("\nStatistics:")
+    print(f"Sequence length: {seq_length} tokens")
     print(f"Average log probability (raw): {np.mean(avg_logprobs):.4f}")
-    print(f"Average log probability (smoothed): {np.mean(smoothed_logprobs):.4f}")
-    if crossing_point is not None:
-        print(f"Smoothed curve crosses -1 at position: {int(crossing_point)}")
-    print(f"Min log probability (smoothed): {np.min(smoothed_logprobs):.4f}")
-    print(f"Max log probability (smoothed): {np.max(smoothed_logprobs):.4f}")
+    if seq_length > window_size:
+        print(f"Average log probability (smoothed): {np.mean(smoothed_logprobs):.4f}")
+        if crossing_point is not None:
+            print(f"Smoothed curve crosses -1 at position: {int(crossing_point)}")
+        print(f"Min log probability (smoothed): {np.min(smoothed_logprobs):.4f}")
+        print(f"Max log probability (smoothed): {np.max(smoothed_logprobs):.4f}")
 
 def main():
     parser = argparse.ArgumentParser()
