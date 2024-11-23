@@ -81,23 +81,12 @@ def process_samples(args):
     skipped_samples = 0
     total_samples_seen = 0
     
-    print("Starting sample processing loop...")
     for batch in tqdm(data_gen, desc="Processing articles"):
         if processed_samples >= args.num_samples:
             break
             
         total_samples_seen += 1
-        if total_samples_seen % 10 == 0:  # Print status every 10 samples
-            print(f"\rSeen: {total_samples_seen}, Processed: {processed_samples}, "
-                  f"Skipped: {skipped_samples}, Target: {args.num_samples}", end="")
-            
         text = batch[0][0]
-        
-        # Print length info for debugging
-        initial_tokens = tokenizer(text, return_tensors="pt", truncation=False)
-        print(f"\nArticle length: {initial_tokens.input_ids.size(1)} tokens "
-              f"(need {args.max_length})")
-        
         token_logprobs = calculate_token_logprobs(model, tokenizer, device, text, args.max_length)
         
         if token_logprobs is None:
