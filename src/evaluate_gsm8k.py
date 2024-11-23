@@ -156,50 +156,49 @@ def batch_process_answers(
     return extracted_generated_answers
 
 
-def get_model_path(provided_path=None):
+def find_checkpoint_with_index(model_dir, target_index=None):
     """
-    Get the model path and model type, either from provided path or latest result.
-
+    Find checkpoint file matching the specified index or most recent if not specified.
+    
     Args:
-        provided_path (str, optional): Explicitly provided model path
-
+        model_dir: Directory to search in
+        target_index: Specific training index to look for (e.g., 1000)
+    
     Returns:
-        tuple: (model_path, model_type)
+        str: Path to matching checkpoint file
     """
+    checkpoint_files = glob.glob(os.path.join(model_dir, "model*.pt"))
+    
+    if not checkpoint_files:
+        raise FileNotFoundError(f"No checkpoint files found in {model_dir}")
+    
+    if target_index is not None:
+        # Find files matching the target index
+        matching_files = [f for f in checkpoint_files if f"_{target_index}_" in f]
+        if matching_files:
+            # Return most recent matching file
+            return max(matching_files, key=os.path.getctime)
+        raise FileNotFoundError(f"No checkpoint found with index {target_index}")
+    
+    # If no specific index requested, return most recent checkpoint
+    return max(checkpoint_files, key=os.path.getctime)
+
+
+def get_model_path(provided_path=None, target_index=None):
+    """Get model path from provided path or find latest with optional index matching."""
     if provided_path:
-        model_path = provided_path
-        log_path = os.path.join(os.path.dirname(model_path), "log.jsonl")
+        model_dir = os.path.dirname(provided_path)
+        model_path = find_checkpoint_with_index(model_dir, target_index)
     else:
-        model_path = find_latest_result(return_log=False)
-        if not model_path:
-            raise FileNotFoundError(
-                "No model checkpoint found in the results directory."
-            )
-        log_path = os.path.join(os.path.dirname(model_path), "log.jsonl")
-
-    # Try to get model type from log file
-    model_type = None
-    if os.path.exists(log_path):
-        try:
-            with open(log_path, "r") as f:
-                first_line = f.readline().strip()
-                if first_line:
-                    entry = json.loads(first_line)
-                    model_type = entry.get("model_type")
-        except (json.JSONDecodeError, KeyError):
-            pass
-
-    # Fallback to path inference if log file reading fails
-    if not model_type:
-        model_type = "mistral" if "mistral" in model_path.lower() else "llama"
-        print(
-            f"Warning: Could not read model_type from log file. Inferring type as '{model_type}' from path."
-        )
-
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model file not found at {model_path}")
-
-    return model_path, model_type
+        # Find most recent results directory
+        results = glob.glob("results/gsm8k/*")
+        if not results:
+            raise FileNotFoundError("No GSM8K results directory found")
+        latest_dir = max(results, key=os.path.getctime)
+        model_path = find_checkpoint_with_index(latest_dir, target_index)
+    
+    print(f"Using checkpoint: {model_path}")
+    return model_path
 
 
 def main(
@@ -209,10 +208,11 @@ def main(
     use_base_model=False,
     model_type=None,
     stride=1,
+    training_index=None,
 ):
     # Get model path and type if not explicitly provided
     if not use_base_model:
-        model_path, inferred_model_type = get_model_path(model_path)
+        model_path, inferred_model_type = get_model_path(model_path, training_index)
         if model_type is None:
             model_type = inferred_model_type
             print("Inferred Model Type", model_type)
@@ -295,6 +295,11 @@ if __name__ == "__main__":
         default=1,
         help="Evaluate every nth example in the test set",
     )
+    parser.add_argument(
+        "--training_index",
+        type=int,
+        help="Specific training index to evaluate (e.g., 1000)",
+    )
     args = parser.parse_args()
 
     try:
@@ -305,6 +310,7 @@ if __name__ == "__main__":
             args.use_base_model,
             args.model_type,
             args.stride,
+            args.training_index,
         )
     except FileNotFoundError as e:
         print(f"Error: {e}")
