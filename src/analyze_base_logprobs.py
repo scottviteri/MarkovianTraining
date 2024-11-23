@@ -61,9 +61,10 @@ def main():
         task_type="wiki_continuation",
         tokenizer=tokenizer,
         hyperparameters={
-            "target_length": args.max_length,  # Changed from question_length to target_length
-            "question_length": args.max_length  # Keep this if needed
-        }
+            "target_length": args.max_length,
+            "question_length": args.max_length
+        },
+        chunk_size=args.num_samples  # Set chunk_size to match num_samples
     )
 
     # Initialize arrays to store results
