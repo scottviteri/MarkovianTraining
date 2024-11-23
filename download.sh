@@ -39,45 +39,56 @@ fi
 
 # Handle copy operation if requested
 if [ ! -z "$COPY_FROM" ] && [ ! -z "$COPY_TO" ]; then
-    if [ "$COPY_FROM" -lt 1 ] || [ "$COPY_FROM" -gt ${#hosts[@]} ] || [ "$COPY_TO" -lt 1 ] || [ "$COPY_TO" -gt ${#hosts[@]} ]; then
-        echo "Invalid indices for copy operation (must be between 1 and ${#hosts[@]})"
+    # Get the last element as destination
+    dst_idx=${COPY_TO}
+    
+    # Validate destination index
+    if [ "$dst_idx" -lt 1 ] || [ "$dst_idx" -gt ${#hosts[@]} ]; then
+        echo "Invalid destination index: $dst_idx (must be between 1 and ${#hosts[@]})"
         exit 1
     fi
     
-    # Get source and destination hosts
-    src_host="${hosts[$((COPY_FROM-1))]}"
-    dst_host="${hosts[$((COPY_TO-1))]}"
-    
-    # Split hosts and ports
-    IFS=':' read -r src_hostname src_port <<< "$src_host"
+    # Get destination host
+    dst_host="${hosts[$((dst_idx-1))]}"
     IFS=':' read -r dst_hostname dst_port <<< "$dst_host"
-    
-    # Set port options
-    src_port_option=""
     dst_port_option=""
-    if [ ! -z "$src_port" ]; then
-        src_port_option="-P $src_port"
-    fi
     if [ ! -z "$dst_port" ]; then
         dst_port_option="-P $dst_port"
     fi
     
-    # Get the source directory and log file
-    src_dir="results_${COPY_FROM}_${src_hostname}"
-    src_log="${src_dir}/log.jsonl"
-    
-    if [ ! -f "$src_log" ]; then
-        echo "Source log file not found: $src_log"
-        exit 1
-    fi
-    
-    # Create the same directory structure on target machine
-    echo "Creating directory on target machine..."
-    ssh $dst_port_option "$dst_hostname" "cd /root/MarkovianTraining && mkdir -p $src_dir"
-    
-    # Copy to destination with same directory structure
-    echo "Copying log from host $src_hostname to $dst_hostname..."
-    scp $dst_port_option "$src_log" "$dst_hostname:/root/MarkovianTraining/${src_dir}/log.jsonl"
+    # Process each source index
+    for src_idx in ${COPY_FROM}; do
+        # Validate source index
+        if [ "$src_idx" -lt 1 ] || [ "$src_idx" -gt ${#hosts[@]} ]; then
+            echo "Invalid source index: $src_idx (must be between 1 and ${#hosts[@]})"
+            continue
+        fi
+        
+        # Get source host
+        src_host="${hosts[$((src_idx-1))]}"
+        IFS=':' read -r src_hostname src_port <<< "$src_host"
+        src_port_option=""
+        if [ ! -z "$src_port" ]; then
+            src_port_option="-P $src_port"
+        fi
+        
+        # Get the source directory and log file
+        src_dir="results_${src_idx}_${src_hostname}"
+        src_log="${src_dir}/log.jsonl"
+        
+        if [ ! -f "$src_log" ]; then
+            echo "Source log file not found: $src_log"
+            continue
+        fi
+        
+        # Create the same directory structure on target machine
+        echo "Creating directory on target machine for source $src_idx..."
+        ssh $dst_port_option "$dst_hostname" "cd /root/MarkovianTraining && mkdir -p $src_dir"
+        
+        # Copy to destination with same directory structure
+        echo "Copying log from host $src_hostname to $dst_hostname..."
+        scp $dst_port_option "$src_log" "$dst_hostname:/root/MarkovianTraining/${src_dir}/log.jsonl"
+    done
     exit 0
 fi
 
