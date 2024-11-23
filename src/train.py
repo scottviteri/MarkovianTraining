@@ -1227,7 +1227,7 @@ def save_checkpoint(state: TrainingState):
             "batch_index": state.batch_index,
             "hyperparameters": state.hyperparameters,
         },
-        state.model_save_path,
+        state.model_save_path + ".pt"
     )
 
 

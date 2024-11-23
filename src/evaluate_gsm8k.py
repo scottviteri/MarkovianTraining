@@ -9,6 +9,7 @@ import os
 from peft import LoraConfig, get_peft_model
 import datetime
 from train import find_latest_result
+import glob
 
 
 def extract_answer(answer):
@@ -185,16 +186,12 @@ def get_model_path(provided_path=None):
     """
     if provided_path:
         model_path = provided_path
-        # For provided paths, still try to find log file in same directory
         log_path = os.path.join(os.path.dirname(model_path), "log.jsonl")
     else:
-        result_dir = find_latest_result()
-        if not result_dir:
-            raise FileNotFoundError(
-                "No model checkpoint found in the results directory."
-            )
-        model_path = os.path.join(os.path.dirname(result_dir), "model")
-        log_path = os.path.join(os.path.dirname(result_dir), "log.jsonl")
+        model_path = find_latest_result(return_log=False)
+        if not model_path:
+            raise FileNotFoundError("No model checkpoint found in the results directory.")
+        log_path = os.path.join(os.path.dirname(model_path), "log.jsonl")
 
     # Try to get model type from log file
     model_type = None
