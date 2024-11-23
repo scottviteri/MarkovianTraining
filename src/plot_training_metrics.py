@@ -41,8 +41,8 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         output_file = f"combined_metrics_{task_type}.png"
     
     if plot_summary:
-        # For arithmetic tasks
-        if task_type == 'arithmetic':
+        # For arithmetic tasks or gsm8k
+        if task_type in ['arithmetic', 'gsm8k']:
             metrics_to_plot = [
                 ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')"),
                 ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
