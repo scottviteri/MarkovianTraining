@@ -9,26 +9,27 @@ from tqdm import tqdm
 import json
 import os
 
-def calculate_token_logprobs(model, tokenizer, device, text, max_length):
-    """Calculate log probabilities for each token position."""
+def calculate_token_logprobs_with_context(model, tokenizer, device, text, context_start, q_end=200, a_end=300):
+    """Calculate log probabilities for answer tokens given varying context."""
     
-    # Tokenize the text first to check length
+    # Tokenize the text
     tokens = tokenizer(
         text, 
         return_tensors="pt",
-        truncation=False  # Don't truncate yet, we want to check full length
+        truncation=False
     )
     
-    # Return None if text is too short
-    if tokens.input_ids.size(1) < max_length:
+    # Return None if text isn't long enough for full answer
+    if tokens.input_ids.size(1) < a_end:
         return None
     
-    # Now tokenize with truncation for processing
+    # Truncate to include only context + answer
     tokens = tokenizer(
         text, 
         return_tensors="pt",
         truncation=True,
-        max_length=max_length
+        max_length=a_end - context_start,
+        padding=False
     ).to(device)
     
     # Get model outputs
@@ -44,11 +45,15 @@ def calculate_token_logprobs(model, tokenizer, device, text, max_length):
         2, tokens.input_ids[:, 1:].unsqueeze(-1)
     ).squeeze(-1)
     
-    return token_log_probs[0]  # Remove batch dimension
+    # Calculate average log prob for answer section only
+    answer_start_idx = q_end - context_start - 1  # -1 because we lost one position in the gather
+    answer_end_idx = a_end - context_start - 1
+    answer_logprobs = token_log_probs[0, answer_start_idx:answer_end_idx]
+    
+    return torch.mean(answer_logprobs).item()
 
 def process_samples(args):
     """Process samples and save raw data to file."""
-    # Load model
     print("Loading model...")
     model, tokenizer, device = load_model(
         model_path=None,
@@ -59,7 +64,7 @@ def process_samples(args):
     # Initialize data generator
     print("Initializing data generator...")
     data_gen = generate_question_answer_batches(
-        num_batches=args.num_samples * 2,  # Request more samples to account for filtering
+        num_batches=args.num_samples,
         batch_size=1,
         task_type="wiki_continuation",
         tokenizer=tokenizer,
@@ -67,57 +72,45 @@ def process_samples(args):
             "target_length": args.max_length,
             "question_length": args.max_length
         },
-        chunk_size=args.num_samples * 2
+        chunk_size=args.num_samples
     )
 
+    # Define context lengths to try
+    context_lengths = range(10, 201, 10)  # Try contexts from 10 to 200 tokens
+    
     # Initialize arrays to store results
-    total_logprobs = torch.zeros(args.max_length - 1).to(device)
-    counts = torch.zeros(args.max_length - 1).to(device)
+    total_logprobs = {length: 0.0 for length in context_lengths}
+    counts = {length: 0 for length in context_lengths}
 
     # Process samples
     print("Processing samples...")
-    all_logprobs = []  # Store individual sample logprobs
-    processed_samples = 0
-    skipped_samples = 0
-    total_samples_seen = 0
-    
     for batch in tqdm(data_gen, desc="Processing articles"):
-        if processed_samples >= args.num_samples:
-            break
-            
-        total_samples_seen += 1
         text = batch[0][0]
-        token_logprobs = calculate_token_logprobs(model, tokenizer, device, text, args.max_length)
         
-        if token_logprobs is None:
-            skipped_samples += 1
-            continue
-        
-        # Store individual sample data
-        all_logprobs.append(token_logprobs.cpu().tolist())
-        
-        # Add to running totals
-        seq_len = min(len(token_logprobs), args.max_length - 1)
-        total_logprobs[:seq_len] += token_logprobs[:seq_len]
-        counts[:seq_len] += 1
-        
-        processed_samples += 1
+        # Try each context length
+        for context_length in context_lengths:
+            context_start = 200 - context_length
+            avg_logprob = calculate_token_logprobs_with_context(
+                model, tokenizer, device, text, 
+                context_start=context_start
+            )
+            
+            if avg_logprob is not None:
+                total_logprobs[context_length] += avg_logprob
+                counts[context_length] += 1
 
-    print(f"\nFinal stats:")
-    print(f"Total samples seen: {total_samples_seen}")
-    print(f"Processed {processed_samples} samples")
-    print(f"Skipped {skipped_samples} samples that were too short")
+    # Calculate averages
+    avg_logprobs = {
+        length: total_logprobs[length] / counts[length] 
+        for length in context_lengths 
+        if counts[length] > 0
+    }
 
-    # Save raw data
+    # Save data
     data = {
-        "individual_logprobs": all_logprobs,
-        "counts": counts.cpu().tolist(),
-        "metadata": {
-            "processed_samples": processed_samples,
-            "skipped_samples": skipped_samples,
-            "total_samples_seen": total_samples_seen,
-            "max_length": args.max_length
-        }
+        "context_lengths": list(context_lengths),
+        "avg_logprobs": list(avg_logprobs.values()),
+        "counts": list(counts.values())
     }
     
     with open(args.intermediate_file, 'w') as f:
@@ -143,72 +136,38 @@ def plot_results(args):
     with open(args.intermediate_file, 'r') as f:
         data = json.load(f)
     
-    # Get actual sequence length from the data
-    seq_length = len(data["individual_logprobs"][0])  # Length of first sample
-    print(f"Actual sequence length in data: {seq_length}")
-    
-    # Adjust window size if it's too large
-    window_size = min(args.window_size, seq_length // 2)
-    if window_size != args.window_size:
-        print(f"Adjusting window size from {args.window_size} to {window_size} due to short sequence length")
-    
-    # Initialize arrays with correct size
-    total_logprobs = np.zeros(seq_length)
-    counts = np.array(data["counts"][:seq_length])  # Trim to actual length
-    
-    # Sum up logprobs
-    for sample_logprobs in data["individual_logprobs"]:
-        total_logprobs += sample_logprobs[:seq_length]
-    
-    avg_logprobs = total_logprobs / counts
+    context_lengths = np.array(data["context_lengths"])
+    avg_logprobs = np.array(data["avg_logprobs"])
 
     # Create plot
     plt.figure(figsize=(12, 6))
     
     # Plot raw data
-    plt.plot(range(1, seq_length + 1), avg_logprobs, 'b-', alpha=0.3, label='Raw')
+    plt.plot(context_lengths, avg_logprobs, 'b-', alpha=0.3, label='Raw')
     
-    # Only apply smoothing if we have enough data points
-    if seq_length > window_size:
-        # Apply smoothing
-        valid_x = np.arange(1, seq_length - window_size + 2)
-        smoothed_logprobs = smooth_curve(avg_logprobs, window_size)
+    # Apply smoothing if enough data points
+    if len(context_lengths) > args.window_size:
+        smoothed = smooth_curve(avg_logprobs, args.window_size)
+        valid_x = context_lengths[args.window_size-1:]
+        plt.plot(valid_x, smoothed, 'r-', label=f'Smoothed (window={args.window_size})')
         
-        # Plot smoothed data
-        plt.plot(valid_x, smoothed_logprobs, 'r-', 
-                label=f'Smoothed (window={window_size})')
-        
-        # Find crossing point on smoothed curve
-        crossing_point = find_crossing_point(valid_x, smoothed_logprobs)
+        # Find crossing point
+        crossing_point = find_crossing_point(valid_x, smoothed)
         if crossing_point is not None:
-            plt.annotate(f'Smoothed curve crosses -1 at position {int(crossing_point)}',
+            plt.annotate(f'Crosses -1 at context length {int(crossing_point)}',
                         xy=(crossing_point, -1),
-                        xytext=(crossing_point + 50, -0.8),
+                        xytext=(crossing_point + 20, -0.8),
                         arrowprops=dict(facecolor='black', shrink=0.05))
-    else:
-        print(f"Warning: Sequence length ({seq_length}) too short for smoothing with window size {window_size}")
-        smoothed_logprobs = avg_logprobs  # Use raw data for statistics
     
     plt.axhline(y=-1, color='k', linestyle='--', label='y = -1')
-    plt.xlabel('Token Position')
-    plt.ylabel('Average Log Probability')
-    plt.title('Average Token Log Probabilities in LLaMA Base Model')
+    plt.xlabel('Context Length (tokens)')
+    plt.ylabel('Average Log Probability of Target Section')
+    plt.title('Target Section (200-300) Log Probability vs Context Length')
     plt.grid(True)
     plt.legend()
 
     plt.savefig(args.output)
     print(f"Plot saved to {args.output}")
-
-    # Print statistics
-    print("\nStatistics:")
-    print(f"Sequence length: {seq_length} tokens")
-    print(f"Average log probability (raw): {np.mean(avg_logprobs):.4f}")
-    if seq_length > window_size:
-        print(f"Average log probability (smoothed): {np.mean(smoothed_logprobs):.4f}")
-        if crossing_point is not None:
-            print(f"Smoothed curve crosses -1 at position: {int(crossing_point)}")
-        print(f"Min log probability (smoothed): {np.min(smoothed_logprobs):.4f}")
-        print(f"Max log probability (smoothed): {np.max(smoothed_logprobs):.4f}")
 
 def main():
     parser = argparse.ArgumentParser()
