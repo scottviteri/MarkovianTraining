@@ -168,13 +168,7 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
 
 def plot_cross_model_comparison(results, log_file, window_size=40, max_index=None):
     """
-    Plot Original Model's Normalized Reward vs Cross-Model Actor-Critic Difference.
-    
-    Args:
-        results: Evaluation results
-        log_file: Original log file path
-        window_size: Smoothing window size
-        max_index: If provided, only plot up to this index in the results array
+    Plot Cross-Model Actor-Critic Difference alongside Original Normalized Reward.
     """
     all_data = results["evaluations"]
     
@@ -185,42 +179,60 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
     
     min_length = min(len(data) for data in all_data)
 
-    # Initialize averaged data
-    averaged_data = {"Actor-Critic Difference": [], "Original Reward": []}
-
-    # Calculate averages across all datasets
+    # Calculate Actor-Critic differences (cross-model normalized reward)
+    cross_model_rewards = []
+    original_rewards = []
     for i in range(min_length):
-        # Calculate Actor-Critic differences
-        differences = [
+        # Cross-model rewards
+        diffs = [
             data[i]["Avg Log Probs"]["Actor"] - data[i]["Avg Log Probs"]["Critic"]
             for data in all_data
         ]
-        original_rewards = [data[i]["Original Reward"] for data in all_data]
-
-        averaged_data["Actor-Critic Difference"].append(np.mean(differences))
-        averaged_data["Original Reward"].append(np.mean(original_rewards))
+        cross_model_rewards.append(np.mean(diffs))
+        
+        # Original rewards
+        rewards = [data[i]["Original Reward"] for data in all_data]
+        original_rewards.append(np.mean(rewards))
 
     plt.figure(figsize=(12, 6))
-    colors = ["#e41a1c", "#4daf4a"]  # Red for Difference, Green for Original
-
-    for i, (metric, values) in enumerate(averaged_data.items()):
-        if len(values) > window_size:
-            smoothed_values = savgol_filter(values, window_size, 3)
-            half_window = window_size // 2
-            x_values = range(half_window, len(smoothed_values) - half_window)
-            y_values = smoothed_values[half_window:-half_window]
-            plt.plot(x_values, y_values, label=metric, color=colors[i], linewidth=2)
-        else:
-            plt.plot(values, label=metric, color=colors[i], linewidth=2)
+    
+    # Plot both metrics with smoothing if enough data points
+    if len(cross_model_rewards) > window_size:
+        # Cross-model rewards
+        smoothed_cross = savgol_filter(cross_model_rewards, window_size, 3)
+        half_window = window_size // 2
+        x_values = range(half_window, len(smoothed_cross) - half_window)
+        y_values = smoothed_cross[half_window:-half_window]
+        plt.plot(x_values, y_values, 
+                label=f"{results['evaluator_model'].title()} Normalized Reward", 
+                color="#e41a1c", 
+                linewidth=2)
+        
+        # Original rewards
+        smoothed_orig = savgol_filter(original_rewards, window_size, 3)
+        y_values_orig = smoothed_orig[half_window:-half_window]
+        plt.plot(x_values, y_values_orig, 
+                label=f"{results['generator_model'].title()} Normalized Reward", 
+                color="#377eb8", 
+                linewidth=2)
+    else:
+        plt.plot(cross_model_rewards, 
+                label=f"{results['evaluator_model'].title()} Normalized Reward", 
+                color="#e41a1c", 
+                linewidth=2)
+        plt.plot(original_rewards, 
+                label=f"{results['generator_model'].title()} Normalized Reward", 
+                color="#377eb8", 
+                linewidth=2)
 
     plt.xlabel("Sample", fontsize=16)
-    plt.ylabel("Score", fontsize=16)
+    plt.ylabel("Normalized Reward", fontsize=16)
     plt.title(
         f"{results['generator_model'].title()} Generated, {results['evaluator_model'].title()} Evaluated\n"
-        f"Original Reward vs Actor-Critic Difference (Smoothing: {window_size})",
+        f"Normalized Rewards Comparison (Smoothing: {window_size})",
         fontsize=16,
     )
-    plt.legend(fontsize=12, loc="lower right")
+    plt.legend(fontsize=12, loc="best")
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.tick_params(axis="both", which="major", labelsize=14)
     plt.tight_layout()
@@ -334,15 +346,18 @@ def collate_cross_model_results(log_files, output_dir):
                 "Actor": 0.0,
                 "Critic": 0.0
             },
+            "Original Reward": 0.0,  # Initialize Original Reward
             "Example": accumulated_results['results'][0][entry_idx]["Example"],
             "Metrics": accumulated_results['results'][0][entry_idx].get("Metrics", {})
         }
         
-        # Average the log probabilities
+        # Average the log probabilities and original reward
         num_runs = accumulated_results['count']
         for run in accumulated_results['results']:
             avg_entry["Avg Log Probs"]["Actor"] += run[entry_idx]["Avg Log Probs"]["Actor"] / num_runs
             avg_entry["Avg Log Probs"]["Critic"] += run[entry_idx]["Avg Log Probs"]["Critic"] / num_runs
+            if "Original Reward" in run[entry_idx]:
+                avg_entry["Original Reward"] += run[entry_idx]["Original Reward"] / num_runs
         
         averaged_results.append(avg_entry)
     
