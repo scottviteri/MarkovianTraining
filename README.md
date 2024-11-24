@@ -75,20 +75,41 @@ python src/train.py [options]
 
 ### 2. Model Evaluation Scripts
 
-#### GSM8K Evaluation (`src/evaluate_gsm8k.py`)
-Evaluates model performance on the GSM8K test set with detailed metrics and analysis.
+#### GSM8K Training and Evaluation
+
+### Training
+To train a model on the GSM8K dataset:
 
 ```bash
-# Basic evaluation:
-python src/evaluate_gsm8k.py --model_path <path> --num_samples <n> --batch_size <b>
-
-# Additional options:
---use_base_model        # Evaluate base model without loading weights
---model_type mistral    # Use Mistral instead of default Llama
---stride <n>           # Evaluate every nth example
---training_index <n>   # Evaluate specific training checkpoint
---all_checkpoints      # Evaluate all checkpoints in directory
+python src/train.py --task_type gsm8k --model_type mistral [options]
 ```
+
+Key training options:
+```bash
+--use_ppo             # Enable PPO training
+--use_ei <float>      # Use Expert Iteration with specified std deviations
+--cot_length <int>    # Length of chain-of-thought reasoning
+--batch_size <int>    # Training batch size
+--num_batches <int>   # Total number of training batches
+```
+
+For GSM8K specifically:
+- Checkpoints are saved every 500 batches with unique timestamps
+- Training automatically tracks dataset epochs
+- Progress can be monitored through the training logs
+
+### Evaluation
+To evaluate a trained model:
+
+```bash
+python src/evaluate_gsm8k.py --model_path <path> --num_samples <n>
+```
+
+The evaluation script will:
+1. Load the specified model checkpoint
+2. Run inference on the GSM8K test set
+3. Calculate accuracy metrics
+4. Save detailed results to `results/evaluations/`
 
 #### Cross-Model Evaluation (`src/evaluate_cross_model.py`)
 Evaluates and compares performance across different model configurations.
@@ -183,10 +204,10 @@ Please ensure all dependencies are installed before running the scripts.
 
 ## GSM8K Results
 
-To generate the GSM8K Performance plot from the appendix, use the following command:
+To generate the GSM8K Performance plot, use the following command:
 
 ```
-python src/AnalyzeResults/analyze_pg_norm.py --gsm8k_plot --window_size=100 --log_file results/Official/GSM8K_training.log
+python src/evaluate_gsm8k.py --model_path <path> --num_samples <n>
 ```
 
 This command will create a plot showing two metrics over the course of training:
