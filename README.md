@@ -67,81 +67,86 @@ python src/policy_gradient_normalized.py --task_type <task> --use_ppo
 python src/policy_gradient_normalized.py --task_type <task> --use_ei
 ```
 
-#### GSM8K Evaluation (`src/AnalyzeResults/eval_gsm8k.py`)
+### 2. Model Evaluation Scripts
 
-Evaluates the trained model on the GSM8K test set.
+#### GSM8K Evaluation (`src/evaluate_gsm8k.py`)
+Evaluates model performance on the GSM8K test set with detailed metrics and analysis.
 
-Usage:
 ```bash
-# Using Llama (default):
-python src/AnalyzeResults/eval_gsm8k.py --model_path <path_to_model> --num_samples <number_of_samples> --batch_size <batch_size>
+# Basic evaluation:
+python src/evaluate_gsm8k.py --model_path <path> --num_samples <n> --batch_size <b>
 
-# Using Mistral:
-python src/AnalyzeResults/eval_gsm8k.py --model_path <path_to_model> --num_samples <number_of_samples> --batch_size <batch_size> --model_type mistral
+# Additional options:
+--use_base_model        # Evaluate base model without loading weights
+--model_type mistral    # Use Mistral instead of default Llama
+--stride <n>           # Evaluate every nth example
+--training_index <n>   # Evaluate specific training checkpoint
+--all_checkpoints      # Evaluate all checkpoints in directory
 ```
 
-### 2. CoT Answer Accuracy Evaluation (`src/eval_cot_answer_accuracy.py`)
+#### Cross-Model Evaluation (`src/evaluate_cross_model.py`)
+Evaluates and compares performance across different model configurations.
 
-Evaluates and visualizes the performance of trained models (Figure 2).
+```bash
+# Basic evaluation:
+python src/evaluate_cross_model.py --log_file <path>
 
-Usage:
-```
-python src/eval_cot_answer_accuracy.py --use-max
-```
-
-### 3. Chain-of-Thought Perturbation Analysis (`src/perturb_CoT.py`)
-
-Analyzes the robustness of trained models by applying perturbations to the chain-of-thought reasoning (Figure 3).
-
-Usage:
-```
-# Generate perturbation and Llama comparison data:
-python src/perturb_CoT.py --log_file PPO1.log PPO2.log PPO3.log PPO4.log --results_subfolder Official
-
-# Plot perturbation results:
-python src/perturb_CoT.py --log_file PPO1.log PPO2.log PPO3.log PPO4.log --results_subfolder Official --plot
-
-# Plot Llama comparison:
-python src/perturb_CoT.py --log_file PPO1.log PPO2.log PPO3.log PPO4.log --results_subfolder Official --plot_llama
+# Additional options:
+--window_size <n>      # Smoothing window size (default: 40)
+--stride <n>           # Process every nth entry
+--debug_freq <n>       # Print debug info frequency
+--process_only         # Only process data without plotting
+--plot_only           # Only generate plots from saved results
+--max_index <n>       # Maximum index to process
+--use_same_model      # Use same model type as generator
 ```
 
-## Results
+#### Training Metrics Visualization (`src/plot_training_metrics.py`)
+Generates detailed plots of training metrics and performance.
 
-All results, including plots and log files, are stored in the `results/Official` directory.
+```bash
+# Basic usage:
+python src/plot_training_metrics.py [indices]
 
-## AnalyzeResults Directory
-
-The `src/AnalyzeResults` directory gets populated with detailed log files when running `src/policy_gradient_normalized.py`. Here's how it works:
-
-1. Log File Creation: At the start of training, a new log file is created in `src/AnalyzeResults` with the format:
-   ```
-   PolicyGradientNormalized_{dataset_type}_{timestamp}.log
-   ```
-   Where `{dataset_type}` is either "GSM8K" or "Arithmetic".
-
-2. Logging During Training: For each batch, the script logs detailed information including:
-   - Batch index
-   - Question and generated reasoning
-   - Answer and its log probability
-   - Rewards and advantages
-   - Various loss metrics
-   - Training statistics (e.g., gradient norm)
-
-3. Continuous Logging: The script appends to this log file throughout the entire training process.
-
-4. Resuming Training: If training is resumed, the script continues appending to the most recent log file.
-
-These log files provide a comprehensive record of the training process, allowing for detailed analysis, plotting of learning curves, and debugging.
-
-### Analyzing Results
-
-To plot the loss curve from an existing logged run:
-
-```
-python src/AnalyzeResults/analyze_pg_norm.py
+# Additional options:
+--window_size <n>      # Moving average window size
+--output_file <path>   # Save plot to file
+--plot_summary        # Plot summary metrics
+--files <paths>       # Direct paths to log files
+--max_index <n>       # Maximum index to plot
+--average            # Average values across files
+--show_std           # Show standard deviation bands
+--no_legend          # Hide plot legends
+--label-size <n>     # Font size for labels
+--no_title          # Hide plot titles
 ```
 
-This script reads the log files in `src/AnalyzeResults`, processes the data, and generates a loss curve plot. The resulting plot is saved as `src/AnalyzeResults/pg_norm_plot.png`.
+### 3. Results Analysis
+
+All results are stored in the following structure:
+- `results/<task_type>/<timestamp>/` - Contains training outputs
+- `results/evaluations/` - Contains evaluation results
+- `results/Official/` - Contains final results and figures
+
+#### Log File Format
+Training logs (`log.jsonl`) contain:
+1. First line: Hyperparameters configuration
+2. Subsequent lines: Per-batch metrics including:
+   - Loss values (total, policy gradient)
+   - Log probabilities (actor, critic)
+   - KL divergence
+   - Gradient norms
+   - Advantages
+   - Normalized rewards
+   - Active samples fraction
+   - Answer log probabilities (when available)
+
+#### Evaluation Results
+Evaluation results are saved as JSON files containing:
+- Accuracy metrics
+- Detailed per-example results
+- Model configuration
+- Test parameters
 
 ## Dependencies
 
@@ -160,10 +165,11 @@ Please ensure all dependencies are installed before running the scripts.
 
 ## Notes
 
-- The `--use-max` flag in `eval_cot_answer_accuracy.py` is required to reproduce the results as presented.
-- When using `--model_type llama`, ensure you have appropriate access to the Llama model weights.
-- Adjust batch sizes and other parameters as needed based on your hardware capabilities.
-- Some scripts may require significant computational resources, especially when working with large language models.
+- The evaluation scripts support both Llama and Mistral models
+- Cross-model evaluation allows comparison of different model configurations
+- Training metrics can be visualized with various smoothing and averaging options
+- Results are automatically versioned by timestamp
+- Checkpoints can be evaluated individually or in batch
 
 ## GSM8K Results
 
