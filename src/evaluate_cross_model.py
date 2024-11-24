@@ -87,14 +87,25 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
                 model_type=results["evaluator_model"]
             )
 
-            # Filter entries by batch index if max_index is provided
-            entries = [entry for entry in lines[1:] if "Example" in entry]
+            # Filter entries and validate required fields
+            entries = []
+            for entry in lines[1:]:
+                if ("Example" in entry and 
+                    "Training Metrics" in entry and 
+                    "Normalized Reward" in entry["Training Metrics"] and
+                    "Batch Index" in entry):
+                    entries.append(entry)
+
+            print(f"Found {len(entries)} valid entries")
+
             if max_index is not None:
-                entries = [entry for entry in entries if entry.get("Batch Index", float('inf')) <= max_index]
+                entries = [entry for entry in entries if entry["Batch Index"] <= max_index]
                 print(f"Processing entries up to batch index {max_index}")
-            
+
             # Apply stride
             entries = entries[::stride]
+            print(f"Processing {len(entries)} entries after applying stride {stride}")
+
             pbar = tqdm(entries, desc="Processing examples")
 
             # Process each example
@@ -171,7 +182,7 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
 
 def plot_cross_model_comparison(results, log_file, window_size=40, max_index=None, use_same_model=False):
     """
-    Plot either absolute log probs (if use_same_model) or normalized rewards comparison.
+    Plot both absolute log probs and normalized rewards for comparison.
     """
     all_data = results["evaluations"]
     
@@ -184,24 +195,24 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
     # Initialize arrays for plotting
     actor_values = []
     critic_values = []
-    original_rewards = []
+    computed_rewards = []  # Difference between actor and critic log probs
+    original_rewards = []  # Original normalized rewards
     
     for i in range(min_length):
-        if use_same_model:
-            # Store absolute log probs
-            actor_probs = [data[i]["Avg Log Probs"]["Actor"] for data in all_data]
-            critic_probs = [data[i]["Avg Log Probs"]["Critic"] for data in all_data]
-            actor_values.append(np.mean(actor_probs))
-            critic_values.append(np.mean(critic_probs))
-        else:
-            # Store normalized rewards (differences)
-            diffs = [
-                data[i]["Avg Log Probs"]["Actor"] - data[i]["Avg Log Probs"]["Critic"]
-                for data in all_data
-            ]
-            actor_values.append(np.mean(diffs))
+        # Store absolute log probs
+        actor_probs = [data[i]["Avg Log Probs"]["Actor"] for data in all_data]
+        critic_probs = [data[i]["Avg Log Probs"]["Critic"] for data in all_data]
+        actor_values.append(np.mean(actor_probs))
+        critic_values.append(np.mean(critic_probs))
         
-        # Always store original rewards
+        # Compute reward as difference between actor and critic
+        diffs = [
+            data[i]["Avg Log Probs"]["Actor"] - data[i]["Avg Log Probs"]["Critic"]
+            for data in all_data
+        ]
+        computed_rewards.append(np.mean(diffs))
+        
+        # Store original rewards
         rewards = [data[i]["Original Reward"] for data in all_data]
         original_rewards.append(np.mean(rewards))
 
@@ -219,35 +230,34 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
                     label="Actor Log Probs", color="#e41a1c", linewidth=2)
             plt.plot(x_values, smoothed_critic[half_window:-half_window], 
                     label="Critic Log Probs", color="#377eb8", linewidth=2)
-        else:
-            # Plot normalized rewards
-            smoothed_cross = savgol_filter(actor_values, window_size, 3)
-            plt.plot(x_values, smoothed_cross[half_window:-half_window], 
-                    label=f"{results['evaluator_model'].title()} Normalized Reward", 
-                    color="#e41a1c", linewidth=2)
         
-        # Always plot original rewards
+        # Always plot both rewards
+        smoothed_computed = savgol_filter(computed_rewards, window_size, 3)
         smoothed_orig = savgol_filter(original_rewards, window_size, 3)
-        plt.plot(x_values, smoothed_orig[half_window:-half_window], 
-                label=f"{results['generator_model'].title()} Normalized Reward", 
+        
+        plt.plot(x_values, smoothed_computed[half_window:-half_window], 
+                label=f"{results['evaluator_model'].title()} Computed Reward", 
                 color="#4daf4a", linewidth=2)
+        plt.plot(x_values, smoothed_orig[half_window:-half_window], 
+                label=f"{results['generator_model'].title()} Original Reward", 
+                color="#984ea3", linewidth=2)
     else:
         if use_same_model:
             plt.plot(actor_values, label="Actor Log Probs", color="#e41a1c", linewidth=2)
             plt.plot(critic_values, label="Critic Log Probs", color="#377eb8", linewidth=2)
-        else:
-            plt.plot(actor_values, 
-                    label=f"{results['evaluator_model'].title()} Normalized Reward", 
-                    color="#e41a1c", linewidth=2)
-        plt.plot(original_rewards, 
-                label=f"{results['generator_model'].title()} Normalized Reward", 
+        
+        plt.plot(computed_rewards, 
+                label=f"{results['evaluator_model'].title()} Computed Reward", 
                 color="#4daf4a", linewidth=2)
+        plt.plot(original_rewards, 
+                label=f"{results['generator_model'].title()} Original Reward", 
+                color="#984ea3", linewidth=2)
 
     plt.xlabel("Sample", fontsize=16)
-    plt.ylabel("Log Probability" if use_same_model else "Normalized Reward", fontsize=16)
+    plt.ylabel("Log Probability / Reward", fontsize=16)
     plt.title(
         f"{results['generator_model'].title()} Generated, {results['evaluator_model'].title()} Evaluated\n"
-        f"{'Log Probabilities' if use_same_model else 'Normalized Rewards'} Comparison (Smoothing: {window_size})",
+        f"{'Log Probabilities and ' if use_same_model else ''}Rewards Comparison (Smoothing: {window_size})",
         fontsize=16,
     )
     plt.legend(fontsize=12, loc="best")
@@ -459,11 +469,6 @@ def main():
 
     print(f"Using log file: {log_file}")
 
-    # Determine evaluation results file path
-    eval_results_file = os.path.join(
-        os.path.dirname(log_file), "cross_model_evaluation_results.jsonl"
-    )
-
     # Process data if needed
     if not args.plot_only:
         print(f"Processing every {args.stride}th entry")
@@ -474,7 +479,11 @@ def main():
             max_index=args.max_index,
             use_same_model=args.use_same_model
         )
-        save_evaluation_results(results, log_file)
+        save_evaluation_results(results, log_file, use_same_model=args.use_same_model)
+
+    # Determine evaluation results file path based on use_same_model
+    filename = "same_model_evaluation_results.jsonl" if args.use_same_model else "cross_model_evaluation_results.jsonl"
+    eval_results_file = os.path.join(os.path.dirname(log_file), filename)
 
     # Plot if needed
     if not args.process_only:

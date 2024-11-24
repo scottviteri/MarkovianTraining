@@ -275,10 +275,11 @@ def run_perturbations(log_file, perturb_type, stride=1, max_index=None):
     return perturbation_data
 
 
-def plot_perturbation_results(results, log_file, perturb_type, window_size=40, debug=False, max_index=None):
+def plot_perturbation_results(results, log_file, perturb_type, window_size=40, debug=False, max_index=None, font_size=12):
     """
     Plot the results of perturbation analysis.
     No smoothing is applied if window_size=1.
+    font_size controls the size of text elements in the plot.
     """
     if not results:
         print("No data found to plot.")
@@ -352,22 +353,23 @@ def plot_perturbation_results(results, log_file, perturb_type, window_size=40, d
 
         ax4.plot(x_values, ac_diff_smooth, label="Actor - Critic (Original)", color="purple")
 
-        # Set titles and labels
-        if window_size > 1:
-            ax1.set_title(f"Actor Perturbation Effect (smoothing={window_size})", fontsize=16)
-            ax2.set_title(f"Critic Perturbation Effect (smoothing={window_size})", fontsize=16)
-            ax3.set_title(f"Difference in Effects (Actor - Critic) (smoothing={window_size})", fontsize=16)
-            ax4.set_title(f"Original Actor vs Critic Difference (smoothing={window_size})", fontsize=16)
-        else:
-            ax1.set_title("Actor Perturbation Effect (raw)", fontsize=16)
-            ax2.set_title("Critic Perturbation Effect (raw)", fontsize=16)
-            ax3.set_title("Difference in Effects (Actor - Critic) (raw)", fontsize=16)
-            ax4.set_title("Original Actor vs Critic Difference (raw)", fontsize=16)
-
+        # Update font sizes in debug plots
         for ax in [ax1, ax2, ax3, ax4]:
-            ax.set_ylabel("Change in Negative Log Probability", fontsize=14)
-            ax.legend(fontsize=12)
+            ax.set_ylabel("Change in Negative Log Probability", fontsize=font_size+2)
+            ax.legend(fontsize=font_size)
+            ax.tick_params(axis='both', which='major', labelsize=font_size)
             ax.grid(True)
+        
+        if window_size > 1:
+            ax1.set_title(f"Actor Perturbation Effect (smoothing={window_size})", fontsize=font_size+4)
+            ax2.set_title(f"Critic Perturbation Effect (smoothing={window_size})", fontsize=font_size+4)
+            ax3.set_title(f"Difference in Effects (Actor - Critic) (smoothing={window_size})", fontsize=font_size+4)
+            ax4.set_title(f"Original Actor vs Critic Difference (smoothing={window_size})", fontsize=font_size+4)
+        else:
+            ax1.set_title("Actor Perturbation Effect (raw)", fontsize=font_size+4)
+            ax2.set_title("Critic Perturbation Effect (raw)", fontsize=font_size+4)
+            ax3.set_title("Difference in Effects (Actor - Critic) (raw)", fontsize=font_size+4)
+            ax4.set_title("Original Actor vs Critic Difference (raw)", fontsize=font_size+4)
 
         plt.tight_layout()
     else:
@@ -400,70 +402,71 @@ def plot_perturbation_results(results, log_file, perturb_type, window_size=40, d
             plt.plot(x_values, effect_smooth, label=f"{pert}", color=colors[i])
 
         plt.grid(True)
-        plt.legend(fontsize=12)
-        plt.ylabel("Difference in Perturbation Effect\n(Actor - Critic)", fontsize=14)
+        plt.legend(fontsize=font_size)
+        plt.ylabel("Difference in Perturbation Effect\n(Actor - Critic)", fontsize=font_size+2)
+        plt.xlabel("Example Index", fontsize=font_size+2)
+        plt.tick_params(axis='both', which='major', labelsize=font_size)
 
         if window_size > 1:
-            plt.title(f"Perturbation Analysis: Actor vs Critic Effect (smoothing={window_size})")
+            plt.title(f"Perturbation Analysis: Actor vs Critic Effect (smoothing={window_size})", 
+                     fontsize=font_size+4)
         else:
-            plt.title("Perturbation Analysis: Actor vs Critic Effect (raw)")
+            plt.title("Perturbation Analysis: Actor vs Critic Effect (raw)", 
+                     fontsize=font_size+4)
 
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Plot saved to {output_file}")
     plt.close()
 
 
-def plot_multiple_perturbation_results(log_file, perturb_types, window_size=40, max_index=None):
-    """
-    Create a figure with subplots in a 2-column grid for multiple perturbation types.
-    """
-    # Calculate number of rows needed for 2 columns
-    n_rows = (len(perturb_types) + 1) // 2  # Ceiling division
-    n_cols = 2
+def plot_multiple_perturbation_results(log_file, perturb_types, window_size=40, max_index=None, font_size=12):
+    """Plot multiple perturbation results in a grid layout."""
+    # Calculate grid dimensions
+    n_plots = len(perturb_types)
+    n_rows = (n_plots + 1) // 2  # 2 columns, round up
+    n_cols = min(2, n_plots)  # Use 2 columns unless only 1 plot
     
-    # Create figure with shared axes
-    fig = plt.figure(figsize=(20, 6 * n_rows))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(12 * n_cols, 6 * n_rows))
     
-    # Create subplot grid with shared axes
-    axes = []
-    for i in range(len(perturb_types)):
-        row = i // 2
-        col = i % 2
-        if i == 0:
-            ax = plt.subplot2grid((n_rows, n_cols), (row, col))
-            first_ax = ax
-        else:
-            # Share y-axis within row, share x-axis within column
-            share_y = axes[i-2] if i >= 2 else None  # Share y with plot 2 rows up
-            share_x = axes[i-1] if i % 2 == 1 else None  # Share x with previous plot if in right column
-            ax = plt.subplot2grid((n_rows, n_cols), (row, col), 
-                                sharex=share_x, sharey=share_y)
-        axes.append(ax)
-
+    # Convert axes to array if single row or column
+    if n_rows == 1 and n_cols == 1:
+        axes = np.array([[axes]])
+    elif n_rows == 1:
+        axes = axes.reshape(1, -1)
+    elif n_cols == 1:
+        axes = axes.reshape(-1, 1)
+    
+    axes_flat = axes.flatten()
     colors = list(mcolors.TABLEAU_COLORS.values())
-
-    for ax, perturb_type in zip(axes, perturb_types):
+    
+    # Hide unused subplots
+    for idx in range(n_plots, len(axes_flat)):
+        axes_flat[idx].set_visible(False)
+    
+    for ax, perturb_type in zip(axes_flat, perturb_types):
         try:
             results = load_perturbation_results(log_file, perturb_type)
-
             if max_index is not None:
                 results = results[:max_index]
-
-            # Plot differences for each perturbation type
+            
+            # Plot each perturbation degree
             for i, (pert, _) in enumerate(results[0]["Log Probs"]["Actor"]["Perturbed"].items()):
-                # Calculate differences for Actor
+                # Skip baseline case (0% perturbation)
+                if pert == f"{perturb_type.title().replace('_', '')}0%":
+                    continue
+                
+                # Calculate differences for Actor and Critic
                 actor_orig_values = [-entry["Log Probs"]["Actor"]["Original"] for entry in results]
                 actor_pert_values = [-entry["Log Probs"]["Actor"]["Perturbed"][pert] for entry in results]
                 actor_diff_values = [p - o for p, o in zip(actor_pert_values, actor_orig_values)]
-
-                # Calculate differences for Critic
+                
                 critic_orig_values = [-entry["Log Probs"]["Critic"]["Original"] for entry in results]
                 critic_pert_values = [-entry["Log Probs"]["Critic"]["Perturbed"][pert] for entry in results]
                 critic_diff_values = [p - o for p, o in zip(critic_pert_values, critic_orig_values)]
-
-                # Calculate the difference between Actor and Critic perturbation effects
+                
+                # Calculate effect difference
                 effect_difference = [a - c for a, c in zip(actor_diff_values, critic_diff_values)]
-
+                
                 if window_size > 1 and len(effect_difference) > window_size:
                     effect_smooth = savgol_filter(effect_difference, window_size, 3)
                     padding = window_size // 2
@@ -472,37 +475,37 @@ def plot_multiple_perturbation_results(log_file, perturb_types, window_size=40, 
                 else:
                     x_values = range(len(effect_difference))
                     effect_smooth = effect_difference
-
-                ax.plot(x_values, effect_smooth, label=f"{pert}", color=colors[i])
-
+                
+                ax.plot(x_values, effect_smooth, label=f"{pert}", color=colors[i], linewidth=2)
+            
             ax.grid(True)
-            ax.legend(fontsize=10)
+            ax.legend(fontsize=font_size-2, loc='best')
             
-            # Only show y-label for leftmost plots
             if ax.get_subplotspec().is_first_col():
-                ax.set_ylabel("Diff in Perturbation Effect\n(Actor - Critic)", fontsize=12)
-            
-            # Only show x-label for bottom plots
+                ax.set_ylabel("Diff in Perturbation Effect\n(Actor - Critic)", fontsize=font_size)
             if ax.get_subplotspec().is_last_row():
-                ax.set_xlabel("Example Index", fontsize=12)
-
+                ax.set_xlabel("Example Index", fontsize=font_size)
+            
+            ax.tick_params(axis='both', which='major', labelsize=font_size-2)
+            
             if window_size > 1:
-                ax.set_title(f"{perturb_type.replace('_', ' ').title()} (smoothing={window_size})")
+                ax.set_title(f"{perturb_type.replace('_', ' ').title()} (smoothing={window_size})", 
+                           fontsize=font_size+2)
             else:
-                ax.set_title(f"{perturb_type.replace('_', ' ').title()} (raw)")
-
+                ax.set_title(f"{perturb_type.replace('_', ' ').title()} (raw)", 
+                           fontsize=font_size+2)
+                
         except FileNotFoundError:
-            ax.text(0.5, 0.5, f"No saved results found for {perturb_type}",
-                   ha="center", va="center")
-            ax.set_title(f"{perturb_type.replace('_', ' ').title()}")
-
+            print(f"No saved results found for {perturb_type}")
+            ax.text(0.5, 0.5, f"No data for {perturb_type}", 
+                   ha='center', va='center', fontsize=font_size)
+            ax.set_xticks([])
+            ax.set_yticks([])
+    
     plt.tight_layout()
-
-    # Use a simple, fixed filename for combined plots
-    output_file = os.path.join(os.path.dirname(log_file), "perturbation_results_combined.png")
+    output_file = os.path.join(os.path.dirname(log_file), "combined_perturbation_plot.png")
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Combined plot saved to {output_file}")
-    plt.close()
 
 
 def collate_perturbation_results(log_files, output_dir):
@@ -640,6 +643,13 @@ def main():
         help="Output directory for collated results",
     )
 
+    parser.add_argument(
+        "--font_size",
+        type=int,
+        default=12,
+        help="Base font size for plot text elements"
+    )
+
     args = parser.parse_args()
 
     if args.log_file:
@@ -692,6 +702,7 @@ def main():
                 args.perturb,
                 window_size=args.window_size,
                 max_index=args.max_index,
+                font_size=args.font_size
             )
         else:
             # Original single-perturbation plotting
@@ -705,6 +716,7 @@ def main():
                         window_size=args.window_size,
                         debug=args.debug,
                         max_index=args.max_index,
+                        font_size=args.font_size
                     )
                 except FileNotFoundError:
                     print(
