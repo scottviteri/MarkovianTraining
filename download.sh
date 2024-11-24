@@ -73,7 +73,7 @@ if [ ! -z "$COPY_FROM" ] && [ ! -z "$COPY_TO" ]; then
         fi
         
         # Get the source directory and log file
-        src_dir="results_${src_idx}_${src_hostname}"
+        src_dir="results_${src_hostname}"
         src_log="${src_dir}/log.jsonl"
         
         if [ ! -f "$src_log" ]; then
@@ -113,7 +113,7 @@ for i in "${INDICES[@]}"; do
     fi
     
     # Create a unique directory for each host
-    mkdir -p "./results_${i}_${hostname}"
+    mkdir -p "./results_${hostname}"
     
     # Execute git pull if requested
     if [ "$PULL" = true ]; then
@@ -130,8 +130,8 @@ for i in "${INDICES[@]}"; do
         latest_log_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'log.jsonl' -print0 | xargs -0 ls -t | head -1")
 
         # Download the files
-        scp $port_option "$hostname:$latest_file" "./results_${i}_${hostname}/"
-        scp $port_option "$hostname:$latest_log_file" "./results_${i}_${hostname}/"
+        scp $port_option "$hostname:$latest_file" "./results_${hostname}/"
+        scp $port_option "$hostname:$latest_log_file" "./results_${hostname}/"
     fi
     
     # If neither operation is requested, show usage
