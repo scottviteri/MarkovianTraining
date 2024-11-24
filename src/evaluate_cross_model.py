@@ -43,15 +43,16 @@ def load_evaluation_model(model_type="mistral"):
     return model, tokenizer, device
 
 
-def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=None):
+def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=None, use_same_model=False):
     """
-    Evaluate log files using the opposite model as evaluator.
+    Evaluate log files using either the opposite model or same model as evaluator.
     
     Args:
         log_files (list): List of log file paths to evaluate
         stride (int): Process every nth entry
         debug_freq (int): How often to print debug info
         max_index (int): If provided, only process entries with batch_index <= max_index
+        use_same_model (bool): If True, use the same model type as the generator for evaluation
     """
     results = {
         "files": log_files,
@@ -69,15 +70,17 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
             # Store model types
             results["generator_model"] = hyperparameters["model_type"]
             results["evaluator_model"] = (
-                "mistral" if hyperparameters["model_type"] == "llama" else "llama"
+                hyperparameters["model_type"] if use_same_model
+                else "mistral" if hyperparameters["model_type"] == "llama" else "llama"
             )
 
-            # Update hyperparameters for the evaluator model
-            hyperparameters["model_type"] = results["evaluator_model"]
-            if results["evaluator_model"] == "mistral":
-                hyperparameters["model_name"] = "mistralai/Mistral-7B-Instruct-v0.2"
-            else:
-                hyperparameters["model_name"] = "meta-llama/Llama-3.1-8B-Instruct"
+            # Update hyperparameters for the evaluator model (only if using different model)
+            if not use_same_model:
+                hyperparameters["model_type"] = results["evaluator_model"]
+                if results["evaluator_model"] == "mistral":
+                    hyperparameters["model_name"] = "mistralai/Mistral-7B-Instruct-v0.2"
+                else:
+                    hyperparameters["model_name"] = "meta-llama/Llama-3.1-8B-Instruct"
 
             # Load the evaluation model
             frozen_model, tokenizer, device = load_evaluation_model(
@@ -166,70 +169,85 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
     return results
 
 
-def plot_cross_model_comparison(results, log_file, window_size=40, max_index=None):
+def plot_cross_model_comparison(results, log_file, window_size=40, max_index=None, use_same_model=False):
     """
-    Plot Cross-Model Actor-Critic Difference alongside Original Normalized Reward.
+    Plot either absolute log probs (if use_same_model) or normalized rewards comparison.
     """
     all_data = results["evaluations"]
     
-    # Apply max_index to limit plotting range
     if max_index is not None:
         all_data = [data[:max_index] for data in all_data]
         print(f"Plotting up to index {max_index}")
     
     min_length = min(len(data) for data in all_data)
 
-    # Calculate Actor-Critic differences (cross-model normalized reward)
-    cross_model_rewards = []
+    # Initialize arrays for plotting
+    actor_values = []
+    critic_values = []
     original_rewards = []
+    
     for i in range(min_length):
-        # Cross-model rewards
-        diffs = [
-            data[i]["Avg Log Probs"]["Actor"] - data[i]["Avg Log Probs"]["Critic"]
-            for data in all_data
-        ]
-        cross_model_rewards.append(np.mean(diffs))
+        if use_same_model:
+            # Store absolute log probs
+            actor_probs = [data[i]["Avg Log Probs"]["Actor"] for data in all_data]
+            critic_probs = [data[i]["Avg Log Probs"]["Critic"] for data in all_data]
+            actor_values.append(np.mean(actor_probs))
+            critic_values.append(np.mean(critic_probs))
+        else:
+            # Store normalized rewards (differences)
+            diffs = [
+                data[i]["Avg Log Probs"]["Actor"] - data[i]["Avg Log Probs"]["Critic"]
+                for data in all_data
+            ]
+            actor_values.append(np.mean(diffs))
         
-        # Original rewards
+        # Always store original rewards
         rewards = [data[i]["Original Reward"] for data in all_data]
         original_rewards.append(np.mean(rewards))
 
     plt.figure(figsize=(12, 6))
     
-    # Plot both metrics with smoothing if enough data points
-    if len(cross_model_rewards) > window_size:
-        # Cross-model rewards
-        smoothed_cross = savgol_filter(cross_model_rewards, window_size, 3)
+    if len(actor_values) > window_size:
         half_window = window_size // 2
-        x_values = range(half_window, len(smoothed_cross) - half_window)
-        y_values = smoothed_cross[half_window:-half_window]
-        plt.plot(x_values, y_values, 
-                label=f"{results['evaluator_model'].title()} Normalized Reward", 
-                color="#e41a1c", 
-                linewidth=2)
+        x_values = range(half_window, len(actor_values) - half_window)
         
-        # Original rewards
+        if use_same_model:
+            # Plot absolute log probs
+            smoothed_actor = savgol_filter(actor_values, window_size, 3)
+            smoothed_critic = savgol_filter(critic_values, window_size, 3)
+            plt.plot(x_values, smoothed_actor[half_window:-half_window], 
+                    label="Actor Log Probs", color="#e41a1c", linewidth=2)
+            plt.plot(x_values, smoothed_critic[half_window:-half_window], 
+                    label="Critic Log Probs", color="#377eb8", linewidth=2)
+        else:
+            # Plot normalized rewards
+            smoothed_cross = savgol_filter(actor_values, window_size, 3)
+            plt.plot(x_values, smoothed_cross[half_window:-half_window], 
+                    label=f"{results['evaluator_model'].title()} Normalized Reward", 
+                    color="#e41a1c", linewidth=2)
+        
+        # Always plot original rewards
         smoothed_orig = savgol_filter(original_rewards, window_size, 3)
-        y_values_orig = smoothed_orig[half_window:-half_window]
-        plt.plot(x_values, y_values_orig, 
+        plt.plot(x_values, smoothed_orig[half_window:-half_window], 
                 label=f"{results['generator_model'].title()} Normalized Reward", 
-                color="#377eb8", 
-                linewidth=2)
+                color="#4daf4a", linewidth=2)
     else:
-        plt.plot(cross_model_rewards, 
-                label=f"{results['evaluator_model'].title()} Normalized Reward", 
-                color="#e41a1c", 
-                linewidth=2)
+        if use_same_model:
+            plt.plot(actor_values, label="Actor Log Probs", color="#e41a1c", linewidth=2)
+            plt.plot(critic_values, label="Critic Log Probs", color="#377eb8", linewidth=2)
+        else:
+            plt.plot(actor_values, 
+                    label=f"{results['evaluator_model'].title()} Normalized Reward", 
+                    color="#e41a1c", linewidth=2)
         plt.plot(original_rewards, 
                 label=f"{results['generator_model'].title()} Normalized Reward", 
-                color="#377eb8", 
-                linewidth=2)
+                color="#4daf4a", linewidth=2)
 
     plt.xlabel("Sample", fontsize=16)
-    plt.ylabel("Normalized Reward", fontsize=16)
+    plt.ylabel("Log Probability" if use_same_model else "Normalized Reward", fontsize=16)
     plt.title(
         f"{results['generator_model'].title()} Generated, {results['evaluator_model'].title()} Evaluated\n"
-        f"Normalized Rewards Comparison (Smoothing: {window_size})",
+        f"{'Log Probabilities' if use_same_model else 'Normalized Rewards'} Comparison (Smoothing: {window_size})",
         fontsize=16,
     )
     plt.legend(fontsize=12, loc="best")
@@ -237,16 +255,17 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
     plt.tick_params(axis="both", which="major", labelsize=14)
     plt.tight_layout()
 
-    output_file = os.path.join(os.path.dirname(log_file), "cross_model_evaluation.png")
+    filename = "same_model_evaluation.png" if use_same_model else "cross_model_evaluation.png"
+    output_file = os.path.join(os.path.dirname(log_file), filename)
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Plot saved to {output_file}")
 
 
-def save_evaluation_results(results, log_file):
+def save_evaluation_results(results, log_file, use_same_model=False):
     """Save evaluation results to a new jsonl file."""
-    output_file = os.path.join(
-        os.path.dirname(log_file), "cross_model_evaluation_results.jsonl"
-    )
+    # Modify filename based on evaluation type
+    filename = "same_model_evaluation_results.jsonl" if use_same_model else "cross_model_evaluation_results.jsonl"
+    output_file = os.path.join(os.path.dirname(log_file), filename)
 
     with open(output_file, "w") as f:
         # Write metadata as first line
@@ -412,6 +431,11 @@ def main():
         type=int,
         help="Maximum index to process (batch index for --process_only, array index for --plot_only)"
     )
+    parser.add_argument(
+        "--use_same_model",
+        action="store_true",
+        help="Use the same model type as the generator for evaluation"
+    )
     
     args = parser.parse_args()
 
@@ -447,7 +471,8 @@ def main():
             [log_file], 
             stride=args.stride, 
             debug_freq=args.debug_freq,
-            max_index=args.max_index  # Pass max_index for batch index filtering
+            max_index=args.max_index,
+            use_same_model=args.use_same_model
         )
         save_evaluation_results(results, log_file)
 
@@ -459,7 +484,8 @@ def main():
                 results, 
                 log_file, 
                 window_size=args.window_size,
-                max_index=args.max_index  # Pass max_index for plot range limiting
+                max_index=args.max_index,
+                use_same_model=args.use_same_model
             )
         except FileNotFoundError:
             print(f"No saved results found at {eval_results_file}. Run without --plot_only first.")
