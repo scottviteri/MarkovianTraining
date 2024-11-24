@@ -1085,7 +1085,8 @@ class LogMetrics:
     loss: float
     pg_loss: float
     actor_logprobs: float
-    actor_answer_logprobs: float  # Added this
+    actor_answer_logprobs: float
+    critic_answer_logprobs: float
     kl: float
     weighted_kl: Optional[float]
     ppo_ratio: Optional[float]
@@ -1135,6 +1136,9 @@ class LogMetrics:
             pg_loss=batch_data.metrics["pg_losses"][0].item(),
             actor_logprobs=batch_data.R_mean_actor_logprobs[0].item(),
             actor_answer_logprobs=batch_data.actor_answer_logprobs[
+                0
+            ].item(),  # Updated this line
+            critic_answer_logprobs=batch_data.critic_answer_logprobs[
                 0
             ].item(),  # Updated this line
             kl=raw_kl,
@@ -1205,6 +1209,7 @@ def log_batch_results(
             "Policy Gradient Loss": float(metrics.pg_loss),
             "Actor Log Probs": float(metrics.actor_logprobs),
             "Actor Answer Log Probs": float(metrics.actor_answer_logprobs),
+            "Critic Answer Log Probs": float(metrics.critic_answer_logprobs),
             "KL": float(kl_to_log),
             "KL Type": kl_label,
             "PPO Ratio": (
@@ -1424,6 +1429,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 state.grad_accum_count,
                 state.previous_advantages,
                 state.hyperparameters["batch_size"],
+                critic_answer_logprobs=batch_data.R_mean_critic_logprobs.mean().item(),
             )
             log_batch_results(state, batch_data, metrics)
 
@@ -1455,7 +1461,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             print("Saving checkpoint as at least one epoch was completed")
             save_checkpoint(state)
         else:
-            print("Not saving checkpoint because haven't yet completed one full epock")
+            print("No checkpoint saved (no full epochs completed)")
         return
 
 

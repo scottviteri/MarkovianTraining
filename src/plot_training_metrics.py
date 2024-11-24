@@ -10,8 +10,16 @@ from constants import EI_SKIP_INITIAL
 import sys
 
 
-def get_nested_value(entry, path):
-    """Helper function to get nested dictionary values using dot notation"""
+def get_nested_value(entry, path, metrics_dict=None):
+    """Helper function to get nested dictionary values using dot notation, with optional derived metrics"""
+    if path == "Training Metrics.Critic Answer Log Probs" and metrics_dict is not None:
+        # Calculate Critic Answer Log Probs if not directly available
+        actor_probs = get_nested_value(entry, "Training Metrics.Actor Answer Log Probs")
+        norm_reward = get_nested_value(entry, "Training Metrics.Normalized Reward")
+        if actor_probs is not None and norm_reward is not None:
+            return actor_probs - norm_reward
+        return None
+
     value = entry
     for key in path.split("."):
         if value is None or key not in value:
@@ -36,6 +44,10 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
     
     task_type = hyperparameters.get('task_type', 'unknown')
     has_answer_logprobs = "Actor Answer Log Probs" in first_entry.get("Training Metrics", {})
+    has_critic_probs = "Critic Answer Log Probs" in first_entry.get("Training Metrics", {})
+    
+    # Initialize metrics_dict for deriving critic probs if needed
+    metrics_dict = None if has_critic_probs else {"derive_critic": True}
     
     if output_file is None:
         output_file = f"combined_metrics_{task_type}.png"
@@ -45,6 +57,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         if task_type in ['arithmetic', 'gsm8k']:
             metrics_to_plot = [
                 ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
+                ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)"),
                 ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
             ]
         # For wiki tasks
@@ -52,17 +65,23 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             if has_answer_logprobs:
                 metrics_to_plot = [
                     ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')"),
-                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)")
+                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
+                    ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)")
                 ]
             else:
                 metrics_to_plot = [
                     ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
                 ]
+        else:
+            metrics_to_plot = [
+                ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
+            ]
     else:
         base_metrics = [
             ("Training Metrics.Loss", "Total Loss", "Training Batch No. []", "Loss"),
             ("Training Metrics.Policy Gradient Loss", "Policy Gradient Loss", "Training Batch No. []", "Loss"),
             ("Training Metrics.Actor Log Probs", "Actor Log Probs", "Training Batch No. []", "Log Prob"),
+            ("Training Metrics.Critic Log Probs", "Critic Log Probs", "Training Batch No. []", "Log Prob"),
             ("Training Metrics.KL", "KL Divergence", "Training Batch No. []", "KL"),
             ("Training Metrics.Gradient Norm", "Gradient Norm", "Training Batch No. []", "Norm"),
             ("Training Metrics.Advantage", "Advantage", "Training Batch No. []", "Value"),
@@ -71,9 +90,10 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         ]
         
         if has_answer_logprobs:
-            base_metrics.append(
-                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)")
-            )
+            base_metrics.extend([
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
+                ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)")
+            ])
         metrics_to_plot = base_metrics
 
     # Calculate required number of rows and columns for subplots
@@ -106,9 +126,9 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 entries = entries[:max_index]
             
             data = [
-                get_nested_value(entry, metric_path)
+                get_nested_value(entry, metric_path, metrics_dict)
                 for entry in entries[EI_SKIP_INITIAL:]
-                if get_nested_value(entry, metric_path) is not None
+                if get_nested_value(entry, metric_path, metrics_dict) is not None
             ]
             
             if data:
@@ -188,18 +208,18 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         
         # Add smoothing window info in bottom right corner
         axs[metric_idx].text(
-            0.95, 0.05,  # Changed y position to 0.02 for bottom right
+            0.98, 0.02,  # Changed y position to 0.02 for bottom right
             f"Smoothing window = {window_size}",
             transform=axs[metric_idx].transAxes,
             horizontalalignment='right',
-            verticalalignment='bottom',  # Changed to 'bottom'
+            verticalalignment='bottom',
             fontsize=label_size * 0.8,
             bbox=dict(
                 facecolor='white',
                 alpha=0.8,
-                edgecolor='black',  # Added black edge
+                edgecolor='black',
                 pad=3,
-                boxstyle='round,pad=0.5'  # Added rounded corners
+                boxstyle='round,pad=0.5'
             )
         )
         
