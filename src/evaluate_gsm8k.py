@@ -10,6 +10,10 @@ from peft import LoraConfig, get_peft_model
 import datetime
 from train import find_latest_result, initialize_model_and_optimizer
 import glob
+import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+import numpy as np
+from typing import List, Dict
 
 
 def extract_answer(answer):
@@ -258,21 +262,57 @@ def get_model_paths_and_type(provided_path=None, target_index=None, all_checkpoi
     return model_paths, model_type
 
 
+def plot_evaluation_results(results: List[Dict], save_path: str):
+    """
+    Plot evaluation results and save to file.
+    
+    Args:
+        results: List of result dictionaries with evaluation metrics
+        save_path: Path to save the plot PNG
+    """
+    # Create figure with subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+    fig.suptitle('GSM8K Evaluation Results', fontsize=16)
+
+    # Plot 1: Running Accuracy
+    correct_cumsum = np.cumsum([1 if r['is_correct'] else 0 for r in results])
+    indices = np.arange(1, len(results) + 1)
+    running_accuracy = correct_cumsum / indices
+    
+    ax1.plot(indices, running_accuracy, 'b-', label='Running Accuracy')
+    ax1.set_xlabel('Example Number')
+    ax1.set_ylabel('Accuracy')
+    ax1.set_title('Running Accuracy')
+    ax1.grid(True)
+    ax1.legend()
+
+    # Plot 2: Question Length vs Correctness
+    question_lengths = [len(r['question'].split()) for r in results]
+    correct_lengths = [l for l, r in zip(question_lengths, results) if r['is_correct']]
+    incorrect_lengths = [l for l, r in zip(question_lengths, results) if not r['is_correct']]
+    
+    ax2.hist([correct_lengths, incorrect_lengths], 
+             label=['Correct', 'Incorrect'],
+             bins=30,
+             alpha=0.6)
+    ax2.set_xlabel('Question Length (words)')
+    ax2.set_ylabel('Count')
+    ax2.set_title('Question Length Distribution by Correctness')
+    ax2.legend()
+    ax2.grid(True)
+
+    # Adjust layout and save
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+
 def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_samples):
-    """Save or append results to a running results file in the model directory."""
-    results_file = os.path.join(model_dir, "gsm8k_results.jsonl")
-    
-    # Extract batch index from checkpoint filename
-    batch_index = None
-    if checkpoint_path:
-        match = re.search(r'model_(\d+)_', os.path.basename(checkpoint_path))
-        if match:
-            batch_index = int(match.group(1))
-    
-    # Create results entry
+    """Save results to file and generate plots."""
+    # Create results entry as before
     entry = {
         "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-        "batch_index": batch_index,
+        "batch_index": None,
         "accuracy": accuracy,
         "model_path": checkpoint_path,
         "model_type": model_type,
@@ -280,10 +320,27 @@ def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_
         "detailed_results": results
     }
     
-    # Append to results file
+    # Extract batch index if available
+    if checkpoint_path:
+        match = re.search(r'model_(\d+)_', os.path.basename(checkpoint_path))
+        if match:
+            entry["batch_index"] = int(match.group(1))
+    
+    # Save JSONL results
+    results_file = os.path.join(model_dir, "gsm8k_results.jsonl")
     with open(results_file, "a") as f:
         json.dump(entry, f)
         f.write("\n")
+    
+    # Save plots
+    if checkpoint_path:
+        plot_name = f"eval_results_{entry['batch_index']}.png"
+    else:
+        plot_name = f"eval_results_{entry['timestamp']}.png"
+    plot_path = os.path.join(model_dir, plot_name)
+    
+    plot_evaluation_results(results, plot_path)
+    print(f"Results visualization saved to {plot_path}")
     
     return results_file
 
