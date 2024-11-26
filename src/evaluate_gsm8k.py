@@ -12,8 +12,7 @@ import glob
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Dict
-from utils import construct_prompts, find_latest_result, configure_model_for_generation
-
+from utils import construct_prompts, find_latest_result
 
 def extract_answer(answer):
     if "=" in answer:
