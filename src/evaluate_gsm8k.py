@@ -28,27 +28,48 @@ def extract_answer(answer):
 
 
 def load_model(model_path, use_base_model=False, model_type="mistral"):
-    # Create a minimal hyperparameters dict with required values
-    hyperparameters = {
-        "model_type": model_type,
-        "lr": 1e-4,  # Default learning rate, won't be used in evaluation
-        "gradient_accumulation_steps": 1,  # Won't be used in evaluation
-    }
+    """Load model for evaluation without creating a frozen copy."""
+    if model_type == "mistral":
+        model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+    elif model_type == "llama":
+        model_name = "meta-llama/Llama-3.1-8B-Instruct"
+    else:
+        raise ValueError("model_type must be either 'mistral' or 'llama'")
 
-    # Initialize model using the same function as training
-    model, _, tokenizer, device, _ = initialize_model_and_optimizer(
-        model_type=model_type,
-        hyperparameters=hyperparameters,
-        checkpoint_path=None if use_base_model else model_path,
-    )
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
+    tokenizer.pad_token = tokenizer.eos_token
     tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # Set model to evaluation mode and configure generation parameters
+    # Load model in evaluation mode
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+    )
+
+    # Add LoRA if not using base model
+    if not use_base_model:
+        peft_config = LoraConfig(
+            task_type="CAUSAL_LM",
+            inference_mode=True,  # Set to True for evaluation
+            r=8,
+            lora_alpha=16,
+            lora_dropout=0.1,
+            target_modules="all-linear",
+        )
+        model = get_peft_model(model, peft_config)
+        
+        # Load checkpoint weights
+        checkpoint = torch.load(model_path)
+        model.load_state_dict(checkpoint["model_state_dict"])
+
     model.eval()
     model.generation_config.temperature = None
     model.generation_config.top_p = None
     model.generation_config.pad_token_id = tokenizer.eos_token_id
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return model, tokenizer, device
 
 

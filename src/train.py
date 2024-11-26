@@ -1285,6 +1285,12 @@ def save_checkpoint(state: TrainingState):
     if state.hyperparameters["task_type"] == "gsm8k":
         colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
         try:
+            # Move models to CPU and clear GPU memory
+            state.actor_model.cpu()
+            state.critic_model.cpu()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             # Run evaluation script
             import subprocess
             result = subprocess.run(
@@ -1292,12 +1298,22 @@ def save_checkpoint(state: TrainingState):
                 capture_output=True,
                 text=True
             )
+            
+            # Move models back to GPU
+            if torch.cuda.is_available():
+                state.actor_model.cuda()
+                state.critic_model.cuda()
+            
             if result.returncode == 0:
                 colored_print("Evaluation", "Completed successfully", Colors.GREEN)
             else:
                 colored_print("Evaluation", f"Failed: {result.stderr}", Colors.RED)
         except Exception as e:
             colored_print("Evaluation", f"Error running evaluation: {e}", Colors.RED)
+            # Ensure models are back on GPU even if evaluation fails
+            if torch.cuda.is_available():
+                state.actor_model.cuda()
+                state.critic_model.cuda()
 
 
 def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> BatchData:
