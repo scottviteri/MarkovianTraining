@@ -1147,41 +1147,39 @@ def save_checkpoint(state: TrainingState):
     # If GSM8K, evaluate the model
     if state.hyperparameters["task_type"] == "gsm8k":
         colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
-        try:
-            
-            # Use the actor model directly for evaluation
-            state.actor_model.eval()  # Ensure model is in eval mode
-            
-            # Use test split for evaluation
-            test_data = list(load_gsm8k_dataset(split="test"))
-            
-            # Run evaluation with hyperparameters
-            accuracy, results = evaluate_model(
-                state.actor_model,
-                state.tokenizer,
-                state.device,
-                test_data,
-                state.hyperparameters,  # Add hyperparameters here
-                batch_size=8
-            )
-            
-            # Save results
-            model_dir = os.path.dirname(state.model_save_path)
-            results_file = save_results(
-                model_dir,
-                state.model_save_path,
-                state.hyperparameters["model_type"],
-                accuracy,
-                results,
-                len(test_data)
-            )
-            
-            colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
-            
-        except Exception as e:
-            colored_print("Evaluation", f"Error running evaluation: {e}", Colors.RED)
-        finally:
-            state.actor_model.train()  # Return model to training mode
+        state.actor_model.eval()  # Ensure model is in eval mode
+        # Configure for evaluation
+        configure_model_for_generation(state.actor_model, state.tokenizer, is_eval=True)
+        
+        # Use test split for evaluation
+        test_data = list(load_gsm8k_dataset(split="test"))
+        
+        # Run evaluation
+        accuracy, results = evaluate_model(
+            state.actor_model,
+            state.tokenizer,
+            state.device,
+            test_data,
+            state.hyperparameters,
+            batch_size=8
+        )
+        
+        # Save results
+        model_dir = os.path.dirname(state.model_save_path)
+        results_file = save_results(
+            model_dir,
+            state.model_save_path,
+            state.hyperparameters["model_type"],
+            accuracy,
+            results,
+            len(test_data)
+        )
+        
+        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        
+        # Restore training configuration
+        configure_model_for_generation(state.actor_model, state.tokenizer, is_eval=False, hyperparameters=state.hyperparameters)
+        state.actor_model.train()  # Return model to training mode
 
 
 def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> BatchData:
