@@ -73,34 +73,59 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
     return model, tokenizer, device
 
 
+def get_hyperparameters_from_log(model_dir):
+    """Get hyperparameters from the first line of log.jsonl"""
+    log_path = os.path.join(model_dir, "log.jsonl")
+    try:
+        with open(log_path, 'r') as f:
+            hyperparameters = json.loads(f.readline().strip())
+        return hyperparameters
+    except Exception as e:
+        print(f"Warning: Could not read hyperparameters from log file ({e})")
+        # Fallback to default hyperparameters
+        return {
+            "model_type": "mistral",
+            "task_type": "gsm8k",
+            "cot_length": 100,
+            "target_length": 15,
+            "temperature": 1.0,
+            "r": 0.9,
+            "question_length": 200,
+            "shrink_cot": None,
+            "flatten": False,
+        }
+
+
 def evaluate_model(
     model,
     tokenizer,
     device,
     test_data,
+    hyperparameters,
     num_samples=None,
     batch_size=16,
-    model_type="mistral",
 ):
-    from train import construct_prompts  # Import the prompt construction function
+    from train import construct_prompts
     
     correct = 0
     total = 0
     results = []
 
     # Process in smaller chunks to manage memory
-    chunk_size = min(batch_size, 8)  # Use smaller batch size for evaluation
+    chunk_size = min(batch_size, 8)
     for i in tqdm(range(0, len(test_data[:num_samples]), chunk_size)):
         batch = test_data[i : i + chunk_size]
         questions, answers = zip(*batch)
 
         # Use the same prompt construction as training
-        prompts = construct_prompts(
-            questions=questions,
-            model_type=model_type,
-            tokenizer=tokenizer,
-            task_type="gsm8k"
-        )
+        prompts = [
+            construct_prompts(
+                question=q,
+                hyperparameters=hyperparameters,
+                reasoning=None
+            )
+            for q in questions
+        ]
         inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
 
         with torch.no_grad():
@@ -298,8 +323,9 @@ def main(
             test_data = test_data[::stride]
             print(f"Using stride={stride}, evaluating on {len(test_data)} examples")
 
+        hyperparameters = get_hyperparameters_from_log(os.path.dirname(checkpoint_path))
         accuracy, results = evaluate_model(
-            model, tokenizer, device, test_data, num_samples, batch_size, model_type
+            model, tokenizer, device, test_data, hyperparameters, num_samples, batch_size
         )
 
         print(f"Accuracy: {accuracy:.2%}")
