@@ -61,60 +61,77 @@ def evaluate_model(
     batch_size=16,
     model_type="mistral",
 ):
-    correct = 0
-    total = 0
-    results = []
+    try:
+        correct = 0
+        total = 0
+        results = []
 
-    for i in tqdm(range(0, len(test_data[:num_samples]), batch_size)):
-        batch = test_data[i : i + batch_size]
-        questions, answers = zip(*batch)
+        # Process in smaller chunks to manage memory
+        chunk_size = min(batch_size, 8)  # Use smaller batch size for evaluation
+        for i in tqdm(range(0, len(test_data[:num_samples]), chunk_size)):
+            # Clear cache between batches
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+            batch = test_data[i : i + chunk_size]
+            questions, answers = zip(*batch)
 
-        # Generate prompts based on model type
-        prompts = [
-            (
-                f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the question.<|eot_id|><|start_header_id|>assistant<|end_header_id|> Question: {q}\nReasoning:"
-                if model_type == "llama"
-                else f"{tokenizer.bos_token} Produce minimal text which will help you answer the question. {tokenizer.eos_token} Question: {q}\nReasoning:"
-            )
-            for q in questions
-        ]
-        inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
+            # Generate prompts based on model type
+            prompts = [
+                (
+                    f"<|start_header_id|>user<|end_header_id|>Produce minimal text which will help you answer the question.<|eot_id|><|start_header_id|>assistant<|end_header_id|> Question: {q}\nReasoning:"
+                    if model_type == "llama"
+                    else f"{tokenizer.bos_token} Produce minimal text which will help you answer the question. {tokenizer.eos_token} Question: {q}\nReasoning:"
+                )
+                for q in questions
+            ]
+            inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
 
-        with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=100,
-                min_new_tokens=100,
-                do_sample=False,
-            )
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=100,
+                    min_new_tokens=100,
+                    do_sample=False,
+                )
 
-        reasoning_tokens = outputs[:, inputs.input_ids.shape[1] :]
+            # Process outputs and free memory
+            reasoning_tokens = outputs[:, inputs.input_ids.shape[1] :]
+            del outputs
+            del inputs
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
-        # Use the provided batch processing function
-        extracted_generated_answers = batch_process_answers(
-            model, tokenizer, device, reasoning_tokens, answers, use_gsm8k=True
-        )
-
-        true_answers = [extract_answer(a) for a in answers]
-
-        for q, true_ans, gen_ans in zip(
-            questions, true_answers, extracted_generated_answers
-        ):
-            is_correct = gen_ans == true_ans
-            correct += is_correct
-            total += 1
-
-            results.append(
-                {
-                    "question": q,
-                    "true_answer": true_ans,
-                    "generated_answer": gen_ans,
-                    "is_correct": is_correct,
-                }
+            # Use the provided batch processing function
+            extracted_generated_answers = batch_process_answers(
+                model, tokenizer, device, reasoning_tokens, answers, use_gsm8k=True
             )
 
-    accuracy = correct / total
-    return accuracy, results
+            true_answers = [extract_answer(a) for a in answers]
+
+            for q, true_ans, gen_ans in zip(
+                questions, true_answers, extracted_generated_answers
+            ):
+                is_correct = gen_ans == true_ans
+                correct += is_correct
+                total += 1
+
+                results.append(
+                    {
+                        "question": q,
+                        "true_answer": true_ans,
+                        "generated_answer": gen_ans,
+                        "is_correct": is_correct,
+                    }
+                )
+
+        accuracy = correct / total
+        return accuracy, results
+
+    finally:
+        # Ensure memory is cleared after evaluation
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 def batch_process_answers(
