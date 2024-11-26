@@ -1367,6 +1367,30 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         metrics=metrics,
     )
 
+def get_random_weight_snapshot(model, num_weights=1000):
+    """Take a snapshot of random weights from the model."""
+    snapshots = []
+    for name, param in model.named_parameters():
+        # Get flattened view of the parameter
+        flat_param = param.data.view(-1)
+        if len(flat_param) > 0:
+            # Randomly sample an index from this parameter
+            idx = random.randint(0, len(flat_param) - 1)
+            snapshots.append((name, idx, flat_param[idx].item()))
+            if len(snapshots) >= num_weights:
+                break
+    return snapshots
+
+def verify_frozen_weights(model, weight_snapshot):
+    """Verify that sampled weights haven't changed."""
+    for name, idx, original_value in weight_snapshot:
+        current_param = model.get_parameter(name)
+        current_value = current_param.data.view(-1)[idx].item()
+        if not torch.allclose(torch.tensor(current_value), torch.tensor(original_value)):
+            raise RuntimeError(
+                f"Critic weight changed in {name}[{idx}]: "
+                f"was {original_value}, now {current_value}"
+            )
 
 def update_model(state: TrainingState, batch_data: BatchData) -> float:
     """Perform model update and return gradient norm"""
@@ -1434,6 +1458,9 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
         hyperparameters=hyperparameters,
     )
 
+    # After initializing models
+    critic_weight_snapshot = get_random_weight_snapshot(frozen_model)
+    
     try:
         for batch_index in range(state.batch_index, hyperparameters["num_batches"]):
             state.batch_index = batch_index
@@ -1483,6 +1510,10 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             # Save checkpoint and evaluate periodically using configured frequency
             if batch_index % checkpoint_frequency == 0 and batch_index > 0:
                 save_checkpoint(state)
+
+            # Verify critic weights haven't changed (e.g., every 100 batches)
+            if batch_index % 100 == 0:
+                verify_frozen_weights(frozen_model, critic_weight_snapshot)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
