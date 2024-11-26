@@ -110,59 +110,101 @@ def evaluate_model(
     num_samples=None,
     batch_size=16,
 ):
+    """Evaluate model on GSM8K test set."""
+    if num_samples:
+        test_data = test_data[:num_samples]
     
+    all_results = []
     correct = 0
     total = 0
-    results = []
-
-    # Process in smaller chunks to manage memory
-    chunk_size = min(batch_size, 8)
-    for i in tqdm(range(0, len(test_data[:num_samples]), chunk_size)):
-        batch = test_data[i : i + chunk_size]
+    
+    for i in tqdm(range(0, len(test_data), batch_size)):
+        batch = test_data[i:i + batch_size]
         questions, answers = zip(*batch)
-
-        # Use the same prompt construction as training
+        
+        # Create prompts for CoT generation
         prompts = [
             construct_prompts(
                 question=q,
                 hyperparameters=hyperparameters,
-                reasoning=None
             )
             for q in questions
         ]
-        inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
-
+        
+        # Tokenize
+        tokenized_inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
+        
+        # 1. Generate CoT with temperature (like actor)
         with torch.no_grad():
-            outputs = model.generate(
-                **inputs,
-                max_new_tokens=100,
-                min_new_tokens=100,
-                do_sample=False,
+            cot_outputs = model.generate(
+                input_ids=tokenized_inputs.input_ids,
+                attention_mask=tokenized_inputs.attention_mask,
+                max_new_tokens=hyperparameters["cot_length"],
+                min_new_tokens=hyperparameters["cot_length"],
+                do_sample=True,
+                temperature=hyperparameters["temperature"],
+                pad_token_id=tokenizer.pad_token_id,
             )
-
-        reasoning_tokens = outputs[:, inputs.input_ids.shape[1] :]
-        extracted_generated_answers = batch_process_answers(
-            model, tokenizer, device, reasoning_tokens, answers, use_gsm8k=True
+            
+        # Decode CoT
+        cot_texts = tokenizer.batch_decode(
+            cot_outputs[:, tokenized_inputs.input_ids.shape[1]:],
+            skip_special_tokens=True
         )
-
-        true_answers = [extract_answer(a) for a in answers]
-
-        for q, true_ans, gen_ans in zip(
-            questions, true_answers, extracted_generated_answers
-        ):
-            is_correct = gen_ans == true_ans
-            correct += is_correct
-            total += 1
-
-            results.append({
+        
+        # 2. Generate answers deterministically given CoT
+        answer_prompts = [
+            construct_prompts(
+                question=q,
+                hyperparameters=hyperparameters,
+                reasoning=r,
+            )
+            for q, r in zip(questions, cot_texts)
+        ]
+        
+        tokenized_answer_inputs = tokenizer(
+            answer_prompts, 
+            padding=True, 
+            return_tensors="pt"
+        ).to(device)
+        
+        with torch.no_grad():
+            answer_outputs = model.generate(
+                input_ids=tokenized_answer_inputs.input_ids,
+                attention_mask=tokenized_answer_inputs.attention_mask,
+                max_new_tokens=15,  # Fixed length for answer generation
+                do_sample=False,    # Deterministic
+                pad_token_id=tokenizer.pad_token_id,
+            )
+        
+        # Decode and extract answers
+        generated_answers = tokenizer.batch_decode(
+            answer_outputs[:, tokenized_answer_inputs.input_ids.shape[1]:],
+            skip_special_tokens=True
+        )
+        extracted_answers = [extract_answer(ans) for ans in generated_answers]
+        
+        # Check correctness
+        for q, a, cot, gen_a, ext_a in zip(questions, answers, cot_texts, generated_answers, extracted_answers):
+            correct_answer = extract_answer(a)
+            is_correct = (ext_a == correct_answer)
+            
+            result = {
                 "question": q,
-                "true_answer": true_ans,
-                "generated_answer": gen_ans,
+                "correct_answer": correct_answer,
+                "chain_of_thought": cot,
+                "generated_answer": gen_a,
+                "extracted_answer": ext_a,
                 "is_correct": is_correct,
-            })
-
+            }
+            all_results.append(result)
+            
+            if is_correct:
+                correct += 1
+            total += 1
+    
     accuracy = correct / total
-    return accuracy, results
+    return accuracy, all_results
 
 
 def batch_process_answers(
