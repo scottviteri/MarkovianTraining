@@ -6,7 +6,19 @@ import matplotlib.pyplot as plt
 import argparse
 import os
 
-def load_and_analyze_metrics(file_paths, window=50, target_batch_index=None):
+def load_and_analyze_metrics(file_paths=None, window=50, target_batch_index=None):
+    """Load and analyze metrics from log files"""
+    # If no file paths provided, use the latest result
+    if not file_paths:
+        from train import find_latest_result
+        latest_log = find_latest_result(return_log=True)
+        if latest_log:
+            file_paths = [latest_log]
+            print(f"Using latest log file: {latest_log}")
+        else:
+            print("No log files found")
+            return
+
     # Initialize empty lists
     actor_answer_log_probs = []
     critic_answer_log_probs = []
@@ -143,9 +155,9 @@ def load_and_analyze_metrics(file_paths, window=50, target_batch_index=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('files', nargs='+', help='Log files to analyze')
+    parser.add_argument('files', nargs='*', help='Log files to analyze (if none provided, uses latest)')
     parser.add_argument('--window_size', type=int, default=50, help='Smoothing window size')
     parser.add_argument('--batch_index', type=int, help='Print specific batch index entry without plotting')
     args = parser.parse_args()
     
-    load_and_analyze_metrics(args.files, args.window_size, args.batch_index)
+    load_and_analyze_metrics(args.files if args.files else None, args.window_size, args.batch_index)
