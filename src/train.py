@@ -1285,37 +1285,42 @@ def save_checkpoint(state: TrainingState):
     if state.hyperparameters["task_type"] == "gsm8k":
         colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
         try:
-            # Move models to CPU and ensure GPU operations are complete
-            state.actor_model.cpu()
-            state.critic_model.cpu()
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()  # Wait for GPU operations to complete
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()  # Wait for cache clearing to complete
+            from evaluate_gsm8k import evaluate_model, load_dataset, save_results
             
-            # Run evaluation script
-            import subprocess
-            result = subprocess.run(
-                ["python", "src/evaluate_gsm8k.py", "--model_path", state.model_save_path],
-                capture_output=True,
-                text=True
+            # Use the actor model directly for evaluation
+            state.actor_model.eval()  # Ensure model is in eval mode
+            
+            # Load test data
+            test_data = load_dataset("openai/gsm8k", "main", split="test")
+            test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
+            
+            # Run evaluation
+            accuracy, results = evaluate_model(
+                state.actor_model,
+                state.tokenizer,
+                state.device,
+                test_data,
+                batch_size=8,
+                model_type=state.hyperparameters["model_type"]
             )
             
-            # Move models back to GPU
-            if torch.cuda.is_available():
-                state.actor_model.cuda()
-                state.critic_model.cuda()
+            # Save results
+            model_dir = os.path.dirname(state.model_save_path)
+            results_file = save_results(
+                model_dir,
+                state.model_save_path,
+                state.hyperparameters["model_type"],
+                accuracy,
+                results,
+                len(test_data)
+            )
             
-            if result.returncode == 0:
-                colored_print("Evaluation", "Completed successfully", Colors.GREEN)
-            else:
-                colored_print("Evaluation", f"Failed: {result.stderr}", Colors.RED)
+            colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+            
         except Exception as e:
             colored_print("Evaluation", f"Error running evaluation: {e}", Colors.RED)
-            # Ensure models are back on GPU even if evaluation fails
-            if torch.cuda.is_available():
-                state.actor_model.cuda()
-                state.critic_model.cuda()
+        finally:
+            state.actor_model.train()  # Return model to training mode
 
 
 def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> BatchData:
