@@ -1459,7 +1459,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     )
 
     # After initializing models
-    critic_weight_snapshot = get_random_weight_snapshot(frozen_model)
+    critic_weight_snapshot = get_random_weight_snapshot(state.critic_model)
     
     try:
         for batch_index in range(state.batch_index, hyperparameters["num_batches"]):
@@ -1513,7 +1513,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
 
             # Verify critic weights haven't changed (e.g., every 100 batches)
             if batch_index % 100 == 0:
-                verify_frozen_weights(frozen_model, critic_weight_snapshot)
+                verify_frozen_weights(state.critic_model, critic_weight_snapshot)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
