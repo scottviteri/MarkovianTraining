@@ -1291,12 +1291,13 @@ def save_checkpoint(state: TrainingState):
             # Use test split for evaluation
             test_data = list(load_gsm8k_dataset(split="test"))
             
-            # Run evaluation
+            # Run evaluation with hyperparameters
             accuracy, results = evaluate_model(
                 state.actor_model,
                 state.tokenizer,
                 state.device,
                 test_data,
+                state.hyperparameters,  # Add hyperparameters here
                 batch_size=8
             )
             
