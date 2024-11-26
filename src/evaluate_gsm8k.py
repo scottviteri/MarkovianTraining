@@ -90,9 +90,11 @@ def evaluate_model(
         # Process in smaller chunks to manage memory
         chunk_size = min(batch_size, 8)  # Use smaller batch size for evaluation
         for i in tqdm(range(0, len(test_data[:num_samples]), chunk_size)):
-            # Clear cache between batches
+            # Clear cache between batches with synchronization
             if torch.cuda.is_available():
+                torch.cuda.synchronize()
                 torch.cuda.empty_cache()
+                torch.cuda.synchronize()
                 
             batch = test_data[i : i + chunk_size]
             questions, answers = zip(*batch)
@@ -116,12 +118,14 @@ def evaluate_model(
                     do_sample=False,
                 )
 
-            # Process outputs and free memory
+            # Process outputs and free memory with synchronization
             reasoning_tokens = outputs[:, inputs.input_ids.shape[1] :]
             del outputs
             del inputs
             if torch.cuda.is_available():
+                torch.cuda.synchronize()
                 torch.cuda.empty_cache()
+                torch.cuda.synchronize()
 
             # Use the provided batch processing function
             extracted_generated_answers = batch_process_answers(
@@ -150,9 +154,11 @@ def evaluate_model(
         return accuracy, results
 
     finally:
-        # Ensure memory is cleared after evaluation
+        # Ensure memory is cleared after evaluation with synchronization
         if torch.cuda.is_available():
+            torch.cuda.synchronize()
             torch.cuda.empty_cache()
+            torch.cuda.synchronize()
 
 
 def batch_process_answers(
@@ -192,6 +198,20 @@ def batch_process_answers(
         )
         selected_answers = [x.split("\nAnswer: ")[-1] for x in generated_answers]
         extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
+
+        # Clean up with synchronization
+        del tokenized_partial_prompts
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+
+    finally:
+        # Final cleanup with synchronization
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
 
     return extracted_generated_answers
 

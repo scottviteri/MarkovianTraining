@@ -1285,11 +1285,13 @@ def save_checkpoint(state: TrainingState):
     if state.hyperparameters["task_type"] == "gsm8k":
         colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
         try:
-            # Move models to CPU and clear GPU memory
+            # Move models to CPU and ensure GPU operations are complete
             state.actor_model.cpu()
             state.critic_model.cpu()
             if torch.cuda.is_available():
+                torch.cuda.synchronize()  # Wait for GPU operations to complete
                 torch.cuda.empty_cache()
+                torch.cuda.synchronize()  # Wait for cache clearing to complete
             
             # Run evaluation script
             import subprocess
