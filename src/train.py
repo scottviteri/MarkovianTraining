@@ -1294,14 +1294,13 @@ def save_checkpoint(state: TrainingState):
             test_data = load_dataset("openai/gsm8k", "main", split="test")
             test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
             
-            # Run evaluation
+            # Run evaluation without model_type argument
             accuracy, results = evaluate_model(
                 state.actor_model,
                 state.tokenizer,
                 state.device,
                 test_data,
-                batch_size=8,
-                model_type=state.hyperparameters["model_type"]
+                batch_size=8
             )
             
             # Save results
