@@ -179,6 +179,33 @@ results/
     └── <final_results_and_figures>
 ```
 
+### 4. Log Analysis Tool (`src/log_file_quick_analysis.py`)
+
+For quick analysis of training logs, use the log file analysis tool:
+
+```bash
+# Plot metrics with default window size (50)
+python src/log_file_quick_analysis.py results/task_type/timestamp/log.jsonl
+
+# Plot with custom smoothing window
+python src/log_file_quick_analysis.py results/task_type/timestamp/log.jsonl --window_size 100
+
+# Print statistics and examine specific batch without plotting
+python src/log_file_quick_analysis.py results/task_type/timestamp/log.jsonl --batch_index 1000
+```
+
+The tool provides:
+- Overall statistics for actor/critic log probabilities and normalized rewards
+- Moving average plots of training metrics
+- Detailed examination of specific training batches
+- Support for analyzing multiple log files simultaneously
+
+For GSM8K training specifically, the tool can help track:
+- Actor and critic reasoning log probabilities
+- Actor and critic answer log probabilities
+- Normalized rewards
+- Training progression across checkpoints
+
 ## Dependencies
 
 This project requires the following main dependencies:
