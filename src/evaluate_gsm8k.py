@@ -12,8 +12,7 @@ import glob
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Dict
-from train import construct_prompts
-from utils import find_latest_result
+from utils import construct_prompts, find_latest_result
 
 
 def extract_answer(answer):
