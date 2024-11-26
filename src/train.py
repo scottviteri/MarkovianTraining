@@ -13,70 +13,17 @@ import argparse
 from datasets import load_dataset
 import re
 import os
-from constants import MISTRAL_INST_START, MISTRAL_INST_END, EI_SKIP_INITIAL
 from constants import EI_SKIP_INITIAL
 from typing import Union, List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass, asdict
 from tqdm import tqdm
-
-
-def find_latest_result(return_log=False):
-    """
-    Find the most recent result file across all tasks and model types.
-
-    Args:
-        return_log (bool): If True, return the log file instead of the model checkpoint
-
-    Returns:
-        str: Path to the most recent result file, or None if no result found
-    """
-    results_dir = "results"
-
-    # Collect all potential result files
-    result_files = []
-
-    # Walk through the results directory
-    for task_dir in os.listdir(results_dir):
-        task_path = os.path.join(results_dir, task_dir)
-        if os.path.isdir(task_path):
-            for timestamp_dir in os.listdir(task_path):
-                full_timestamp_path = os.path.join(task_path, timestamp_dir)
-
-                # Check for model checkpoint or log file
-                if return_log:
-                    log_path = os.path.join(full_timestamp_path, "log.jsonl")
-                    file_path = log_path
-                else:
-                    model_path = os.path.join(full_timestamp_path, "model.pt")
-                    file_path = model_path
-
-                if os.path.exists(file_path):
-                    result_files.append(
-                        (
-                            os.path.getmtime(full_timestamp_path),
-                            file_path,
-                        )
-                    )
-
-    # Sort by timestamp, most recent first
-    if result_files:
-        return sorted(result_files, key=lambda x: x[0], reverse=True)[0][1]
-
-    return None
-
-
-# Add at the top of the file with other imports
-class Colors:
-    """ANSI color codes"""
-
-    BLUE = "\033[94m"
-    GREEN = "\033[92m"
-    RED = "\033[91m"
-    YELLOW = "\033[93m"
-    BOLD = "\033[1m"
-    UNDERLINE = "\033[4m"
-    CYAN = "\033[96m"
-    END = "\033[0m"
+from evaluate_gsm8k import evaluate_model, save_results
+from utils import (
+    Colors,
+    colored_print,
+    construct_prompts,
+    find_latest_result,
+)
 
 
 def print_batch_delimiter():
@@ -201,71 +148,6 @@ def load_gsm8k_dataset(chunk_size: int = 1000, split: str = "train"):
         if split == "train":  # Only shuffle training data
             random.shuffle(chunk)
         yield from chunk
-
-
-def get_model_specific_tokens(model_type):
-    """Return model-specific tokens for prompt construction."""
-    if model_type == "mistral":
-        return {
-            "inst_start": MISTRAL_INST_START,
-            "inst_end": MISTRAL_INST_END,
-        }
-    else:  # llama
-        return {
-            "inst_start": "",
-            "inst_end": "",
-        }
-
-
-def construct_prompts(
-    question: str, hyperparameters: Dict[str, Any], reasoning: Optional[str] = None
-) -> str:
-    """
-    Construct prompt for model input.
-
-    Args:
-        question: The input question or text
-        hyperparameters: Dictionary containing model and task configuration
-        reasoning: Optional reasoning text to include
-
-    Returns:
-        str: Formatted prompt
-    """
-    model_type = hyperparameters["model_type"]
-    task_type = hyperparameters["task_type"]
-
-    tokens = get_model_specific_tokens(model_type)
-
-    # Construct base prompt
-    if task_type == "wiki_compression":
-        base_prompt = (
-            f"You will need to reconstruct the following {hyperparameters['target_length']} tokens, which you will need to reconstruct given {hyperparameters['cot_length']} memory tokens which you can write for yourself."
-            f"Feel free to be creative in your chosen compression strategy!\n\nFull Text:"
-        )
-        prompt_type = "Compression:"
-    elif task_type == "wiki_continuation":
-        base_prompt = (
-            f"You will need to predict the next {hyperparameters['target_length']} tokens which follow the provided passage."
-            f"You can write {hyperparameters['cot_length']} thinking tokens which will be your sole context for prediction."
-            f"Feel free to be creative in your thinking strategy!\n\nOpening text:"
-        )
-        prompt_type = "Helpful Text:"
-    elif task_type == "arithmetic":
-        base_prompt = f"You will be given an arithmetic problem, which you have {hyperparameters['cot_length']} tokens to work through step-by-step. Question:"
-        prompt_type = "Reasoning:"
-    elif task_type == "gsm8k":
-        base_prompt = f"You will be given a reasoning problem, which you have {hyperparameters['cot_length']} tokens to work through step-by-step. Question:"
-        prompt_type = "Reasoning:"
-    else:
-        raise ValueError(f"Unknown task type: {task_type}")
-    # Construct initial prompt with model-specific tokens
-    if reasoning is None:
-        return f"{tokens['inst_start']} {base_prompt} {question} {tokens['inst_end']}\n{prompt_type}"
-
-    base_with_type = f"{tokens['inst_start']} {base_prompt} <Redacted> {tokens['inst_end']}\n{prompt_type}"
-
-    # Add model-specific answer header to partial prompt
-    return base_with_type + reasoning + f" Answer: "
 
 
 def get_text_with_token_length(
@@ -947,32 +829,6 @@ def tensor_to_python(value):
     return value
 
 
-def print_debug_info(
-    task_type,
-    q,
-    reasoning_text_first,
-    ans,
-    avg_log_prob,
-    extracted_generated_answers=None,
-):
-    """Print debug information with consistent coloring and formatting."""
-    if task_type == "wiki_compression":
-        colored_print("Full Text:", q, Colors.BLUE)
-        colored_print("Compression:", reasoning_text_first, Colors.YELLOW)
-    elif task_type == "wiki_continuation":
-        colored_print("Context:", q, Colors.BLUE)
-        colored_print("Helpful Text:", reasoning_text_first, Colors.YELLOW)
-    else:  # arithmetic or gsm8k
-        colored_print("Question:", q, Colors.BLUE)
-        colored_print("Reasoning:", reasoning_text_first, Colors.YELLOW)
-
-    colored_print("Answer:", ans, Colors.GREEN)
-    colored_print("Avg Log Prob:", str(avg_log_prob), Colors.BOLD, inline=True)
-
-    if extracted_generated_answers is not None:
-        colored_print("Generated Answer:", extracted_generated_answers[0], Colors.RED)
-
-
 def should_decrease_cot_length(recent_log_probs, threshold=-0.5, window_size=10):
     """
     Check if we should decrease the cot_length based on recent log probabilities.
@@ -996,24 +852,26 @@ def should_decrease_cot_length(recent_log_probs, threshold=-0.5, window_size=10)
 def setup_training_environment(task_type, resume, hyperparameters):
     """Set up the results directory and load checkpoints if resuming."""
     if resume:
-        latest_checkpoint_path, latest_log_path = get_latest_result_and_log(task_type)
-        if latest_checkpoint_path is None or latest_log_path is None:
+        latest_dir = find_latest_result()
+        if not latest_dir:
             raise ValueError(f"No previous run found for task type: {task_type}")
+            
+        model_save_path = os.path.join(latest_dir, "model.pt")
+        log_file = os.path.join(latest_dir, "log.jsonl")
+        
+        if not os.path.exists(model_save_path) or not os.path.exists(log_file):
+            raise ValueError(f"Missing required files in latest result directory: {latest_dir}")
 
-        start_batch, hyperparameters = load_training_state(latest_log_path)
+        start_batch, hyperparameters = load_training_state(log_file)
         previous_normalized_rewards, previous_advantages = (
-            load_previous_rewards_and_advantages(latest_log_path)
+            load_previous_rewards_and_advantages(log_file)
         )
-        # Use the same directory as the loaded checkpoint
-        results_dir = os.path.dirname(latest_checkpoint_path)
-        model_save_path = os.path.join(results_dir, "model.pt")  # Changed to direct .pt file
-        log_file = latest_log_path
     else:
         results_dir = os.path.join(
             "results", task_type, datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         )
         os.makedirs(results_dir, exist_ok=True)
-        model_save_path = os.path.join(results_dir, "model.pt")  # Changed to direct .pt file
+        model_save_path = os.path.join(results_dir, "model.pt")
         log_file = os.path.join(results_dir, "log.jsonl")
         start_batch = 0
         previous_normalized_rewards = []
@@ -1028,7 +886,7 @@ def setup_training_environment(task_type, resume, hyperparameters):
         start_batch,
         previous_normalized_rewards,
         previous_advantages,
-        hyperparameters,  # Now returning the potentially updated hyperparameters
+        hyperparameters,
     )
 
 
@@ -1283,7 +1141,6 @@ def save_checkpoint(state: TrainingState):
     if state.hyperparameters["task_type"] == "gsm8k":
         colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
         try:
-            from evaluate_gsm8k import evaluate_model, save_results
             
             # Use the actor model directly for evaluation
             state.actor_model.eval()  # Ensure model is in eval mode

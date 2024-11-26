@@ -12,7 +12,6 @@ from scipy.signal import savgol_filter
 from train import calculate_answer_log_probs, find_latest_result, print_debug_info
 from tqdm import tqdm
 import string
-import shutil
 from pathlib import Path
 
 

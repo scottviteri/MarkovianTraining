@@ -8,12 +8,12 @@ from tqdm import tqdm
 import os
 from peft import LoraConfig, get_peft_model
 import datetime
-from train import find_latest_result, initialize_model_and_optimizer
 import glob
 import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
 import numpy as np
 from typing import List, Dict
+from train import construct_prompts
+from utils import find_latest_result
 
 
 def extract_answer(answer):
@@ -109,7 +109,6 @@ def evaluate_model(
     num_samples=None,
     batch_size=16,
 ):
-    from train import construct_prompts
     
     correct = 0
     total = 0
@@ -236,11 +235,10 @@ def get_model_paths_and_type(provided_path=None, target_index=None, all_checkpoi
     if provided_path:
         model_dir = os.path.dirname(provided_path)
     else:
-        # Find most recent results directory
-        results = glob.glob("results/gsm8k/*")
-        if not results:
-            raise FileNotFoundError("No GSM8K results directory found")
-        model_dir = max(results, key=os.path.getctime)
+        # Use find_latest_result to get the most recent directory
+        model_dir = find_latest_result()
+        if not model_dir:
+            raise FileNotFoundError("No results directory found")
     
     # Get model paths
     if all_checkpoints:
@@ -249,7 +247,7 @@ def get_model_paths_and_type(provided_path=None, target_index=None, all_checkpoi
     else:
         model_paths = [find_checkpoint_with_index(model_dir, target_index)]
     
-    # Get model type from log.jsonl (same for all checkpoints in directory)
+    # Get model type from log.jsonl
     log_path = os.path.join(model_dir, "log.jsonl")
     try:
         with open(log_path, 'r') as f:
