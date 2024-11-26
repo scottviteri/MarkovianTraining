@@ -23,7 +23,6 @@ from utils import (
     colored_print,
     construct_prompts,
     find_latest_result,
-    configure_model_for_generation,
 )
 
 
@@ -62,9 +61,6 @@ def load_model(model_type="mistral", hyperparameters=None):
         device_map="auto",
     )
 
-    # Configure generation settings for training
-    configure_model_for_generation(model, tokenizer, is_eval=False, hyperparameters=hyperparameters)
-
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",
         inference_mode=False,
@@ -76,9 +72,8 @@ def load_model(model_type="mistral", hyperparameters=None):
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
-    # Create frozen copy with eval settings
+    # Create frozen copy
     frozen_model = copy.deepcopy(model)
-    configure_model_for_generation(frozen_model, tokenizer, is_eval=True)
     for param in frozen_model.parameters():
         param.requires_grad = False
 
@@ -1148,8 +1143,6 @@ def save_checkpoint(state: TrainingState):
     if state.hyperparameters["task_type"] == "gsm8k":
         colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
         state.actor_model.eval()  # Ensure model is in eval mode
-        # Configure for evaluation
-        configure_model_for_generation(state.actor_model, state.tokenizer, is_eval=True)
         
         # Use test split for evaluation
         test_data = list(load_gsm8k_dataset(split="test"))
@@ -1176,9 +1169,6 @@ def save_checkpoint(state: TrainingState):
         )
         
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
-        
-        # Restore training configuration
-        configure_model_for_generation(state.actor_model, state.tokenizer, is_eval=False, hyperparameters=state.hyperparameters)
         state.actor_model.train()  # Return model to training mode
 
 

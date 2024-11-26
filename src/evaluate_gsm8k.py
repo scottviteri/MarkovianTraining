@@ -54,9 +54,6 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
         device_map="auto",
     )
     
-    # Configure generation settings for evaluation
-    configure_model_for_generation(model, tokenizer, is_eval=True)
-
     # Add LoRA if not using base model
     if not use_base_model:
         peft_config = LoraConfig(
