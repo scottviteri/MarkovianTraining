@@ -169,7 +169,7 @@ def evaluate_model(
             answer_outputs = model.generate(
                 input_ids=tokenized_answer_inputs.input_ids,
                 attention_mask=tokenized_answer_inputs.attention_mask,
-                max_new_tokens=15,  # Fixed length for answer generation
+                max_new_tokens=10,  # Fixed length for answer generation
                 do_sample=False,    # Deterministic
                 pad_token_id=tokenizer.pad_token_id,
             )
@@ -202,36 +202,6 @@ def evaluate_model(
     
     accuracy = correct / total
     return accuracy, all_results
-
-
-def batch_process_answers(
-    model, tokenizer, device, reasoning_tokens, answers, use_gsm8k
-):
-    reasoning_text = tokenizer.batch_decode(reasoning_tokens, skip_special_tokens=True)
-    
-    if use_gsm8k:
-        partial_prompts = [f"Reasoning: {r}\nAnswer:" for r in reasoning_text]
-        tokenized_partial_prompts = tokenizer(
-            partial_prompts, padding=True, return_tensors="pt"
-        ).to(device)
-        max_answer_length = 15
-        
-        with torch.no_grad():
-            generated_outputs = model.generate(
-                input_ids=tokenized_partial_prompts.input_ids,
-                attention_mask=tokenized_partial_prompts.attention_mask,
-                max_new_tokens=max_answer_length,
-                do_sample=False,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-
-        generated_answers = tokenizer.batch_decode(
-            generated_outputs[:, -max_answer_length - 1 :], skip_special_tokens=True
-        )
-        selected_answers = [x.split("\nAnswer: ")[-1] for x in generated_answers]
-        extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
-
-        return extracted_generated_answers
 
 
 def find_checkpoint_with_index(model_dir, target_index=None):

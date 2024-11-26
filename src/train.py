@@ -1142,20 +1142,22 @@ def save_checkpoint(state: TrainingState):
     # If GSM8K, evaluate the model
     if state.hyperparameters["task_type"] == "gsm8k":
         colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
-        state.actor_model.eval()  # Ensure model is in eval mode
         
         # Use test split for evaluation
         test_data = list(load_gsm8k_dataset(split="test"))
         
-        # Run evaluation
-        accuracy, results = evaluate_model(
-            state.actor_model,
-            state.tokenizer,
-            state.device,
-            test_data,
-            state.hyperparameters,
-            batch_size=8
-        )
+        # Run evaluation in eval mode
+        with torch.no_grad():
+            state.actor_model.eval()
+            accuracy, results = evaluate_model(
+                state.actor_model,
+                state.tokenizer,
+                state.device,
+                test_data,
+                state.hyperparameters,
+                batch_size=8
+            )
+            state.actor_model.train()
         
         # Save results
         model_dir = os.path.dirname(state.model_save_path)
@@ -1169,7 +1171,6 @@ def save_checkpoint(state: TrainingState):
         )
         
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
-        state.actor_model.train()  # Return model to training mode
 
 
 def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> BatchData:
