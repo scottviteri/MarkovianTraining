@@ -145,7 +145,7 @@ def construct_prompts(
     # Add model-specific answer header to partial prompt
     return base_with_type + reasoning + f" Answer: "
 
-def configure_model_for_generation(model, tokenizer, is_eval=False):
+def configure_model_for_generation(model, tokenizer, is_eval=False, hyperparameters=None):
     """Configure model generation settings consistently."""
     model.generation_config.pad_token_id = tokenizer.eos_token_id
     model.generation_config.eos_token_id = tokenizer.eos_token_id
@@ -153,10 +153,13 @@ def configure_model_for_generation(model, tokenizer, is_eval=False):
     if is_eval:
         # For evaluation, we want deterministic output
         model.generation_config.do_sample = False
-        model.generation_config.temperature = None
-        model.generation_config.top_p = None
+        model.generation_config.temperature = None  # Explicitly unset
+        model.generation_config.top_p = None       # Explicitly unset
     else:
-        # For training, we want stochastic output
-        model.generation_config.do_sample = True
-        model.generation_config.temperature = 0.6
-        model.generation_config.top_p = 0.9
+        # For training, use hyperparameters
+        if hyperparameters:
+            model.generation_config.do_sample = True
+            model.generation_config.temperature = hyperparameters.get("temperature", 1.0)
+            # Only set top_p if explicitly specified in hyperparameters
+            top_p = hyperparameters.get("top_p", None)
+            model.generation_config.top_p = top_p

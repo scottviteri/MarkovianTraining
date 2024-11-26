@@ -43,7 +43,7 @@ def colored_print(
         print(repr(text))
 
 
-def load_model(model_type="mistral"):
+def load_model(model_type="mistral", hyperparameters=None):
     """Load either Mistral or Llama model based on parameter."""
     if model_type == "mistral":
         model_name = "mistralai/Mistral-7B-Instruct-v0.2"
@@ -63,7 +63,7 @@ def load_model(model_type="mistral"):
     )
 
     # Configure generation settings for training
-    configure_model_for_generation(model, tokenizer, is_eval=False)
+    configure_model_for_generation(model, tokenizer, is_eval=False, hyperparameters=hyperparameters)
 
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",
@@ -1296,7 +1296,10 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
 def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     """Main training loop"""
     state = TrainingState.initialize(task_type, resume, model_type, hyperparameters)
-
+    
+    # Update the model loading call to include hyperparameters
+    model, frozen_model, tokenizer, device = load_model(model_type=model_type, hyperparameters=hyperparameters)
+    
     # Get dataset size for tracking full passes
     if task_type == "gsm8k":
         dataset_size = len(load_dataset("openai/gsm8k", "main")["train"])
@@ -1315,7 +1318,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
         num_batches=hyperparameters["num_batches"],
         batch_size=hyperparameters["batch_size"],
         task_type=task_type,
-        tokenizer=state.tokenizer,
+        tokenizer=tokenizer,
         hyperparameters=hyperparameters,
     )
 
@@ -1337,7 +1340,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         num_batches=hyperparameters["num_batches"] - batch_index,
                         batch_size=hyperparameters["batch_size"],
                         task_type=task_type,
-                        tokenizer=state.tokenizer,
+                        tokenizer=tokenizer,
                         hyperparameters=hyperparameters,
                     )
                     qa_batch = next(qa_generator)
