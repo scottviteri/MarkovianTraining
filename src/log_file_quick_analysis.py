@@ -6,8 +6,15 @@ import matplotlib.pyplot as plt
 import argparse
 import os
 
-def load_and_analyze_metrics(file_paths=None, window=50, target_batch_index=None):
-    """Load and analyze metrics from log files"""
+def load_and_analyze_metrics(file_paths=None, window_size=50, target_batch_index=None):
+    """
+    Load and analyze metrics from log files
+    
+    Args:
+        file_paths: List of log files to analyze. If None, uses latest.
+        window_size: Size of the moving average window for smoothing
+        target_batch_index: Specific batch index to analyze
+    """
     # If no file paths provided, use the latest result
     if not file_paths:
         from train import find_latest_result
@@ -70,22 +77,24 @@ def load_and_analyze_metrics(file_paths=None, window=50, target_batch_index=None
 
     # Convert to numpy arrays
     normalized_rewards = np.array(normalized_rewards)
-    if actor_answer_log_probs:
+    if len(actor_answer_log_probs) > 0:
         actor_answer_log_probs = np.array(actor_answer_log_probs)
-    if critic_answer_log_probs:
-        critic_answer_log_probs = np.array(critic_answer_log_probs)
-    
-    # Create plots directory if it doesn't exist
-    log_dir = str(Path(file_paths[0]).parent)
+        
+        # If critic values aren't present, calculate them
+        if len(critic_answer_log_probs) == 0:
+            print("Calculating Critic Answer Log Probs as Actor - Normalized Rewards")
+            critic_answer_log_probs = actor_answer_log_probs - normalized_rewards[:len(actor_answer_log_probs)]
+        else:
+            critic_answer_log_probs = np.array(critic_answer_log_probs)
     
     # Create figure with 2x2 subplots
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
-    fig.suptitle('Training Metrics Analysis', fontsize=16)
+    fig.suptitle(f'Training Metrics Analysis (Window Size: {window_size})', fontsize=16)
     
     # Plot 1: Normalized Rewards
     ax1.plot(normalized_rewards, alpha=0.3, label='Raw')
-    ax1.plot(np.convolve(normalized_rewards, np.ones(window)/window, mode='valid'),
-             label=f'Moving Avg (w={window})')
+    ax1.plot(np.convolve(normalized_rewards, np.ones(window_size)/window_size, mode='valid'),
+             label=f'Moving Avg (w={window_size})')
     ax1.set_title('Normalized Rewards')
     ax1.set_xlabel('Batch')
     ax1.set_ylabel('Value')
@@ -93,10 +102,10 @@ def load_and_analyze_metrics(file_paths=None, window=50, target_batch_index=None
     ax1.legend()
 
     # Plot 2: Actor Answer Log Probs
-    if actor_answer_log_probs.size > 0:
+    if len(actor_answer_log_probs) > 0:
         ax2.plot(actor_answer_log_probs, alpha=0.3, label='Raw')
-        ax2.plot(np.convolve(actor_answer_log_probs, np.ones(window)/window, mode='valid'),
-                label=f'Moving Avg (w={window})')
+        ax2.plot(np.convolve(actor_answer_log_probs, np.ones(window_size)/window_size, mode='valid'),
+                label=f'Moving Avg (w={window_size})')
         ax2.set_title('Actor Answer Log Probs')
         ax2.set_xlabel('Batch')
         ax2.set_ylabel('Value')
@@ -104,10 +113,10 @@ def load_and_analyze_metrics(file_paths=None, window=50, target_batch_index=None
         ax2.legend()
 
     # Plot 3: Critic Answer Log Probs
-    if critic_answer_log_probs.size > 0:
+    if len(critic_answer_log_probs) > 0:
         ax3.plot(critic_answer_log_probs, alpha=0.3, label='Raw')
-        ax3.plot(np.convolve(critic_answer_log_probs, np.ones(window)/window, mode='valid'),
-                label=f'Moving Avg (w={window})')
+        ax3.plot(np.convolve(critic_answer_log_probs, np.ones(window_size)/window_size, mode='valid'),
+                label=f'Moving Avg (w={window_size})')
         ax3.set_title('Critic Answer Log Probs')
         ax3.set_xlabel('Batch')
         ax3.set_ylabel('Value')
@@ -116,18 +125,19 @@ def load_and_analyze_metrics(file_paths=None, window=50, target_batch_index=None
 
     # Plot 4: Contains Answer
     contains_answer = np.array(contains_answer)
-    window_avg = np.convolve(contains_answer, np.ones(window)/window, mode='valid')
+    window_avg = np.convolve(contains_answer, np.ones(window_size)/window_size, mode='valid')
     ax4.plot(contains_answer, 'o', alpha=0.1, label='Raw')
-    ax4.plot(np.arange(len(window_avg)), window_avg, label=f'Moving Avg (w={window})')
+    ax4.plot(np.arange(len(window_avg)), window_avg, label=f'Moving Avg (w={window_size})')
     ax4.set_title('Contains Answer')
     ax4.set_xlabel('Batch')
     ax4.set_ylabel('Rate')
     ax4.grid(True)
     ax4.legend()
 
-    # Save plot
-    plt.tight_layout()
+    # Save plot to the same directory as the log file
+    log_dir = str(Path(file_paths[0]).parent)
     plot_path = os.path.join(log_dir, 'training_metrics.png')
+    plt.tight_layout()
     plt.savefig(plot_path)
     plt.close()
     print(f"\nPlot saved to: {plot_path}")
@@ -136,13 +146,13 @@ def load_and_analyze_metrics(file_paths=None, window=50, target_batch_index=None
     print(f"\nProcessed {len(normalized_rewards)} total entries from {len(file_paths)} files")
     print("\nRaw Statistics:")
     
-    if actor_answer_log_probs.size > 0:
+    if len(actor_answer_log_probs) > 0:
         print("Actor Answer Log Probs:")
         print(f"  Mean: {actor_answer_log_probs.mean():.4f}")
         print(f"  Std:  {actor_answer_log_probs.std():.4f}")
         print(f"  Max:  {actor_answer_log_probs.max():.4f}")
     
-    if critic_answer_log_probs.size > 0:
+    if len(critic_answer_log_probs) > 0:
         print("\nCritic Answer Log Probs:")
         print(f"  Mean: {critic_answer_log_probs.mean():.4f}")
         print(f"  Std:  {critic_answer_log_probs.std():.4f}")
@@ -154,10 +164,16 @@ def load_and_analyze_metrics(file_paths=None, window=50, target_batch_index=None
     print(f"  Max:  {normalized_rewards.max():.4f}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Analyze training log files and plot metrics")
     parser.add_argument('files', nargs='*', help='Log files to analyze (if none provided, uses latest)')
-    parser.add_argument('--window_size', type=int, default=50, help='Smoothing window size')
-    parser.add_argument('--batch_index', type=int, help='Print specific batch index entry without plotting')
+    parser.add_argument('--window_size', type=int, default=50, 
+                       help='Window size for moving average smoothing (default: 50)')
+    parser.add_argument('--batch_index', type=int, 
+                       help='Print specific batch index entry without plotting')
     args = parser.parse_args()
     
-    load_and_analyze_metrics(args.files if args.files else None, args.window_size, args.batch_index)
+    load_and_analyze_metrics(
+        file_paths=args.files if args.files else None,
+        window_size=args.window_size,
+        target_batch_index=args.batch_index
+    )
