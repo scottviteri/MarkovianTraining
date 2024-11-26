@@ -599,6 +599,7 @@ class AdvantageOutput:
     advantages: torch.Tensor
     normalized_rewards: torch.Tensor
     actor_answer_logprobs: torch.Tensor
+    critic_answer_logprobs: torch.Tensor
     extracted_answers: Optional[List[Any]]
 
 
@@ -779,17 +780,18 @@ def calculate_advantages(
         state.hyperparameters,
     )
 
+    # Calculate log probs of answers given critic's reasoning
+    critic_answer_logprobs, _ = calculate_answer_log_probs(
+        state.critic_model,
+        state.tokenizer,
+        state.device,
+        questions,
+        reasoning_output.critic_reasoning,
+        answers,
+        state.hyperparameters,
+    )
+
     if state.hyperparameters.get("normalize_loss", True):
-        # Calculate log probs of answers given critic's reasoning (baseline)
-        critic_answer_logprobs, _ = calculate_answer_log_probs(
-            state.critic_model,
-            state.tokenizer,
-            state.device,
-            questions,
-            reasoning_output.critic_reasoning,
-            answers,
-            state.hyperparameters,
-        )
         # Normalize reward as improvement over baseline
         normalized_rewards = actor_answer_logprobs - critic_answer_logprobs
     else:
@@ -807,6 +809,7 @@ def calculate_advantages(
         advantages=advantages,
         normalized_rewards=normalized_rewards,
         actor_answer_logprobs=actor_answer_logprobs,
+        critic_answer_logprobs=critic_answer_logprobs,
         extracted_answers=extracted_answers,
     )
 
@@ -1065,14 +1068,13 @@ class BatchData:
     answers: List[str]
     actor_reasoning: List[str]
     critic_reasoning: List[str]
-    R_mean_actor_logprobs: torch.Tensor
-    R_mean_critic_logprobs: torch.Tensor
+    R_mean_actor_logprobs: torch.Tensor  # Reasoning logprobs
+    R_mean_critic_logprobs: torch.Tensor  # Reasoning logprobs
     kl: torch.Tensor
     advantages: torch.Tensor
     normalized_rewards: torch.Tensor
-    actor_answer_logprobs: (
-        torch.Tensor
-    )  # Changed from advantage_output to just the tensor we need
+    actor_answer_logprobs: torch.Tensor
+    critic_answer_logprobs: torch.Tensor
     losses: torch.Tensor
     training_mask: Optional[torch.Tensor]
     metrics: Dict[str, Any]
@@ -1085,6 +1087,7 @@ class LogMetrics:
     loss: float
     pg_loss: float
     actor_logprobs: float
+    critic_logprobs: float
     actor_answer_logprobs: float
     critic_answer_logprobs: float
     kl: float
@@ -1135,12 +1138,13 @@ class LogMetrics:
             loss=batch_data.losses.mean().item(),
             pg_loss=batch_data.metrics["pg_losses"][0].item(),
             actor_logprobs=batch_data.R_mean_actor_logprobs[0].item(),
+            critic_logprobs=batch_data.R_mean_critic_logprobs[0].item(),
             actor_answer_logprobs=batch_data.actor_answer_logprobs[
                 0
-            ].item(),  # Updated this line
+            ].item(),
             critic_answer_logprobs=batch_data.critic_answer_logprobs[
                 0
-            ].item(),  # Updated this line
+            ].item(),
             kl=raw_kl,
             weighted_kl=weighted_kl,
             ppo_ratio=ppo_ratio,
@@ -1207,7 +1211,8 @@ def log_batch_results(
         "Training Metrics": {
             "Loss": float(metrics.loss),
             "Policy Gradient Loss": float(metrics.pg_loss),
-            "Actor Log Probs": float(metrics.actor_logprobs),
+            "Actor Reasoning Log Probs": float(metrics.actor_logprobs),
+            "Critic Reasoning Log Probs": float(metrics.critic_logprobs),
             "Actor Answer Log Probs": float(metrics.actor_answer_logprobs),
             "Critic Answer Log Probs": float(metrics.critic_answer_logprobs),
             "KL": float(kl_to_log),
@@ -1316,7 +1321,8 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         kl=reasoning_output.kl,
         advantages=advantage_output.advantages,
         normalized_rewards=advantage_output.normalized_rewards,
-        actor_answer_logprobs=advantage_output.actor_answer_logprobs,  # Just pass the tensor
+        actor_answer_logprobs=advantage_output.actor_answer_logprobs,
+        critic_answer_logprobs=advantage_output.critic_answer_logprobs,  # Added critic_answer_logprobs
         losses=losses,
         training_mask=training_mask,
         metrics=metrics,
