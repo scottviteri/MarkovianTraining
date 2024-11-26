@@ -183,16 +183,23 @@ def generate_arithmetic_pairs(task_type: str, num_examples: int = 1000):
     return qa_pairs
 
 
-def load_gsm8k_dataset(chunk_size: int = 1000):
-    """Lazily load GSM8K dataset in chunks."""
+def load_gsm8k_dataset(chunk_size: int = 1000, split: str = "train"):
+    """
+    Lazily load GSM8K dataset in chunks.
+    
+    Args:
+        chunk_size: Number of examples to yield at a time
+        split: Dataset split to use ("train" or "test")
+    """
     ds = load_dataset("openai/gsm8k", "main")
-    questions = ds["train"]["question"]
-    answers = list(map(lambda x: x[x.index("####") + 5 :], ds["train"]["answer"]))
+    questions = ds[split]["question"]
+    answers = list(map(lambda x: x[x.index("####") + 5 :], ds[split]["answer"]))
     qa_pairs = list(zip(questions, answers))
 
     for i in range(0, len(qa_pairs), chunk_size):
         chunk = qa_pairs[i : i + chunk_size]
-        random.shuffle(chunk)
+        if split == "train":  # Only shuffle training data
+            random.shuffle(chunk)
         yield from chunk
 
 
@@ -312,28 +319,19 @@ def generate_question_answer_batches(
 ):
     """Generate batches of Q&A pairs lazily."""
     if task_type == "gsm8k":
-        # Load GSM8K dataset
-        print("Loading GSM8K dataset...")
-        dataset = load_dataset("gsm8k", "main")["train"]
-        dataset_size = len(dataset)
-        
-        # Create indices for all batches
-        all_indices = list(range(dataset_size))
-        random.shuffle(all_indices)
-        
-        # Yield batches
+        # Use load_gsm8k_dataset directly which already processes answers correctly
+        dataset_iter = load_gsm8k_dataset(chunk_size=chunk_size)
         for batch_start in range(0, num_batches * batch_size, batch_size):
-            # Wrap around if we reach the end of the dataset
-            batch_indices = [all_indices[i % dataset_size] for i in range(batch_start, batch_start + batch_size)]
-            
-            # Get batch of examples
             batch = []
-            for idx in batch_indices:
-                example = dataset[idx]
-                question = example["question"]
-                answer = example["answer"]
-                batch.append((question, answer))
-            
+            for _ in range(batch_size):
+                try:
+                    qa_pair = next(dataset_iter)
+                    batch.append(qa_pair)
+                except StopIteration:
+                    # Reset iterator if we run out of data
+                    dataset_iter = load_gsm8k_dataset(chunk_size=chunk_size)
+                    qa_pair = next(dataset_iter)
+                    batch.append(qa_pair)
             yield batch
             
     elif task_type in ["wiki_compression", "wiki_continuation"]:
@@ -1285,16 +1283,15 @@ def save_checkpoint(state: TrainingState):
     if state.hyperparameters["task_type"] == "gsm8k":
         colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
         try:
-            from evaluate_gsm8k import evaluate_model, load_dataset, save_results
+            from evaluate_gsm8k import evaluate_model, save_results
             
             # Use the actor model directly for evaluation
             state.actor_model.eval()  # Ensure model is in eval mode
             
-            # Load test data
-            test_data = load_dataset("openai/gsm8k", "main", split="test")
-            test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
+            # Use test split for evaluation
+            test_data = list(load_gsm8k_dataset(split="test"))
             
-            # Run evaluation without model_type argument
+            # Run evaluation
             accuracy, results = evaluate_model(
                 state.actor_model,
                 state.tokenizer,
