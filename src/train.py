@@ -23,6 +23,7 @@ from utils import (
     colored_print,
     construct_prompts,
     find_latest_result,
+    configure_model_for_generation,
 )
 
 
@@ -43,22 +44,26 @@ def colored_print(
 
 
 def load_model(model_type="mistral"):
-    """Load either Mistral or Llama 3.1 model based on parameter."""
+    """Load either Mistral or Llama model based on parameter."""
     if model_type == "mistral":
         model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     elif model_type == "llama":
-        model_name = "meta-llama/Llama-3.1-8B-Instruct"  # Using 8B version
+        model_name = "meta-llama/Llama-3.1-8B-Instruct"
     else:
         raise ValueError("model_type must be either 'mistral' or 'llama'")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token_id = tokenizer.eos_token_id
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
-        device_map="auto",  # Added for better device management
+        device_map="auto",
     )
+
+    # Configure generation settings for training
+    configure_model_for_generation(model, tokenizer, is_eval=False)
 
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",
@@ -71,7 +76,9 @@ def load_model(model_type="mistral"):
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
 
+    # Create frozen copy with eval settings
     frozen_model = copy.deepcopy(model)
+    configure_model_for_generation(frozen_model, tokenizer, is_eval=True)
     for param in frozen_model.parameters():
         param.requires_grad = False
 

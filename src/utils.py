@@ -143,4 +143,20 @@ def construct_prompts(
     base_with_type = f"{tokens['inst_start']} {base_prompt} <Redacted> {tokens['inst_end']}\n{prompt_type}"
 
     # Add model-specific answer header to partial prompt
-    return base_with_type + reasoning + f" Answer: " 
+    return base_with_type + reasoning + f" Answer: "
+
+def configure_model_for_generation(model, tokenizer, is_eval=False):
+    """Configure model generation settings consistently."""
+    model.generation_config.pad_token_id = tokenizer.eos_token_id
+    model.generation_config.eos_token_id = tokenizer.eos_token_id
+    
+    if is_eval:
+        # For evaluation, we want deterministic output
+        model.generation_config.do_sample = False
+        model.generation_config.temperature = None
+        model.generation_config.top_p = None
+    else:
+        # For training, we want stochastic output
+        model.generation_config.do_sample = True
+        model.generation_config.temperature = 0.6
+        model.generation_config.top_p = 0.9

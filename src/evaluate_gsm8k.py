@@ -12,7 +12,7 @@ import glob
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Dict
-from utils import construct_prompts, find_latest_result
+from utils import construct_prompts, find_latest_result, configure_model_for_generation
 
 
 def extract_answer(answer):
@@ -43,28 +43,25 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
     tokenizer = AutoTokenizer.from_pretrained(
         model_name,
         padding_side="left",
-        pad_token=tokenizer.eos_token,  # Set pad token explicitly
     )
-    tokenizer.pad_token_id = tokenizer.eos_token_id  # Set pad token ID explicitly
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # Load model in evaluation mode with generation settings pre-configured
+    # Load model in evaluation mode
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
         device_map="auto",
     )
     
-    # Configure generation settings once at initialization
-    model.generation_config.pad_token_id = tokenizer.eos_token_id
-    model.generation_config.eos_token_id = tokenizer.eos_token_id
-    model.generation_config.temperature = None
-    model.generation_config.top_p = None
+    # Configure generation settings for evaluation
+    configure_model_for_generation(model, tokenizer, is_eval=True)
 
     # Add LoRA if not using base model
     if not use_base_model:
         peft_config = LoraConfig(
             task_type="CAUSAL_LM",
-            inference_mode=True,  # Set to True for evaluation
+            inference_mode=True,
             r=8,
             lora_alpha=16,
             lora_dropout=0.1,
@@ -77,7 +74,6 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
         model.load_state_dict(checkpoint["model_state_dict"])
 
     model.eval()
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return model, tokenizer, device
 
