@@ -1008,14 +1008,14 @@ def setup_training_environment(task_type, resume, hyperparameters):
         )
         # Use the same directory as the loaded checkpoint
         results_dir = os.path.dirname(latest_checkpoint_path)
-        model_save_path = latest_checkpoint_path
+        model_save_path = os.path.join(results_dir, "model.pt")  # Changed to direct .pt file
         log_file = latest_log_path
     else:
         results_dir = os.path.join(
             "results", task_type, datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         )
         os.makedirs(results_dir, exist_ok=True)
-        model_save_path = os.path.join(results_dir, "model")
+        model_save_path = os.path.join(results_dir, "model.pt")  # Changed to direct .pt file
         log_file = os.path.join(results_dir, "log.jsonl")
         start_batch = 0
         previous_normalized_rewards = []
@@ -1265,10 +1265,12 @@ def log_batch_results(
 
 
 def save_checkpoint(state: TrainingState):
-    """Save model checkpoint"""
+    """Save model checkpoint and evaluate if GSM8K"""
     colored_print(
         "Checkpoint", f"Saving model at batch {state.batch_index}", Colors.BOLD
     )
+    
+    # Save model checkpoint
     torch.save(
         {
             "model_state_dict": state.actor_model.state_dict(),
@@ -1276,8 +1278,26 @@ def save_checkpoint(state: TrainingState):
             "batch_index": state.batch_index,
             "hyperparameters": state.hyperparameters,
         },
-        state.model_save_path + ".pt"
+        state.model_save_path
     )
+
+    # If GSM8K, evaluate the model
+    if state.hyperparameters["task_type"] == "gsm8k":
+        colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
+        try:
+            # Run evaluation script
+            import subprocess
+            result = subprocess.run(
+                ["python", "src/evaluate_gsm8k.py", "--model_path", state.model_save_path],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                colored_print("Evaluation", "Completed successfully", Colors.GREEN)
+            else:
+                colored_print("Evaluation", f"Failed: {result.stderr}", Colors.RED)
+        except Exception as e:
+            colored_print("Evaluation", f"Error running evaluation: {e}", Colors.RED)
 
 
 def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> BatchData:
@@ -1372,10 +1392,13 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     # Get dataset size for tracking full passes
     if task_type == "gsm8k":
         dataset_size = len(load_dataset("openai/gsm8k", "main")["train"])
-        checkpoint_frequency = 500
+        default_checkpoint_frequency = 500
     else:
         dataset_size = float('inf')  # For generated datasets
-        checkpoint_frequency = 1000
+        default_checkpoint_frequency = 1000
+    
+    # Use configured frequency if provided, otherwise use default
+    checkpoint_frequency = hyperparameters.get("checkpoint_frequency") or default_checkpoint_frequency
     
     batches_per_epoch = dataset_size // hyperparameters["batch_size"]
     completed_epochs = 0
@@ -1434,32 +1457,14 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             )
             log_batch_results(state, batch_data, metrics)
 
-            # Save checkpoint periodically regardless of epochs
+            # Save checkpoint and evaluate periodically using configured frequency
             if batch_index % checkpoint_frequency == 0 and batch_index > 0:
-                if task_type == "gsm8k":
-                    # Save with unique timestamp for GSM8K
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    checkpoint_path = f"{state.model_save_path}_{batch_index}_{timestamp}.pt"
-                else:
-                    checkpoint_path = f"{state.model_save_path}.pt"
-                
-                colored_print(
-                    "Checkpoint", f"Saving model at batch {state.batch_index}", Colors.BOLD
-                )
-                torch.save(
-                    {
-                        "model_state_dict": state.actor_model.state_dict(),
-                        "optimizer_state_dict": state.actor_optimizer.state_dict(),
-                        "batch_index": state.batch_index,
-                        "hyperparameters": state.hyperparameters,
-                    },
-                    checkpoint_path
-                )
+                save_checkpoint(state)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
         if completed_epochs > 0:
-            print("Saving checkpoint as at least one epoch was completed")
+            print("Saving checkpoint and running final evaluation")
             save_checkpoint(state)
         else:
             print("No checkpoint saved (no full epochs completed)")
@@ -1511,6 +1516,7 @@ class TrainingConfig:
     lr: float
     num_batches: int
     ppo_epsilon: float
+    checkpoint_frequency: Optional[int]
 
     @classmethod
     def from_args(cls, args):
@@ -1546,6 +1552,7 @@ class TrainingConfig:
             lr=args.lr,
             num_batches=args.num_batches,
             ppo_epsilon=args.ppo_epsilon,
+            checkpoint_frequency=args.checkpoint_frequency,
         )
 
 
@@ -1607,6 +1614,11 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--num_batches", type=int, default=100000)
     parser.add_argument("--ppo_epsilon", type=float, default=0.2)
+    parser.add_argument(
+        "--checkpoint_frequency",
+        type=int,
+        help="Override default checkpoint frequency (default: 500 for GSM8K, 1000 for others)",
+    )
 
     args = parser.parse_args()
     config = TrainingConfig.from_args(args)

@@ -225,6 +225,36 @@ def get_model_paths_and_type(provided_path=None, target_index=None, all_checkpoi
     return model_paths, model_type
 
 
+def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_samples):
+    """Save or append results to a running results file in the model directory."""
+    results_file = os.path.join(model_dir, "gsm8k_results.jsonl")
+    
+    # Extract batch index from checkpoint filename
+    batch_index = None
+    if checkpoint_path:
+        match = re.search(r'model_(\d+)_', os.path.basename(checkpoint_path))
+        if match:
+            batch_index = int(match.group(1))
+    
+    # Create results entry
+    entry = {
+        "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+        "batch_index": batch_index,
+        "accuracy": accuracy,
+        "model_path": checkpoint_path,
+        "model_type": model_type,
+        "num_samples": num_samples,
+        "detailed_results": results
+    }
+    
+    # Append to results file
+    with open(results_file, "a") as f:
+        json.dump(entry, f)
+        f.write("\n")
+    
+    return results_file
+
+
 def main(
     model_path=None,
     num_samples=None,
@@ -266,25 +296,17 @@ def main(
 
         print(f"Accuracy: {accuracy:.2%}")
 
-        # Save results
-        os.makedirs("results/evaluations", exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        checkpoint_id = os.path.basename(checkpoint_path).replace(".pt", "") if checkpoint_path else "base"
-        output_file = f"results/evaluations/gsm8k_eval_{model_type}_{checkpoint_id}_{timestamp}.json"
-
-        with open(output_file, "w") as f:
-            json.dump(
-                {
-                    "accuracy": accuracy,
-                    "results": results,
-                    "model_path": checkpoint_path,
-                    "model_type": model_type,
-                    "num_samples": num_samples,
-                },
-                f,
-                indent=2,
-            )
-        print(f"Detailed results saved to {output_file}")
+        # Save results to running file in model directory
+        model_dir = os.path.dirname(checkpoint_path) if checkpoint_path else "results/evaluations"
+        results_file = save_results(
+            model_dir,
+            checkpoint_path,
+            model_type,
+            accuracy,
+            results,
+            num_samples
+        )
+        print(f"Results appended to {results_file}")
 
 
 if __name__ == "__main__":
