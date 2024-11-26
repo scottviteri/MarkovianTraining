@@ -1139,12 +1139,8 @@ class LogMetrics:
             pg_loss=batch_data.metrics["pg_losses"][0].item(),
             actor_logprobs=batch_data.R_mean_actor_logprobs[0].item(),
             critic_logprobs=batch_data.R_mean_critic_logprobs[0].item(),
-            actor_answer_logprobs=batch_data.actor_answer_logprobs[
-                0
-            ].item(),
-            critic_answer_logprobs=batch_data.critic_answer_logprobs[
-                0
-            ].item(),
+            actor_answer_logprobs=batch_data.actor_answer_logprobs[0].item(),
+            critic_answer_logprobs=batch_data.critic_answer_logprobs[0].item(),
             kl=raw_kl,
             weighted_kl=weighted_kl,
             ppo_ratio=ppo_ratio,
@@ -1435,7 +1431,6 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 state.grad_accum_count,
                 state.previous_advantages,
                 state.hyperparameters["batch_size"],
-                critic_answer_logprobs=batch_data.R_mean_critic_logprobs.mean().item(),
             )
             log_batch_results(state, batch_data, metrics)
 
