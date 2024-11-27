@@ -60,7 +60,7 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
         # Create actor model with LoRA
         peft_config = LoraConfig(
             task_type="CAUSAL_LM",
-            inference_mode=False,  # Actor needs gradients
+            inference_mode=True,
             r=8,
             lora_alpha=16,
             lora_dropout=0.1,
@@ -74,9 +74,6 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
         
         # Create frozen critic model
         critic_model = copy.deepcopy(actor_model)
-        critic_model.eval()
-        for param in critic_model.parameters():
-            param.requires_grad = False
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return actor_model, critic_model, tokenizer, device
@@ -400,13 +397,11 @@ def main(
         if checkpoint_path:
             print(f"\nEvaluating checkpoint: {checkpoint_path}")
             hyperparameters = get_hyperparameters_from_log(os.path.dirname(checkpoint_path))
-            # Override parameters if provided
             if cot_length is not None:
                 hyperparameters["cot_length"] = cot_length
             if temperature is not None:
                 hyperparameters["temperature"] = temperature
         else:
-            # Minimal hyperparameters for base model evaluation
             hyperparameters = {
                 "model_type": model_type,
                 "task_type": "gsm8k",
@@ -414,7 +409,7 @@ def main(
                 "temperature": temperature or 1.0,
             }
         
-        actor_model, tokenizer, device = load_model(
+        actor_model, critic_model, tokenizer, device = load_model(
             checkpoint_path, 
             use_base_model, 
             model_type
@@ -428,7 +423,8 @@ def main(
             print(f"Using stride={stride}, evaluating on {len(test_data)} examples")
 
         accuracy, results = evaluate_model(
-            actor_model,
+            actor_model,  # For CoT generation
+            critic_model,  # For answer generation
             tokenizer, 
             device, 
             test_data, 
