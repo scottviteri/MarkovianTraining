@@ -414,16 +414,30 @@ def collate_cross_model_results(paths, output_dir):
             },
             "Original Reward": 0.0,
             "Example": accumulated_results['results'][0][entry_idx]["Example"],
-            "Metrics": accumulated_results['results'][0][entry_idx].get("Metrics", {})
+            "Metrics": accumulated_results['results'][0][entry_idx].get("Metrics", {}),
+            "Std Dev": 0.0  # Add standard deviation field
         }
         
-        # Average the log probabilities and original reward
-        num_runs = accumulated_results['count']
+        # Collect values for computing mean and std
+        actor_values = []
+        critic_values = []
+        reward_values = []
+        
         for run in accumulated_results['results']:
-            avg_entry["Avg Log Probs"]["Actor"] += run[entry_idx]["Avg Log Probs"]["Actor"] / num_runs
-            avg_entry["Avg Log Probs"]["Critic"] += run[entry_idx]["Avg Log Probs"]["Critic"] / num_runs
+            actor_val = run[entry_idx]["Avg Log Probs"]["Actor"]
+            critic_val = run[entry_idx]["Avg Log Probs"]["Critic"]
+            actor_values.append(actor_val)
+            critic_values.append(critic_val)
+            reward_values.append(actor_val - critic_val)
+            
+            avg_entry["Avg Log Probs"]["Actor"] += actor_val / num_runs
+            avg_entry["Avg Log Probs"]["Critic"] += critic_val / num_runs
             if "Original Reward" in run[entry_idx]:
                 avg_entry["Original Reward"] += run[entry_idx]["Original Reward"] / num_runs
+        
+        # Compute standard deviation of the computed rewards
+        if len(reward_values) > 1:
+            avg_entry["Std Dev"] = np.std(reward_values, ddof=1)
         
         averaged_results.append(avg_entry)
     
@@ -445,7 +459,7 @@ def collate_cross_model_results(paths, output_dir):
     print(f"Averaged results saved to {output_file}")
 
 
-def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, show_log_probs=False):
+def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, show_log_probs=False, show_error_bars=False):
     """
     Create a combined plot comparing different critic models' evaluations.
     
@@ -454,6 +468,7 @@ def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, sh
         window_size: Window size for smoothing
         max_index: Maximum index to plot
         show_log_probs: Whether to show actor/critic log probabilities
+        show_error_bars: Whether to show error bars (standard deviation) across runs
     """
     plt.figure(figsize=(12, 6))
     
@@ -462,12 +477,11 @@ def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, sh
         "llama": "#e41a1c",
         "mistral": "#377eb8",
         "gpt2": "#4daf4a",
-        "tinystories": "#984ea3"  # Added color for TinyStories
+        "tinystories": "#984ea3"
     }
     
-    generator_model = None  # Will be extracted from first valid results file
+    generator_model = None
     
-    # Load and plot results for each critic model
     for model_type in ["mistral", "llama", "gpt2", "tinystories"]:
         results_file = os.path.join(log_dir, f"evaluation_results_{model_type}.jsonl")
         if not os.path.exists(results_file):
@@ -478,28 +492,51 @@ def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, sh
             if generator_model is None:
                 generator_model = results["generator_model"]
                 
-            all_data = results["evaluations"][0]  # Assuming single evaluation set
+            all_data = results["evaluations"][0]
             
             if max_index is not None:
                 all_data = all_data[:max_index]
             
-            # Extract computed rewards
-            computed_rewards = [entry["Avg Log Probs"]["Actor"] - entry["Avg Log Probs"]["Critic"] 
-                              for entry in all_data]
+            # Extract computed rewards and their standard deviations if available
+            computed_rewards = []
+            reward_stds = []
+            
+            for entry in all_data:
+                reward = entry["Avg Log Probs"]["Actor"] - entry["Avg Log Probs"]["Critic"]
+                computed_rewards.append(reward)
+                if "Std Dev" in entry:
+                    reward_stds.append(entry["Std Dev"])
             
             if len(computed_rewards) > window_size:
                 half_window = window_size // 2
                 x_values = range(half_window, len(computed_rewards) - half_window)
                 smoothed = savgol_filter(computed_rewards, window_size, 3)
+                
                 plt.plot(x_values, smoothed[half_window:-half_window],
                         label=f"{model_type.title()} Critic",
                         color=colors[model_type],
                         linewidth=2)
+                
+                # Add error bars if available and requested
+                if show_error_bars and reward_stds:
+                    smoothed_std = savgol_filter(reward_stds, window_size, 3)
+                    plt.fill_between(x_values,
+                                   smoothed[half_window:-half_window] - smoothed_std[half_window:-half_window],
+                                   smoothed[half_window:-half_window] + smoothed_std[half_window:-half_window],
+                                   color=colors[model_type],
+                                   alpha=0.2)
             else:
                 plt.plot(computed_rewards,
                         label=f"{model_type.title()} Critic",
                         color=colors[model_type],
                         linewidth=2)
+                
+                if show_error_bars and reward_stds:
+                    plt.fill_between(range(len(computed_rewards)),
+                                   np.array(computed_rewards) - np.array(reward_stds),
+                                   np.array(computed_rewards) + np.array(reward_stds),
+                                   color=colors[model_type],
+                                   alpha=0.2)
                         
         except FileNotFoundError:
             print(f"No results found for {model_type} critic")
@@ -507,9 +544,12 @@ def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, sh
     
     plt.xlabel("Sample", fontsize=16)
     plt.ylabel("Computed Reward (Actor - Critic Log Prob)", fontsize=16)
-    plt.title(f"Comparison of Different Critics Evaluating {generator_model.title()} Generator\n"
-              f"(Smoothing: {window_size})",
-              fontsize=16)
+    title = f"Comparison of Different Critics Evaluating {generator_model.title()} Generator\n"
+    if show_error_bars:
+        title += f"(Smoothing: {window_size}, with Standard Deviation)"
+    else:
+        title += f"(Smoothing: {window_size})"
+    plt.title(title, fontsize=16)
     plt.legend(fontsize=12, loc="best")
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.tick_params(axis="both", which="major", labelsize=14)
@@ -573,6 +613,11 @@ def main():
         action="store_true",
         help="Show actor and critic log probabilities in the plot"
     )
+    parser.add_argument(
+        "--show_error_bars",
+        action="store_true",
+        help="Show error bars (standard deviation) in the plot when multiple runs are available"
+    )
     
     args = parser.parse_args()
 
@@ -596,8 +641,22 @@ def main():
 
     print(f"Using log file: {log_file}")
 
+    # If we're only plotting multiple critics, skip the evaluation step
+    if args.plot_multiple_critics:
+        log_dir = os.path.dirname(log_file)
+        plot_multiple_critics_comparison(
+            log_dir,
+            window_size=args.window_size,
+            max_index=args.max_index,
+            show_log_probs=args.show_log_probs,
+            show_error_bars=args.show_error_bars
+        )
+        return
+
     # Process data if needed
     if not args.plot_only:
+        if not args.critic_model:
+            raise ValueError("--critic_model must be specified when running evaluation")
         print(f"Processing every {args.stride}th entry")
         results = run_cross_model_evaluation(
             [log_file], 
@@ -608,34 +667,23 @@ def main():
         )
         save_evaluation_results(results, log_file)
 
-    # Handle plotting
+    # Handle single critic plotting
     if not args.process_only:
-        if args.plot_multiple_critics:
-            # Plot comparison of multiple critics
-            log_dir = os.path.dirname(log_file)
-            plot_multiple_critics_comparison(
-                log_dir,
+        eval_results_file = os.path.join(
+            os.path.dirname(log_file), 
+            f"evaluation_results_{args.critic_model}.jsonl"
+        )
+        try:
+            results = load_evaluation_results(eval_results_file)
+            plot_cross_model_comparison(
+                results, 
+                log_file, 
                 window_size=args.window_size,
                 max_index=args.max_index,
                 show_log_probs=args.show_log_probs
             )
-        else:
-            # Plot single critic results
-            eval_results_file = os.path.join(
-                os.path.dirname(log_file), 
-                f"evaluation_results_{args.critic_model}.jsonl"
-            )
-            try:
-                results = load_evaluation_results(eval_results_file)
-                plot_cross_model_comparison(
-                    results, 
-                    log_file, 
-                    window_size=args.window_size,
-                    max_index=args.max_index,
-                    show_log_probs=args.show_log_probs
-                )
-            except FileNotFoundError:
-                print(f"No saved results found at {eval_results_file}. Run without --plot_only first.")
+        except FileNotFoundError:
+            print(f"No saved results found at {eval_results_file}. Run without --plot_only first.")
 
 
 if __name__ == "__main__":
