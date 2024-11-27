@@ -370,15 +370,12 @@ def collate_cross_model_results(paths, output_dir):
         
         try:
             with open(eval_file, 'r') as f:
-                # Read metadata (first line)
-                metadata = json.loads(f.readline())
-                
-                # Initialize metadata if not done yet
+                # Store first file's metadata
                 if accumulated_results['metadata'] is None:
-                    accumulated_results['metadata'] = metadata
-                elif metadata != accumulated_results['metadata']:
-                    print(f"Warning: Metadata mismatch in {eval_file}")
-                    continue
+                    accumulated_results['metadata'] = json.loads(f.readline())
+                else:
+                    # Skip metadata line for subsequent files
+                    f.readline()
                 
                 # Read results
                 results = []
@@ -402,6 +399,9 @@ def collate_cross_model_results(paths, output_dir):
     # Find shortest common length
     min_length = min(len(results) for results in accumulated_results['results'])
     print(f"Using {min_length} entries (shortest common length)")
+    
+    # Get number of valid runs
+    num_runs = accumulated_results['count']
     
     # Initialize structure for averaged results
     averaged_results = []
