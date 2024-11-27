@@ -19,8 +19,10 @@ def load_evaluation_model(model_type="mistral"):
         model_name = "meta-llama/Llama-3.1-8B-Instruct"
     elif model_type == "gpt2":
         model_name = "openai-community/gpt2"
+    elif model_type == "tinystories":
+        model_name = "roneneldan/TinyStories"
     else:
-        raise ValueError("model_type must be either 'mistral', 'llama', or 'gpt2'")
+        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', or 'tinystories'")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
@@ -328,53 +330,75 @@ def load_evaluation_results(results_file):
     return results
 
 
-def collate_cross_model_results(log_files, output_dir):
+def collate_cross_model_results(paths, output_dir):
     """
-    Average cross-model evaluation results across multiple runs and save to a new directory.
+    Collate results from multiple evaluation runs.
     
     Args:
-        log_files (list): List of paths to cross-model evaluation result files
-        output_dir (str): Directory to save collated results
+        paths: List of paths (can be files or directories)
+        output_dir: Directory to save collated results
     """
-    os.makedirs(output_dir, exist_ok=True)
     accumulated_results = {
+        'metadata': None,
         'results': [],
-        'count': 0,
-        'metadata': None
+        'count': 0
     }
     
-    # Process each evaluation results file
-    for log_file in log_files:
+    for path in paths:
+        if os.path.isdir(path):
+            # If directory, look for evaluation results file
+            eval_file = None
+            for model_type in ["mistral", "llama", "gpt2", "tinystories"]:
+                potential_file = os.path.join(path, f"evaluation_results_{model_type}.jsonl")
+                if os.path.exists(potential_file):
+                    eval_file = potential_file
+                    break
+            if eval_file is None:
+                print(f"No evaluation results found in directory: {path}")
+                continue
+        else:
+            # If file path, use directly
+            eval_file = path
+            
+        if not os.path.exists(eval_file):
+            print(f"File not found: {eval_file}")
+            continue
+            
+        print(f"Processing: {eval_file}")
+        
         try:
-            results = load_evaluation_results(log_file)
-            
-            # Store metadata from first file
-            if accumulated_results['metadata'] is None:
-                accumulated_results['metadata'] = {
-                    'files': results['files'],
-                    'generator_model': results['generator_model'],
-                    'evaluator_model': results['evaluator_model']
-                }
-            else:
-                # Verify consistency across files
-                if (results['generator_model'] != accumulated_results['metadata']['generator_model'] or
-                    results['evaluator_model'] != accumulated_results['metadata']['evaluator_model']):
-                    print(f"Warning: Inconsistent models in {log_file}, skipping")
+            with open(eval_file, 'r') as f:
+                # Read metadata (first line)
+                metadata = json.loads(f.readline())
+                
+                # Initialize metadata if not done yet
+                if accumulated_results['metadata'] is None:
+                    accumulated_results['metadata'] = metadata
+                elif metadata != accumulated_results['metadata']:
+                    print(f"Warning: Metadata mismatch in {eval_file}")
                     continue
-            
-            accumulated_results['results'].append(results['evaluations'][0])  # Assuming single evaluation set
-            accumulated_results['count'] += 1
-            
-        except FileNotFoundError:
-            print(f"Warning: No results found in {log_file}")
+                
+                # Read results
+                results = []
+                for line in f:
+                    results.append(json.loads(line))
+                
+                accumulated_results['results'].append(results)
+                accumulated_results['count'] += 1
+                
+        except Exception as e:
+            print(f"Error processing {eval_file}: {e}")
             continue
     
     if accumulated_results['count'] == 0:
-        print("No valid results found to collate")
+        print("No valid results files found to collate")
         return
     
-    # Find minimum length across all runs
-    min_length = min(len(run) for run in accumulated_results['results'])
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Find shortest common length
+    min_length = min(len(results) for results in accumulated_results['results'])
     print(f"Using {min_length} entries (shortest common length)")
     
     # Initialize structure for averaged results
@@ -386,7 +410,7 @@ def collate_cross_model_results(log_files, output_dir):
                 "Actor": 0.0,
                 "Critic": 0.0
             },
-            "Original Reward": 0.0,  # Initialize Original Reward
+            "Original Reward": 0.0,
             "Example": accumulated_results['results'][0][entry_idx]["Example"],
             "Metrics": accumulated_results['results'][0][entry_idx].get("Metrics", {})
         }
@@ -401,8 +425,11 @@ def collate_cross_model_results(log_files, output_dir):
         
         averaged_results.append(avg_entry)
     
-    # Save averaged results
-    output_file = os.path.join(output_dir, "cross_model_evaluation_results.jsonl")
+    # Extract critic model type from metadata
+    critic_model = accumulated_results['metadata'].get('evaluator_model', 'unknown')
+    
+    # Save averaged results with model-specific name
+    output_file = os.path.join(output_dir, f"evaluation_results_{critic_model}.jsonl")
     with open(output_file, "w") as f:
         # Write metadata as first line
         json.dump(accumulated_results['metadata'], f)
@@ -432,13 +459,14 @@ def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, sh
     colors = {
         "llama": "#e41a1c",
         "mistral": "#377eb8",
-        "gpt2": "#4daf4a"
+        "gpt2": "#4daf4a",
+        "tinystories": "#984ea3"  # Added color for TinyStories
     }
     
     generator_model = None  # Will be extracted from first valid results file
     
     # Load and plot results for each critic model
-    for model_type in ["mistral", "llama", "gpt2"]:
+    for model_type in ["mistral", "llama", "gpt2", "tinystories"]:
         results_file = os.path.join(log_dir, f"evaluation_results_{model_type}.jsonl")
         if not os.path.exists(results_file):
             continue
@@ -535,7 +563,7 @@ def main():
     parser.add_argument(
         "--critic_model",
         type=str,
-        choices=["mistral", "llama", "gpt2"],
+        choices=["mistral", "llama", "gpt2", "tinystories"],
         help="Specify which model to use as the critic"
     )
     parser.add_argument(

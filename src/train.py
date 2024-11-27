@@ -43,15 +43,17 @@ def colored_print(
 
 
 def load_model(model_type="mistral", hyperparameters=None):
-    """Load either Mistral, Llama, or GPT2 model based on parameter."""
+    """Load either Mistral, Llama, GPT2, or TinyStories model based on parameter."""
     if model_type == "mistral":
         model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     elif model_type == "llama":
         model_name = "meta-llama/Llama-3.1-8B-Instruct"
     elif model_type == "gpt2":
         model_name = "openai-community/gpt2"
+    elif model_type == "tinystories":
+        model_name = "roneneldan/TinyStories"
     else:
-        raise ValueError("model_type must be either 'mistral', 'llama', or 'gpt2'")
+        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', or 'tinystories'")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
@@ -350,7 +352,7 @@ def find_answer_start_position(input_ids, model_type):
             & (input_ids[1:] == 25)
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
-    elif model_type == "gpt2":
+    elif model_type in ["gpt2", "tinystories"]:  # TinyStories uses same tokens as GPT2
         matching_indices = (
             (input_ids[:-1] == 23998)
             & (input_ids[1:] == 25)
@@ -1511,7 +1513,7 @@ if __name__ == "__main__":
         "--model_type",
         type=str,
         default="llama",
-        choices=["llama", "mistral", "gpt2"],
+        choices=["llama", "mistral", "gpt2", "tinystories"],
         help="Model type (default: llama)",
     )
     parser.add_argument("--resume", action="store_true")
