@@ -416,11 +416,86 @@ def collate_cross_model_results(log_files, output_dir):
     print(f"Averaged results saved to {output_file}")
 
 
+def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, show_log_probs=False):
+    """
+    Create a combined plot comparing different critic models' evaluations.
+    
+    Args:
+        log_dir: Directory containing evaluation results for different critics
+        window_size: Window size for smoothing
+        max_index: Maximum index to plot
+        show_log_probs: Whether to show actor/critic log probabilities
+    """
+    plt.figure(figsize=(12, 6))
+    
+    # Color scheme for different models
+    colors = {
+        "llama": "#e41a1c",
+        "mistral": "#377eb8",
+        "gpt2": "#4daf4a"
+    }
+    
+    generator_model = None  # Will be extracted from first valid results file
+    
+    # Load and plot results for each critic model
+    for model_type in ["mistral", "llama", "gpt2"]:
+        results_file = os.path.join(log_dir, f"evaluation_results_{model_type}.jsonl")
+        if not os.path.exists(results_file):
+            continue
+            
+        try:
+            results = load_evaluation_results(results_file)
+            if generator_model is None:
+                generator_model = results["generator_model"]
+                
+            all_data = results["evaluations"][0]  # Assuming single evaluation set
+            
+            if max_index is not None:
+                all_data = all_data[:max_index]
+            
+            # Extract computed rewards
+            computed_rewards = [entry["Avg Log Probs"]["Actor"] - entry["Avg Log Probs"]["Critic"] 
+                              for entry in all_data]
+            
+            if len(computed_rewards) > window_size:
+                half_window = window_size // 2
+                x_values = range(half_window, len(computed_rewards) - half_window)
+                smoothed = savgol_filter(computed_rewards, window_size, 3)
+                plt.plot(x_values, smoothed[half_window:-half_window],
+                        label=f"{model_type.title()} Critic",
+                        color=colors[model_type],
+                        linewidth=2)
+            else:
+                plt.plot(computed_rewards,
+                        label=f"{model_type.title()} Critic",
+                        color=colors[model_type],
+                        linewidth=2)
+                        
+        except FileNotFoundError:
+            print(f"No results found for {model_type} critic")
+            continue
+    
+    plt.xlabel("Sample", fontsize=16)
+    plt.ylabel("Computed Reward (Actor - Critic Log Prob)", fontsize=16)
+    plt.title(f"Comparison of Different Critics Evaluating {generator_model.title()} Generator\n"
+              f"(Smoothing: {window_size})",
+              fontsize=16)
+    plt.legend(fontsize=12, loc="best")
+    plt.grid(True, linestyle="--", alpha=0.7)
+    plt.tick_params(axis="both", which="major", labelsize=14)
+    plt.tight_layout()
+    
+    # Save plot
+    output_file = os.path.join(log_dir, "multiple_critics_comparison.png")
+    plt.savefig(output_file, dpi=300, bbox_inches="tight")
+    print(f"Combined plot saved to {output_file}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Cross-Model Evaluation Tool")
     parser.add_argument("--log_file", help="Log file to evaluate")
     parser.add_argument(
-        "--window_size", type=int, default=40, help="Smoothing window size"
+        "--window_size", type=int, default=40, help="Smoothing window size for plots"
     )
     parser.add_argument("--stride", type=int, default=1, help="Process every nth entry")
     parser.add_argument(
@@ -438,6 +513,11 @@ def main():
         help="Only generate plots from saved results",
     )
     parser.add_argument(
+        "--plot_multiple_critics",
+        action="store_true",
+        help="Create a combined plot comparing different critic models' evaluations"
+    )
+    parser.add_argument(
         "--collate",
         nargs="+",
         help="List of evaluation result files to average"
@@ -450,19 +530,18 @@ def main():
     parser.add_argument(
         "--max_index",
         type=int,
-        help="Maximum index to process (batch index for --process_only, array index for --plot_only)"
+        help="Maximum index to process/plot"
     )
     parser.add_argument(
         "--critic_model",
         type=str,
-        required=True,
         choices=["mistral", "llama", "gpt2"],
         help="Specify which model to use as the critic"
     )
     parser.add_argument(
         "--show_log_probs",
         action="store_true",
-        help="Show actor and critic log probabilities in the plot",
+        help="Show actor and critic log probabilities in the plot"
     )
     
     args = parser.parse_args()
@@ -499,25 +578,34 @@ def main():
         )
         save_evaluation_results(results, log_file)
 
-    # Determine evaluation results file path based on critic model
-    eval_results_file = os.path.join(
-        os.path.dirname(log_file), 
-        f"evaluation_results_{args.critic_model}.jsonl"
-    )
-
-    # Plot if needed
+    # Handle plotting
     if not args.process_only:
-        try:
-            results = load_evaluation_results(eval_results_file)
-            plot_cross_model_comparison(
-                results, 
-                log_file, 
+        if args.plot_multiple_critics:
+            # Plot comparison of multiple critics
+            log_dir = os.path.dirname(log_file)
+            plot_multiple_critics_comparison(
+                log_dir,
                 window_size=args.window_size,
                 max_index=args.max_index,
                 show_log_probs=args.show_log_probs
             )
-        except FileNotFoundError:
-            print(f"No saved results found at {eval_results_file}. Run without --plot_only first.")
+        else:
+            # Plot single critic results
+            eval_results_file = os.path.join(
+                os.path.dirname(log_file), 
+                f"evaluation_results_{args.critic_model}.jsonl"
+            )
+            try:
+                results = load_evaluation_results(eval_results_file)
+                plot_cross_model_comparison(
+                    results, 
+                    log_file, 
+                    window_size=args.window_size,
+                    max_index=args.max_index,
+                    show_log_probs=args.show_log_probs
+                )
+            except FileNotFoundError:
+                print(f"No saved results found at {eval_results_file}. Run without --plot_only first.")
 
 
 if __name__ == "__main__":
