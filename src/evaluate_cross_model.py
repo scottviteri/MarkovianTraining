@@ -183,9 +183,16 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
     return results
 
 
-def plot_cross_model_comparison(results, log_file, window_size=40, max_index=None):
+def plot_cross_model_comparison(results, log_file, window_size=40, max_index=None, show_log_probs=False):
     """
-    Plot both absolute log probs and normalized rewards for comparison.
+    Plot evaluation results.
+    
+    Args:
+        results: Evaluation results dictionary
+        log_file: Path to log file
+        window_size: Window size for smoothing
+        max_index: Maximum index to plot
+        show_log_probs: Whether to show actor/critic log probabilities
     """
     all_data = results["evaluations"]
     
@@ -225,13 +232,14 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
         half_window = window_size // 2
         x_values = range(half_window, len(actor_values) - half_window)
         
-        # Plot absolute log probs
-        smoothed_actor = savgol_filter(actor_values, window_size, 3)
-        smoothed_critic = savgol_filter(critic_values, window_size, 3)
-        plt.plot(x_values, smoothed_actor[half_window:-half_window], 
-                label="Actor Log Probs", color="#e41a1c", linewidth=2)
-        plt.plot(x_values, smoothed_critic[half_window:-half_window], 
-                label="Critic Log Probs", color="#377eb8", linewidth=2)
+        if show_log_probs:
+            # Plot absolute log probs
+            smoothed_actor = savgol_filter(actor_values, window_size, 3)
+            smoothed_critic = savgol_filter(critic_values, window_size, 3)
+            plt.plot(x_values, smoothed_actor[half_window:-half_window], 
+                    label="Actor Log Probs", color="#e41a1c", linewidth=2)
+            plt.plot(x_values, smoothed_critic[half_window:-half_window], 
+                    label="Critic Log Probs", color="#377eb8", linewidth=2)
         
         # Always plot both rewards
         smoothed_computed = savgol_filter(computed_rewards, window_size, 3)
@@ -244,8 +252,9 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
                 label=f"{results['generator_model'].title()} Original Reward", 
                 color="#984ea3", linewidth=2)
     else:
-        plt.plot(actor_values, label="Actor Log Probs", color="#e41a1c", linewidth=2)
-        plt.plot(critic_values, label="Critic Log Probs", color="#377eb8", linewidth=2)
+        if show_log_probs:
+            plt.plot(actor_values, label="Actor Log Probs", color="#e41a1c", linewidth=2)
+            plt.plot(critic_values, label="Critic Log Probs", color="#377eb8", linewidth=2)
         
         plt.plot(computed_rewards, 
                 label=f"{results['evaluator_model'].title()} Computed Reward", 
@@ -258,7 +267,7 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
     plt.ylabel("Log Probability / Reward", fontsize=16)
     plt.title(
         f"{results['generator_model'].title()} Generated, {results['evaluator_model'].title()} Evaluated\n"
-        f"Rewards Comparison (Smoothing: {window_size})",
+        f"{'Log Probabilities and ' if show_log_probs else ''}Rewards Comparison (Smoothing: {window_size})",
         fontsize=16,
     )
     plt.legend(fontsize=12, loc="best")
@@ -450,6 +459,11 @@ def main():
         choices=["mistral", "llama", "gpt2"],
         help="Specify which model to use as the critic"
     )
+    parser.add_argument(
+        "--show_log_probs",
+        action="store_true",
+        help="Show actor and critic log probabilities in the plot",
+    )
     
     args = parser.parse_args()
 
@@ -499,7 +513,8 @@ def main():
                 results, 
                 log_file, 
                 window_size=args.window_size,
-                max_index=args.max_index
+                max_index=args.max_index,
+                show_log_probs=args.show_log_probs
             )
         except FileNotFoundError:
             print(f"No saved results found at {eval_results_file}. Run without --plot_only first.")
