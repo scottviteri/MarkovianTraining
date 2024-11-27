@@ -381,6 +381,8 @@ def main(
     stride=1,
     training_index=None,
     all_checkpoints=False,
+    cot_length=None,
+    temperature=None,
 ):
     # Get model path(s) and type if not explicitly provided
     if not use_base_model:
@@ -397,13 +399,27 @@ def main(
     for checkpoint_path in model_paths:
         if checkpoint_path:
             print(f"\nEvaluating checkpoint: {checkpoint_path}")
+            hyperparameters = get_hyperparameters_from_log(os.path.dirname(checkpoint_path))
+            # Override parameters if provided
+            if cot_length is not None:
+                hyperparameters["cot_length"] = cot_length
+            if temperature is not None:
+                hyperparameters["temperature"] = temperature
+        else:
+            # Minimal hyperparameters for base model evaluation
+            hyperparameters = {
+                "model_type": model_type,
+                "task_type": "gsm8k",
+                "cot_length": cot_length or 150,
+                "temperature": temperature or 1.0,
+            }
         
-        actor_model, critic_model, tokenizer, device = load_model(
+        actor_model, tokenizer, device = load_model(
             checkpoint_path, 
             use_base_model, 
             model_type
         )
-        
+
         test_data = load_dataset("openai/gsm8k", "main", split="test")
         test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
 
@@ -411,10 +427,8 @@ def main(
             test_data = test_data[::stride]
             print(f"Using stride={stride}, evaluating on {len(test_data)} examples")
 
-        hyperparameters = get_hyperparameters_from_log(os.path.dirname(checkpoint_path))
         accuracy, results = evaluate_model(
             actor_model,
-            critic_model, 
             tokenizer, 
             device, 
             test_data, 
@@ -427,6 +441,7 @@ def main(
 
         # Save results to running file in model directory
         model_dir = os.path.dirname(checkpoint_path) if checkpoint_path else "results/evaluations"
+        os.makedirs(model_dir, exist_ok=True)  # Ensure directory exists
         results_file = save_results(
             model_dir,
             checkpoint_path,
@@ -485,6 +500,18 @@ if __name__ == "__main__":
         action="store_true",
         help="Evaluate all checkpoints in the directory",
     )
+    parser.add_argument(
+        "--cot_length",
+        type=int,
+        default=None,
+        help="Override the chain-of-thought length for generation (default: 150)",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Override the temperature for generation (default: 1.0)",
+    )
     args = parser.parse_args()
 
     try:
@@ -497,6 +524,8 @@ if __name__ == "__main__":
             args.stride,
             args.training_index,
             args.all_checkpoints,
+            args.cot_length,
+            args.temperature,
         )
     except FileNotFoundError as e:
         print(f"Error: {e}")
