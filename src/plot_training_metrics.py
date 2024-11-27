@@ -218,7 +218,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         
         # Add smoothing window info in bottom right corner
         axs[metric_idx].text(
-            0.98, 0.02,  # Changed y position to 0.02 for bottom right
+            0.95, 0.05,  # Changed from 0.98, 0.02
             f"Smoothing window = {window_size}",
             transform=axs[metric_idx].transAxes,
             horizontalalignment='right',
