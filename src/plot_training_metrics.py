@@ -57,7 +57,6 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         if task_type in ['arithmetic', 'gsm8k']:
             metrics_to_plot = [
                 ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
-                ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)"),
                 ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
             ]
         # For wiki tasks
@@ -203,9 +202,11 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         if title == "Contains Answer":
             axs[metric_idx].set_ylim(-0.05, 1.05)
 
-        # Only add legend if there are labeled lines in the plot and show_legend is True
+        # Only add legend for specific conditions
         if len(axs[metric_idx].get_lines()) > 0 and show_legend:
-            axs[metric_idx].legend(fontsize=label_size)
+            # For GSM8K summary plots, only show legend on the rightmost plot
+            if not (plot_summary and task_type == "gsm8k") or metric_idx == len(metrics_to_plot) - 1:
+                axs[metric_idx].legend(fontsize=label_size)
             
         # Set labels and their sizes
         axs[metric_idx].set_xlabel(xlabel, fontsize=label_size)
