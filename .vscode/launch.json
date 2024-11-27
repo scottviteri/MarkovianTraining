@@ -90,6 +90,26 @@
             "env": {
                 "PYTHONPATH": "/root/MarkovianTraining"
             }
+        },
+        {
+            "name": "Train GSM8K (CoT=150, EI=2.2)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/train.py",
+            "args": [
+                "--task_type", "gsm8k",
+                "--cot_length", "150",
+                "--checkpoint_frequency", "1",
+                "--batch_size", "2",
+                "--temperature", "2.0",
+                "--use_ei", "2.2"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONPATH": "/root/MarkovianTraining"
+            }
         }
+
     ]
 }

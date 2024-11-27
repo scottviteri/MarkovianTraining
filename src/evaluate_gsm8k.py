@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Dict
 from utils import construct_prompts, find_latest_result
+import copy
 
 def extract_answer(answer):
     if "=" in answer:
@@ -30,7 +31,7 @@ def extract_answer(answer):
 
 
 def load_model(model_path, use_base_model=False, model_type="mistral"):
-    """Load model for evaluation without creating a frozen copy."""
+    """Load actor and critic models for evaluation."""
     if model_type == "mistral":
         model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     elif model_type == "llama":
@@ -38,7 +39,6 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
     else:
         raise ValueError("model_type must be either 'mistral' or 'llama'")
 
-    # Load tokenizer with padding settings pre-configured
     tokenizer = AutoTokenizer.from_pretrained(
         model_name,
         padding_side="left",
@@ -46,32 +46,40 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # Load model in evaluation mode
-    model = AutoModelForCausalLM.from_pretrained(
+    # Load base model
+    base_model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
         device_map="auto",
     )
     
-    # Add LoRA if not using base model
-    if not use_base_model:
+    if use_base_model:
+        # For base model evaluation, use same model for both actor and critic
+        actor_model = critic_model = base_model
+    else:
+        # Create actor model with LoRA
         peft_config = LoraConfig(
             task_type="CAUSAL_LM",
-            inference_mode=True,
+            inference_mode=False,  # Actor needs gradients
             r=8,
             lora_alpha=16,
             lora_dropout=0.1,
             target_modules="all-linear",
         )
-        model = get_peft_model(model, peft_config)
+        actor_model = get_peft_model(base_model, peft_config)
         
         # Load checkpoint weights
         checkpoint = torch.load(model_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
+        actor_model.load_state_dict(checkpoint["model_state_dict"])
+        
+        # Create frozen critic model
+        critic_model = copy.deepcopy(actor_model)
+        critic_model.eval()
+        for param in critic_model.parameters():
+            param.requires_grad = False
 
-    model.eval()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    return model, tokenizer, device
+    return actor_model, critic_model, tokenizer, device
 
 
 def get_hyperparameters_from_log(model_dir):
@@ -98,7 +106,8 @@ def get_hyperparameters_from_log(model_dir):
 
 
 def evaluate_model(
-    model,
+    actor_model,  # Non-frozen model for generating reasoning
+    critic_model, # Frozen model for generating answers
     tokenizer,
     device,
     test_data,
@@ -106,7 +115,18 @@ def evaluate_model(
     num_samples=None,
     batch_size=16,
 ):
-    """Evaluate model on GSM8K test set."""
+    """Evaluate model on GSM8K test set using actor-critic pattern.
+    
+    Args:
+        actor_model: Model for generating reasoning (with temperature)
+        critic_model: Frozen model for generating answers (deterministic)
+        tokenizer: Tokenizer for both models
+        device: torch device
+        test_data: List of (question, answer) tuples
+        hyperparameters: Configuration dictionary
+        num_samples: Optional limit on number of samples to evaluate
+        batch_size: Batch size for evaluation
+    """
     if num_samples:
         test_data = test_data[:num_samples]
     
@@ -130,9 +150,9 @@ def evaluate_model(
         # Tokenize
         tokenized_inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
         
-        # 1. Generate CoT with temperature (like actor)
+        # 1. Generate CoT using actor model (with temperature)
         with torch.no_grad():
-            cot_outputs = model.generate(
+            cot_outputs = actor_model.generate(
                 input_ids=tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
                 max_new_tokens=hyperparameters["cot_length"],
@@ -148,7 +168,7 @@ def evaluate_model(
             skip_special_tokens=True
         )
         
-        # 2. Generate answers deterministically given CoT
+        # 2. Generate answers using critic model (deterministic)
         answer_prompts = [
             construct_prompts(
                 question=q,
@@ -165,10 +185,10 @@ def evaluate_model(
         ).to(device)
         
         with torch.no_grad():
-            answer_outputs = model.generate(
+            answer_outputs = critic_model.generate(
                 input_ids=tokenized_answer_inputs.input_ids,
                 attention_mask=tokenized_answer_inputs.attention_mask,
-                max_new_tokens=10,  # Fixed length for answer generation
+                max_new_tokens=10,  # Changed from 15 to 10 to match training
                 do_sample=False,    # Deterministic
                 pad_token_id=tokenizer.pad_token_id,
             )
@@ -378,7 +398,11 @@ def main(
         if checkpoint_path:
             print(f"\nEvaluating checkpoint: {checkpoint_path}")
         
-        model, tokenizer, device = load_model(checkpoint_path, use_base_model, model_type)
+        actor_model, critic_model, tokenizer, device = load_model(
+            checkpoint_path, 
+            use_base_model, 
+            model_type
+        )
         
         test_data = load_dataset("openai/gsm8k", "main", split="test")
         test_data = [(q, a) for q, a in zip(test_data["question"], test_data["answer"])]
@@ -389,7 +413,14 @@ def main(
 
         hyperparameters = get_hyperparameters_from_log(os.path.dirname(checkpoint_path))
         accuracy, results = evaluate_model(
-            model, tokenizer, device, test_data, hyperparameters, num_samples, batch_size
+            actor_model,
+            critic_model, 
+            tokenizer, 
+            device, 
+            test_data, 
+            hyperparameters, 
+            num_samples, 
+            batch_size
         )
 
         print(f"Accuracy: {accuracy:.2%}")

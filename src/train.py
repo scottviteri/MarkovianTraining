@@ -1151,11 +1151,12 @@ def save_checkpoint(state: TrainingState):
             state.actor_model.eval()
             accuracy, results = evaluate_model(
                 state.actor_model,
+                state.critic_model,
                 state.tokenizer,
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=8
+                batch_size=state.hyperparameters["batch_size"] * 2
             )
             state.actor_model.train()
         
