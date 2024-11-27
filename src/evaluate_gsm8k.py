@@ -333,13 +333,13 @@ def plot_evaluation_results(results: List[Dict], save_path: str):
 
 def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_samples):
     """Save results to file and generate plots."""
-    # Create results entry as before
+    # Create results entry
     entry = {
         "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
         "batch_index": None,
         "accuracy": accuracy,
         "model_path": checkpoint_path,
-        "model_type": model_type,
+        "model_type": model_type,  # This is the critic model type
         "num_samples": num_samples,
         "detailed_results": results
     }
@@ -350,17 +350,20 @@ def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_
         if match:
             entry["batch_index"] = int(match.group(1))
     
-    # Save JSONL results
-    results_file = os.path.join(model_dir, "gsm8k_results.jsonl")
+    # Include model type in filenames
+    model_type_suffix = f"_{model_type}"
+    
+    # Save JSONL results with model type in filename
+    results_file = os.path.join(model_dir, f"gsm8k_results{model_type_suffix}.jsonl")
     with open(results_file, "a") as f:
         json.dump(entry, f)
         f.write("\n")
     
-    # Save plots
+    # Save plots with model type in filename
     if checkpoint_path:
-        plot_name = f"eval_results_{entry['batch_index']}.png"
+        plot_name = f"eval_results{model_type_suffix}_{entry['batch_index']}.png"
     else:
-        plot_name = f"eval_results_{entry['timestamp']}.png"
+        plot_name = f"eval_results{model_type_suffix}_{entry['timestamp']}.png"
     plot_path = os.path.join(model_dir, plot_name)
     
     plot_evaluation_results(results, plot_path)

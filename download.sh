@@ -128,12 +128,19 @@ for i in "${INDICES[@]}"; do
         # Generate the plots on remote machine
         ssh $port_option "$hostname" "cd /root/MarkovianTraining && python src/plot_training_metrics.py"
         
-        # Find most recent log.jsonl
+        # Find most recent log.jsonl, evaluation, and gsm8k_results.jsonl files
         latest_log_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'log.jsonl' -print0 | xargs -0 ls -t | head -1")
+        latest_eval_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'eval_results_None.png' -print0 | xargs -0 ls -t | head -1")
+        latest_gsm8k_results=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'gsm8k_results.jsonl' -print0 | xargs -0 ls -t | head -1")
+        
+        # Create directory if it doesn't exist
+        mkdir -p "./results_${hostname}"
         
         # Download the files
         scp $port_option "$hostname:/root/MarkovianTraining/combined_metrics_gsm8k.png" "./results_${hostname}/"
         scp $port_option "$hostname:$latest_log_file" "./results_${hostname}/"
+        scp $port_option "$hostname:$latest_eval_file" "./results_${hostname}/"
+        scp $port_option "$hostname:$latest_gsm8k_results" "./results_${hostname}/"
     fi
     
     # If neither operation is requested, show usage

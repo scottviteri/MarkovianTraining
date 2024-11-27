@@ -5,12 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
 from tqdm import tqdm
-from train import (
-    find_latest_result,
-    calculate_answer_log_probs,
-    print_debug_info,
-    construct_prompts,
-)
+from train import calculate_answer_log_probs
+from utils import print_debug_info, find_latest_result
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
@@ -21,8 +17,10 @@ def load_evaluation_model(model_type="mistral"):
         model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     elif model_type == "llama":
         model_name = "meta-llama/Llama-3.1-8B-Instruct"
+    elif model_type == "gpt2":
+        model_name = "openai-community/gpt2"
     else:
-        raise ValueError("model_type must be either 'mistral' or 'llama'")
+        raise ValueError("model_type must be either 'mistral', 'llama', or 'gpt2'")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
@@ -43,16 +41,16 @@ def load_evaluation_model(model_type="mistral"):
     return model, tokenizer, device
 
 
-def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=None, use_same_model=False):
+def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=None, critic_model_type=None):
     """
-    Evaluate log files using either the opposite model or same model as evaluator.
+    Evaluate log files using the specified critic model.
     
     Args:
         log_files (list): List of log file paths to evaluate
         stride (int): Process every nth entry
         debug_freq (int): How often to print debug info
         max_index (int): If provided, only process entries with batch_index <= max_index
-        use_same_model (bool): If True, use the same model type as the generator for evaluation
+        critic_model_type (str): Model type for evaluation
     """
     results = {
         "files": log_files,
@@ -69,18 +67,23 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
 
             # Store model types
             results["generator_model"] = hyperparameters["model_type"]
-            results["evaluator_model"] = (
-                hyperparameters["model_type"] if use_same_model
-                else "mistral" if hyperparameters["model_type"] == "llama" else "llama"
-            )
+            
+            # Use the specified critic model type
+            if critic_model_type:
+                results["evaluator_model"] = critic_model_type
+            else:
+                raise ValueError("A critic model type must be specified.")
 
-            # Update hyperparameters for the evaluator model (only if using different model)
-            if not use_same_model:
-                hyperparameters["model_type"] = results["evaluator_model"]
-                if results["evaluator_model"] == "mistral":
-                    hyperparameters["model_name"] = "mistralai/Mistral-7B-Instruct-v0.2"
-                else:
-                    hyperparameters["model_name"] = "meta-llama/Llama-3.1-8B-Instruct"
+            # Update hyperparameters for the evaluator model
+            hyperparameters["model_type"] = results["evaluator_model"]
+            if results["evaluator_model"] == "mistral":
+                hyperparameters["model_name"] = "mistralai/Mistral-7B-Instruct-v0.2"
+            elif results["evaluator_model"] == "llama":
+                hyperparameters["model_name"] = "meta-llama/Llama-3.1-8B-Instruct"
+            elif results["evaluator_model"] == "gpt2":
+                hyperparameters["model_name"] = "openai-community/gpt2"
+            else:
+                raise ValueError("Unsupported model type")
 
             # Load the evaluation model
             frozen_model, tokenizer, device = load_evaluation_model(
@@ -180,7 +183,7 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
     return results
 
 
-def plot_cross_model_comparison(results, log_file, window_size=40, max_index=None, use_same_model=False):
+def plot_cross_model_comparison(results, log_file, window_size=40, max_index=None):
     """
     Plot both absolute log probs and normalized rewards for comparison.
     """
@@ -222,14 +225,13 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
         half_window = window_size // 2
         x_values = range(half_window, len(actor_values) - half_window)
         
-        if use_same_model:
-            # Plot absolute log probs
-            smoothed_actor = savgol_filter(actor_values, window_size, 3)
-            smoothed_critic = savgol_filter(critic_values, window_size, 3)
-            plt.plot(x_values, smoothed_actor[half_window:-half_window], 
-                    label="Actor Log Probs", color="#e41a1c", linewidth=2)
-            plt.plot(x_values, smoothed_critic[half_window:-half_window], 
-                    label="Critic Log Probs", color="#377eb8", linewidth=2)
+        # Plot absolute log probs
+        smoothed_actor = savgol_filter(actor_values, window_size, 3)
+        smoothed_critic = savgol_filter(critic_values, window_size, 3)
+        plt.plot(x_values, smoothed_actor[half_window:-half_window], 
+                label="Actor Log Probs", color="#e41a1c", linewidth=2)
+        plt.plot(x_values, smoothed_critic[half_window:-half_window], 
+                label="Critic Log Probs", color="#377eb8", linewidth=2)
         
         # Always plot both rewards
         smoothed_computed = savgol_filter(computed_rewards, window_size, 3)
@@ -242,9 +244,8 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
                 label=f"{results['generator_model'].title()} Original Reward", 
                 color="#984ea3", linewidth=2)
     else:
-        if use_same_model:
-            plt.plot(actor_values, label="Actor Log Probs", color="#e41a1c", linewidth=2)
-            plt.plot(critic_values, label="Critic Log Probs", color="#377eb8", linewidth=2)
+        plt.plot(actor_values, label="Actor Log Probs", color="#e41a1c", linewidth=2)
+        plt.plot(critic_values, label="Critic Log Probs", color="#377eb8", linewidth=2)
         
         plt.plot(computed_rewards, 
                 label=f"{results['evaluator_model'].title()} Computed Reward", 
@@ -257,7 +258,7 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
     plt.ylabel("Log Probability / Reward", fontsize=16)
     plt.title(
         f"{results['generator_model'].title()} Generated, {results['evaluator_model'].title()} Evaluated\n"
-        f"{'Log Probabilities and ' if use_same_model else ''}Rewards Comparison (Smoothing: {window_size})",
+        f"Rewards Comparison (Smoothing: {window_size})",
         fontsize=16,
     )
     plt.legend(fontsize=12, loc="best")
@@ -265,16 +266,17 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
     plt.tick_params(axis="both", which="major", labelsize=14)
     plt.tight_layout()
 
-    filename = "same_model_evaluation.png" if use_same_model else "cross_model_evaluation.png"
-    output_file = os.path.join(os.path.dirname(log_file), filename)
+    # Save plots with evaluator model type in filename
+    plot_name = f"evaluation_results_{results['evaluator_model']}.png"
+    output_file = os.path.join(os.path.dirname(log_file), plot_name)
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Plot saved to {output_file}")
 
 
-def save_evaluation_results(results, log_file, use_same_model=False):
+def save_evaluation_results(results, log_file):
     """Save evaluation results to a new jsonl file."""
-    # Modify filename based on evaluation type
-    filename = "same_model_evaluation_results.jsonl" if use_same_model else "cross_model_evaluation_results.jsonl"
+    # Include critic model type in filename
+    filename = f"evaluation_results_{results['evaluator_model']}.jsonl"
     output_file = os.path.join(os.path.dirname(log_file), filename)
 
     with open(output_file, "w") as f:
@@ -442,9 +444,11 @@ def main():
         help="Maximum index to process (batch index for --process_only, array index for --plot_only)"
     )
     parser.add_argument(
-        "--use_same_model",
-        action="store_true",
-        help="Use the same model type as the generator for evaluation"
+        "--critic_model",
+        type=str,
+        required=True,
+        choices=["mistral", "llama", "gpt2"],
+        help="Specify which model to use as the critic"
     )
     
     args = parser.parse_args()
@@ -477,13 +481,15 @@ def main():
             stride=args.stride, 
             debug_freq=args.debug_freq,
             max_index=args.max_index,
-            use_same_model=args.use_same_model
+            critic_model_type=args.critic_model
         )
-        save_evaluation_results(results, log_file, use_same_model=args.use_same_model)
+        save_evaluation_results(results, log_file)
 
-    # Determine evaluation results file path based on use_same_model
-    filename = "same_model_evaluation_results.jsonl" if args.use_same_model else "cross_model_evaluation_results.jsonl"
-    eval_results_file = os.path.join(os.path.dirname(log_file), filename)
+    # Determine evaluation results file path based on critic model
+    eval_results_file = os.path.join(
+        os.path.dirname(log_file), 
+        f"evaluation_results_{args.critic_model}.jsonl"
+    )
 
     # Plot if needed
     if not args.process_only:
@@ -493,8 +499,7 @@ def main():
                 results, 
                 log_file, 
                 window_size=args.window_size,
-                max_index=args.max_index,
-                use_same_model=args.use_same_model
+                max_index=args.max_index
             )
         except FileNotFoundError:
             print(f"No saved results found at {eval_results_file}. Run without --plot_only first.")
