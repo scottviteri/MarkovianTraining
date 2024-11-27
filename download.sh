@@ -125,12 +125,14 @@ for i in "${INDICES[@]}"; do
     if [ "$SCP" = true ]; then
         echo "Downloading files from host $hostname..."
         
-        # Find the most recently edited files
-        latest_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'log_metrics.png' -print0 | xargs -0 ls -t | head -1")
+        # Generate the plots on remote machine
+        ssh $port_option "$hostname" "cd /root/MarkovianTraining && python src/plot_training_metrics.py"
+        
+        # Find most recent log.jsonl
         latest_log_file=$(ssh $port_option "$hostname" "find /root/MarkovianTraining/results -name 'log.jsonl' -print0 | xargs -0 ls -t | head -1")
-
+        
         # Download the files
-        scp $port_option "$hostname:$latest_file" "./results_${hostname}/"
+        scp $port_option "$hostname:/root/MarkovianTraining/combined_metrics_gsm8k.png" "./results_${hostname}/"
         scp $port_option "$hostname:$latest_log_file" "./results_${hostname}/"
     fi
     
