@@ -199,6 +199,10 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                     label='±1 SD'
                 )
 
+        # Set y-limits for Contains Answer plot
+        if title == "Contains Answer":
+            axs[metric_idx].set_ylim(-0.05, 1.05)
+
         # Only add legend if there are labeled lines in the plot and show_legend is True
         if len(axs[metric_idx].get_lines()) > 0 and show_legend:
             axs[metric_idx].legend(fontsize=label_size)
