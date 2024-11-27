@@ -92,6 +92,13 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
                 ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)")
             ])
+        
+        # Add Contains Answer metric for GSM8K
+        if task_type == "gsm8k":
+            base_metrics.append(
+                ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
+            )
+            
         metrics_to_plot = base_metrics
 
     # Calculate required number of rows and columns for subplots
