@@ -559,7 +559,7 @@ def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, sh
             continue
     
     plt.xlabel("Sample", fontsize=16)
-    plt.ylabel("Log Probability / Reward", fontsize=16)
+    plt.ylabel("Normalized Reward\n" + r"$\ln \pi$(ans | cot) - $\ln \pi$(ans | cot')", fontsize=16)
     title = f"Comparison of Different Critics Evaluating {generator_model.title()} Generator\n"
     if show_error_bars:
         title += f"(Smoothing: {window_size}, with Standard Deviation)"
