@@ -482,21 +482,44 @@ def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, sh
         "llama": "#e41a1c",
         "mistral": "#377eb8",
         "gpt2": "#4daf4a",
-        "tinystories": "#984ea3"
+        "tinystories": "#984ea3",
+        "phi": "#ff7f00",
+        "original": "#000000"  # Black for original loss
     }
     
     generator_model = None
+    original_losses = None
     
-    for model_type in ["mistral", "llama", "gpt2", "tinystories"]:
+    # Find all evaluation result files in the directory
+    eval_files = [f for f in os.listdir(log_dir) if f.startswith('evaluation_results_') and f.endswith('.jsonl')]
+    critic_models = [f.replace('evaluation_results_', '').replace('.jsonl', '') for f in eval_files]
+    
+    # First, load original losses from any of the evaluation files
+    if eval_files:
+        with open(os.path.join(log_dir, eval_files[0]), 'r') as f:
+            metadata = json.loads(f.readline())
+            generator_model = metadata["generator_model"]
+            data = [json.loads(line) for line in f]
+            original_losses = [entry["Original Reward"] for entry in data]
+            if max_index is not None:
+                original_losses = original_losses[:max_index]
+    
+    # Plot original losses first
+    if original_losses and len(original_losses) > window_size:
+        half_window = window_size // 2
+        x_values = range(half_window, len(original_losses) - half_window)
+        smoothed = savgol_filter(original_losses, window_size, 3)
+        plt.plot(x_values, smoothed[half_window:-half_window],
+                label=f"{generator_model.title()} Original Loss",
+                color=colors["original"],
+                linewidth=2,
+                linestyle='--')  # Dashed line for original loss
+    
+    # Then plot each critic's evaluations
+    for model_type in critic_models:
         results_file = os.path.join(log_dir, f"evaluation_results_{model_type}.jsonl")
-        if not os.path.exists(results_file):
-            continue
-            
         try:
             results = load_evaluation_results(results_file)
-            if generator_model is None:
-                generator_model = results["generator_model"]
-                
             all_data = results["evaluations"][0]
             
             if max_index is not None:
@@ -518,7 +541,7 @@ def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, sh
                 smoothed = savgol_filter(computed_rewards, window_size, 3)
                 
                 plt.plot(x_values, smoothed[half_window:-half_window],
-                        label=f"{model_type.title()} Critic",
+                        label=f"{model_type.title()} Critic Computed Reward",
                         color=colors[model_type],
                         linewidth=2)
                 
@@ -530,25 +553,13 @@ def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, sh
                                    smoothed[half_window:-half_window] + smoothed_std[half_window:-half_window],
                                    color=colors[model_type],
                                    alpha=0.2)
-            else:
-                plt.plot(computed_rewards,
-                        label=f"{model_type.title()} Critic",
-                        color=colors[model_type],
-                        linewidth=2)
-                
-                if show_error_bars and reward_stds:
-                    plt.fill_between(range(len(computed_rewards)),
-                                   np.array(computed_rewards) - np.array(reward_stds),
-                                   np.array(computed_rewards) + np.array(reward_stds),
-                                   color=colors[model_type],
-                                   alpha=0.2)
                         
-        except FileNotFoundError:
-            print(f"No results found for {model_type} critic")
+        except Exception as e:
+            print(f"Error processing {results_file}: {e}")
             continue
     
     plt.xlabel("Sample", fontsize=16)
-    plt.ylabel("Computed Reward (Actor - Critic Log Prob)", fontsize=16)
+    plt.ylabel("Log Probability / Reward", fontsize=16)
     title = f"Comparison of Different Critics Evaluating {generator_model.title()} Generator\n"
     if show_error_bars:
         title += f"(Smoothing: {window_size}, with Standard Deviation)"
