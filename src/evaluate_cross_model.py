@@ -685,12 +685,8 @@ def main():
 
     # Handle single critic plotting
     if not args.process_only:
-        eval_results_file = os.path.join(
-            os.path.dirname(log_file), 
-            f"evaluation_results_{args.critic_model}.jsonl"
-        )
         try:
-            results = load_evaluation_results(eval_results_file)
+            results = load_evaluation_results(log_file)
             plot_cross_model_comparison(
                 results, 
                 log_file, 
@@ -699,7 +695,7 @@ def main():
                 show_log_probs=args.show_log_probs
             )
         except FileNotFoundError:
-            print(f"No saved results found at {eval_results_file}. Run without --plot_only first.")
+            print(f"No saved results found at {log_file}. Run without --plot_only first.")
 
 
 if __name__ == "__main__":
