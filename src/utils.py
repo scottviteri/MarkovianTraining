@@ -3,6 +3,8 @@ import datetime
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 from constants import MISTRAL_INST_START, MISTRAL_INST_END
+from transformers import AutoTokenizer, AutoModelForCausalLM
+import torch
 
 class Colors:
     """ANSI color codes"""
@@ -144,3 +146,37 @@ def construct_prompts(
 
     # Add model-specific answer header to partial prompt
     return base_with_type + reasoning + f" Answer: "
+
+def load_model(model_type="mistral"):
+    """Load a frozen model for evaluation."""
+    if model_type == "mistral":
+        model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+    elif model_type == "llama":
+        model_name = "meta-llama/Llama-3.1-8B-Instruct"
+    elif model_type == "gpt2":
+        model_name = "openai-community/gpt2"
+    elif model_type == "tinystories":
+        model_name = "roneneldan/TinyStories"
+    elif model_type == "phi":
+        model_name = "microsoft/Phi-3.5-mini-instruct"
+    else:
+        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', or 'phi'")
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
+    tokenizer.pad_token = tokenizer.eos_token
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        trust_remote_code=model_type=="phi"  # Phi needs trust_remote_code=True
+    )
+
+    # Freeze the model
+    for param in model.parameters():
+        param.requires_grad = False
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    return model, tokenizer, device

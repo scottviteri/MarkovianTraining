@@ -13,24 +13,7 @@ from train import calculate_answer_log_probs, find_latest_result, print_debug_in
 from tqdm import tqdm
 import string
 from pathlib import Path
-
-
-def load_model_and_tokenizer(model_type):
-    if model_type == "mistral":
-        model_name = "mistralai/Mistral-7B-Instruct-v0.2"
-    elif model_type == "llama":
-        model_name = "meta-llama/Llama-3.1-8B-Instruct"
-    else:
-        raise ValueError(f"Unsupported model_type: {model_type}")
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name, torch_dtype=torch.float16, device_map="auto"
-    )
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model.to(device)
-    return model, tokenizer, device
+from utils import load_model
 
 
 def perturb_CoT(CoT, config):
@@ -166,9 +149,7 @@ def run_perturbations(log_file, perturb_type, stride=1, max_index=None):
     # Extract hyperparameters from the first line
     hyperparameters = log_data[0]
     task_type = hyperparameters.get("task_type", "gsm8k")
-    frozen_model, tokenizer, device = load_model_and_tokenizer(
-        hyperparameters["model_type"]
-    )
+    frozen_model, tokenizer, device = load_model(hyperparameters["model_type"])
 
     # Filter log data by batch index if max_index is provided
     if max_index is not None:

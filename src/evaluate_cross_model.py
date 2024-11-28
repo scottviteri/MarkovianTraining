@@ -6,44 +6,9 @@ import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
 from tqdm import tqdm
 from train import calculate_answer_log_probs
-from utils import print_debug_info, find_latest_result
+from utils import print_debug_info, find_latest_result, load_model
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
-
-
-def load_evaluation_model(model_type="mistral"):
-    """Load a frozen model for evaluation."""
-    if model_type == "mistral":
-        model_name = "mistralai/Mistral-7B-Instruct-v0.2"
-    elif model_type == "llama":
-        model_name = "meta-llama/Llama-3.1-8B-Instruct"
-    elif model_type == "gpt2":
-        model_name = "openai-community/gpt2"
-    elif model_type == "tinystories":
-        model_name = "roneneldan/TinyStories"
-    elif model_type == "phi":
-        model_name = "microsoft/Phi-3.5-mini-instruct"
-    else:
-        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', or 'phi'")
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
-    tokenizer.pad_token = tokenizer.eos_token
-
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
-        trust_remote_code=model_type=="phi"  # Phi needs trust_remote_code=True
-    )
-
-    # Freeze the model
-    for param in model.parameters():
-        param.requires_grad = False
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-
-    return model, tokenizer, device
 
 
 def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=None, critic_model_type=None):
@@ -95,9 +60,7 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
                 raise ValueError("Unsupported model type")
 
             # Load the evaluation model
-            frozen_model, tokenizer, device = load_evaluation_model(
-                model_type=results["evaluator_model"]
-            )
+            frozen_model, tokenizer, device = load_model(results["evaluator_model"])
 
             # Filter entries and validate required fields
             entries = []
