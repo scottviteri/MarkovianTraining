@@ -89,6 +89,8 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
                 hyperparameters["model_name"] = "openai-community/gpt2"
             elif results["evaluator_model"] == "tinystories":
                 hyperparameters["model_name"] = "roneneldan/TinyStories"
+            elif results["evaluator_model"] == "phi":
+                hyperparameters["model_name"] = "microsoft/Phi-3.5-mini-instruct"
             else:
                 raise ValueError("Unsupported model type")
 
