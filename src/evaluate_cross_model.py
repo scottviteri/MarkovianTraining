@@ -21,8 +21,10 @@ def load_evaluation_model(model_type="mistral"):
         model_name = "openai-community/gpt2"
     elif model_type == "tinystories":
         model_name = "roneneldan/TinyStories"
+    elif model_type == "phi":
+        model_name = "microsoft/Phi-3.5-mini-instruct"
     else:
-        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', or 'tinystories'")
+        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', or 'phi'")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
@@ -31,6 +33,7 @@ def load_evaluation_model(model_type="mistral"):
         model_name,
         torch_dtype=torch.bfloat16,
         device_map="auto",
+        trust_remote_code=model_type=="phi"  # Phi needs trust_remote_code=True
     )
 
     # Freeze the model
@@ -605,7 +608,7 @@ def main():
     parser.add_argument(
         "--critic_model",
         type=str,
-        choices=["mistral", "llama", "gpt2", "tinystories"],
+        choices=["mistral", "llama", "gpt2", "tinystories", "phi"],
         help="Specify which model to use as the critic"
     )
     parser.add_argument(

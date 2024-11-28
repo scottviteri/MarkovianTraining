@@ -89,7 +89,7 @@ def get_model_specific_tokens(model_type):
             "inst_start": MISTRAL_INST_START,
             "inst_end": MISTRAL_INST_END,
         }
-    else:  # llama or gpt2 or tinystories
+    else:  # llama or gpt2 or tinystories or phi
         return {
             "inst_start": "",
             "inst_end": "",

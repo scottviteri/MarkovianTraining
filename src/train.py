@@ -43,7 +43,7 @@ def colored_print(
 
 
 def load_model(model_type="mistral", hyperparameters=None):
-    """Load either Mistral, Llama, GPT2, or TinyStories model based on parameter."""
+    """Load either Mistral, Llama, GPT2, TinyStories, or Phi model based on parameter."""
     if model_type == "mistral":
         model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     elif model_type == "llama":
@@ -52,8 +52,10 @@ def load_model(model_type="mistral", hyperparameters=None):
         model_name = "openai-community/gpt2"
     elif model_type == "tinystories":
         model_name = "roneneldan/TinyStories"
+    elif model_type == "phi":
+        model_name = "microsoft/Phi-3.5-mini-instruct"
     else:
-        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', or 'tinystories'")
+        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', or 'phi'")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
@@ -63,6 +65,7 @@ def load_model(model_type="mistral", hyperparameters=None):
         model_name,
         torch_dtype=torch.bfloat16,
         device_map="auto",
+        trust_remote_code=model_type=="phi"  # Phi needs trust_remote_code=True
     )
 
     peft_config = LoraConfig(
@@ -356,6 +359,12 @@ def find_answer_start_position(input_ids, model_type):
         matching_indices = (
             (input_ids[:-1] == 23998)
             & (input_ids[1:] == 25)
+        ).nonzero(as_tuple=True)[0]
+        pos = matching_indices[-1].item() + 2
+    elif model_type == "phi":
+        matching_indices = (
+            (input_ids[:-1] == 673)  # "Answer"
+            & (input_ids[1:] == 29901)  # ":"
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
     else:
@@ -1513,7 +1522,7 @@ if __name__ == "__main__":
         "--model_type",
         type=str,
         default="llama",
-        choices=["llama", "mistral", "gpt2", "tinystories"],
+        choices=["llama", "mistral", "gpt2", "tinystories", "phi"],
         help="Model type (default: llama)",
     )
     parser.add_argument("--resume", action="store_true")
