@@ -9,7 +9,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from scipy.signal import savgol_filter
-from train import calculate_answer_log_probs, find_latest_result, print_debug_info
+from train import calculate_answer_log_probs
+from utils import find_latest_result, print_debug_info
 from tqdm import tqdm
 import string
 from pathlib import Path
