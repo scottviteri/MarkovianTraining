@@ -231,7 +231,7 @@ Please ensure all dependencies are installed before running the scripts.
 
 ## GSM8K Results
 
-To generate the GSM8K Performance plot, use the following command:
+To generate evaluate an existing "model.pt" file on the GSM8K test set, run:
 
 ```
 python src/evaluate_gsm8k.py --model_path <path> --num_samples <n>

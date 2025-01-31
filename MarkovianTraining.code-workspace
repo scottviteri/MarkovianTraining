@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"name": "MarkovianTraining",
+			"path": "."
+		}
+	],
+	"settings": {
+		"python.testing.pytestArgs": [
+			"tests"
+		],
+		"python.testing.unittestEnabled": false,
+		"python.testing.pytestEnabled": true
+	}
+}

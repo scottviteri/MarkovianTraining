@@ -256,151 +256,100 @@ def run_perturbations(log_file, perturb_type, stride=1, max_index=None):
     return perturbation_data
 
 
-def plot_perturbation_results(results, log_file, perturb_type, window_size=40, debug=False, max_index=None, font_size=12):
+def plot_perturbation_results(
+    results, log_file, perturb_type, window_size=40, debug=False, max_index=None, font_size=12, legend_font_size=10
+):
     """
-    Plot the results of perturbation analysis.
-    No smoothing is applied if window_size=1.
-    font_size controls the size of text elements in the plot.
+    Plot the perturbation results comparing actor and critic log probabilities.
+
+    Args:
+        results: The perturbation results data.
+        log_file: Path to the log file or results directory.
+        perturb_type: The type of perturbation being analyzed.
+        window_size: Smoothing window size.
+        debug: Whether to generate debug plots.
+        max_index: Maximum index to plot.
+        font_size: Base font size for plot text elements.
+        legend_font_size: Font size for the legend in plots.
     """
-    if not results:
-        print("No data found to plot.")
-        return
+    # Extract data
+    batch_indices = []
+    actor_original = []
+    actor_perturbed = []
+    critic_original = []
+    critic_perturbed = []
+    perturbations = []
 
-    # Get output paths at the start
-    output_paths = get_output_paths(log_file, perturb_type)
-    output_file = output_paths["debug_plot"] if debug else output_paths["plot"]
+    # Assuming only one perturbation per type for simplicity
+    for entry in results:
+        batch_indices.append(entry["Batch Index"])
+        actor_original.append(entry["Log Probs"]["Actor"]["Original"])
+        critic_original.append(entry["Log Probs"]["Critic"]["Original"])
 
-    # Threshold results by array index
+        pert_name = list(entry["Log Probs"]["Actor"]["Perturbed"].keys())[0]
+        perturbations.append(pert_name)
+
+        actor_perturbed.append(entry["Log Probs"]["Actor"]["Perturbed"][pert_name])
+        critic_perturbed.append(entry["Log Probs"]["Critic"]["Perturbed"][pert_name])
+
     if max_index is not None:
-        results = results[:max_index]
-        if not results:
-            print(f"No data found within max_index {max_index}")
-            return
+        max_index = min(max_index, len(batch_indices))
+        batch_indices = batch_indices[:max_index]
+        actor_original = actor_original[:max_index]
+        critic_original = critic_original[:max_index]
+        actor_perturbed = actor_perturbed[:max_index]
+        critic_perturbed = critic_perturbed[:max_index]
 
-    colors = list(mcolors.TABLEAU_COLORS.values())
+    # Calculate differences
+    actor_diff = np.array(actor_original) - np.array(actor_perturbed)
+    critic_diff = np.array(critic_original) - np.array(critic_perturbed)
+    diff_difference = actor_diff - critic_diff
 
-    if debug:
-        fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 24))
-
-        # Plot perturbation results in first three axes
-        for i, (pert, _) in enumerate(results[0]["Log Probs"]["Actor"]["Perturbed"].items()):
-            # Skip baseline case
-            if pert == f"{perturb_type.title().replace('_', '')}0%":
-                continue
-
-            # Get Actor values
-            actor_orig_values = [-entry["Log Probs"]["Actor"]["Original"] for entry in results]
-            actor_pert_values = [-entry["Log Probs"]["Actor"]["Perturbed"][pert] for entry in results]
-            actor_diff_values = [p - o for p, o in zip(actor_pert_values, actor_orig_values)]
-
-            # Get Critic values
-            critic_orig_values = [-entry["Log Probs"]["Critic"]["Original"] for entry in results]
-            critic_pert_values = [-entry["Log Probs"]["Critic"]["Perturbed"][pert] for entry in results]
-            critic_diff_values = [p - o for p, o in zip(critic_pert_values, critic_orig_values)]
-
-            if window_size > 1 and len(actor_diff_values) > window_size:
-                actor_smooth = savgol_filter(actor_diff_values, window_size, 3)
-                critic_smooth = savgol_filter(critic_diff_values, window_size, 3)
-                effect_diff_smooth = savgol_filter([a - c for a, c in zip(actor_diff_values, critic_diff_values)], window_size, 3)
-
-                padding = window_size // 2
-                x_values = range(padding, len(actor_diff_values) - padding)
-                actor_smooth = actor_smooth[padding:-padding]
-                critic_smooth = critic_smooth[padding:-padding]
-                effect_diff_smooth = effect_diff_smooth[padding:-padding]
-            else:
-                x_values = range(len(actor_diff_values))
-                actor_smooth = actor_diff_values
-                critic_smooth = critic_diff_values
-                effect_diff_smooth = [a - c for a, c in zip(actor_diff_values, critic_diff_values)]
-
-            ax1.plot(x_values, actor_smooth, label=f"{pert} (Actor)", color=colors[i])
-            ax2.plot(x_values, critic_smooth, label=f"{pert} (Critic)", color=colors[i])
-            ax3.plot(x_values, effect_diff_smooth, label=f"{pert} (Actor - Critic)", color=colors[i])
-
-        # Plot Actor vs Critic original difference
-        actor_values = [-entry["Log Probs"]["Actor"]["Original"] for entry in results]
-        critic_values = [-entry["Log Probs"]["Critic"]["Original"] for entry in results]
-        ac_diff_values = [a - c for a, c in zip(actor_values, critic_values)]
-
-        if window_size > 1 and len(ac_diff_values) > window_size:
-            ac_diff_smooth = savgol_filter(ac_diff_values, window_size, 3)
-            padding = window_size // 2
-            x_values = range(padding, len(ac_diff_values) - padding)
-            ac_diff_smooth = ac_diff_smooth[padding:-padding]
-        else:
-            x_values = range(len(ac_diff_values))
-            ac_diff_smooth = ac_diff_values
-
-        ax4.plot(x_values, ac_diff_smooth, label="Actor - Critic (Original)", color="purple")
-
-        # Update font sizes in debug plots
-        for ax in [ax1, ax2, ax3, ax4]:
-            ax.set_ylabel("Change in Negative Log Probability", fontsize=font_size+2)
-            ax.legend(fontsize=font_size)
-            ax.tick_params(axis='both', which='major', labelsize=font_size)
-            ax.grid(True)
-        
-        if window_size > 1:
-            ax1.set_title(f"Actor Perturbation Effect (smoothing={window_size})", fontsize=font_size+4)
-            ax2.set_title(f"Critic Perturbation Effect (smoothing={window_size})", fontsize=font_size+4)
-            ax3.set_title(f"Difference in Effects (Actor - Critic) (smoothing={window_size})", fontsize=font_size+4)
-            ax4.set_title(f"Original Actor vs Critic Difference (smoothing={window_size})", fontsize=font_size+4)
-        else:
-            ax1.set_title("Actor Perturbation Effect (raw)", fontsize=font_size+4)
-            ax2.set_title("Critic Perturbation Effect (raw)", fontsize=font_size+4)
-            ax3.set_title("Difference in Effects (Actor - Critic) (raw)", fontsize=font_size+4)
-            ax4.set_title("Original Actor vs Critic Difference (raw)", fontsize=font_size+4)
-
-        plt.tight_layout()
+    # Smoothing
+    if window_size > 1 and len(diff_difference) > window_size:
+        effect_smooth = savgol_filter(diff_difference, window_size, 3)
+        padding = window_size // 2
+        x_values = range(padding, len(diff_difference) - padding)
+        effect_smooth = effect_smooth[padding:-padding]
     else:
-        plt.figure(figsize=(12, 6))
+        x_values = range(len(diff_difference))
+        effect_smooth = diff_difference
 
-        # Plot differences for each perturbation type
-        for i, (pert, _) in enumerate(results[0]["Log Probs"]["Actor"]["Perturbed"].items()):
-            # Calculate differences for Actor
-            actor_orig_values = [-entry["Log Probs"]["Actor"]["Original"] for entry in results]
-            actor_pert_values = [-entry["Log Probs"]["Actor"]["Perturbed"][pert] for entry in results]
-            actor_diff_values = [p - o for p, o in zip(actor_pert_values, actor_orig_values)]
+    # Plotting
+    plt.figure(figsize=(12, 6))
+    plt.plot(
+        x_values,
+        effect_smooth,
+        label=f"{perturb_type.replace('_', ' ').title()}",
+        color="blue",
+        linewidth=2,
+    )
 
-            # Calculate differences for Critic
-            critic_orig_values = [-entry["Log Probs"]["Critic"]["Original"] for entry in results]
-            critic_pert_values = [-entry["Log Probs"]["Critic"]["Perturbed"][pert] for entry in results]
-            critic_diff_values = [p - o for p, o in zip(critic_pert_values, critic_orig_values)]
+    plt.grid(True, linestyle="--", alpha=0.7)
+    plt.legend(fontsize=legend_font_size, loc="best")
 
-            # Calculate the difference between Actor and Critic perturbation effects
-            effect_difference = [a - c for a, c in zip(actor_diff_values, critic_diff_values)]
+    plt.xlabel("Example Index", fontsize=font_size)
+    plt.ylabel("Difference in Perturbation Effect\n(Actor - Critic)", fontsize=font_size)
 
-            if window_size > 1 and len(effect_difference) > window_size:
-                effect_smooth = savgol_filter(effect_difference, window_size, 3)
-                padding = window_size // 2
-                x_values = range(padding, len(effect_difference) - padding)
-                effect_smooth = effect_smooth[padding:-padding]
-            else:
-                x_values = range(len(effect_difference))
-                effect_smooth = effect_difference
+    title = f"Perturbation Analysis: {perturb_type.replace('_', ' ').title()}"
+    if window_size > 1:
+        title += f" (Smoothing: {window_size})"
+    else:
+        title += " (Raw Data)"
 
-            plt.plot(x_values, effect_smooth, label=f"{pert}", color=colors[i])
+    plt.title(title, fontsize=font_size)
+    plt.tick_params(axis="both", which="major", labelsize=font_size)
+    plt.tight_layout()
 
-        plt.grid(True)
-        plt.legend(fontsize=font_size)
-        plt.ylabel("Difference in Perturbation Effect\n(Actor - Critic)", fontsize=font_size+2)
-        plt.xlabel("Example Index", fontsize=font_size+2)
-        plt.tick_params(axis='both', which='major', labelsize=font_size)
-
-        if window_size > 1:
-            plt.title(f"Perturbation Analysis: Actor vs Critic Effect (smoothing={window_size})", 
-                     fontsize=font_size+4)
-        else:
-            plt.title("Perturbation Analysis: Actor vs Critic Effect (raw)", 
-                     fontsize=font_size+4)
-
+    output_file = os.path.join(os.path.dirname(log_file), f"perturbation_results_{perturb_type}_plot.png")
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Plot saved to {output_file}")
     plt.close()
 
 
-def plot_multiple_perturbation_results(log_file, perturb_types, window_size=40, max_index=None, font_size=12):
+def plot_multiple_perturbation_results(
+    log_file, perturb_types, window_size=40, max_index=None, font_size=12, legend_font_size=10
+):
     """Plot multiple perturbation results in a grid layout."""
     # Calculate grid dimensions
     n_plots = len(perturb_types)
@@ -429,7 +378,7 @@ def plot_multiple_perturbation_results(log_file, perturb_types, window_size=40, 
             results = load_perturbation_results(log_file, perturb_type)
             if max_index is not None:
                 results = results[:max_index]
-            
+                
             # Plot each perturbation degree
             for i, (pert, _) in enumerate(results[0]["Log Probs"]["Actor"]["Perturbed"].items()):
                 # Skip baseline case (0% perturbation)
@@ -457,130 +406,115 @@ def plot_multiple_perturbation_results(log_file, perturb_types, window_size=40, 
                     x_values = range(len(effect_difference))
                     effect_smooth = effect_difference
                 
-                ax.plot(x_values, effect_smooth, label=f"{pert}", color=colors[i], linewidth=2)
+                ax.plot(x_values, effect_smooth, label=f"{pert}", color=colors[i % len(colors)], linewidth=2)
             
             ax.grid(True)
-            ax.legend(fontsize=font_size-2, loc='best')
+            ax.legend(fontsize=legend_font_size, loc='best')
             
             if ax.get_subplotspec().is_first_col():
-                ax.set_ylabel("Diff in Perturbation Effect\n(Actor - Critic)", fontsize=font_size)
+                ax.set_ylabel("Difference in Perturbation Effect\n(Actor - Critic)", fontsize=font_size)
             if ax.get_subplotspec().is_last_row():
                 ax.set_xlabel("Example Index", fontsize=font_size)
             
             ax.tick_params(axis='both', which='major', labelsize=font_size-2)
             
             if window_size > 1:
-                ax.set_title(f"{perturb_type.replace('_', ' ').title()} (smoothing={window_size})", 
-                           fontsize=font_size+2)
+                ax.set_title(f"{perturb_type.replace('_', ' ').title()} (Smoothing: {window_size})", fontsize=font_size+2)
             else:
-                ax.set_title(f"{perturb_type.replace('_', ' ').title()} (raw)", 
-                           fontsize=font_size+2)
+                ax.set_title(f"{perturb_type.replace('_', ' ').title()} (Raw Data)", fontsize=font_size+2)
                 
         except FileNotFoundError:
             print(f"No saved results found for {perturb_type}")
-            ax.text(0.5, 0.5, f"No data for {perturb_type}", 
-                   ha='center', va='center', fontsize=font_size)
+            ax.text(0.5, 0.5, f"No data for {perturb_type}", ha='center', va='center', fontsize=font_size)
             ax.set_xticks([])
             ax.set_yticks([])
     
     plt.tight_layout()
-    output_file = os.path.join(os.path.dirname(log_file), "combined_perturbation_plot.png")
+    output_file = os.path.join(log_file, "combined_perturbation_plot.png")
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Combined plot saved to {output_file}")
+    plt.close()
 
 
-def collate_perturbation_results(log_files, output_dir):
+def collate_perturbation_results(perturbation_files, output_dir, perturb_type):
     """
     Average perturbation results across multiple runs and save to a new directory.
     """
     os.makedirs(output_dir, exist_ok=True)
-    accumulated_results = {}
+    accumulated_results = []
     
-    # Process each log file directory
-    for log_file in log_files:
-        base_dir = os.path.dirname(log_file)
-        
-        for perturb_type in PERTURBATION_SETS.keys():
-            try:
-                results = load_perturbation_results(log_file, perturb_type)
-                
-                if perturb_type not in accumulated_results:
-                    accumulated_results[perturb_type] = {
-                        'results': [],
-                        'count': 0
-                    }
-                
-                accumulated_results[perturb_type]['results'].append(results)
-                accumulated_results[perturb_type]['count'] += 1
-                
-            except FileNotFoundError:
-                print(f"Warning: No results found for {perturb_type} in {log_file}")
-                continue
-    
-    # Average the results for each perturbation type
-    for perturb_type, acc_data in accumulated_results.items():
-        if acc_data['count'] == 0:
+    # Process each perturbation result file
+    for perturbation_file in perturbation_files:
+        try:
+            with open(perturbation_file, 'r') as f:
+                results = json.load(f)
+                accumulated_results.append(results)
+        except FileNotFoundError:
+            print(f"Warning: No results found in {perturbation_file}")
             continue
-            
-        results_list = acc_data['results']
-        num_runs = len(results_list)
-        
-        # Find minimum length across all runs
-        min_length = min(len(run) for run in results_list)
-        print(f"Using {min_length} entries for {perturb_type} (shortest common length)")
-        
-        # Initialize structure for averaged results
-        averaged_results = []
-        for entry_idx in range(min_length):
-            avg_entry = {
-                "Batch Index": results_list[0][entry_idx]["Batch Index"],
-                "Log Probs": {
-                    "Actor": {
-                        "Original": 0.0,
-                        "Perturbed": {}
-                    },
-                    "Critic": {
-                        "Original": 0.0,
-                        "Perturbed": {}
-                    }
+    
+    if not accumulated_results:
+        print("No results to collate.")
+        return
+    
+    num_runs = len(accumulated_results)
+    
+    # Find minimum length across all runs
+    min_length = min(len(run) for run in accumulated_results)
+    print(f"Using {min_length} entries for {perturb_type} (shortest common length)")
+    
+    # Initialize structure for averaged results
+    averaged_results = []
+    for entry_idx in range(min_length):
+        avg_entry = {
+            "Batch Index": accumulated_results[0][entry_idx]["Batch Index"],
+            "Log Probs": {
+                "Actor": {
+                    "Original": 0.0,
+                    "Perturbed": {}
+                },
+                "Critic": {
+                    "Original": 0.0,
+                    "Perturbed": {}
                 }
             }
-            
-            # Average the Original values for both Actor and Critic
-            for run in results_list:
-                avg_entry["Log Probs"]["Actor"]["Original"] += run[entry_idx]["Log Probs"]["Actor"]["Original"] / num_runs
-                avg_entry["Log Probs"]["Critic"]["Original"] += run[entry_idx]["Log Probs"]["Critic"]["Original"] / num_runs
-            
-            # Get perturbation names from first run
-            pert_names = results_list[0][entry_idx]["Log Probs"]["Actor"]["Perturbed"].keys()
-            
-            # Initialize perturbation dictionaries
-            for pert_name in pert_names:
-                avg_entry["Log Probs"]["Actor"]["Perturbed"][pert_name] = 0.0
-                avg_entry["Log Probs"]["Critic"]["Perturbed"][pert_name] = 0.0
-            
-            # Average the perturbed values for both Actor and Critic
-            for run in results_list:
-                for pert_name in pert_names:
-                    avg_entry["Log Probs"]["Actor"]["Perturbed"][pert_name] += (
-                        run[entry_idx]["Log Probs"]["Actor"]["Perturbed"][pert_name] / num_runs
-                    )
-                    avg_entry["Log Probs"]["Critic"]["Perturbed"][pert_name] += (
-                        run[entry_idx]["Log Probs"]["Critic"]["Perturbed"][pert_name] / num_runs
-                    )
-            
-            averaged_results.append(avg_entry)
+        }
         
-        # Save averaged results
-        output_file = os.path.join(output_dir, f"perturbation_results_{perturb_type}.json")
-        with open(output_file, "w") as f:
-            json.dump(averaged_results, f)
-        print(f"Averaged results for {perturb_type} saved to {output_file}")
-
+        # Average the Original values for both Actor and Critic
+        for run in accumulated_results:
+            avg_entry["Log Probs"]["Actor"]["Original"] += run[entry_idx]["Log Probs"]["Actor"]["Original"] / num_runs
+            avg_entry["Log Probs"]["Critic"]["Original"] += run[entry_idx]["Log Probs"]["Critic"]["Original"] / num_runs
+        
+        # Get perturbation names from first run
+        pert_names = accumulated_results[0][entry_idx]["Log Probs"]["Actor"]["Perturbed"].keys()
+        
+        # Initialize perturbation dictionaries
+        for pert_name in pert_names:
+            avg_entry["Log Probs"]["Actor"]["Perturbed"][pert_name] = 0.0
+            avg_entry["Log Probs"]["Critic"]["Perturbed"][pert_name] = 0.0
+        
+        # Average the perturbed values for both Actor and Critic
+        for run in accumulated_results:
+            for pert_name in pert_names:
+                avg_entry["Log Probs"]["Actor"]["Perturbed"][pert_name] += (
+                    run[entry_idx]["Log Probs"]["Actor"]["Perturbed"][pert_name] / num_runs
+                )
+                avg_entry["Log Probs"]["Critic"]["Perturbed"][pert_name] += (
+                    run[entry_idx]["Log Probs"]["Critic"]["Perturbed"][pert_name] / num_runs
+                )
+        
+        averaged_results.append(avg_entry)
+    
+    # Save averaged results
+    output_file = os.path.join(output_dir, f"perturbation_results_{perturb_type}.json")
+    with open(output_file, "w") as f:
+        json.dump(averaged_results, f)
+    print(f"Averaged results for {perturb_type} saved to {output_file}")
+    
 
 def main():
     parser = argparse.ArgumentParser(description="Perturbation Analysis Tool")
-    parser.add_argument("--log_file", help="Log file to analyze")
+    parser.add_argument("--log_file", help="Log file to analyze or directory containing perturbation results")
     parser.add_argument(
         "--window_size", type=int, default=40, help="Smoothing window size"
     )
@@ -600,8 +534,8 @@ def main():
         "--process_only", action="store_true", help="Only process data without plotting"
     )
 
-    # Create a mutually exclusive group for --perturb and --all
-    perturb_group = parser.add_mutually_exclusive_group(required=True)
+    # Adjusted to not require --perturb when using --collate
+    perturb_group = parser.add_mutually_exclusive_group(required=False)
     perturb_group.add_argument(
         "--perturb",
         nargs="+",
@@ -612,11 +546,11 @@ def main():
         "--all", action="store_true", help="Run all perturbation types"
     )
 
-    # Add new collate argument
+    # Modify the --collate help message
     parser.add_argument(
         "--collate",
         nargs="+",
-        help="List of log file locations to average results from",
+        help="List of perturbation result JSON files to average"
     )
     parser.add_argument(
         "--output_dir",
@@ -630,80 +564,96 @@ def main():
         default=12,
         help="Base font size for plot text elements"
     )
+    parser.add_argument(
+        "--legend_font_size",
+        type=int,
+        default=10,
+        help="Font size for the legend in plots"
+    )
+    parser.add_argument(
+        "--plot_multiple_perturbations",
+        action="store_true",
+        help="Generate a combined plot for multiple perturbation types"
+    )
 
     args = parser.parse_args()
 
-    if args.log_file:
-        log_file = args.log_file
-    else:
-        log_file = find_latest_result(return_log=True)
-
-    if not log_file:
-        print("No log file found.")
-        return
-
-    # If --all is used, set perturb to all available types
     if args.all:
         args.perturb = list(PERTURBATION_SETS.keys())
 
-    print(f"Using log file: {log_file}")
-    print(f"Perturbation types: {', '.join(args.perturb)}")
-
-    # Handle collation if requested
     if args.collate:
-        print(f"Collating results from {len(args.collate)} runs...")
-        collate_perturbation_results(args.collate, args.output_dir)
+        if not args.output_dir:
+            print("Please specify an output directory using --output_dir when using --collate.")
+            return
+        # Extract perturb_type from the filenames
+        perturb_types = set()
+        for file in args.collate:
+            basename = os.path.basename(file)
+            if basename.startswith("perturbation_results_") and basename.endswith(".json"):
+                perturb_type = basename[len("perturbation_results_"):-len(".json")]
+                perturb_types.add(perturb_type)
+            else:
+                print(f"Invalid perturbation result file: {file}")
+                return
+        if len(perturb_types) != 1:
+            print("All perturbation result files must be for the same perturbation type.")
+            return
+        perturb_type = perturb_types.pop()
+        print(f"Collating results for perturbation type: {perturb_type}")
+        collate_perturbation_results(args.collate, args.output_dir, perturb_type)
         print(f"Collation complete. Results saved to {args.output_dir}")
         if not args.plot_only:
             return
         # Update log_file to point to collated results for plotting
-        log_file = os.path.join(args.output_dir, "dummy.log")
-
-    # Process data if needed
-    if not args.plot_only:
-        for perturb_type in args.perturb:
-            print(f"\nProcessing {perturb_type}...")
-            results = run_perturbations(
-                log_file, 
-                perturb_type, 
-                stride=args.stride,
-                max_index=args.max_index
-            )
-            if results:
-                save_perturbation_results(results, log_file, perturb_type)
-            else:
-                print(f"No data found to save for {perturb_type}.")
+        args.log_file = args.output_dir
+        args.perturb = [perturb_type]
+    else:
+        if args.log_file:
+            if not args.perturb and not args.all:
+                print("Please specify perturbation types using --perturb or --all.")
+                return
+        else:
+            # Get the latest result directory
+            log_dir = find_latest_result()
+            if log_dir is None:
+                print("No result directories found.")
+                return
+            args.log_file = log_dir
 
     # Plot if needed
     if not args.process_only:
-        if args.plot_only and not args.debug and len(args.perturb) > 1:
+        if args.plot_only and args.plot_multiple_perturbations and len(args.perturb) > 1:
             # Create combined plot for multiple perturbation types
             plot_multiple_perturbation_results(
-                log_file,
+                args.log_file,
                 args.perturb,
                 window_size=args.window_size,
                 max_index=args.max_index,
-                font_size=args.font_size
+                font_size=args.font_size,
+                legend_font_size=args.legend_font_size
             )
         else:
-            # Original single-perturbation plotting
             for perturb_type in args.perturb:
+                result_file = os.path.join(args.log_file, f"perturbation_results_{perturb_type}.json")
                 try:
-                    results = load_perturbation_results(log_file, perturb_type)
+                    with open(result_file, "r") as f:
+                        results = json.load(f)
                     plot_perturbation_results(
                         results,
-                        log_file,
+                        args.log_file,
                         perturb_type,
                         window_size=args.window_size,
                         debug=args.debug,
                         max_index=args.max_index,
-                        font_size=args.font_size
+                        font_size=args.font_size,
+                        legend_font_size=args.legend_font_size
                     )
                 except FileNotFoundError:
                     print(
-                        f"No saved results found for {perturb_type}. Run without --plot_only first."
+                        f"No saved results found for {perturb_type} in {args.log_file}. Run the analysis first or check the file path."
                     )
-
+    else:
+        print("Process-only mode is selected, but no processing code is provided.")
 
 if __name__ == "__main__":
     main()

@@ -123,7 +123,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 file_contents = f.readlines()
             
             hyperparameters = json.loads(file_contents[0].strip())
-            label = f"c{hyperparameters['cot_length']}t{hyperparameters['temperature']}ei{hyperparameters['use_ei']}kl{hyperparameters.get('kl_penalty', 'NA')}"
+            label = f"c{hyperparameters.get('cot_length', 400)}t{hyperparameters.get('temperature',1.0)}ei{hyperparameters['use_ei']}kl{hyperparameters.get('kl_penalty', 'NA')}"
             
             entries = [json.loads(line) for line in file_contents[1:]]
             if max_index is not None:

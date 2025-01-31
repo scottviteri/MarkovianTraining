@@ -155,7 +155,7 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
     return results
 
 
-def plot_cross_model_comparison(results, log_file, window_size=40, max_index=None, show_log_probs=False):
+def plot_cross_model_comparison(results, log_file, window_size=40, max_index=None, show_log_probs=False, font_size=16, legend_font_size=12):
     """
     Plot evaluation results.
     
@@ -165,6 +165,8 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
         window_size: Window size for smoothing
         max_index: Maximum index to plot
         show_log_probs: Whether to show actor/critic log probabilities
+        font_size: Base font size for plot text elements
+        legend_font_size: Font size for the legend
     """
     all_data = results["evaluations"]
     
@@ -235,16 +237,16 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
                 label=f"{results['generator_model'].title()} Original Reward", 
                 color="#984ea3", linewidth=2)
 
-    plt.xlabel("Sample", fontsize=16)
-    plt.ylabel("Log Probability / Reward", fontsize=16)
+    plt.xlabel("Sample", fontsize=font_size)
+    plt.ylabel("Log Probability / Reward", fontsize=font_size)
     plt.title(
         f"{results['generator_model'].title()} Generated, {results['evaluator_model'].title()} Evaluated\n"
         f"{'Log Probabilities and ' if show_log_probs else ''}Rewards Comparison (Smoothing: {window_size})",
-        fontsize=16,
+        fontsize=font_size,
     )
-    plt.legend(fontsize=12, loc="best")
+    plt.legend(fontsize=legend_font_size, loc="best")
     plt.grid(True, linestyle="--", alpha=0.7)
-    plt.tick_params(axis="both", which="major", labelsize=14)
+    plt.tick_params(axis="both", which="major", labelsize=font_size)
     plt.tight_layout()
 
     # Save plots with evaluator model type in filename
@@ -252,6 +254,7 @@ def plot_cross_model_comparison(results, log_file, window_size=40, max_index=Non
     output_file = os.path.join(os.path.dirname(log_file), plot_name)
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Plot saved to {output_file}")
+    plt.close()
 
 
 def save_evaluation_results(results, log_file):
@@ -427,7 +430,7 @@ def collate_cross_model_results(paths, output_dir):
     print(f"Averaged results saved to {output_file}")
 
 
-def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, show_log_probs=False, show_error_bars=False):
+def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, show_log_probs=False, show_error_bars=False, font_size=16, legend_font_size=12):
     """
     Create a combined plot comparing different critic models' evaluations.
     
@@ -437,6 +440,8 @@ def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, sh
         max_index: Maximum index to plot
         show_log_probs: Whether to show actor/critic log probabilities
         show_error_bars: Whether to show error bars (standard deviation) across runs
+        font_size: Base font size for plot text elements
+        legend_font_size: Font size for the legend
     """
     plt.figure(figsize=(12, 6))
     
@@ -505,7 +510,7 @@ def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, sh
                 
                 plt.plot(x_values, smoothed[half_window:-half_window],
                         label=f"{model_type.title()} Critic Computed Reward",
-                        color=colors[model_type],
+                        color=colors.get(model_type, "#000000"),
                         linewidth=2)
                 
                 # Add error bars if available and requested
@@ -514,35 +519,36 @@ def plot_multiple_critics_comparison(log_dir, window_size=40, max_index=None, sh
                     plt.fill_between(x_values,
                                    smoothed[half_window:-half_window] - smoothed_std[half_window:-half_window],
                                    smoothed[half_window:-half_window] + smoothed_std[half_window:-half_window],
-                                   color=colors[model_type],
+                                   color=colors.get(model_type, "#000000"),
                                    alpha=0.2)
                         
         except Exception as e:
             print(f"Error processing {results_file}: {e}")
             continue
     
-    plt.xlabel("Sample", fontsize=16)
-    plt.ylabel("Normalized Reward\n" + r"$\ln \pi$(ans | cot) - $\ln \pi$(ans | cot')", fontsize=16)
+    plt.xlabel("Sample", fontsize=font_size)
+    plt.ylabel("Normalized Reward\n" + r"$\ln \pi(\text{ans} \mid \text{CoT}) - \ln \pi(\text{ans} \mid \text{CoT'})$", fontsize=font_size)
     title = f"Comparison of Different Critics Evaluating {generator_model.title()} Generator\n"
     if show_error_bars:
         title += f"(Smoothing: {window_size}, with Standard Deviation)"
     else:
         title += f"(Smoothing: {window_size})"
-    plt.title(title, fontsize=16)
-    plt.legend(fontsize=12, loc="best")
+    plt.title(title, fontsize=font_size)
+    plt.legend(fontsize=legend_font_size, loc="best")
     plt.grid(True, linestyle="--", alpha=0.7)
-    plt.tick_params(axis="both", which="major", labelsize=14)
+    plt.tick_params(axis="both", which="major", labelsize=font_size)
     plt.tight_layout()
     
     # Save plot
     output_file = os.path.join(log_dir, "multiple_critics_comparison.png")
     plt.savefig(output_file, dpi=300, bbox_inches="tight")
     print(f"Combined plot saved to {output_file}")
+    plt.close()
 
 
 def main():
     parser = argparse.ArgumentParser(description="Cross-Model Evaluation Tool")
-    parser.add_argument("--log_file", help="Log file to evaluate")
+    parser.add_argument("--log_file", help="Log file or directory to evaluate")
     parser.add_argument(
         "--window_size", type=int, default=40, help="Smoothing window size for plots"
     )
@@ -597,7 +603,19 @@ def main():
         action="store_true",
         help="Show error bars (standard deviation) in the plot when multiple runs are available"
     )
-    
+    parser.add_argument(
+        "--font_size",
+        type=int,
+        default=16,
+        help="Base font size for plot text elements"
+    )
+    parser.add_argument(
+        "--legend_font_size",
+        type=int,
+        default=12,
+        help="Font size for the legend in plots"
+    )
+
     args = parser.parse_args()
 
     if args.collate:
@@ -607,7 +625,7 @@ def main():
         if not args.plot_only:
             return
         # Update log_file to point to collated results for plotting
-        log_file = os.path.join(args.output_dir, "cross_model_evaluation_results.jsonl")
+        log_file = os.path.join(args.output_dir, "evaluation_results.jsonl")
     else:
         if args.log_file:
             log_file = args.log_file
@@ -622,13 +640,15 @@ def main():
 
     # If we're only plotting multiple critics, skip the evaluation step
     if args.plot_multiple_critics:
-        log_dir = os.path.dirname(log_file)
+        log_dir = args.log_file if os.path.isdir(args.log_file) else os.path.dirname(args.log_file)
         plot_multiple_critics_comparison(
             log_dir,
             window_size=args.window_size,
             max_index=args.max_index,
             show_log_probs=args.show_log_probs,
-            show_error_bars=args.show_error_bars
+            show_error_bars=args.show_error_bars,
+            font_size=args.font_size,
+            legend_font_size=args.legend_font_size
         )
         return
 
@@ -655,7 +675,9 @@ def main():
                 log_file, 
                 window_size=args.window_size,
                 max_index=args.max_index,
-                show_log_probs=args.show_log_probs
+                show_log_probs=args.show_log_probs,
+                font_size=args.font_size,
+                legend_font_size=args.legend_font_size
             )
         except FileNotFoundError:
             print(f"No saved results found at {log_file}. Run without --plot_only first.")
