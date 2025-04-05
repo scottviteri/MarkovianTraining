@@ -380,14 +380,19 @@ def calculate_answer_log_probs(
     reasoning,
     answers,
     hyperparameters,
+    include_question=False,
 ):
     """Calculate the log probabilities of the answers given the reasoning.
 
     Args:
         frozen_model: The critic model (frozen)
+        tokenizer: Tokenizer for the model
+        device: The device to run on
         questions: List of question strings
         reasoning: List of reasoning strings (from either actor or critic)
         answers: List of answer strings
+        hyperparameters: Dictionary of hyperparameters
+        include_question: Whether to include the question in the prompt (default: False)
 
     Returns:
         tuple: (
@@ -396,22 +401,23 @@ def calculate_answer_log_probs(
             extracted_answers      # Only for GSM8K: extracted numerical answers
         )
     """
-    # Create prompts with reasoning
+    # Create prompts with reasoning (may have <Redacted> instead of actual question when include_question=False)
     partial_prompts = [
         construct_prompts(
             question=q,
             hyperparameters=hyperparameters,
             reasoning=r,
+            include_question=include_question,
         )
         for q, r in zip(questions, reasoning)
     ]
 
     # Add answers to create full prompts
-    q_r_a_prompts = [x + y for x, y in zip(partial_prompts, answers)]
+    full_prompts = [x + y for x, y in zip(partial_prompts, answers)]
 
     # Tokenize full prompts
-    q_r_a_tokens = tokenizer(
-        q_r_a_prompts,
+    full_prompt_tokens = tokenizer(
+        full_prompts,
         padding=True,
         return_tensors="pt",
     ).to(device)
@@ -420,16 +426,16 @@ def calculate_answer_log_probs(
     extracted_generated_answers = None
     if hyperparameters["task_type"] == "gsm8k":
         # Tokenize partial prompts (without answers) for generation
-        q_r_tokens = tokenizer(partial_prompts, padding=True, return_tensors="pt").to(
+        partial_prompt_tokens = tokenizer(partial_prompts, padding=True, return_tensors="pt").to(
             device
         )
 
         # Generate answer tokens
         max_answer_length = 15
         with torch.no_grad():
-            q_r_a_generated = frozen_model.generate(
-                input_ids=q_r_tokens.input_ids,
-                attention_mask=q_r_tokens.attention_mask,
+            generated_outputs = frozen_model.generate(
+                input_ids=partial_prompt_tokens.input_ids,
+                attention_mask=partial_prompt_tokens.attention_mask,
                 max_new_tokens=max_answer_length,
                 do_sample=False,
                 pad_token_id=tokenizer.pad_token_id,
@@ -437,7 +443,7 @@ def calculate_answer_log_probs(
 
         # Decode and extract numerical answers
         generated_answers = tokenizer.batch_decode(
-            q_r_a_generated[:, -max_answer_length - 1 :], skip_special_tokens=True
+            generated_outputs[:, -max_answer_length - 1 :], skip_special_tokens=True
         )
         selected_answers = [x.split("\n")[-1] for x in generated_answers]
         extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
@@ -445,13 +451,13 @@ def calculate_answer_log_probs(
     # Find the starting positions of answers in the full prompts
     answer_start_positions = [
         find_answer_start_position(input_ids, hyperparameters["model_type"])
-        for input_ids in q_r_a_tokens.input_ids
+        for input_ids in full_prompt_tokens.input_ids
     ]
 
     # Verify answer positions are correct
     for i in range(len(answers)):
         decoded_answer = tokenizer.decode(
-            q_r_a_tokens.input_ids[i][answer_start_positions[i] :]
+            full_prompt_tokens.input_ids[i][answer_start_positions[i] :]
         ).strip()
         expected_answer = answers[i].strip()
         if (
@@ -462,18 +468,18 @@ def calculate_answer_log_probs(
 
     # Calculate log probabilities
     with torch.no_grad():
-        q_r_a_critic_logits = frozen_model(
-            input_ids=q_r_a_tokens.input_ids,
-            attention_mask=q_r_a_tokens.attention_mask,
+        model_logits = frozen_model(
+            input_ids=full_prompt_tokens.input_ids,
+            attention_mask=full_prompt_tokens.attention_mask,
         ).logits
 
     # Convert to log probabilities
-    q_r_a_logprobs = torch.nn.functional.log_softmax(q_r_a_critic_logits, dim=-1)
+    log_probs = torch.nn.functional.log_softmax(model_logits, dim=-1)
 
     # Get log probs for each answer token
     answer_logprobs = [
-        q_r_a_logprobs[i, start - 1 : -1]
-        .gather(1, q_r_a_tokens.input_ids[i, start:].unsqueeze(-1))
+        log_probs[i, start - 1 : -1]
+        .gather(1, full_prompt_tokens.input_ids[i, start:].unsqueeze(-1))
         .squeeze(-1)
         for i, start in enumerate(answer_start_positions)
     ]
@@ -687,6 +693,7 @@ def calculate_advantages(
         reasoning_output.actor_reasoning,
         answers,
         state.hyperparameters,
+        include_question=False,  # Default behavior: don't include question in prompt
     )
 
     # Calculate log probs of answers given critic's reasoning
@@ -698,6 +705,7 @@ def calculate_advantages(
         reasoning_output.critic_reasoning,
         answers,
         state.hyperparameters,
+        include_question=False,  # Default behavior: don't include question in prompt
     )
 
     if state.hyperparameters.get("normalize_loss", True):

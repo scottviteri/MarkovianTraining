@@ -98,7 +98,7 @@ def get_model_specific_tokens(model_type):
         }
 
 def construct_prompts(
-    question: str, hyperparameters: Dict[str, Any], reasoning: Optional[str] = None
+    question: str, hyperparameters: Dict[str, Any], reasoning: Optional[str] = None, include_question: bool = False
 ) -> str:
     """
     Construct prompt for model input.
@@ -107,6 +107,7 @@ def construct_prompts(
         question: The input question or text
         hyperparameters: Dictionary containing model and task configuration
         reasoning: Optional reasoning text to include
+        include_question: Whether to include the question when reasoning is provided (otherwise uses <Redacted>)
 
     Returns:
         str: Formatted prompt
@@ -142,7 +143,9 @@ def construct_prompts(
     if reasoning is None:
         return f"{tokens['inst_start']} {base_prompt} {question} {tokens['inst_end']}\n{prompt_type}"
 
-    base_with_type = f"{tokens['inst_start']} {base_prompt} <Redacted> {tokens['inst_end']}\n{prompt_type}"
+    # Include the actual question or use <Redacted> placeholder
+    question_placeholder = question if include_question else "<Redacted>"
+    base_with_type = f"{tokens['inst_start']} {base_prompt} {question_placeholder} {tokens['inst_end']}\n{prompt_type}"
 
     # Add model-specific answer header to partial prompt
     return base_with_type + reasoning + f" Answer: "
