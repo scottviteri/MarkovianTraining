@@ -43,7 +43,7 @@ def colored_print(
 
 
 def load_model(model_type="mistral", hyperparameters=None):
-    """Load either Mistral, Llama, GPT2, TinyStories, or Phi model based on parameter."""
+    """Load either Mistral, Llama, GPT2, TinyStories, Phi, or Phi-4 model based on parameter."""
     if model_type == "mistral":
         model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     elif model_type == "llama":
@@ -54,20 +54,29 @@ def load_model(model_type="mistral", hyperparameters=None):
         model_name = "roneneldan/TinyStories"
     elif model_type == "phi":
         model_name = "microsoft/Phi-3.5-mini-instruct"
+    elif model_type == "phi-4":
+        model_name = "microsoft/phi-4"
     else:
-        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', or 'phi'")
+        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', or 'phi-4'")
 
+    # Common settings
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    trust_remote_code = model_type in ["phi", "phi-4"]
+    
+    # Load tokenizer once
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.pad_token_id = tokenizer.eos_token_id
-
+    
+    # Load actor model with LoRA for training
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
         device_map="auto",
-        trust_remote_code=model_type=="phi"  # Phi needs trust_remote_code=True
+        trust_remote_code=trust_remote_code
     )
 
+    # Apply LoRA to actor model
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",
         inference_mode=False,
@@ -78,13 +87,21 @@ def load_model(model_type="mistral", hyperparameters=None):
     )
     model = get_peft_model(model, peft_config)
     model.print_trainable_parameters()
-
-    # Create frozen copy
-    frozen_model = copy.deepcopy(model)
+    
+    # Load critic model separately (no LoRA needed)
+    # This avoids OOM from deepcopy while keeping the model architecture intact
+    frozen_model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        trust_remote_code=trust_remote_code
+    )
+    
+    # Ensure all parameters are frozen in critic model
     for param in frozen_model.parameters():
         param.requires_grad = False
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Move models to device
     model.to(device)
     frozen_model.to(device)
 
@@ -206,7 +223,7 @@ def generate_question_answer_batches(
     task_type: str,
     tokenizer,
     hyperparameters: dict = None,
-    chunk_size: int = 5000,
+    chunk_size: int = 500,
 ):
     """Generate batches of Q&A pairs lazily."""
     if task_type == "gsm8k":
@@ -310,6 +327,9 @@ def generate_question_answer_batches(
         for i in range(0, len(qa_pairs), batch_size):
             batch = qa_pairs[i:i + batch_size]
             yield batch
+            
+            # Free memory after each batch is yielded
+            del batch
 
 
 def get_grad_norm(parameters):
@@ -349,7 +369,7 @@ def find_answer_start_position(input_ids, model_type):
             )
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
-    elif model_type == "llama":
+    elif model_type in ["llama", "phi-4"]:  # phi-4 uses the same token IDs as llama for "Answer:"
         matching_indices = (
             ((input_ids[:-1] == 16533) | (input_ids[:-1] == 22559))
             & (input_ids[1:] == 25)
@@ -1236,7 +1256,7 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         state.hyperparameters,
     )
 
-    return BatchData(
+    batch_data = BatchData(
         questions=questions,
         answers=answers,
         actor_reasoning=reasoning_output.actor_reasoning,
@@ -1247,11 +1267,13 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         advantages=advantage_output.advantages,
         normalized_rewards=advantage_output.normalized_rewards,
         actor_answer_logprobs=advantage_output.actor_answer_logprobs,
-        critic_answer_logprobs=advantage_output.critic_answer_logprobs,  # Added critic_answer_logprobs
+        critic_answer_logprobs=advantage_output.critic_answer_logprobs,
         losses=losses,
         training_mask=training_mask,
         metrics=metrics,
     )
+
+    return batch_data
 
 def get_random_weight_snapshot(model, num_weights=1000):
     """Take a snapshot of random weights from the model."""
@@ -1277,6 +1299,35 @@ def verify_frozen_weights(model, weight_snapshot):
                 f"Critic weight changed in {name}[{idx}]: "
                 f"was {original_value}, now {current_value}"
             )
+
+def verify_actor_weights_changing(model, weight_snapshot):
+    """Verify that at least some actor weights have changed from the snapshot."""
+    weights_changed = False
+    total_checked = 0
+    unchanged_count = 0
+    
+    for name, idx, original_value in weight_snapshot:
+        total_checked += 1
+        try:
+            current_param = model.get_parameter(name)
+            current_value = current_param.data.view(-1)[idx].item()
+            
+            if torch.allclose(torch.tensor(current_value), torch.tensor(original_value)):
+                unchanged_count += 1
+            else:
+                weights_changed = True
+                if total_checked >= 10:  # Check at least 10 weights
+                    break
+        except:
+            continue
+    
+    if not weights_changed:
+        colored_print("Warning", f"Actor weights not changing! {unchanged_count}/{total_checked} weights unchanged.", Colors.RED)
+    
+    change_percentage = 100 * (1 - unchanged_count / total_checked) if total_checked > 0 else 0
+    colored_print("Actor Weight Changes", f"{change_percentage:.1f}% of sampled weights changed", Colors.GREEN)
+    
+    return weights_changed
 
 def update_model(state: TrainingState, batch_data: BatchData) -> float:
     """Perform model update and return gradient norm"""
@@ -1322,9 +1373,6 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     """Main training loop"""
     state = TrainingState.initialize(task_type, resume, model_type, hyperparameters)
     
-    # Update the model loading call to include hyperparameters
-    model, frozen_model, tokenizer, device = load_model(model_type=model_type, hyperparameters=hyperparameters)
-    
     # Get dataset size for tracking full passes
     if task_type == "gsm8k":
         dataset_size = len(load_dataset("openai/gsm8k", "main")["train"])
@@ -1343,12 +1391,13 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
         num_batches=hyperparameters["num_batches"],
         batch_size=hyperparameters["batch_size"],
         task_type=task_type,
-        tokenizer=tokenizer,
+        tokenizer=state.tokenizer,
         hyperparameters=hyperparameters,
     )
 
-    # After initializing models
-    critic_weight_snapshot = get_random_weight_snapshot(state.critic_model)
+    # Take a snapshot of both models' weights
+    critic_weight_snapshot = get_random_weight_snapshot(state.critic_model, num_weights=100)
+    actor_weight_snapshot = get_random_weight_snapshot(state.actor_model, num_weights=100)
     
     try:
         for batch_index in range(state.batch_index, hyperparameters["num_batches"]):
@@ -1359,13 +1408,13 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             try:
                 qa_batch = next(qa_generator)
             except StopIteration:
-                # Reset generator if we need more batches
+                # Reset generator if we run out of data
                 if batch_index < hyperparameters["num_batches"] - 1:
                     qa_generator = generate_question_answer_batches(
                         num_batches=hyperparameters["num_batches"] - batch_index,
                         batch_size=hyperparameters["batch_size"],
                         task_type=task_type,
-                        tokenizer=tokenizer,
+                        tokenizer=state.tokenizer,
                         hyperparameters=hyperparameters,
                     )
                     qa_batch = next(qa_generator)
@@ -1379,12 +1428,12 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             batch_data = process_batch(state, qa_batch)
             grad_norm = update_model(state, batch_data)
 
-            # Update history and log as before
+            # Update history and log
             state.previous_normalized_rewards.extend(
-                batch_data.normalized_rewards.detach().float().cpu().numpy()
+                batch_data.normalized_rewards.float().detach().cpu().numpy()
             )
             state.previous_advantages.extend(
-                batch_data.advantages.detach().float().cpu().numpy()
+                batch_data.advantages.float().detach().cpu().numpy()
             )
 
             metrics = LogMetrics.from_batch(
@@ -1400,9 +1449,18 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             if batch_index % checkpoint_frequency == 0 and batch_index > 0:
                 save_checkpoint(state)
 
-            # Verify critic weights haven't changed (e.g., every 100 batches)
+            # Every 100 batches, verify model weights are behaving as expected
             if batch_index % 100 == 0:
+                # Verify critic weights haven't changed
                 verify_frozen_weights(state.critic_model, critic_weight_snapshot)
+                
+                # Verify actor weights are changing (compare to initial snapshot)
+                if batch_index > 0:  # Skip the first check (batch 0)
+                    verify_actor_weights_changing(state.actor_model, actor_weight_snapshot)
+                    
+                    # Take a fresh snapshot for more fine-grained tracking
+                    if batch_index % 1000 == 0:
+                        actor_weight_snapshot = get_random_weight_snapshot(state.actor_model, num_weights=100)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
@@ -1530,15 +1588,15 @@ if __name__ == "__main__":
         "--model_type",
         type=str,
         default="llama",
-        choices=["llama", "mistral", "gpt2", "tinystories", "phi"],
+        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4"],
         help="Model type (default: llama)",
     )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
         "--use_ei",
         type=float,
-        default=None,
-        help="Use Expert Iteration with specified number of standard deviations",
+        default=1.0,
+        help="Use Expert Iteration with specified number of standard deviations (default: 1.0)",
     )
     parser.add_argument("--use_ppo", action="store_true")
     parser.add_argument("--cot_length", type=int, default=50)

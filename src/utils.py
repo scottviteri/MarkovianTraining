@@ -162,8 +162,10 @@ def load_model(model_type="mistral"):
         model_name = "roneneldan/TinyStories"
     elif model_type == "phi":
         model_name = "microsoft/Phi-3.5-mini-instruct"
+    elif model_type == "phi-4":
+        model_name = "microsoft/phi-4"
     else:
-        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', or 'phi'")
+        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', or 'phi-4'")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
@@ -172,7 +174,7 @@ def load_model(model_type="mistral"):
         model_name,
         torch_dtype=torch.bfloat16,
         device_map="auto",
-        trust_remote_code=model_type=="phi"  # Phi needs trust_remote_code=True
+        trust_remote_code=model_type in ["phi", "phi-4"]  # Phi models need trust_remote_code=True
     )
 
     # Freeze the model

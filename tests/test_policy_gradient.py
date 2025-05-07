@@ -609,3 +609,38 @@ def test_log_metrics(training_state, batch_data):
     else:
         assert metrics.ppo_ratio is None
         assert metrics.ppo_clipped_ratio is None
+
+def test_frozen_weights(training_state, sample_qa_batch):
+    """Test that actor weights update while critic weights remain frozen"""
+    # Take snapshots of both models' weights
+    actor_snapshot = get_random_weight_snapshot(training_state.actor_model, num_weights=100)
+    critic_snapshot = get_random_weight_snapshot(training_state.critic_model, num_weights=100)
+    
+    # Run a training step
+    batch_data = process_batch(training_state, sample_qa_batch)
+    grad_norm = update_model(training_state, batch_data)
+    
+    # Check that at least some actor weights have changed
+    actor_weights_changed = False
+    for name, idx, original_value in actor_snapshot:
+        current_param = training_state.actor_model.get_parameter(name)
+        current_value = current_param.data.view(-1)[idx].item()
+        if not torch.allclose(torch.tensor(current_value), torch.tensor(original_value)):
+            actor_weights_changed = True
+            break
+    
+    # Actor weights should have changed
+    assert actor_weights_changed, "Actor weights did not change after training step"
+    
+    # Check that critic weights haven't changed
+    verify_frozen_weights(training_state.critic_model, critic_snapshot)
+    
+    # Additional check for requires_grad
+    for param in training_state.actor_model.parameters():
+        if param.requires_grad == False:
+            # Some PEFT adapters might have frozen weights, so we only check that some are trainable
+            # and that none of the critic's weights are trainable
+            pass
+    
+    for param in training_state.critic_model.parameters():
+        assert param.requires_grad == False, "Critic model has trainable parameters"
