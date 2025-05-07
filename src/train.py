@@ -2,7 +2,7 @@ import datetime
 import torch
 from torch import nn
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, PeftModel
 import bitsandbytes
 import random
 import numpy as np
@@ -46,6 +46,108 @@ def colored_print(
         print(repr(text))
 
 
+def initialize_and_preload_adapter(model):
+    """Explicitly initialize and preload an adapter for the model.
+    
+    This function ensures that a model has at least one working adapter
+    by directly populating the adapter weights with zeros and setting up
+    the required adapter states.
+    """
+    colored_print("Adapter Initialization", "Creating adapter weights...", Colors.BLUE)
+    
+    # Check if this is already a PEFT model
+    if not hasattr(model, 'peft_config'):
+        colored_print("Adapter Error", "Cannot initialize adapter: not a PEFT model", Colors.RED)
+        return model
+    
+    # Get the adapter name (usually 'default')
+    adapter_name = list(model.peft_config.keys())[0]
+    colored_print("Adapter Info", f"Working with adapter: {adapter_name}", Colors.BLUE)
+    
+    # Set the active adapter
+    model.active_adapter = adapter_name
+    
+    # Create empty adapter weights for each module that needs them
+    for name, module in model.named_modules():
+        # Look for LoRA modules
+        if hasattr(module, 'lora_A') and hasattr(module, 'lora_B'):
+            colored_print("LoRA Module", f"Initializing adapter weights for: {name}", Colors.GREEN)
+            # Initialize adapter state if not already present
+            if not hasattr(module, 'active_adapter') or module.active_adapter is None:
+                module.active_adapter = adapter_name
+    
+    # Create a fake adapter state dict (with zero weights)
+    # This will be populated during training, but having a structure prevents errors
+    if not hasattr(model, '_peft_adapter_state_dict'):
+        model._peft_adapter_state_dict = {}
+    if adapter_name not in model._peft_adapter_state_dict:
+        model._peft_adapter_state_dict[adapter_name] = {}
+    
+    # Run a forward pass to initialize all adapter weights
+    try:
+        # Generate a random input for a basic test forward pass
+        batch_size = 1
+        seq_length = 16
+        dummy_input = torch.randint(0, 100, (batch_size, seq_length)).to(model.device)
+        with torch.no_grad():
+            _ = model(dummy_input)
+        colored_print("Forward Pass", "Successfully ran test forward pass", Colors.GREEN)
+    except Exception as e:
+        colored_print("Forward Pass Error", f"Failed to run test forward pass: {str(e)}", Colors.RED)
+    
+    # Try getting adapter state dict now
+    try:
+        adapter_state = model.get_adapter_state_dict()
+        colored_print("Adapter Success", f"Adapter initialized with {len(adapter_state)} keys", Colors.GREEN)
+    except Exception as e:
+        colored_print("Adapter Error", f"Still cannot get adapter state: {str(e)}", Colors.RED)
+    
+    return model
+
+
+def create_peft_model_with_adapter(base_model, peft_config):
+    """Create a PEFT model with a properly initialized adapter using PEFT's standard API.
+    
+    This function creates a PEFT model and ensures the adapter is properly loaded and available
+    for saving/loading.
+    """
+    # Create PEFT model with specified config
+    colored_print("Creating PEFT Model", f"Using config with r={peft_config.r}, alpha={peft_config.lora_alpha}", Colors.BLUE)
+    
+    # Check if model is already a PeftModel
+    if isinstance(base_model, PeftModel):
+        colored_print("Note", "Model is already a PeftModel, adding adapter", Colors.YELLOW)
+        model = base_model
+        # Add a new adapter with the specified config
+        adapter_name = "default"
+        if adapter_name in model.peft_config:
+            colored_print("Note", f"Adapter '{adapter_name}' already exists, will use it", Colors.YELLOW)
+        else:
+            colored_print("Adding Adapter", f"Creating adapter '{adapter_name}'", Colors.BLUE)
+            model.add_adapter(adapter_name, peft_config)
+    else:
+        # Create a new PEFT model with the default adapter
+        model = get_peft_model(base_model, peft_config)
+    
+    # Ensure there's an active adapter
+    adapter_name = list(model.peft_config.keys())[0]
+    model.active_adapter = adapter_name
+    colored_print("Active Adapter", f"Set active adapter to '{adapter_name}'", Colors.GREEN)
+    
+    # Print trainable parameters
+    model.print_trainable_parameters()
+    
+    # Verify the adapter is properly initialized
+    try:
+        adapter_state = model.get_adapter_state_dict()
+        colored_print("Adapter State", f"Successfully verified adapter state with {len(adapter_state)} keys", Colors.GREEN)
+    except Exception as e:
+        colored_print("Warning", f"Could not get adapter state: {str(e)}", Colors.YELLOW)
+        colored_print("Troubleshooting", "This is expected for a newly initialized adapter and will be fixed during training", Colors.YELLOW)
+    
+    return model
+
+
 def load_model(model_type="mistral", hyperparameters=None):
     """Load either Mistral, Llama, GPT2, TinyStories, Phi, or Phi-4 model based on parameter."""
     if model_type == "mistral":
@@ -73,24 +175,38 @@ def load_model(model_type="mistral", hyperparameters=None):
     tokenizer.pad_token_id = tokenizer.eos_token_id
     
     # Load actor model with LoRA for training
+    colored_print("Loading Model", f"Loading {model_name} for {model_type}", Colors.BOLD)
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,
         device_map="auto",
         trust_remote_code=trust_remote_code
     )
+    
+    colored_print("Model Info", f"Base model loaded: {type(model).__name__}", Colors.BLUE)
+    
+    # Print base model information
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    colored_print("Model Params", f"Before LoRA: Total: {total_params:,}, Trainable: {trainable_params:,}", Colors.BLUE)
 
-    # Apply LoRA to actor model
+    # Create LoRA config for actor model
+    # Get LoRA parameters from hyperparameters or use defaults
+    lora_rank = hyperparameters.get("lora_rank", 8) if hyperparameters else 8
+    lora_alpha = hyperparameters.get("lora_alpha", 16) if hyperparameters else 16
+    colored_print("LoRA Config", f"Using rank={lora_rank}, alpha={lora_alpha}", Colors.CYAN)
+    
     peft_config = LoraConfig(
         task_type="CAUSAL_LM",
         inference_mode=False,
-        r=8,
-        lora_alpha=16,
+        r=lora_rank,
+        lora_alpha=lora_alpha,
         lora_dropout=0.1,
         target_modules="all-linear",
     )
-    model = get_peft_model(model, peft_config)
-    model.print_trainable_parameters()
+    
+    # Use our improved PEFT model initialization 
+    model = create_peft_model_with_adapter(model, peft_config)
     
     # Load critic model separately (no LoRA needed)
     # This avoids OOM from deepcopy while keeping the model architecture intact
@@ -275,7 +391,104 @@ def generate_question_answer_batches(
     chunk_size: int = 500,
 ):
     """Generate batches of Q&A pairs lazily."""
-    if task_type == "gsm8k":
+    # If debug_repeat_datapoint mode is enabled, generate a single batch and repeat it
+    if hyperparameters.get("debug_repeat_datapoint", False):
+        colored_print("Debug Mode", "Training on the same datapoint repeatedly", Colors.RED)
+        
+        # Generate a single batch based on task type
+        debug_batch = None
+        
+        if task_type in ["arithmetic", "arithmetic_negative"]:
+            debug_batch = generate_arithmetic_pairs(task_type, num_examples=batch_size)
+        elif task_type == "gsm8k":
+            dataset_iter = load_gsm8k_dataset(chunk_size=chunk_size)
+            debug_batch = []
+            for _ in range(batch_size):
+                try:
+                    qa_pair = next(dataset_iter)
+                    debug_batch.append(qa_pair)
+                except StopIteration:
+                    dataset_iter = load_gsm8k_dataset(chunk_size=chunk_size)
+                    qa_pair = next(dataset_iter)
+                    debug_batch.append(qa_pair)
+        elif task_type == "mmlu":
+            subject = hyperparameters.get("mmlu_subject", None)
+            split = hyperparameters.get("mmlu_split", "validation")
+            dataset_iter = load_mmlu_dataset(chunk_size=chunk_size, split=split, subject=subject)
+            debug_batch = []
+            for _ in range(batch_size):
+                try:
+                    qa_pair = next(dataset_iter)
+                    debug_batch.append(qa_pair)
+                except StopIteration:
+                    dataset_iter = load_mmlu_dataset(chunk_size=chunk_size, split=split, subject=subject)
+                    qa_pair = next(dataset_iter)
+                    debug_batch.append(qa_pair)
+        elif task_type in ["wiki_compression", "wiki_continuation"]:
+            print("Loading Wikipedia dataset for debug datapoint...")
+            wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
+            debug_batch = []
+            article_idx = 0
+            articles_examined = 0
+            
+            while len(debug_batch) < batch_size:
+                article = wiki_dataset[article_idx]
+                article_idx += 1
+                articles_examined += 1
+                
+                text = article['text']
+                
+                if "question_length" in hyperparameters and "target_length" in hyperparameters:
+                    # Get question chunk
+                    question_chunk, actual_q_tokens = get_text_with_token_length(
+                        text, hyperparameters["question_length"], tokenizer
+                    )
+                    
+                    if question_chunk is None:
+                        continue
+                    
+                    # Get remaining text after question chunk
+                    remaining_text = text[len(question_chunk):]
+                    
+                    # Get target chunk from remaining text
+                    target_chunk, actual_t_tokens = get_text_with_token_length(
+                        remaining_text, hyperparameters["target_length"], tokenizer
+                    )
+                    
+                    if target_chunk is None:
+                        continue
+                        
+                    debug_batch.append((question_chunk, target_chunk))
+                else:
+                    # Single chunk mode
+                    text_chunk, actual_tokens = get_text_with_token_length(
+                        text, hyperparameters["target_length"], tokenizer
+                    )
+                    
+                    if text_chunk is None:
+                        continue
+                        
+                    debug_batch.append((text_chunk, ""))
+                
+                if len(debug_batch) >= batch_size:
+                    break
+        
+        # Now yield this same batch for all requested batches
+        for _ in range(num_batches):
+            yield debug_batch
+            
+        # Exit the generator
+        return
+    
+    # Regular (non-debug) data generation continues below
+    if task_type in ["arithmetic", "arithmetic_negative"]:
+        # For arithmetic, generate chunks of data as needed
+        for batch_idx in range(num_batches):
+            # Generate a new batch of arithmetic problems
+            qa_pairs = generate_arithmetic_pairs(task_type, num_examples=batch_size)
+            yield qa_pairs
+            
+    elif task_type == "gsm8k":
         # Use load_gsm8k_dataset directly which already processes answers correctly
         dataset_iter = load_gsm8k_dataset(chunk_size=chunk_size)
         for batch_start in range(0, num_batches * batch_size, batch_size):
@@ -996,25 +1209,68 @@ def should_decrease_cot_length(recent_log_probs, threshold=-0.5, window_size=10)
 def setup_training_environment(task_type, resume, hyperparameters):
     """Set up the results directory and load checkpoints if resuming."""
     if resume:
-        latest_dir = find_latest_result()
-        if not latest_dir:
-            raise ValueError(f"No previous run found for task type: {task_type}")
-            
-        # For the checkpoint, we'll now find the latest one in the directory
-        checkpoint_dir = latest_dir
-        log_file = os.path.join(latest_dir, "log.jsonl")
+        # Get the task results directory
+        results_dir = os.path.join("results", task_type)
+        if not os.path.exists(results_dir):
+            raise ValueError(f"No results directory found for task type: {task_type}")
         
+        # Look for timestamped run directories
+        run_dirs = [os.path.join(results_dir, d) for d in os.listdir(results_dir)
+                  if os.path.isdir(os.path.join(results_dir, d)) and re.match(r"^\d{8}_\d{6}$", d)]
+        
+        if not run_dirs:
+            raise ValueError(f"No previous runs found in {results_dir}")
+        
+        # Get the latest run directory
+        latest_dir = max(run_dirs, key=os.path.getmtime)
+        colored_print("Resume", f"Using latest run directory: {latest_dir}", Colors.BOLD)
+        
+        # Check if this run directory has a log file
+        log_file = os.path.join(latest_dir, "log.jsonl")
         if not os.path.exists(log_file):
-            raise ValueError(f"Missing required log file in latest result directory: {latest_dir}")
-
+            # Check if there are adapter directories in this run
+            adapter_dirs = sorted(
+                [d for d in glob.glob(os.path.join(latest_dir, "adapter_*")) if os.path.isdir(d)],
+                key=lambda x: int(x.split("_")[-1])  # Sort by batch number
+            )
+            
+            if adapter_dirs:
+                # Use the latest adapter to get batch information
+                latest_adapter = adapter_dirs[-1]
+                batch_number = int(latest_adapter.split("_")[-1])
+                colored_print("Log File", f"Creating log file using adapter at batch {batch_number}", Colors.YELLOW)
+                
+                # Check if metadata exists
+                metadata_path = os.path.join(latest_adapter, "training_metadata.pt")
+                if os.path.exists(metadata_path):
+                    # Load metadata for hyperparameters
+                    metadata = torch.load(metadata_path)
+                    if "hyperparameters" in metadata:
+                        hyperparameters = metadata["hyperparameters"]
+                        
+                # Create a minimal log file with just the batch index and hyperparameters
+                with open(log_file, "w") as f:
+                    json.dump(hyperparameters, f)
+                    f.write("\n")
+                    
+                    # Add an entry for the current batch
+                    entry = {"Batch Index": batch_number}
+                    json.dump(entry, f)
+                    f.write("\n")
+                
+                colored_print("Log File", f"Created new log file for resuming from adapter", Colors.GREEN)
+            else:
+                raise ValueError(f"Missing required log file and no adapter checkpoints found in: {latest_dir}")
+        
         start_batch, hyperparameters = load_training_state(log_file)
         previous_normalized_rewards, previous_advantages = (
             load_previous_rewards_and_advantages(log_file)
         )
         
-        # Create a placeholder model save path - actual file will be determined at save time
-        model_save_path = checkpoint_dir
+        # Use the latest run directory for saving future checkpoints
+        model_save_path = latest_dir
     else:
+        # Create a new timestamped directory for this run
         results_dir = os.path.join(
             "results", task_type, datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         )
@@ -1061,6 +1317,47 @@ def initialize_model_and_optimizer(model_type, hyperparameters, checkpoint_path=
     if checkpoint_path is not None:
         # Find the latest checkpoint in the directory if checkpoint_path points to a directory
         if os.path.isdir(checkpoint_path):
+            # First check for adapter directories within this run directory
+            adapter_dirs = sorted(
+                [d for d in glob.glob(os.path.join(checkpoint_path, "adapter_*")) if os.path.isdir(d)],
+                key=lambda x: int(x.split("_")[-1])  # Sort by batch number
+            )
+            
+            if adapter_dirs:
+                # Use the latest adapter directory
+                latest_adapter = adapter_dirs[-1]
+                colored_print("Resume", f"Using latest adapter: {os.path.basename(latest_adapter)}", Colors.BOLD)
+                
+                # Get the batch number for logging 
+                batch_num = int(latest_adapter.split("_")[-1])
+                
+                # Load the adapter using PEFT's load_pretrained
+                from peft import PeftModel
+                
+                colored_print("Loading Adapter", f"Loading adapter from {latest_adapter}", Colors.BLUE)
+                model = PeftModel.from_pretrained(
+                    model,  # Base model
+                    latest_adapter,  # Adapter path
+                    is_trainable=True  # Ensure it's set to training mode
+                )
+                
+                # Load optimizer state and other metadata
+                metadata_path = os.path.join(latest_adapter, "training_metadata.pt")
+                if os.path.exists(metadata_path):
+                    metadata = torch.load(metadata_path)
+                    model_optimizer.load_state_dict(metadata["optimizer_state_dict"])
+                    colored_print("Metadata", f"Loaded optimizer state from batch {batch_num}", Colors.GREEN)
+                    
+                    # Print key info about the loaded adapter
+                    colored_print("Adapter Info", f"Loaded adapter from batch {batch_num}", Colors.GREEN)
+                    colored_print("Active Adapter", f"Current active adapter: {model.active_adapter}", Colors.GREEN)
+                else:
+                    colored_print("Warning", f"No metadata found at {metadata_path}", Colors.YELLOW)
+                
+                return model, frozen_model, tokenizer, device, model_optimizer
+            
+            # Fall back to traditional checkpoint files if no adapters found
+            colored_print("Note", "No adapter directories found in this run", Colors.YELLOW)
             latest_checkpoint = find_latest_checkpoint(checkpoint_path)
             if latest_checkpoint:
                 checkpoint_path = latest_checkpoint
@@ -1074,7 +1371,7 @@ def initialize_model_and_optimizer(model_type, hyperparameters, checkpoint_path=
         
         # Check if this is a LoRA adapter checkpoint or full model checkpoint
         if "adapter_state_dict" in checkpoint:
-            colored_print("Resume", "Loading LoRA adapter weights", Colors.BOLD)
+            colored_print("Resume", "Loading LoRA adapter weights from checkpoint file", Colors.BOLD)
             model.load_adapter_state_dict(checkpoint["adapter_state_dict"])
             size_bytes = sum(tensor.nelement() * tensor.element_size() 
                            for tensor in checkpoint["adapter_state_dict"].values())
@@ -1529,33 +1826,60 @@ def save_checkpoint(state: TrainingState):
     checkpoint_filename = f"model_batch_{state.batch_index}.pt"
     checkpoint_path = os.path.join(checkpoint_dir, checkpoint_filename)
     
+    # Create adapter path as a subdirectory of the run folder, not at the task level
+    adapter_path = os.path.join(state.model_save_path, f"adapter_{state.batch_index}")
+    
     # Save only LoRA adapter weights instead of full model
     model_to_save = state.actor_model
     
-    # Get just the LoRA weights (much smaller than full model)
-    adapters_weights = model_to_save.get_adapter_state_dict()
+    # Print diagnostics about the model before trying to save
+    colored_print("Model Diagnostics", "Checking model state before saving", Colors.BLUE)
     
-    # Calculate size in MB to log
-    size_bytes = sum(param.nelement() * param.element_size() for param in model_to_save.parameters() if param.requires_grad)
-    size_mb = size_bytes / (1024 * 1024)
+    # Check if model is still a PEFT model
+    is_peft_model = isinstance(model_to_save, PeftModel)
+    colored_print("PEFT Check", f"Is PeftModel: {is_peft_model}", Colors.BLUE if is_peft_model else Colors.RED)
     
-    # Save just the LoRA weights and metadata
-    torch.save(
-        {
-            "adapter_state_dict": adapters_weights,
-            "optimizer_state_dict": state.actor_optimizer.state_dict(),
-            "batch_index": state.batch_index,
-            "hyperparameters": state.hyperparameters,
-        },
-        checkpoint_path
-    )
+    # Check trainable parameters
+    total_params = sum(p.numel() for p in model_to_save.parameters())
+    trainable_params = sum(p.numel() for p in model_to_save.parameters() if p.requires_grad)
+    trainable_ratio = trainable_params / total_params if total_params > 0 else 0
+    colored_print("Params", f"Total: {total_params:,}, Trainable: {trainable_params:,} ({trainable_ratio:.4%})", 
+                Colors.BLUE if trainable_ratio > 0 else Colors.RED)
     
-    colored_print(
-        "Checkpoint Info", 
-        f"Saved at batch {state.batch_index} to {checkpoint_filename}. LoRA size: {size_mb:.2f}MB", 
-        Colors.GREEN
-    )
-
+    try:
+        if is_peft_model:
+            # Get the active adapter
+            colored_print("Active Adapter", f"Current active adapter: {model_to_save.active_adapter}", Colors.GREEN)
+            
+            # Save the adapter using PEFT's built-in method
+            colored_print("Saving Adapter", f"Saving adapter to {adapter_path}", Colors.BLUE)
+            model_to_save.save_pretrained(adapter_path)
+            
+            # Also save optimizer state and batch index metadata
+            metadata_path = os.path.join(adapter_path, "training_metadata.pt")
+            torch.save(
+                {
+                    "optimizer_state_dict": state.actor_optimizer.state_dict(),
+                    "batch_index": state.batch_index,
+                    "hyperparameters": state.hyperparameters,
+                },
+                metadata_path
+            )
+            
+            colored_print("Save Success", f"Saved adapter at batch {state.batch_index} to {adapter_path}", Colors.GREEN)
+        else:
+            # If not a PEFT model, raise an error - we don't want to save full model
+            raise ValueError("Model is not a PEFT model with adapters. Cannot save checkpoint.")
+    except Exception as e:
+        colored_print("Error Saving Model", f"Error: {str(e)}", Colors.RED)
+        
+        # Print detailed traceback
+        import traceback
+        colored_print("Error Traceback", traceback.format_exc(), Colors.RED)
+        
+        # Don't fall back to saving full model - just report the error
+        colored_print("Checkpoint Failed", "Could not save adapter weights. Check model configuration.", Colors.RED)
+    
     # If GSM8K, evaluate the model
     if state.hyperparameters["task_type"] == "gsm8k":
         colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
@@ -1930,6 +2254,11 @@ class TrainingConfig:
     num_batches: int
     ppo_epsilon: float
     checkpoint_frequency: Optional[int]
+    # LoRA parameters
+    lora_rank: int
+    lora_alpha: float
+    # Debug options
+    debug_repeat_datapoint: bool
 
     @classmethod
     def from_args(cls, args):
@@ -1966,6 +2295,9 @@ class TrainingConfig:
             num_batches=args.num_batches,
             ppo_epsilon=args.ppo_epsilon,
             checkpoint_frequency=args.checkpoint_frequency,
+            lora_rank=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            debug_repeat_datapoint=args.debug_repeat_datapoint,
         )
 
 
@@ -2046,6 +2378,25 @@ if __name__ == "__main__":
         default="validation",
         choices=["train", "validation", "test"],
         help="MMLU dataset split to use (default: validation)",
+    )
+    # LoRA configuration arguments
+    parser.add_argument(
+        "--lora_rank",
+        type=int,
+        default=16,
+        help="Rank for LoRA adapter (default: 8). Higher values use more parameters but can capture more complex patterns.",
+    )
+    parser.add_argument(
+        "--lora_alpha",
+        type=float,
+        default=32,
+        help="Alpha scaling for LoRA adapter (default: 16). Usually set to 2x the rank.",
+    )
+    # Debug options
+    parser.add_argument(
+        "--debug_repeat_datapoint",
+        action="store_true",
+        help="Debug mode: train on the same datapoint repeatedly to test optimization",
     )
 
     args = parser.parse_args()
