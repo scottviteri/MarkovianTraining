@@ -99,8 +99,10 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             ]
     else:
         base_metrics = [
-            ("Training Metrics.Loss", "Total Loss", "Training Batch No. []", "Loss"),
-            ("Training Metrics.Policy Gradient Loss", "Policy Gradient Loss", "Training Batch No. []", "Loss"),
+            ("Training Metrics.Loss", "Total Loss (All Examples)", "Training Batch No. []", "Loss"),
+            ("Training Metrics.Active Only Loss", "Total Loss (Active Examples)", "Training Batch No. []", "Loss"),
+            ("Training Metrics.Policy Gradient Loss", "PG Loss (All Examples)", "Training Batch No. []", "Loss"),
+            ("Training Metrics.Active Only PG Loss", "PG Loss (Active Examples)", "Training Batch No. []", "Loss"),
             ("Training Metrics.KL", "KL Divergence", "Training Batch No. []", "KL"),
             ("Training Metrics.Gradient Norm", "Gradient Norm", "Training Batch No. []", "Norm"),
             ("Training Metrics.Advantage", "Advantage", "Training Batch No. []", "Value"),
