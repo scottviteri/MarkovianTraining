@@ -1682,6 +1682,8 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
         )
 
     if num_active > 0:
+        # Calculate mean loss over active examples instead of sum
+        # This ensures consistent loss values regardless of how many examples pass the threshold
         loss = (
             batch_data.losses
             * (
@@ -1689,7 +1691,7 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
                 if batch_data.training_mask is not None
                 else 1.0
             )
-        ).sum()
+        ).sum() / num_active  # Use mean instead of sum
         loss.backward()
 
     if state.grad_accum_count > 0:
