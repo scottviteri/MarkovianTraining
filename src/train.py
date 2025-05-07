@@ -217,6 +217,51 @@ def get_text_with_token_length(
     return best_text, best_count
 
 
+def load_mmlu_dataset(chunk_size: int = 1000, split: str = "validation", subject: str = None):
+    """
+    Load MMLU dataset in chunks. The dataset is a multiple-choice benchmark.
+    
+    Args:
+        chunk_size: Number of examples to yield at a time
+        split: Dataset split to use ("train", "validation", or "test")
+        subject: Specific subject to filter by, or None for all subjects
+    """
+    # Load MMLU dataset
+    ds = load_dataset("cais/mmlu", "all")
+    ds_split = ds[split]
+    
+    # Filter by subject if specified
+    if subject:
+        subject_indices = [i for i, s in enumerate(ds_split["subject"]) if s == subject]
+        questions = [ds_split["question"][i] for i in subject_indices]
+        choices = [ds_split["choices"][i] for i in subject_indices]
+        answers = [ds_split["answer"][i] for i in subject_indices]
+    else:
+        questions = ds_split["question"]
+        choices = ds_split["choices"]
+        answers = ds_split["answer"]
+    
+    # Format as QA pairs for our training
+    qa_pairs = []
+    for q, cs, a in zip(questions, choices, answers):
+        # Format multiple choice question with choices
+        formatted_question = f"Question: {q}\n\nChoices:\n"
+        for i, choice in enumerate(cs):
+            choice_letter = chr(65 + i)  # A, B, C, D, etc.
+            formatted_question += f"{choice_letter}. {choice}\n"
+        
+        # Get correct answer letter
+        correct_letter = chr(65 + a)
+        qa_pairs.append((formatted_question, correct_letter))
+    
+    # Yield in chunks
+    for i in range(0, len(qa_pairs), chunk_size):
+        chunk = qa_pairs[i : i + chunk_size]
+        if split == "train":  # Only shuffle training data
+            random.shuffle(chunk)
+        yield from chunk
+
+
 def generate_question_answer_batches(
     num_batches: int,
     batch_size: int,
@@ -242,6 +287,27 @@ def generate_question_answer_batches(
                     batch.append(qa_pair)
             yield batch
             
+    elif task_type == "mmlu":
+        # Get optional subject filter from hyperparameters
+        subject = hyperparameters.get("mmlu_subject", None)
+        split = hyperparameters.get("mmlu_split", "validation")
+        
+        # Use the MMLU dataset loader
+        dataset_iter = load_mmlu_dataset(chunk_size=chunk_size, split=split, subject=subject)
+        
+        for batch_start in range(0, num_batches * batch_size, batch_size):
+            batch = []
+            for _ in range(batch_size):
+                try:
+                    qa_pair = next(dataset_iter)
+                    batch.append(qa_pair)
+                except StopIteration:
+                    # Reset iterator if we run out of data
+                    dataset_iter = load_mmlu_dataset(chunk_size=chunk_size, split=split, subject=subject)
+                    qa_pair = next(dataset_iter)
+                    batch.append(qa_pair)
+            yield batch
+            
     elif task_type in ["wiki_compression", "wiki_continuation"]:
         print("Loading Wikipedia dataset...")
         wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
@@ -249,87 +315,104 @@ def generate_question_answer_batches(
         articles_examined = 0
         qa_pairs = []
         
-        pbar = tqdm(total=chunk_size, desc="Collecting examples")
-        last_qa_pairs_len = 0
-
-        while len(qa_pairs) < chunk_size:
-            if article_idx >= len(wiki_dataset):
-                print("\nReached end of dataset!")
-                break
-            
-            article = wiki_dataset[article_idx]
-            article_idx += 1
-            articles_examined += 1
-            
-            text = article['text']
-            tokens = tokenizer(text, truncation=False, return_tensors="pt")
-            token_length = tokens.input_ids.size(1)
-            
-            # Calculate required total length based on task type
-            if "question_length" in hyperparameters and "target_length" in hyperparameters:
-                required_length = hyperparameters["question_length"] + hyperparameters["target_length"]
-            else:
-                required_length = hyperparameters.get("target_length", 0)
-            
-            if token_length < required_length:
-                continue
-            
-            if "question_length" in hyperparameters and "target_length" in hyperparameters:
-                # Get question chunk
-                question_chunk, actual_q_tokens = get_text_with_token_length(
-                    text, 
-                    hyperparameters["question_length"], 
-                    tokenizer
-                )
-                
-                if question_chunk is None:
-                    continue
-                
-                # Get remaining text after question chunk
-                remaining_text = text[len(question_chunk):]
-                
-                # Get target chunk from remaining text
-                target_chunk, actual_t_tokens = get_text_with_token_length(
-                    remaining_text,
-                    hyperparameters["target_length"],
-                    tokenizer
-                )
-                
-                if target_chunk is None:
-                    continue
-                    
-                qa_pairs.append((question_chunk, target_chunk))
-                
-            else:
-                # Single chunk mode (for base model analysis)
-                text_chunk, actual_tokens = get_text_with_token_length(
-                    text, 
-                    hyperparameters["target_length"], 
-                    tokenizer
-                )
-                
-                if text_chunk is None:
-                    continue
-                    
-                qa_pairs.append((text_chunk, ""))
-
-            # Update progress bar only when we've added new pairs
-            new_pairs = len(qa_pairs) - last_qa_pairs_len
-            if new_pairs > 0:
-                pbar.update(new_pairs)
+        # Keep track of total examples used across all batches
+        total_examples_used = 0
+        # Set target number for progress tracking
+        examples_target = num_batches * batch_size
+        
+        for batch_start in range(0, num_batches * batch_size, batch_size):
+            # Check if we need to collect more examples
+            if len(qa_pairs) < batch_size:
+                pbar = tqdm(total=min(chunk_size, examples_target - total_examples_used), 
+                           desc=f"Collecting examples (batch {batch_start//batch_size + 1}/{num_batches})")
                 last_qa_pairs_len = len(qa_pairs)
+                
+                # Collect more examples
+                while len(qa_pairs) < chunk_size:
+                    if article_idx >= len(wiki_dataset):
+                        print("\nReached end of dataset! Wrapping around to beginning.")
+                        article_idx = 0
+                        
+                    article = wiki_dataset[article_idx]
+                    article_idx += 1
+                    articles_examined += 1
+                    
+                    text = article['text']
+                    tokens = tokenizer(text, truncation=False, return_tensors="pt")
+                    token_length = tokens.input_ids.size(1)
+                    
+                    # Calculate required total length based on task type
+                    if "question_length" in hyperparameters and "target_length" in hyperparameters:
+                        required_length = hyperparameters["question_length"] + hyperparameters["target_length"]
+                    else:
+                        required_length = hyperparameters.get("target_length", 0)
+                    
+                    if token_length < required_length:
+                        continue
+                    
+                    if "question_length" in hyperparameters and "target_length" in hyperparameters:
+                        # Get question chunk
+                        question_chunk, actual_q_tokens = get_text_with_token_length(
+                            text, 
+                            hyperparameters["question_length"], 
+                            tokenizer
+                        )
+                        
+                        if question_chunk is None:
+                            continue
+                        
+                        # Get remaining text after question chunk
+                        remaining_text = text[len(question_chunk):]
+                        
+                        # Get target chunk from remaining text
+                        target_chunk, actual_t_tokens = get_text_with_token_length(
+                            remaining_text,
+                            hyperparameters["target_length"],
+                            tokenizer
+                        )
+                        
+                        if target_chunk is None:
+                            continue
+                            
+                        qa_pairs.append((question_chunk, target_chunk))
+                        
+                    else:
+                        # Single chunk mode (for base model analysis)
+                        text_chunk, actual_tokens = get_text_with_token_length(
+                            text, 
+                            hyperparameters["target_length"], 
+                            tokenizer
+                        )
+                        
+                        if text_chunk is None:
+                            continue
+                            
+                        qa_pairs.append((text_chunk, ""))
 
-        pbar.close()
-        print(f"\nFinished collecting examples. "
-              f"Examined {articles_examined} articles to find {len(qa_pairs)} valid examples.")
+                    # Update progress bar only when we've added new pairs
+                    new_pairs = len(qa_pairs) - last_qa_pairs_len
+                    if new_pairs > 0:
+                        pbar.update(new_pairs)
+                        last_qa_pairs_len = len(qa_pairs)
+                        
+                    # Check if we've collected enough examples
+                    if len(qa_pairs) >= chunk_size:
+                        break
 
-        # Yield batches from collected pairs
-        for i in range(0, len(qa_pairs), batch_size):
-            batch = qa_pairs[i:i + batch_size]
-            yield batch
+                pbar.close()
+                print(f"\nFinished collecting examples for batch {batch_start//batch_size + 1}/{num_batches}. "
+                      f"Examined {articles_examined} articles to find {len(qa_pairs)} valid examples.")
+                
+                # Shuffle the collected pairs
+                random.shuffle(qa_pairs)
             
-            # Free memory after each batch is yielded
-            del batch
+            # Extract batch_size examples
+            batch = qa_pairs[:batch_size]
+            # Remove used examples
+            qa_pairs = qa_pairs[batch_size:]
+            total_examples_used += len(batch)
+            
+            yield batch
 
 
 def get_grad_norm(parameters):
@@ -1026,11 +1109,43 @@ class LogMetrics:
         batch_size: int,
     ):
         """Create LogMetrics from batch data and training state"""
+        # Calculate number of active examples
+        training_mask = batch_data.training_mask
         num_active = (
-            batch_data.training_mask.sum().item()
-            if batch_data.training_mask is not None
+            training_mask.sum().item()
+            if training_mask is not None
             else len(batch_data.losses)
         )
+
+        # Handle case where no examples are active
+        if num_active == 0:
+            colored_print("Warning", "No active examples in batch!", Colors.RED)
+            # Use placeholder values for metrics when no examples are active
+            return cls(
+                loss=float('nan'),  # NaN indicates no active examples
+                pg_loss=float('nan'),
+                # Average across all examples, not just the first one
+                actor_logprobs=batch_data.R_mean_actor_logprobs.mean().item(),
+                critic_logprobs=batch_data.R_mean_critic_logprobs.mean().item(),
+                actor_answer_logprobs=batch_data.actor_answer_logprobs.mean().item(),
+                critic_answer_logprobs=batch_data.critic_answer_logprobs.mean().item(),
+                kl=batch_data.kl.mean().item(),
+                weighted_kl=None,
+                ppo_ratio=None,
+                ppo_clipped_ratio=None,
+                advantage=batch_data.advantages.mean().item(),
+                normalized_reward=batch_data.normalized_rewards.mean().item(),
+                gradient_norm=0.0,  # No gradient if no active examples
+                num_active=0,
+                fraction_active=0.0,
+                ei_threshold=batch_data.metrics.get("ei_threshold", None),
+                mean_prev_advantage=(
+                    np.mean(previous_advantages) if previous_advantages else None
+                ),
+                std_prev_advantage=(
+                    np.std(previous_advantages) if previous_advantages else None
+                ),
+            )
 
         # Get PPO metrics
         ppo_ratio = batch_data.metrics.get("prob_ratios", [None])[0]
@@ -1042,24 +1157,53 @@ class LogMetrics:
             float(ppo_clipped_ratio.item()) if ppo_clipped_ratio is not None else None
         )
 
-        # Get KL values
-        raw_kl = batch_data.kl[0].item()
-        weighted_kl = batch_data.metrics.get("weighted_kl", [None])[0]
-        weighted_kl = float(weighted_kl.item()) if weighted_kl is not None else None
+        # Get KL values - average across all examples, not just first one
+        raw_kl = batch_data.kl.mean().item()
+        weighted_kl = batch_data.metrics.get("weighted_kl", None)
+        weighted_kl = float(weighted_kl.mean().item()) if weighted_kl is not None else None
+
+        # Calculate metrics that should be averaged over all examples (regardless of active status)
+        mean_actor_logprobs = batch_data.R_mean_actor_logprobs.mean().item()
+        mean_critic_logprobs = batch_data.R_mean_critic_logprobs.mean().item()
+        mean_actor_answer_logprobs = batch_data.actor_answer_logprobs.mean().item()
+        mean_critic_answer_logprobs = batch_data.critic_answer_logprobs.mean().item()
+        mean_advantage = batch_data.advantages.mean().item()
+        mean_normalized_reward = batch_data.normalized_rewards.mean().item()
+        
+        # Calculate loss metrics across ALL examples (not just active ones)
+        # This gives a more consistent view of model performance regardless of threshold
+        mean_loss = batch_data.losses.mean().item()
+        mean_pg_loss = batch_data.metrics["pg_losses"].mean().item()
+        
+        # For reference, also calculate loss metrics for active examples only
+        if training_mask is not None and num_active > 0:
+            # Get only the active losses for calculating means
+            active_mask = training_mask.bool()
+            active_losses = batch_data.losses[active_mask]
+            active_pg_losses = batch_data.metrics["pg_losses"][active_mask]
+            active_only_mean_loss = active_losses.mean().item()
+            active_only_mean_pg_loss = active_pg_losses.mean().item()
+            
+            # Add these to metrics dictionary for potential logging but don't use as primary metrics
+            batch_data.metrics["active_only_loss"] = active_only_mean_loss
+            batch_data.metrics["active_only_pg_loss"] = active_only_mean_pg_loss
 
         return cls(
-            loss=batch_data.losses.mean().item(),
-            pg_loss=batch_data.metrics["pg_losses"][0].item(),
-            actor_logprobs=batch_data.R_mean_actor_logprobs[0].item(),
-            critic_logprobs=batch_data.R_mean_critic_logprobs[0].item(),
-            actor_answer_logprobs=batch_data.actor_answer_logprobs[0].item(),
-            critic_answer_logprobs=batch_data.critic_answer_logprobs[0].item(),
+            # Metrics based on ALL examples (including those that don't pass threshold):
+            loss=mean_loss,
+            pg_loss=mean_pg_loss,
+            
+            # Other metrics also based on all examples:
+            actor_logprobs=mean_actor_logprobs,
+            critic_logprobs=mean_critic_logprobs,
+            actor_answer_logprobs=mean_actor_answer_logprobs,
+            critic_answer_logprobs=mean_critic_answer_logprobs,
             kl=raw_kl,
             weighted_kl=weighted_kl,
             ppo_ratio=ppo_ratio,
             ppo_clipped_ratio=ppo_clipped_ratio,
-            advantage=batch_data.advantages[0].item(),
-            normalized_reward=batch_data.normalized_rewards[0].item(),
+            advantage=mean_advantage,
+            normalized_reward=mean_normalized_reward,
             gradient_norm=grad_norm,
             num_active=num_active,
             fraction_active=num_active / batch_size,
@@ -1101,11 +1245,24 @@ def log_batch_results(
         colored_print("Critic Reasoning:", critic_reasoning_text, Colors.CYAN)
 
     colored_print("Answer:", a, Colors.GREEN)
-    colored_print("Advantage:", f"{metrics.advantage:.4f}", Colors.BOLD, inline=True)
+    
+    # Safely display advantage value, handling NaN
+    advantage_display = f"{metrics.advantage:.4f}" if not np.isnan(metrics.advantage) else "NaN (no active examples)"
+    colored_print("Advantage:", advantage_display, Colors.BOLD, inline=True)
+
+    # If no examples were active, add a clear indicator
+    if metrics.num_active == 0:
+        colored_print("Warning:", "No examples passed the EI threshold in this batch", Colors.RED)
 
     # Determine which KL value to log
     kl_to_log = metrics.weighted_kl if metrics.weighted_kl is not None else metrics.kl
     kl_label = "Weighted KL" if metrics.weighted_kl is not None else "KL"
+
+    # Safely convert metrics to Python values, handling NaN
+    def safe_float(value):
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return "NaN (no active examples)"
+        return float(value)
 
     log_entry = {
         "Batch Index": int(state.batch_index),
@@ -1118,8 +1275,8 @@ def log_batch_results(
             "Contains Answer": contains_answer_fraction,
         },
         "Training Metrics": {
-            "Loss": float(metrics.loss),
-            "Policy Gradient Loss": float(metrics.pg_loss),
+            "Loss": safe_float(metrics.loss),
+            "Policy Gradient Loss": safe_float(metrics.pg_loss),
             "Actor Reasoning Log Probs": float(metrics.actor_logprobs),
             "Critic Reasoning Log Probs": float(metrics.critic_logprobs),
             "Actor Answer Log Probs": float(metrics.actor_answer_logprobs),
@@ -1134,7 +1291,7 @@ def log_batch_results(
                 if metrics.ppo_clipped_ratio is not None
                 else None
             ),
-            "Advantage": float(metrics.advantage),
+            "Advantage": safe_float(metrics.advantage),
             "Normalized Reward": float(metrics.normalized_reward),
             "Gradient Norm": float(metrics.gradient_norm),
             "Active Samples": {
@@ -1170,6 +1327,12 @@ def log_batch_results(
             "Temperature": float(state.hyperparameters["temperature"]),
         },
     }
+    
+    # Add active-only metrics if available
+    if "active_only_loss" in batch_data.metrics:
+        log_entry["Training Metrics"]["Active Only Loss"] = safe_float(batch_data.metrics["active_only_loss"])
+    if "active_only_pg_loss" in batch_data.metrics:
+        log_entry["Training Metrics"]["Active Only PG Loss"] = safe_float(batch_data.metrics["active_only_pg_loss"])
 
     # Write to log file
     with open(state.log_file, "a") as f:
@@ -1177,8 +1340,140 @@ def log_batch_results(
         f.write("\n")
 
 
+def evaluate_model_on_mmlu(
+    actor_model,
+    critic_model,
+    tokenizer,
+    device,
+    test_data,
+    hyperparameters,
+    batch_size=16,
+    num_samples=500  # Use fewer samples for quicker evaluation
+):
+    """Evaluate model performance on MMLU dataset
+    
+    Args:
+        actor_model: The model to evaluate
+        critic_model: The critic model (frozen)
+        tokenizer: Tokenizer for the models
+        device: Device to run on
+        test_data: List of MMLU question-answer pairs
+        hyperparameters: Training hyperparameters
+        batch_size: Evaluation batch size
+        num_samples: Number of samples to evaluate (for quicker evaluation)
+        
+    Returns:
+        tuple: (accuracy, detailed_results)
+    """
+    # Limit number of samples for quicker evaluation
+    if num_samples and num_samples < len(test_data):
+        test_data = random.sample(test_data, num_samples)
+    
+    actor_model.eval()
+    
+    correct = 0
+    results = []
+    
+    for i in tqdm(range(0, len(test_data), batch_size), desc="Evaluating MMLU"):
+        batch = test_data[i:i+batch_size]
+        questions, answers = zip(*batch)
+        
+        # Generate chain-of-thought reasoning
+        reasoning_prompts = []
+        for question in questions:
+            # Use the same prompt format as in training
+            prompt = (
+                f"{question}\n\n"
+                f"Let's think step by step to determine the correct answer."
+            )
+            reasoning_prompts.append(prompt)
+        
+        # Generate reasoning with actor model
+        inputs = tokenizer(
+            reasoning_prompts, 
+            return_tensors="pt", 
+            padding=True, 
+            truncation=True,
+            max_length=hyperparameters.get("question_length", 512)
+        ).to(device)
+        
+        reasoning_outputs = actor_model.generate(
+            **inputs,
+            max_new_tokens=hyperparameters.get("cot_length", 50),
+            do_sample=True,
+            temperature=hyperparameters.get("temperature", 1.0)
+        )
+        
+        # Decode the reasoning
+        actor_reasoning = tokenizer.batch_decode(
+            reasoning_outputs[:, inputs.input_ids.shape[1]:], 
+            skip_special_tokens=True
+        )
+        
+        # Extract predicted answers from reasoning
+        # For MMLU, we're looking for a letter A-E in the reasoning
+        predicted_answers = []
+        for reasoning in actor_reasoning:
+            # Look for answer pattern like "The answer is A" or "Therefore, C is correct"
+            answer_matches = re.findall(r"(?:answer|correct|choice) is ([A-E])", reasoning, re.IGNORECASE)
+            answer_matches += re.findall(r"([A-E]) is (?:correct|the answer)", reasoning, re.IGNORECASE)
+            answer_matches += re.findall(r"(?:I choose|I select|select|choose) ([A-E])", reasoning, re.IGNORECASE)
+            answer_matches += re.findall(r"^([A-E])$", reasoning.strip(), re.MULTILINE)
+            
+            # If no clear pattern is found, check for the last occurrence of a letter
+            if not answer_matches:
+                # Look for standalone A, B, C, D, E as a last resort
+                answer_matches = re.findall(r"\b([A-E])\b", reasoning)
+            
+            predicted = answer_matches[-1] if answer_matches else "X"  # X indicates no answer found
+            predicted_answers.append(predicted)
+        
+        # Calculate accuracy
+        for q, r, p, a in zip(questions, actor_reasoning, predicted_answers, answers):
+            is_correct = p == a
+            if is_correct:
+                correct += 1
+                
+            results.append({
+                "question": q,
+                "reasoning": r,
+                "predicted": p,
+                "answer": a,
+                "correct": is_correct
+            })
+    
+    accuracy = correct / len(test_data)
+    return accuracy, results
+
+
+def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, total, subject=None):
+    """Save MMLU evaluation results to a file"""
+    # Create output filename with timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    subject_str = f"_{subject}" if subject else ""
+    outfile = os.path.join(output_dir, f"mmlu_results{subject_str}_{timestamp}.json")
+    
+    # Compile results data
+    data = {
+        "model_path": model_path,
+        "model_type": model_type,
+        "accuracy": accuracy,
+        "total_examples": total,
+        "timestamp": timestamp,
+        "subject": subject,
+        "results": results
+    }
+    
+    # Save to file
+    with open(outfile, "w") as f:
+        json.dump(data, f, indent=2)
+    
+    print(f"Saved evaluation results to {outfile}")
+    return outfile
+
+
 def save_checkpoint(state: TrainingState):
-    """Save model checkpoint and evaluate if GSM8K"""
+    """Save model checkpoint and evaluate if GSM8K or MMLU"""
     colored_print(
         "Checkpoint", f"Saving model at batch {state.batch_index}", Colors.BOLD
     )
@@ -1224,6 +1519,44 @@ def save_checkpoint(state: TrainingState):
             accuracy,
             results,
             len(test_data)
+        )
+        
+        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+    
+    # If MMLU, evaluate the model
+    elif state.hyperparameters["task_type"] == "mmlu":
+        colored_print("Evaluation", "Running MMLU evaluation...", Colors.BOLD)
+        
+        # Get subject filter from hyperparameters
+        subject = state.hyperparameters.get("mmlu_subject", None)
+        
+        # Use test split for evaluation
+        test_data = list(load_mmlu_dataset(split="test", subject=subject))
+        
+        # Run evaluation in eval mode
+        with torch.no_grad():
+            state.actor_model.eval()
+            accuracy, results = evaluate_model_on_mmlu(
+                state.actor_model,
+                state.critic_model,
+                state.tokenizer,
+                state.device,
+                test_data,
+                state.hyperparameters,
+                batch_size=state.hyperparameters["batch_size"] * 2
+            )
+            state.actor_model.train()
+        
+        # Save results
+        model_dir = os.path.dirname(state.model_save_path)
+        results_file = save_results_mmlu(
+            model_dir,
+            state.model_save_path,
+            state.hyperparameters["model_type"],
+            accuracy,
+            results,
+            len(test_data),
+            subject=subject
         )
         
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
@@ -1337,6 +1670,16 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
         else len(batch_data.losses)
     )
     state.grad_accum_count += num_active
+
+    # Log information about active examples
+    if batch_data.training_mask is not None:
+        total_examples = len(batch_data.training_mask)
+        active_fraction = num_active / total_examples
+        colored_print(
+            "EI Active:", 
+            f"{num_active}/{total_examples} examples ({active_fraction:.1%}) above threshold",
+            Colors.BOLD if active_fraction < 0.1 else Colors.CYAN  # Highlight in bold red if < 10%
+        )
 
     if num_active > 0:
         loss = (
@@ -1579,6 +1922,7 @@ if __name__ == "__main__":
             "arithmetic",
             "arithmetic_negative",
             "gsm8k",
+            "mmlu",
             "wiki_compression",
             "wiki_continuation",
         ],
@@ -1619,6 +1963,20 @@ if __name__ == "__main__":
         "--checkpoint_frequency",
         type=int,
         help="Override default checkpoint frequency (default: 500 for GSM8K, 1000 for others)",
+    )
+    # MMLU-specific arguments
+    parser.add_argument(
+        "--mmlu_subject",
+        type=str,
+        default=None,
+        help="Specific MMLU subject to train on (default: all subjects)",
+    )
+    parser.add_argument(
+        "--mmlu_split",
+        type=str,
+        default="validation",
+        choices=["train", "validation", "test"],
+        help="MMLU dataset split to use (default: validation)",
     )
 
     args = parser.parse_args()

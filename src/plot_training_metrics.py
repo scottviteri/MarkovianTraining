@@ -25,13 +25,35 @@ def get_nested_value(entry, path, metrics_dict=None):
         if value is None or key not in value:
             return None
         value = value[key]
+    
+    # Handle special string indicators like "NaN (no active examples)"
+    if isinstance(value, str) and "NaN" in value:
+        return np.nan
+        
     return value
 
 
 def moving_average(data, window_size):
+    """Calculate moving average, properly handling NaN values"""
     if len(data) < window_size:
         return data
-    return np.convolve(data, np.ones(window_size), "valid") / window_size
+        
+    # Convert the data to a numpy array to ensure correct handling of NaN values
+    data_array = np.array(data, dtype=float)
+    
+    # Use a technique that doesn't count NaN values in the average
+    result = np.zeros(len(data_array) - window_size + 1)
+    
+    for i in range(len(result)):
+        window = data_array[i:i+window_size]
+        # Count only non-NaN values
+        valid_values = window[~np.isnan(window)]
+        if len(valid_values) > 0:
+            result[i] = np.mean(valid_values)
+        else:
+            result[i] = np.nan
+    
+    return result
 
 
 def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, plot_summary=False, max_index=None, average=False, show_std=False, show_legend=True, label_size=10, show_title=True):
@@ -129,30 +151,55 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             if max_index is not None:
                 entries = entries[:max_index]
             
-            data = [
+            # Extract data points, handling None values, NaN, and strings
+            raw_data = [
                 get_nested_value(entry, metric_path, metrics_dict)
                 for entry in entries[EI_SKIP_INITIAL:]
-                if get_nested_value(entry, metric_path, metrics_dict) is not None
             ]
             
-            if data:
-                if metric_path == "Example.Contains Answer":
-                    data = [1 if x else 0 for x in data]
-                
-                if average:
-                    all_data.append(data)
+            # Filter out None values and convert to float array
+            valid_data = []
+            for d in raw_data:
+                if d is None:
+                    valid_data.append(np.nan)  # Convert None to NaN for proper handling
+                elif isinstance(d, str) and "NaN" in d:
+                    valid_data.append(np.nan)  # Handle "NaN" strings
                 else:
-                    smoothed_data = moving_average(data, window_size)
-                    offset = window_size // 2
-                    axs[metric_idx].plot(
-                        range(offset, offset + len(smoothed_data)),
-                        smoothed_data,
-                        linewidth=2,
-                        label=label
-                    )
+                    # Handle special cases for certain metrics
+                    if metric_path == "Example.Contains Answer":
+                        valid_data.append(1 if d else 0)
+                    else:
+                        try:
+                            valid_data.append(float(d))
+                        except (ValueError, TypeError):
+                            valid_data.append(np.nan)
+            
+            # Only proceed if we have valid data
+            if valid_data and not all(np.isnan(d) for d in valid_data):
+                if average:
+                    all_data.append(valid_data)
+                else:
+                    # Convert to numpy array for handling NaN values
+                    data_array = np.array(valid_data, dtype=float)
+                    # Smooth the data, properly handling NaN values
+                    smoothed_data = moving_average(data_array, window_size)
+                    
+                    # Create x-coordinates for plotting, accounting for the window size
+                    offset = (window_size - 1) // 2 if window_size > 1 else 0
+                    x_coords = np.arange(EI_SKIP_INITIAL + offset, EI_SKIP_INITIAL + offset + len(smoothed_data))
+                    
+                    # Filter out NaN values before plotting
+                    mask = ~np.isnan(smoothed_data)
+                    if np.any(mask):  # Only plot if we have any valid points
+                        axs[metric_idx].plot(
+                            x_coords[mask],
+                            smoothed_data[mask],
+                            linewidth=2,
+                            label=label
+                        )
         
-        if average and all_data:
-            # Convert all data to float arrays first
+        if average and all_data and any(len(d) > 0 for d in all_data):
+            # Convert all data to float arrays
             all_data = [np.array(d, dtype=float) for d in all_data]
             
             # Pad shorter sequences with NaN
@@ -166,37 +213,44 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             
             # Remove trailing NaN values
             valid_mask = ~np.isnan(mean_data)
-            mean_data = mean_data[valid_mask]
-            if show_std:
-                std_data = std_data[valid_mask]
-            
-            # Smooth mean and std data
-            smoothed_mean = moving_average(mean_data, window_size)
-            if show_std:
-                smoothed_std = moving_average(std_data, window_size)
-            
-            offset = window_size // 2
-            x_range = range(offset, offset + len(smoothed_mean))
-            
-            # Plot mean line
-            line = axs[metric_idx].plot(
-                x_range,
-                smoothed_mean,
-                linewidth=2,
-                label="Average",
-                color='blue'
-            )[0]
-            
-            # Add std bands if requested
-            if show_std:
-                axs[metric_idx].fill_between(
-                    x_range,
-                    smoothed_mean - smoothed_std,
-                    smoothed_mean + smoothed_std,
-                    alpha=0.2,
-                    color=line.get_color(),
-                    label='±1 SD'
-                )
+            if np.any(valid_mask):  # Only continue if we have valid data
+                mean_data = mean_data[valid_mask]
+                if show_std:
+                    std_data = std_data[valid_mask]
+                
+                # Smooth mean and std data
+                smoothed_mean = moving_average(mean_data, window_size)
+                if show_std:
+                    smoothed_std = moving_average(std_data, window_size)
+                
+                # Create x-coordinates for plotting
+                offset = (window_size - 1) // 2 if window_size > 1 else 0
+                x_range = np.arange(EI_SKIP_INITIAL + offset, EI_SKIP_INITIAL + offset + len(smoothed_mean))
+                
+                # Filter out NaN values before plotting
+                mask = ~np.isnan(smoothed_mean)
+                if np.any(mask):  # Only plot if we have any valid points
+                    # Plot mean line
+                    line = axs[metric_idx].plot(
+                        x_range[mask],
+                        smoothed_mean[mask],
+                        linewidth=2,
+                        label="Average",
+                        color='blue'
+                    )[0]
+                    
+                    # Add std bands if requested
+                    if show_std:
+                        # Ensure std data is aligned with mean data
+                        smoothed_std_filtered = smoothed_std[mask]
+                        axs[metric_idx].fill_between(
+                            x_range[mask],
+                            smoothed_mean[mask] - smoothed_std_filtered,
+                            smoothed_mean[mask] + smoothed_std_filtered,
+                            alpha=0.2,
+                            color=line.get_color(),
+                            label='±1 SD'
+                        )
 
         # Set y-limits for Contains Answer plot
         if title == "Contains Answer":
