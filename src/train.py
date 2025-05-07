@@ -24,6 +24,10 @@ from utils import (
     construct_prompts,
     find_latest_result,
 )
+import glob
+import math
+import string
+import time
 
 
 def print_batch_delimiter():
@@ -996,22 +1000,26 @@ def setup_training_environment(task_type, resume, hyperparameters):
         if not latest_dir:
             raise ValueError(f"No previous run found for task type: {task_type}")
             
-        model_save_path = os.path.join(latest_dir, "model.pt")
+        # For the checkpoint, we'll now find the latest one in the directory
+        checkpoint_dir = latest_dir
         log_file = os.path.join(latest_dir, "log.jsonl")
         
-        if not os.path.exists(model_save_path) or not os.path.exists(log_file):
-            raise ValueError(f"Missing required files in latest result directory: {latest_dir}")
+        if not os.path.exists(log_file):
+            raise ValueError(f"Missing required log file in latest result directory: {latest_dir}")
 
         start_batch, hyperparameters = load_training_state(log_file)
         previous_normalized_rewards, previous_advantages = (
             load_previous_rewards_and_advantages(log_file)
         )
+        
+        # Create a placeholder model save path - actual file will be determined at save time
+        model_save_path = checkpoint_dir
     else:
         results_dir = os.path.join(
             "results", task_type, datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         )
         os.makedirs(results_dir, exist_ok=True)
-        model_save_path = os.path.join(results_dir, "model.pt")
+        model_save_path = results_dir  # Directory, not specific file
         log_file = os.path.join(results_dir, "log.jsonl")
         start_batch = 0
         previous_normalized_rewards = []
@@ -1030,6 +1038,19 @@ def setup_training_environment(task_type, resume, hyperparameters):
     )
 
 
+def find_latest_checkpoint(checkpoint_dir):
+    """Find most recent checkpoint file in a directory."""
+    checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "model_batch_*.pt"))
+    if not checkpoint_files:
+        # Fall back to the old format
+        if os.path.exists(os.path.join(checkpoint_dir, "model.pt")):
+            return os.path.join(checkpoint_dir, "model.pt")
+        return None
+    
+    # Sort by batch number (extract from filename)
+    return max(checkpoint_files, key=lambda f: int(re.search(r'model_batch_(\d+)\.pt', f).group(1)))
+
+
 def initialize_model_and_optimizer(model_type, hyperparameters, checkpoint_path=None):
     """Initialize the model, frozen model, tokenizer, device, and optimizer."""
     model, frozen_model, tokenizer, device = load_model(model_type)
@@ -1038,8 +1059,33 @@ def initialize_model_and_optimizer(model_type, hyperparameters, checkpoint_path=
     )
 
     if checkpoint_path is not None:
+        # Find the latest checkpoint in the directory if checkpoint_path points to a directory
+        if os.path.isdir(checkpoint_path):
+            latest_checkpoint = find_latest_checkpoint(checkpoint_path)
+            if latest_checkpoint:
+                checkpoint_path = latest_checkpoint
+                colored_print("Resume", f"Using latest checkpoint: {os.path.basename(latest_checkpoint)}", Colors.BOLD)
+            else:
+                colored_print("Warning", f"No checkpoints found in {checkpoint_path}", Colors.RED)
+                return model, frozen_model, tokenizer, device, model_optimizer
+        
+        # Load checkpoint
         checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
+        
+        # Check if this is a LoRA adapter checkpoint or full model checkpoint
+        if "adapter_state_dict" in checkpoint:
+            colored_print("Resume", "Loading LoRA adapter weights", Colors.BOLD)
+            model.load_adapter_state_dict(checkpoint["adapter_state_dict"])
+            size_bytes = sum(tensor.nelement() * tensor.element_size() 
+                           for tensor in checkpoint["adapter_state_dict"].values())
+            size_mb = size_bytes / (1024 * 1024)
+            colored_print("Checkpoint Info", f"Loaded LoRA weights, size: {size_mb:.2f}MB", Colors.GREEN)
+        elif "model_state_dict" in checkpoint:
+            colored_print("Resume", "Loading full model weights (old format)", Colors.BOLD)
+            model.load_state_dict(checkpoint["model_state_dict"])
+        else:
+            colored_print("Warning", "Checkpoint has unknown format", Colors.RED)
+        
         model_optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
     return model, frozen_model, tokenizer, device, model_optimizer
@@ -1478,15 +1524,36 @@ def save_checkpoint(state: TrainingState):
         "Checkpoint", f"Saving model at batch {state.batch_index}", Colors.BOLD
     )
     
-    # Save model checkpoint
+    # Create checkpoint path with batch index to avoid overwriting
+    checkpoint_dir = os.path.dirname(state.model_save_path)
+    checkpoint_filename = f"model_batch_{state.batch_index}.pt"
+    checkpoint_path = os.path.join(checkpoint_dir, checkpoint_filename)
+    
+    # Save only LoRA adapter weights instead of full model
+    model_to_save = state.actor_model
+    
+    # Get just the LoRA weights (much smaller than full model)
+    adapters_weights = model_to_save.get_adapter_state_dict()
+    
+    # Calculate size in MB to log
+    size_bytes = sum(param.nelement() * param.element_size() for param in model_to_save.parameters() if param.requires_grad)
+    size_mb = size_bytes / (1024 * 1024)
+    
+    # Save just the LoRA weights and metadata
     torch.save(
         {
-            "model_state_dict": state.actor_model.state_dict(),
+            "adapter_state_dict": adapters_weights,
             "optimizer_state_dict": state.actor_optimizer.state_dict(),
             "batch_index": state.batch_index,
             "hyperparameters": state.hyperparameters,
         },
-        state.model_save_path
+        checkpoint_path
+    )
+    
+    colored_print(
+        "Checkpoint Info", 
+        f"Saved at batch {state.batch_index} to {checkpoint_filename}. LoRA size: {size_mb:.2f}MB", 
+        Colors.GREEN
     )
 
     # If GSM8K, evaluate the model
@@ -1514,7 +1581,7 @@ def save_checkpoint(state: TrainingState):
         model_dir = os.path.dirname(state.model_save_path)
         results_file = save_results(
             model_dir,
-            state.model_save_path,
+            checkpoint_path,  # Use the new checkpoint path here
             state.hyperparameters["model_type"],
             accuracy,
             results,
@@ -1551,7 +1618,7 @@ def save_checkpoint(state: TrainingState):
         model_dir = os.path.dirname(state.model_save_path)
         results_file = save_results_mmlu(
             model_dir,
-            state.model_save_path,
+            checkpoint_path,  # Use the new checkpoint path here
             state.hyperparameters["model_type"],
             accuracy,
             results,
