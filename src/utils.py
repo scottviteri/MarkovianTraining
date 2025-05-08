@@ -2,7 +2,16 @@ import os
 import datetime
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
-from constants import MISTRAL_INST_START, MISTRAL_INST_END, PHI4_IM_START, PHI4_IM_SEP, PHI4_IM_END
+from constants import (
+    MISTRAL_INST_START, 
+    MISTRAL_INST_END, 
+    PHI4_IM_START, 
+    PHI4_IM_SEP, 
+    PHI4_IM_END,
+    GEMMA3_BOS,
+    GEMMA3_START_OF_TURN,
+    GEMMA3_END_OF_TURN
+)
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
@@ -99,6 +108,13 @@ def get_model_specific_tokens(model_type):
             "im_end": PHI4_IM_END,
             "format_type": "phi-4"
         }
+    elif model_type == "gemma-3":
+        return {
+            "bos": GEMMA3_BOS,
+            "start_of_turn": GEMMA3_START_OF_TURN,
+            "end_of_turn": GEMMA3_END_OF_TURN,
+            "format_type": "gemma-3"
+        }
     else:  # llama, gpt2, tinystories, phi
         return {
             "inst_start": "",
@@ -169,6 +185,24 @@ def construct_prompts(
                 f"{tokens['im_start']}user{tokens['im_sep']}\n{base_prompt} {question_placeholder}{tokens['im_end']}\n"
                 f"{tokens['im_start']}assistant{tokens['im_sep']}\n{prompt_type}{reasoning} Answer: "
             )
+    elif format_type == "gemma-3":
+        if reasoning is None:
+            # Initial prompt without reasoning
+            return (
+                f"{tokens['bos']}{tokens['start_of_turn']}user\n"
+                f"{base_prompt} {question}{tokens['end_of_turn']}\n"
+                f"{tokens['start_of_turn']}model\n"
+                f"{prompt_type}"
+            )
+        else:
+            # Prompt with reasoning (for generating/evaluating the answer)
+            question_placeholder = question if include_question else "<Redacted>"
+            return (
+                f"{tokens['bos']}{tokens['start_of_turn']}user\n"
+                f"{base_prompt} {question_placeholder}{tokens['end_of_turn']}\n"
+                f"{tokens['start_of_turn']}model\n"
+                f"{prompt_type}{reasoning} Answer: "
+            )
     elif format_type == "mistral":
         if reasoning is None:
             return f"{tokens['inst_start']} {base_prompt} {question} {tokens['inst_end']}\n{prompt_type}"
@@ -202,8 +236,10 @@ def load_model(model_type="mistral"):
         model_name = "microsoft/Phi-3.5-mini-instruct"
     elif model_type == "phi-4":
         model_name = "microsoft/phi-4"
+    elif model_type == "gemma-3":
+        model_name = "google/gemma-3-12b-it"
     else:
-        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', or 'phi-4'")
+        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', 'phi-4', or 'gemma-3'")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
     tokenizer.pad_token = tokenizer.eos_token
@@ -212,7 +248,7 @@ def load_model(model_type="mistral"):
         model_name,
         torch_dtype=torch.bfloat16,
         device_map="auto",
-        trust_remote_code=model_type in ["phi", "phi-4"]  # Phi models need trust_remote_code=True
+        trust_remote_code=model_type in ["phi", "phi-4", "gemma-3"]  # These models need trust_remote_code=True
     )
 
     # Freeze the model

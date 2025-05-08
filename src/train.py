@@ -149,7 +149,7 @@ def create_peft_model_with_adapter(base_model, peft_config):
 
 
 def load_model(model_type="mistral", hyperparameters=None):
-    """Load either Mistral, Llama, GPT2, TinyStories, Phi, or Phi-4 model based on parameter."""
+    """Load either Mistral, Llama, GPT2, TinyStories, Phi, Phi-4, or Gemma 3 model based on parameter."""
     if model_type == "mistral":
         model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     elif model_type == "llama":
@@ -162,12 +162,14 @@ def load_model(model_type="mistral", hyperparameters=None):
         model_name = "microsoft/Phi-3.5-mini-instruct"
     elif model_type == "phi-4":
         model_name = "microsoft/phi-4"
+    elif model_type == "gemma-3":
+        model_name = "google/gemma-3-12b-it"
     else:
-        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', or 'phi-4'")
+        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', 'phi-4', or 'gemma-3'")
 
     # Common settings
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    trust_remote_code = model_type in ["phi", "phi-4"]
+    trust_remote_code = model_type in ["phi", "phi-4", "gemma-3"]
     
     # Load tokenizer once
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
@@ -439,106 +441,108 @@ def generate_question_answer_batches(
             # Keep track of total examples used across all batches
             total_examples_used = 0
             # Set target number for progress tracking
-            examples_target = num_batches * batch_size
+            examples_target = batch_size  # Only need one batch for debug mode
             
-            for batch_start in range(0, num_batches * batch_size, batch_size):
-                # Check if we need to collect more examples
-                if len(qa_pairs) < batch_size:
-                    pbar = tqdm(total=min(chunk_size, examples_target - total_examples_used), 
-                               desc=f"Collecting examples (batch {batch_start//batch_size + 1}/{num_batches})")
+            # We only need to collect one batch worth of examples
+            pbar = tqdm(total=batch_size, desc="Collecting examples for debug mode")
+            last_qa_pairs_len = len(qa_pairs)
+            
+            # Collect enough examples for one batch
+            while len(qa_pairs) < batch_size:
+                if article_idx >= len(wiki_dataset):
+                    print("\nReached end of dataset! Wrapping around to beginning.")
+                    article_idx = 0
+                
+                # Skip indices in the specified range
+                if skip_start <= article_idx < skip_end:
+                    article_idx = skip_end
+                    continue
+                    
+                article = wiki_dataset[article_idx]
+                article_idx += 1
+                articles_examined += 1
+                
+                text = article['text']
+                tokens = tokenizer(text, truncation=False, return_tensors="pt")
+                token_length = tokens.input_ids.size(1)
+                
+                # Calculate required total length based on task type
+                if "question_length" in hyperparameters and "target_length" in hyperparameters:
+                    required_length = hyperparameters["question_length"] + hyperparameters["target_length"]
+                else:
+                    required_length = hyperparameters.get("target_length", 0)
+                
+                if token_length < required_length:
+                    continue
+                
+                if "question_length" in hyperparameters and "target_length" in hyperparameters:
+                    # Get question chunk
+                    question_chunk, actual_q_tokens = get_text_with_token_length(
+                        text, 
+                        hyperparameters["question_length"], 
+                        tokenizer
+                    )
+                    
+                    if question_chunk is None:
+                        continue
+                    
+                    # Get remaining text after question chunk
+                    remaining_text = text[len(question_chunk):]
+                    
+                    # Get target chunk from remaining text
+                    target_chunk, actual_t_tokens = get_text_with_token_length(
+                        remaining_text,
+                        hyperparameters["target_length"],
+                        tokenizer
+                    )
+                    
+                    if target_chunk is None:
+                        continue
+                        
+                    qa_pairs.append((question_chunk, target_chunk))
+                    
+                else:
+                    # Single chunk mode (for base model analysis)
+                    text_chunk, actual_tokens = get_text_with_token_length(
+                        text, 
+                        hyperparameters["target_length"], 
+                        tokenizer
+                    )
+                    
+                    if text_chunk is None:
+                        continue
+                        
+                    qa_pairs.append((text_chunk, ""))
+
+                # Update progress bar only when we've added new pairs
+                new_pairs = len(qa_pairs) - last_qa_pairs_len
+                if new_pairs > 0:
+                    pbar.update(new_pairs)
                     last_qa_pairs_len = len(qa_pairs)
                     
-                    # Collect more examples
-                    while len(qa_pairs) < chunk_size:
-                        if article_idx >= len(wiki_dataset):
-                            print("\nReached end of dataset! Wrapping around to beginning.")
-                            article_idx = 0
-                        
-                        # Skip indices in the specified range
-                        if skip_start <= article_idx < skip_end:
-                            article_idx = skip_end
-                            continue
-                            
-                        article = wiki_dataset[article_idx]
-                        article_idx += 1
-                        articles_examined += 1
-                        
-                        text = article['text']
-                        tokens = tokenizer(text, truncation=False, return_tensors="pt")
-                        token_length = tokens.input_ids.size(1)
-                        
-                        # Calculate required total length based on task type
-                        if "question_length" in hyperparameters and "target_length" in hyperparameters:
-                            required_length = hyperparameters["question_length"] + hyperparameters["target_length"]
-                        else:
-                            required_length = hyperparameters.get("target_length", 0)
-                        
-                        if token_length < required_length:
-                            continue
-                        
-                        if "question_length" in hyperparameters and "target_length" in hyperparameters:
-                            # Get question chunk
-                            question_chunk, actual_q_tokens = get_text_with_token_length(
-                                text, 
-                                hyperparameters["question_length"], 
-                                tokenizer
-                            )
-                            
-                            if question_chunk is None:
-                                continue
-                            
-                            # Get remaining text after question chunk
-                            remaining_text = text[len(question_chunk):]
-                            
-                            # Get target chunk from remaining text
-                            target_chunk, actual_t_tokens = get_text_with_token_length(
-                                remaining_text,
-                                hyperparameters["target_length"],
-                                tokenizer
-                            )
-                            
-                            if target_chunk is None:
-                                continue
-                                
-                            qa_pairs.append((question_chunk, target_chunk))
-                            
-                        else:
-                            # Single chunk mode (for base model analysis)
-                            text_chunk, actual_tokens = get_text_with_token_length(
-                                text, 
-                                hyperparameters["target_length"], 
-                                tokenizer
-                            )
-                            
-                            if text_chunk is None:
-                                continue
-                                
-                            qa_pairs.append((text_chunk, ""))
+                # Check if we've collected enough examples
+                if len(qa_pairs) >= batch_size:
+                    break
 
-                        # Update progress bar only when we've added new pairs
-                        new_pairs = len(qa_pairs) - last_qa_pairs_len
-                        if new_pairs > 0:
-                            pbar.update(new_pairs)
-                            last_qa_pairs_len = len(qa_pairs)
-                            
-                        # Check if we've collected enough examples
-                        if len(qa_pairs) >= chunk_size:
-                            break
-
-                    pbar.close()
-                    print(f"\nFinished collecting examples for batch {batch_start//batch_size + 1}/{num_batches}. "
-                          f"Examined {articles_examined} articles to find {len(qa_pairs)} valid examples.")
-                    
-                    # Shuffle the collected pairs
-                    random.shuffle(qa_pairs)
-                
-                # Extract batch_size examples
-                batch = qa_pairs[:batch_size]
-                # Remove used examples
-                qa_pairs = qa_pairs[batch_size:]
-                total_examples_used += len(batch)
-                
-                yield batch
+            pbar.close()
+            print(f"\nFinished collecting examples for debug mode. "
+                  f"Examined {articles_examined} articles to find {len(qa_pairs)} valid examples.")
+            
+            # Create the debug batch
+            debug_batch = qa_pairs[:batch_size]
+            
+            # Now yield the same debug batch for all requested batches
+            for _ in range(num_batches):
+                yield debug_batch
+        
+        # For non-wiki tasks, check if we have a valid debug_batch and yield it if so
+        if debug_batch is not None and task_type not in ["wiki_compression", "wiki_continuation"]:
+            print(f"Created debug batch for {task_type}, will use it for all {num_batches} batches")
+            for _ in range(num_batches):
+                yield debug_batch
+        
+        # Return immediately after debug batch creation without proceeding to regular data generation
+        return
     
     # Regular (non-debug) data generation continues below
     if task_type in ["arithmetic", "arithmetic_negative"]:
@@ -757,6 +761,31 @@ def find_answer_start_position(input_ids, model_type):
             & (input_ids[1:] == 29901)  # ":"
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
+    elif model_type == "gemma-3":
+        # For Gemma-3, we need to handle multiple potential tokens for "Answer"
+        # followed by colon token (236787)
+        matching_indices = (
+            (
+                (input_ids[:-1] == 25685)  # " Answer"
+                | (input_ids[:-1] == 7925)  # "Answer"
+                | (input_ids[:-1] == 14433)  # "answer"
+                | (input_ids[:-1] == 3890)  # " answer"
+            )
+            & (input_ids[1:] == 236787)  # ":"
+        ).nonzero(as_tuple=True)[0]
+        
+        if len(matching_indices) > 0:
+            pos = matching_indices[-1].item() + 2
+        else:
+            # Fallback in case the exact pattern isn't found
+            colored_print("Warning", "Could not find 'Answer:' in Gemma-3 output, using fallback position", Colors.YELLOW)
+            # Try to find a plausible position - the colon might be there
+            colon_indices = (input_ids == 236787).nonzero(as_tuple=True)[0]
+            if len(colon_indices) > 0:
+                pos = colon_indices[-1].item() + 1
+            else:
+                # Worst case: use the last 20% of tokens
+                pos = int(len(input_ids) * 0.8)
     else:
         raise ValueError("Unsupported model type")
     return pos
@@ -1493,6 +1522,7 @@ class BatchData:
 class LogMetrics:
     """Holds metrics for logging"""
 
+    # Mean metrics across batch
     loss: float
     pg_loss: float
     actor_logprobs: float
@@ -1505,6 +1535,20 @@ class LogMetrics:
     ppo_clipped_ratio: Optional[float]
     advantage: float
     normalized_reward: float
+    
+    # First example metrics
+    first_loss: float
+    first_pg_loss: float
+    first_actor_logprobs: float
+    first_critic_logprobs: float
+    first_actor_answer_logprobs: float
+    first_critic_answer_logprobs: float
+    first_kl: float
+    first_weighted_kl: Optional[float]
+    first_advantage: float
+    first_normalized_reward: float
+    
+    # Other metrics
     gradient_norm: float
     num_active: int
     fraction_active: float
@@ -1535,9 +1579,9 @@ class LogMetrics:
             colored_print("Warning", "No active examples in batch!", Colors.RED)
             # Use placeholder values for metrics when no examples are active
             return cls(
+                # Mean metrics
                 loss=float('nan'),  # NaN indicates no active examples
                 pg_loss=float('nan'),
-                # Average across all examples, not just the first one
                 actor_logprobs=batch_data.R_mean_actor_logprobs.mean().item(),
                 critic_logprobs=batch_data.R_mean_critic_logprobs.mean().item(),
                 actor_answer_logprobs=batch_data.actor_answer_logprobs.mean().item(),
@@ -1548,6 +1592,20 @@ class LogMetrics:
                 ppo_clipped_ratio=None,
                 advantage=batch_data.advantages.mean().item(),
                 normalized_reward=batch_data.normalized_rewards.mean().item(),
+                
+                # First example metrics
+                first_loss=float('nan'),
+                first_pg_loss=float('nan'),
+                first_actor_logprobs=batch_data.R_mean_actor_logprobs[0].item() if len(batch_data.R_mean_actor_logprobs) > 0 else float('nan'),
+                first_critic_logprobs=batch_data.R_mean_critic_logprobs[0].item() if len(batch_data.R_mean_critic_logprobs) > 0 else float('nan'),
+                first_actor_answer_logprobs=batch_data.actor_answer_logprobs[0].item() if len(batch_data.actor_answer_logprobs) > 0 else float('nan'),
+                first_critic_answer_logprobs=batch_data.critic_answer_logprobs[0].item() if len(batch_data.critic_answer_logprobs) > 0 else float('nan'),
+                first_kl=batch_data.kl[0].item() if len(batch_data.kl) > 0 else float('nan'),
+                first_weighted_kl=None,
+                first_advantage=batch_data.advantages[0].item() if len(batch_data.advantages) > 0 else float('nan'),
+                first_normalized_reward=batch_data.normalized_rewards[0].item() if len(batch_data.normalized_rewards) > 0 else float('nan'),
+                
+                # Other metrics
                 gradient_norm=0.0,  # No gradient if no active examples
                 num_active=0,
                 fraction_active=0.0,
@@ -1571,9 +1629,12 @@ class LogMetrics:
         )
 
         # Get KL values - average across all examples, not just first one
-        raw_kl = batch_data.kl.mean().item()
+        raw_kl_mean = batch_data.kl.mean().item()
+        raw_kl_first = batch_data.kl[0].item() if len(batch_data.kl) > 0 else float('nan')
+        
         weighted_kl = batch_data.metrics.get("weighted_kl", None)
-        weighted_kl = float(weighted_kl.mean().item()) if weighted_kl is not None else None
+        weighted_kl_mean = float(weighted_kl.mean().item()) if weighted_kl is not None else None
+        weighted_kl_first = float(weighted_kl[0].item()) if weighted_kl is not None and len(weighted_kl) > 0 else None
 
         # Calculate metrics that should be averaged over all examples (regardless of active status)
         mean_actor_logprobs = batch_data.R_mean_actor_logprobs.mean().item()
@@ -1583,10 +1644,22 @@ class LogMetrics:
         mean_advantage = batch_data.advantages.mean().item()
         mean_normalized_reward = batch_data.normalized_rewards.mean().item()
         
+        # Get metrics for the first example
+        first_actor_logprobs = batch_data.R_mean_actor_logprobs[0].item()
+        first_critic_logprobs = batch_data.R_mean_critic_logprobs[0].item()
+        first_actor_answer_logprobs = batch_data.actor_answer_logprobs[0].item()
+        first_critic_answer_logprobs = batch_data.critic_answer_logprobs[0].item()
+        first_advantage = batch_data.advantages[0].item()
+        first_normalized_reward = batch_data.normalized_rewards[0].item()
+        
         # Calculate loss metrics across ALL examples (not just active ones)
         # This gives a more consistent view of model performance regardless of threshold
         mean_loss = batch_data.losses.mean().item()
         mean_pg_loss = batch_data.metrics["pg_losses"].mean().item()
+        
+        # Get loss metrics for first example
+        first_loss = batch_data.losses[0].item()
+        first_pg_loss = batch_data.metrics["pg_losses"][0].item()
         
         # For reference, also calculate loss metrics for active examples only
         if training_mask is not None and num_active > 0:
@@ -1602,21 +1675,33 @@ class LogMetrics:
             batch_data.metrics["active_only_pg_loss"] = active_only_mean_pg_loss
 
         return cls(
-            # Metrics based on ALL examples (including those that don't pass threshold):
+            # Mean metrics
             loss=mean_loss,
             pg_loss=mean_pg_loss,
-            
-            # Other metrics also based on all examples:
             actor_logprobs=mean_actor_logprobs,
             critic_logprobs=mean_critic_logprobs,
             actor_answer_logprobs=mean_actor_answer_logprobs,
             critic_answer_logprobs=mean_critic_answer_logprobs,
-            kl=raw_kl,
-            weighted_kl=weighted_kl,
+            kl=raw_kl_mean,
+            weighted_kl=weighted_kl_mean,
             ppo_ratio=ppo_ratio,
             ppo_clipped_ratio=ppo_clipped_ratio,
             advantage=mean_advantage,
             normalized_reward=mean_normalized_reward,
+            
+            # First example metrics
+            first_loss=first_loss,
+            first_pg_loss=first_pg_loss,
+            first_actor_logprobs=first_actor_logprobs,
+            first_critic_logprobs=first_critic_logprobs,
+            first_actor_answer_logprobs=first_actor_answer_logprobs,
+            first_critic_answer_logprobs=first_critic_answer_logprobs,
+            first_kl=raw_kl_first,
+            first_weighted_kl=weighted_kl_first,
+            first_advantage=first_advantage,
+            first_normalized_reward=first_normalized_reward,
+            
+            # Other metrics
             gradient_norm=grad_norm,
             num_active=num_active,
             fraction_active=num_active / batch_size,
@@ -1659,17 +1744,47 @@ def log_batch_results(
 
     colored_print("Answer:", a, Colors.GREEN)
     
-    # Safely display advantage value, handling NaN
-    advantage_display = f"{metrics.advantage:.4f}" if not np.isnan(metrics.advantage) else "NaN (no active examples)"
-    colored_print("Advantage:", advantage_display, Colors.BOLD, inline=True)
-
+    # Print metrics in a clean, aligned format
+    print("\n" + "=" * 50)
+    print(f"{Colors.BOLD}METRICS (FIRST EXAMPLE VS MEAN){Colors.END}")
+    print("-" * 50)
+    
+    # Helper function to format metrics neatly
+    def format_metric(name, first_value, mean_value, color=Colors.BOLD):
+        first_str = f"{first_value:.4f}" if not np.isnan(first_value) else "NaN"
+        mean_str = f"{mean_value:.4f}" if not np.isnan(mean_value) else "NaN"
+        return f"{color}{name:<30}{Colors.END} First: {first_str:<10} Mean: {mean_str}"
+    
+    # Print metrics in logical groups
+    # Group 1: Advantages and Rewards
+    print(format_metric("Advantage:", metrics.first_advantage, metrics.advantage, Colors.MAGENTA))
+    print(format_metric("Normalized Reward:", metrics.first_normalized_reward, metrics.normalized_reward, Colors.MAGENTA))
+    
+    # Group 2: Log Probabilities
+    print("-" * 50)
+    print(format_metric("Actor Answer Log Probs:", metrics.first_actor_answer_logprobs, metrics.actor_answer_logprobs, Colors.YELLOW))
+    print(format_metric("Critic Answer Log Probs:", metrics.first_critic_answer_logprobs, metrics.critic_answer_logprobs, Colors.YELLOW))
+    print(format_metric("Actor Reasoning Log Probs:", metrics.first_actor_logprobs, metrics.actor_logprobs, Colors.YELLOW))
+    print(format_metric("Critic Reasoning Log Probs:", metrics.first_critic_logprobs, metrics.critic_logprobs, Colors.YELLOW))
+    
+    # Group 3: Losses
+    print("-" * 50)
+    print(format_metric("Loss:", metrics.first_loss, metrics.loss, Colors.CYAN))
+    print(format_metric("Policy Gradient Loss:", metrics.first_pg_loss, metrics.pg_loss, Colors.CYAN))
+    
+    # Group 4: KL and other info
+    print("-" * 50)
+    first_kl_to_log = metrics.first_weighted_kl if metrics.first_weighted_kl is not None else metrics.first_kl
+    kl_to_log = metrics.weighted_kl if metrics.weighted_kl is not None else metrics.kl
+    print(format_metric("KL Divergence:", first_kl_to_log, kl_to_log, Colors.GREEN))
+    print("-" * 50)
+    
+    # Active samples info
+    print(f"{Colors.BOLD}Active Samples: {metrics.num_active}/{state.hyperparameters['batch_size']} ({metrics.fraction_active:.1%}){Colors.END}")
+    
     # If no examples were active, add a clear indicator
     if metrics.num_active == 0:
         colored_print("Warning:", "No examples passed the EI threshold in this batch", Colors.RED)
-
-    # Determine which KL value to log
-    kl_to_log = metrics.weighted_kl if metrics.weighted_kl is not None else metrics.kl
-    kl_label = "Weighted KL" if metrics.weighted_kl is not None else "KL"
 
     # Safely convert metrics to Python values, handling NaN
     def safe_float(value):
@@ -1688,6 +1803,7 @@ def log_batch_results(
             "Contains Answer": contains_answer_fraction,
         },
         "Training Metrics": {
+            # Mean metrics
             "Loss": safe_float(metrics.loss),
             "Policy Gradient Loss": safe_float(metrics.pg_loss),
             "Actor Reasoning Log Probs": float(metrics.actor_logprobs),
@@ -1695,7 +1811,7 @@ def log_batch_results(
             "Actor Answer Log Probs": float(metrics.actor_answer_logprobs),
             "Critic Answer Log Probs": float(metrics.critic_answer_logprobs),
             "KL": float(kl_to_log),
-            "KL Type": kl_label,
+            "KL Type": "Weighted KL" if metrics.weighted_kl is not None else "KL",
             "PPO Ratio": (
                 float(metrics.ppo_ratio) if metrics.ppo_ratio is not None else None
             ),
@@ -1706,6 +1822,20 @@ def log_batch_results(
             ),
             "Advantage": safe_float(metrics.advantage),
             "Normalized Reward": float(metrics.normalized_reward),
+            
+            # First example metrics
+            "First Loss": safe_float(metrics.first_loss),
+            "First Policy Gradient Loss": safe_float(metrics.first_pg_loss),
+            "First Actor Reasoning Log Probs": float(metrics.first_actor_logprobs),
+            "First Critic Reasoning Log Probs": float(metrics.first_critic_logprobs),
+            "First Actor Answer Log Probs": float(metrics.first_actor_answer_logprobs),
+            "First Critic Answer Log Probs": float(metrics.first_critic_answer_logprobs),
+            "First KL": float(first_kl_to_log),
+            "First KL Type": "First Weighted KL" if metrics.first_weighted_kl is not None else "First KL",
+            "First Advantage": safe_float(metrics.first_advantage),
+            "First Normalized Reward": float(metrics.first_normalized_reward),
+            
+            # Other metrics
             "Gradient Norm": float(metrics.gradient_norm),
             "Active Samples": {
                 "Count": int(metrics.num_active),
@@ -2403,7 +2533,7 @@ if __name__ == "__main__":
         "--model_type",
         type=str,
         default="llama",
-        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4"],
+        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4", "gemma-3"],
         help="Model type (default: llama)",
     )
     parser.add_argument("--resume", action="store_true")
