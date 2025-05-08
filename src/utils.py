@@ -2,7 +2,7 @@ import os
 import datetime
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
-from constants import MISTRAL_INST_START, MISTRAL_INST_END
+from constants import MISTRAL_INST_START, MISTRAL_INST_END, PHI4_IM_START, PHI4_IM_SEP, PHI4_IM_END
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
@@ -90,11 +90,20 @@ def get_model_specific_tokens(model_type):
         return {
             "inst_start": MISTRAL_INST_START,
             "inst_end": MISTRAL_INST_END,
+            "format_type": "mistral"
         }
-    else:  # llama or gpt2 or tinystories or phi
+    elif model_type == "phi-4":
+        return {
+            "im_start": PHI4_IM_START,
+            "im_sep": PHI4_IM_SEP, 
+            "im_end": PHI4_IM_END,
+            "format_type": "phi-4"
+        }
+    else:  # llama, gpt2, tinystories, phi
         return {
             "inst_start": "",
             "inst_end": "",
+            "format_type": "standard"
         }
 
 def construct_prompts(
@@ -116,6 +125,7 @@ def construct_prompts(
     task_type = hyperparameters["task_type"]
 
     tokens = get_model_specific_tokens(model_type)
+    format_type = tokens["format_type"]
 
     # Construct base prompt
     if task_type == "wiki_compression":
@@ -139,16 +149,44 @@ def construct_prompts(
         prompt_type = "Reasoning:"
     else:
         raise ValueError(f"Unknown task type: {task_type}")
+        
     # Construct initial prompt with model-specific tokens
-    if reasoning is None:
-        return f"{tokens['inst_start']} {base_prompt} {question} {tokens['inst_end']}\n{prompt_type}"
-
-    # Include the actual question or use <Redacted> placeholder
-    question_placeholder = question if include_question else "<Redacted>"
-    base_with_type = f"{tokens['inst_start']} {base_prompt} {question_placeholder} {tokens['inst_end']}\n{prompt_type}"
-
-    # Add model-specific answer header to partial prompt
-    return base_with_type + reasoning + f" Answer: "
+    if format_type == "phi-4":
+        system_msg = "You are a helpful AI assistant that solves problems step by step."
+        
+        if reasoning is None:
+            # Initial prompt without reasoning
+            return (
+                f"{tokens['im_start']}system{tokens['im_sep']}\n{system_msg}{tokens['im_end']}\n"
+                f"{tokens['im_start']}user{tokens['im_sep']}\n{base_prompt} {question}{tokens['im_end']}\n"
+                f"{tokens['im_start']}assistant{tokens['im_sep']}\n{prompt_type}"
+            )
+        else:
+            # Prompt with reasoning (for generating/evaluating the answer)
+            question_placeholder = question if include_question else "<Redacted>"
+            return (
+                f"{tokens['im_start']}system{tokens['im_sep']}\n{system_msg}{tokens['im_end']}\n"
+                f"{tokens['im_start']}user{tokens['im_sep']}\n{base_prompt} {question_placeholder}{tokens['im_end']}\n"
+                f"{tokens['im_start']}assistant{tokens['im_sep']}\n{prompt_type}{reasoning} Answer: "
+            )
+    elif format_type == "mistral":
+        if reasoning is None:
+            return f"{tokens['inst_start']} {base_prompt} {question} {tokens['inst_end']}\n{prompt_type}"
+        else:
+            # Include the actual question or use <Redacted> placeholder
+            question_placeholder = question if include_question else "<Redacted>"
+            base_with_type = f"{tokens['inst_start']} {base_prompt} {question_placeholder} {tokens['inst_end']}\n{prompt_type}"
+            # Add answer header to partial prompt
+            return base_with_type + reasoning + f" Answer: "
+    else:  # standard format (no special tokens)
+        if reasoning is None:
+            return f"{base_prompt} {question}\n{prompt_type}"
+        else:
+            # Include the actual question or use <Redacted> placeholder
+            question_placeholder = question if include_question else "<Redacted>"
+            base_with_type = f"{base_prompt} {question_placeholder}\n{prompt_type}"
+            # Add answer header to partial prompt
+            return base_with_type + reasoning + f" Answer: "
 
 def load_model(model_type="mistral"):
     """Load a frozen model for evaluation."""
