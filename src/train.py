@@ -425,60 +425,120 @@ def generate_question_answer_batches(
                     qa_pair = next(dataset_iter)
                     debug_batch.append(qa_pair)
         elif task_type in ["wiki_compression", "wiki_continuation"]:
-            print("Loading Wikipedia dataset for debug datapoint...")
+            print("Loading Wikipedia dataset...")
             wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
-            debug_batch = []
             article_idx = 0
             articles_examined = 0
+            qa_pairs = []
             
-            while len(debug_batch) < batch_size:
-                article = wiki_dataset[article_idx]
-                article_idx += 1
-                articles_examined += 1
-                
-                text = article['text']
-                
-                if "question_length" in hyperparameters and "target_length" in hyperparameters:
-                    # Get question chunk
-                    question_chunk, actual_q_tokens = get_text_with_token_length(
-                        text, hyperparameters["question_length"], tokenizer
-                    )
-                    
-                    if question_chunk is None:
-                        continue
-                    
-                    # Get remaining text after question chunk
-                    remaining_text = text[len(question_chunk):]
-                    
-                    # Get target chunk from remaining text
-                    target_chunk, actual_t_tokens = get_text_with_token_length(
-                        remaining_text, hyperparameters["target_length"], tokenizer
-                    )
-                    
-                    if target_chunk is None:
-                        continue
-                        
-                    debug_batch.append((question_chunk, target_chunk))
-                else:
-                    # Single chunk mode
-                    text_chunk, actual_tokens = get_text_with_token_length(
-                        text, hyperparameters["target_length"], tokenizer
-                    )
-                    
-                    if text_chunk is None:
-                        continue
-                        
-                    debug_batch.append((text_chunk, ""))
-                
-                if len(debug_batch) >= batch_size:
-                    break
-        
-        # Now yield this same batch for all requested batches
-        for _ in range(num_batches):
-            yield debug_batch
+            # Define indices to skip (from 1900*8 to 2800*8)
+            skip_start = 15200  # 1900 * 8
+            skip_end = 22400    # 2800 * 8
+            print(f"Will skip wiki articles from index {skip_start} to {skip_end}")
             
-        # Exit the generator
-        return
+            # Keep track of total examples used across all batches
+            total_examples_used = 0
+            # Set target number for progress tracking
+            examples_target = num_batches * batch_size
+            
+            for batch_start in range(0, num_batches * batch_size, batch_size):
+                # Check if we need to collect more examples
+                if len(qa_pairs) < batch_size:
+                    pbar = tqdm(total=min(chunk_size, examples_target - total_examples_used), 
+                               desc=f"Collecting examples (batch {batch_start//batch_size + 1}/{num_batches})")
+                    last_qa_pairs_len = len(qa_pairs)
+                    
+                    # Collect more examples
+                    while len(qa_pairs) < chunk_size:
+                        if article_idx >= len(wiki_dataset):
+                            print("\nReached end of dataset! Wrapping around to beginning.")
+                            article_idx = 0
+                        
+                        # Skip indices in the specified range
+                        if skip_start <= article_idx < skip_end:
+                            article_idx = skip_end
+                            continue
+                            
+                        article = wiki_dataset[article_idx]
+                        article_idx += 1
+                        articles_examined += 1
+                        
+                        text = article['text']
+                        tokens = tokenizer(text, truncation=False, return_tensors="pt")
+                        token_length = tokens.input_ids.size(1)
+                        
+                        # Calculate required total length based on task type
+                        if "question_length" in hyperparameters and "target_length" in hyperparameters:
+                            required_length = hyperparameters["question_length"] + hyperparameters["target_length"]
+                        else:
+                            required_length = hyperparameters.get("target_length", 0)
+                        
+                        if token_length < required_length:
+                            continue
+                        
+                        if "question_length" in hyperparameters and "target_length" in hyperparameters:
+                            # Get question chunk
+                            question_chunk, actual_q_tokens = get_text_with_token_length(
+                                text, 
+                                hyperparameters["question_length"], 
+                                tokenizer
+                            )
+                            
+                            if question_chunk is None:
+                                continue
+                            
+                            # Get remaining text after question chunk
+                            remaining_text = text[len(question_chunk):]
+                            
+                            # Get target chunk from remaining text
+                            target_chunk, actual_t_tokens = get_text_with_token_length(
+                                remaining_text,
+                                hyperparameters["target_length"],
+                                tokenizer
+                            )
+                            
+                            if target_chunk is None:
+                                continue
+                                
+                            qa_pairs.append((question_chunk, target_chunk))
+                            
+                        else:
+                            # Single chunk mode (for base model analysis)
+                            text_chunk, actual_tokens = get_text_with_token_length(
+                                text, 
+                                hyperparameters["target_length"], 
+                                tokenizer
+                            )
+                            
+                            if text_chunk is None:
+                                continue
+                                
+                            qa_pairs.append((text_chunk, ""))
+
+                        # Update progress bar only when we've added new pairs
+                        new_pairs = len(qa_pairs) - last_qa_pairs_len
+                        if new_pairs > 0:
+                            pbar.update(new_pairs)
+                            last_qa_pairs_len = len(qa_pairs)
+                            
+                        # Check if we've collected enough examples
+                        if len(qa_pairs) >= chunk_size:
+                            break
+
+                    pbar.close()
+                    print(f"\nFinished collecting examples for batch {batch_start//batch_size + 1}/{num_batches}. "
+                          f"Examined {articles_examined} articles to find {len(qa_pairs)} valid examples.")
+                    
+                    # Shuffle the collected pairs
+                    random.shuffle(qa_pairs)
+                
+                # Extract batch_size examples
+                batch = qa_pairs[:batch_size]
+                # Remove used examples
+                qa_pairs = qa_pairs[batch_size:]
+                total_examples_used += len(batch)
+                
+                yield batch
     
     # Regular (non-debug) data generation continues below
     if task_type in ["arithmetic", "arithmetic_negative"]:
@@ -532,6 +592,11 @@ def generate_question_answer_batches(
         articles_examined = 0
         qa_pairs = []
         
+        # Define indices to skip (from 1900*8 to 2800*8)
+        skip_start = 15200  # 1900 * 8
+        skip_end = 22400    # 2800 * 8
+        print(f"Will skip wiki articles from index {skip_start} to {skip_end}")
+        
         # Keep track of total examples used across all batches
         total_examples_used = 0
         # Set target number for progress tracking
@@ -549,6 +614,11 @@ def generate_question_answer_batches(
                     if article_idx >= len(wiki_dataset):
                         print("\nReached end of dataset! Wrapping around to beginning.")
                         article_idx = 0
+                    
+                    # Skip indices in the specified range
+                    if skip_start <= article_idx < skip_end:
+                        article_idx = skip_end
+                        continue
                         
                     article = wiki_dataset[article_idx]
                     article_idx += 1
