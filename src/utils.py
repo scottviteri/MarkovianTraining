@@ -24,6 +24,7 @@ class Colors:
     BOLD = "\033[1m"
     UNDERLINE = "\033[4m"
     CYAN = "\033[96m"
+    MAGENTA = "\033[95m"
     END = "\033[0m"
 
 def colored_print(
