@@ -1755,6 +1755,14 @@ def log_batch_results(
         mean_str = f"{mean_value:.4f}" if not np.isnan(mean_value) else "NaN"
         return f"{color}{name:<30}{Colors.END} First: {first_str:<10} Mean: {mean_str}"
     
+    # Get raw unfiltered losses directly from the tensors
+    # Always use the raw tensors instead of potentially filtered metrics
+    raw_first_loss = batch_data.losses[0].item() if len(batch_data.losses) > 0 else float('nan')
+    raw_mean_loss = batch_data.losses.mean().item() if len(batch_data.losses) > 0 else float('nan')
+    
+    raw_first_pg_loss = batch_data.metrics["pg_losses"][0].item() if "pg_losses" in batch_data.metrics and len(batch_data.metrics["pg_losses"]) > 0 else float('nan')
+    raw_mean_pg_loss = batch_data.metrics["pg_losses"].mean().item() if "pg_losses" in batch_data.metrics and len(batch_data.metrics["pg_losses"]) > 0 else float('nan')
+    
     # Print metrics in logical groups
     # Group 1: Advantages and Rewards
     print(format_metric("Advantage:", metrics.first_advantage, metrics.advantage, Colors.MAGENTA))
@@ -1767,10 +1775,14 @@ def log_batch_results(
     print(format_metric("Actor Reasoning Log Probs:", metrics.first_actor_logprobs, metrics.actor_logprobs, Colors.YELLOW))
     print(format_metric("Critic Reasoning Log Probs:", metrics.first_critic_logprobs, metrics.critic_logprobs, Colors.YELLOW))
     
-    # Group 3: Losses
+    # Group 3: Losses - Use raw unfiltered values
     print("-" * 50)
-    print(format_metric("Loss:", metrics.first_loss, metrics.loss, Colors.CYAN))
-    print(format_metric("Policy Gradient Loss:", metrics.first_pg_loss, metrics.pg_loss, Colors.CYAN))
+    print(format_metric("Loss (Raw):", raw_first_loss, raw_mean_loss, Colors.CYAN))
+    print(format_metric("Policy Gradient Loss (Raw):", raw_first_pg_loss, raw_mean_pg_loss, Colors.CYAN))
+    
+    # Also show the potentially filtered values for comparison
+    print(format_metric("Loss (Filtered):", metrics.first_loss, metrics.loss, Colors.CYAN))
+    print(format_metric("PG Loss (Filtered):", metrics.first_pg_loss, metrics.pg_loss, Colors.CYAN))
     
     # Group 4: KL and other info
     print("-" * 50)
@@ -1822,6 +1834,12 @@ def log_batch_results(
             ),
             "Advantage": safe_float(metrics.advantage),
             "Normalized Reward": float(metrics.normalized_reward),
+            
+            # Raw unfiltered loss metrics
+            "Raw Loss": safe_float(raw_mean_loss),
+            "Raw Policy Gradient Loss": safe_float(raw_mean_pg_loss),
+            "Raw First Loss": safe_float(raw_first_loss),
+            "Raw First Policy Gradient Loss": safe_float(raw_first_pg_loss),
             
             # First example metrics
             "First Loss": safe_float(metrics.first_loss),

@@ -1,6 +1,6 @@
 MISTRAL_INST_START = "[INST]"
 MISTRAL_INST_END = "[/INST]"
-EI_SKIP_INITIAL = 15
+EI_SKIP_INITIAL = 25 
 
 # Phi-4 formatting tokens
 PHI4_IM_START = "<|im_start|>"
