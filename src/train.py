@@ -1744,17 +1744,6 @@ def log_batch_results(
 
     colored_print("Answer:", a, Colors.GREEN)
     
-    # Print metrics in a clean, aligned format
-    print("\n" + "=" * 50)
-    print(f"{Colors.BOLD}METRICS (FIRST EXAMPLE VS MEAN){Colors.END}")
-    print("-" * 50)
-    
-    # Helper function to format metrics neatly
-    def format_metric(name, first_value, mean_value, color=Colors.BOLD):
-        first_str = f"{first_value:.4f}" if not np.isnan(first_value) else "NaN"
-        mean_str = f"{mean_value:.4f}" if not np.isnan(mean_value) else "NaN"
-        return f"{color}{name:<30}{Colors.END} First: {first_str:<10} Mean: {mean_str}"
-    
     # Get raw unfiltered losses directly from the tensors
     # Always use the raw tensors instead of potentially filtered metrics
     raw_first_loss = batch_data.losses[0].item() if len(batch_data.losses) > 0 else float('nan')
@@ -1763,40 +1752,39 @@ def log_batch_results(
     raw_first_pg_loss = batch_data.metrics["pg_losses"][0].item() if "pg_losses" in batch_data.metrics and len(batch_data.metrics["pg_losses"]) > 0 else float('nan')
     raw_mean_pg_loss = batch_data.metrics["pg_losses"].mean().item() if "pg_losses" in batch_data.metrics and len(batch_data.metrics["pg_losses"]) > 0 else float('nan')
     
-    # Print metrics in logical groups
-    # Group 1: Advantages and Rewards
-    print(format_metric("Advantage:", metrics.first_advantage, metrics.advantage, Colors.MAGENTA))
-    print(format_metric("Normalized Reward:", metrics.first_normalized_reward, metrics.normalized_reward, Colors.MAGENTA))
-    
-    # Group 2: Log Probabilities
-    print("-" * 50)
-    print(format_metric("Actor Answer Log Probs:", metrics.first_actor_answer_logprobs, metrics.actor_answer_logprobs, Colors.YELLOW))
-    print(format_metric("Critic Answer Log Probs:", metrics.first_critic_answer_logprobs, metrics.critic_answer_logprobs, Colors.YELLOW))
-    print(format_metric("Actor Reasoning Log Probs:", metrics.first_actor_logprobs, metrics.actor_logprobs, Colors.YELLOW))
-    print(format_metric("Critic Reasoning Log Probs:", metrics.first_critic_logprobs, metrics.critic_logprobs, Colors.YELLOW))
-    
-    # Group 3: Losses - Use raw unfiltered values
-    print("-" * 50)
-    print(format_metric("Loss (Raw):", raw_first_loss, raw_mean_loss, Colors.CYAN))
-    print(format_metric("Policy Gradient Loss (Raw):", raw_first_pg_loss, raw_mean_pg_loss, Colors.CYAN))
-    
-    # Also show the potentially filtered values for comparison
-    print(format_metric("Loss (Filtered):", metrics.first_loss, metrics.loss, Colors.CYAN))
-    print(format_metric("PG Loss (Filtered):", metrics.first_pg_loss, metrics.pg_loss, Colors.CYAN))
-    
-    # Group 4: KL and other info
-    print("-" * 50)
+    # KL values
     first_kl_to_log = metrics.first_weighted_kl if metrics.first_weighted_kl is not None else metrics.first_kl
     kl_to_log = metrics.weighted_kl if metrics.weighted_kl is not None else metrics.kl
-    print(format_metric("KL Divergence:", first_kl_to_log, kl_to_log, Colors.GREEN))
-    print("-" * 50)
     
-    # Active samples info
-    print(f"{Colors.BOLD}Active Samples: {metrics.num_active}/{state.hyperparameters['batch_size']} ({metrics.fraction_active:.1%}){Colors.END}")
+    # Helper function to format values concisely
+    def fmt(val):
+        if isinstance(val, float) and not np.isnan(val):
+            return f"{val:.4f}"
+        return "NaN"
+    
+    # Print condensed metrics (horizontal layout)
+    print("\n" + "=" * 100)
+    
+    # Advantage and reward metrics (line 1)
+    print(f"{Colors.MAGENTA}Advantage{Colors.END} [F: {fmt(metrics.first_advantage)} | M: {fmt(metrics.advantage)}]  "
+          f"{Colors.MAGENTA}Reward{Colors.END} [F: {fmt(metrics.first_normalized_reward)} | M: {fmt(metrics.normalized_reward)}]  "
+          f"{Colors.GREEN}KL{Colors.END} [F: {fmt(first_kl_to_log)} | M: {fmt(kl_to_log)}]")
+    
+    # Log probabilities (line 2)
+    print(f"{Colors.YELLOW}Actor ⟨LP⟩{Colors.END} [A: {fmt(metrics.first_actor_answer_logprobs)} | R: {fmt(metrics.first_actor_logprobs)}]  "
+          f"{Colors.YELLOW}Critic ⟨LP⟩{Colors.END} [A: {fmt(metrics.first_critic_answer_logprobs)} | R: {fmt(metrics.first_critic_logprobs)}]")
+    
+    # Losses (line 3)
+    print(f"{Colors.CYAN}Loss{Colors.END} [F: {fmt(raw_first_loss)} | M: {fmt(raw_mean_loss)}]  "
+          f"{Colors.CYAN}PG Loss{Colors.END} [F: {fmt(raw_first_pg_loss)} | M: {fmt(raw_mean_pg_loss)}]  "
+          f"{Colors.BOLD}Active{Colors.END} [{metrics.num_active}/{state.hyperparameters['batch_size']} ({metrics.fraction_active:.1%})]")
+    
+    # Legend
+    print(f"{Colors.BOLD}Legend:{Colors.END} F=First example, M=Mean, A=Answer, R=Reasoning, LP=Log Probs")
     
     # If no examples were active, add a clear indicator
     if metrics.num_active == 0:
-        colored_print("Warning:", "No examples passed the EI threshold in this batch", Colors.RED)
+        print(f"{Colors.RED}Warning: No examples passed the EI threshold in this batch{Colors.END}")
 
     # Safely convert metrics to Python values, handling NaN
     def safe_float(value):
