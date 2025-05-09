@@ -5,25 +5,54 @@ from collections import defaultdict
 import os
 import argparse
 import math
-from train import get_latest_log_file
 from constants import EI_SKIP_INITIAL
 import sys
+import glob
+
+
+def get_latest_log_file():
+    """
+    Find the most recent log.jsonl file in any results subdirectory.
+    
+    Returns:
+        str: Path to the most recent log file, or None if no log files found
+    """
+    # Look for any log.jsonl file in subdirectories of results/
+    log_files = glob.glob("results/**/log.jsonl", recursive=True)
+    
+    if not log_files:
+        return None
+    
+    # Sort by modification time, most recent first
+    return sorted(log_files, key=os.path.getmtime, reverse=True)[0]
 
 
 def get_nested_value(entry, path, metrics_dict=None):
     """Helper function to get nested dictionary values using dot notation, with optional derived metrics"""
+    # Handle special cases for missing metrics
+    if path == "Training Metrics.Active Only Loss" or path == "Training Metrics.Active Only PG Loss":
+        # Check if EI is enabled in this log entry
+        if "EI Metrics" not in entry:
+            return np.nan
+    
+    if path == "Training Metrics.Active Samples.Fraction":
+        # Check if Active Samples metrics exist (EI enabled)
+        if "Training Metrics" not in entry or "Active Samples" not in entry.get("Training Metrics", {}):
+            return np.nan
+    
     if path == "Training Metrics.Critic Answer Log Probs" and metrics_dict is not None:
         # Calculate Critic Answer Log Probs if not directly available
         actor_probs = get_nested_value(entry, "Training Metrics.Actor Answer Log Probs")
         norm_reward = get_nested_value(entry, "Training Metrics.Normalized Reward")
         if actor_probs is not None and norm_reward is not None:
             return actor_probs - norm_reward
-        return None
+        return np.nan
 
+    # Standard nested dictionary access
     value = entry
     for key in path.split("."):
         if value is None or key not in value:
-            return None
+            return np.nan
         value = value[key]
     
     # Handle special string indicators like "NaN (no active examples)"
@@ -68,6 +97,10 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
     has_answer_logprobs = "Actor Answer Log Probs" in first_entry.get("Training Metrics", {})
     has_critic_probs = "Critic Answer Log Probs" in first_entry.get("Training Metrics", {})
     
+    # Check if important features are enabled
+    normalize_loss = hyperparameters.get('normalize_loss', True)
+    ei_enabled = hyperparameters.get('use_ei') is not None
+    
     # Initialize metrics_dict for deriving critic probs if needed
     metrics_dict = None if has_critic_probs else {"derive_critic": True}
     
@@ -81,14 +114,22 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
                 ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
             ]
+            
+            # Add critic metrics only if normalization is enabled
+            if normalize_loss and has_critic_probs:
+                metrics_to_plot.insert(1, ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)"))
+                
         # For wiki tasks
         elif task_type.startswith('wiki_'):
             if has_answer_logprobs:
                 metrics_to_plot = [
                     ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')"),
-                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
-                    ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)")
+                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)")
                 ]
+                
+                # Add critic metrics only if normalization is enabled
+                if normalize_loss and has_critic_probs:
+                    metrics_to_plot.append(("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)"))
             else:
                 metrics_to_plot = [
                     ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
@@ -98,23 +139,35 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
             ]
     else:
+        # Start with basic metrics that are always present
         base_metrics = [
             ("Training Metrics.Loss", "Total Loss (All Examples)", "Training Batch No. []", "Loss"),
-            ("Training Metrics.Active Only Loss", "Total Loss (Active Examples)", "Training Batch No. []", "Loss"),
             ("Training Metrics.Policy Gradient Loss", "PG Loss (All Examples)", "Training Batch No. []", "Loss"),
-            ("Training Metrics.Active Only PG Loss", "PG Loss (Active Examples)", "Training Batch No. []", "Loss"),
             ("Training Metrics.KL", "KL Divergence", "Training Batch No. []", "KL"),
             ("Training Metrics.Gradient Norm", "Gradient Norm", "Training Batch No. []", "Norm"),
             ("Training Metrics.Advantage", "Advantage", "Training Batch No. []", "Value"),
-            ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')"),
-            ("Training Metrics.Active Samples.Fraction", "Fraction of Active Samples", "Training Batch No. []", "Fraction")
+            ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
         ]
         
-        if has_answer_logprobs:
+        # Add EI-specific metrics only if EI is enabled
+        if ei_enabled:
             base_metrics.extend([
-                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
-                ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)")
+                ("Training Metrics.Active Only Loss", "Total Loss (Active Examples)", "Training Batch No. []", "Loss"),
+                ("Training Metrics.Active Only PG Loss", "PG Loss (Active Examples)", "Training Batch No. []", "Loss"),
+                ("Training Metrics.Active Samples.Fraction", "Fraction of Active Samples", "Training Batch No. []", "Fraction")
             ])
+        
+        # Add actor log probs if available
+        if has_answer_logprobs:
+            base_metrics.append(
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)")
+            )
+            
+            # Add critic log probs only if normalization is enabled and they're available
+            if normalize_loss and has_critic_probs:
+                base_metrics.append(
+                    ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)")
+                )
         
         # Add Contains Answer metric for GSM8K
         if task_type == "gsm8k":
@@ -422,6 +475,9 @@ if __name__ == "__main__":
     else:
         # Single file plotting (use latest log file)
         log_file = get_latest_log_file()
+        if log_file is None:
+            print("Error: No log files found in results directory")
+            sys.exit(1)
         files_to_plot = [log_file]
         host_names_to_plot = ["local"]
         valid_files = True

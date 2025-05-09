@@ -55,7 +55,6 @@ def sample_hyperparameters():
         # Generation parameters
         "temperature": 0.7,
         "r": 0.9,
-        "shrink_cot": False,
         "ei_threshold": None,
     }
 
@@ -363,7 +362,6 @@ def test_get_default_hyperparameters():
         "temperature": 0.7,
         "question_length": 500,
         "target_length": 500,
-        "shrink_cot": False,
         "ei_threshold": None,
         "gradient_accumulation_steps": 8
     }

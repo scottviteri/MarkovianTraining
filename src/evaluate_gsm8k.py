@@ -97,8 +97,6 @@ def get_hyperparameters_from_log(model_dir):
             "temperature": 1.0,
             "r": 0.9,
             "question_length": 200,
-            "shrink_cot": None,
-            "flatten": False,
         }
 
 

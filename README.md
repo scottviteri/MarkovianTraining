@@ -67,10 +67,8 @@ python src/train.py [options]
 #### Additional Options
 ```bash
 --resume                   # Resume training from latest checkpoint
---shrink_cot <float>      # Shrink chain-of-thought length
 --gradient_accumulation_steps <int>  # Steps before update (default: 1)
 --normalize_loss          # Enable loss normalization (default: True)
---flatten                 # Flatten input sequences
 ```
 
 ### 2. Model Evaluation Scripts
