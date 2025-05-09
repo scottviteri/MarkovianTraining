@@ -130,7 +130,7 @@ def get_model_specific_tokens(model_type):
             "im_end": PHI4_IM_END,
             "format_type": "phi-4"
         }
-    elif model_type == "gemma-3":
+    elif model_type in ["gemma-3", "gemma-3-small"]:
         return {
             "bos": GEMMA3_BOS,
             "start_of_turn": GEMMA3_START_OF_TURN,
@@ -260,12 +260,14 @@ def load_model(model_type, hyperparameters=None):
         model_name = "microsoft/phi-4"
     elif model_type == "gemma-3":
         model_name = "google/gemma-3-12b-it"
+    elif model_type == "gemma-3-small":
+        model_name = "google/gemma-3-1b-it"
     else:
-        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', 'phi-4', or 'gemma-3'")
+        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', 'phi-4', 'gemma-3', 'gemma-3-small', or 'gemma-3-12b-it'")
 
     # Common settings
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    trust_remote_code = model_type in ["phi", "phi-4", "gemma-3"]
+    trust_remote_code = model_type in ["phi", "phi-4", "gemma-3", "gemma-3-small"]
     
     # Load tokenizer once
     tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left", trust_remote_code=trust_remote_code)
@@ -280,6 +282,9 @@ def load_model(model_type, hyperparameters=None):
         device_map="auto",
         trust_remote_code=trust_remote_code
     )
+    
+    # Apply any model-specific patches
+    model = apply_model_specific_patches(model, model_type)
     
     colored_print("Model Info", f"Base model loaded: {type(model).__name__}", Colors.BLUE)
     
@@ -314,6 +319,9 @@ def load_model(model_type, hyperparameters=None):
         device_map="auto",
         trust_remote_code=trust_remote_code
     )
+    
+    # Apply same patches to critic model
+    frozen_model = apply_model_specific_patches(frozen_model, model_type)
 
     # Ensure all parameters are frozen in critic model
     for param in frozen_model.parameters():
@@ -897,6 +905,127 @@ def generate_question_answer_batches(
             yield batch
 
 
+def get_full_weight_snapshot(model):
+    """Create a detailed snapshot of model weights for comparison later.
+    
+    Args:
+        model: The model to snapshot
+        
+    Returns:
+        dict: A dictionary of parameter/buffer information for later comparison
+    """
+    snapshot = {}
+    
+    # Capture all parameters
+    for name, param in model.named_parameters():
+        full_name = "param:" + name
+        
+        # Get parameter data
+        param_data = param.data.detach().cpu()
+        
+        # Convert BFloat16 tensors to float32 before hashing
+        if param_data.dtype == torch.bfloat16:
+            param_data_for_hash = param_data.to(torch.float32)
+        else:
+            param_data_for_hash = param_data
+        
+        # Calculate hash and stats
+        param_hash = hash(param_data_for_hash.numpy().tobytes())
+        
+        # Convert to float32 for statistics calculation
+        param_float = param_data.to(torch.float32)
+        
+        # Store basic stats and hash
+        snapshot[full_name] = {
+            'hash': param_hash,
+            'mean': float(param_float.mean().item()),
+            'std': float(param_float.std().item()),
+            'min': float(param_float.min().item()),
+            'max': float(param_float.max().item()),
+        }
+    
+    # Capture all buffers
+    for name, buffer in model.named_buffers():
+        full_name = "buffer:" + name
+        
+        # Get buffer data
+        buffer_data = buffer.data.detach().cpu()
+        
+        # Convert BFloat16 tensors to float32 before hashing
+        if buffer_data.dtype == torch.bfloat16:
+            buffer_data_for_hash = buffer_data.to(torch.float32)
+        else:
+            buffer_data_for_hash = buffer_data
+        
+        # Calculate hash and stats
+        try:
+            buffer_hash = hash(buffer_data_for_hash.numpy().tobytes())
+            
+            # Only calculate stats if buffer is not empty
+            if buffer_data.numel() > 0:
+                # Convert to float32 for statistics calculation
+                buffer_float = buffer_data.to(torch.float32)
+                
+                # Store basic stats and hash
+                snapshot[full_name] = {
+                    'hash': buffer_hash,
+                    'mean': float(buffer_float.mean().item()),
+                    'std': float(buffer_float.std().item()),
+                    'min': float(buffer_float.min().item()),
+                    'max': float(buffer_float.max().item()),
+                }
+            else:
+                # For empty buffers, just store the hash
+                snapshot[full_name] = {
+                    'hash': buffer_hash,
+                    'empty': True,
+                }
+        except Exception as e:
+            # Some buffers might not be hashable, store info instead
+            snapshot[full_name] = {
+                'hash': hash(str(buffer_data)),
+                'shape': str(buffer_data.shape),
+                'dtype': str(buffer_data.dtype),
+                'error': str(e),
+            }
+    
+    # Capture module states
+    for name, module in model.named_modules():
+        # Check training mode
+        training_name = "module_training:" + name
+        snapshot[training_name] = {
+            'value': int(module.training),
+            'hash': hash(int(module.training)),
+        }
+        
+        # Check active adapter if exists
+        if hasattr(module, 'active_adapter'):
+            adapter_name = "module_adapter:" + name
+            snapshot[adapter_name] = {
+                'value': module.active_adapter,
+                'hash': hash(str(module.active_adapter)),
+            }
+        
+        # Check LoRA-specific properties
+        if hasattr(module, 'lora_A') and hasattr(module, 'lora_B'):
+            # Check rank
+            if hasattr(module, 'r'):
+                rank_name = f"lora_rank:{name}"
+                snapshot[rank_name] = {
+                    'value': module.r,
+                    'hash': hash(module.r),
+                }
+                
+            # Check alpha
+            if hasattr(module, 'lora_alpha'):
+                alpha_name = f"lora_alpha:{name}"
+                snapshot[alpha_name] = {
+                    'value': module.lora_alpha,
+                    'hash': hash(module.lora_alpha),
+                }
+    
+    return snapshot
+
 def verify_all_frozen_weights(model, weight_snapshot, full_check=False):
     """Verify that all weights in the model haven't changed.
     
@@ -1166,6 +1295,33 @@ def verify_actor_weights_changing_comprehensive(model, full_snapshot):
         if len(non_lora_changed) > 5:
             colored_print("Unfrozen Param", f"...and {len(non_lora_changed) - 5} more", Colors.RED)
 
+def apply_model_specific_patches(model, model_type):
+    """Apply compatibility patches for specific models.
+    
+    Args:
+        model: The model to patch
+        model_type: The type of model being used
+        
+    Returns:
+        model: The patched model
+    """
+    if model_type == "phi":
+        # Apply Phi-specific patches
+        colored_print("Model Patches", "Applying Phi model compatibility patches", Colors.YELLOW)
+        
+        # Patch DynamicCache for Phi models
+        try:
+            from transformers.cache_utils import DynamicCache
+            
+            # Add get_max_length if it doesn't exist
+            if not hasattr(DynamicCache, "get_max_length"):
+                colored_print("Patching", "Adding get_max_length method to DynamicCache", Colors.YELLOW)
+                DynamicCache.get_max_length = DynamicCache.get_seq_length
+        except (ImportError, AttributeError):
+            colored_print("Warning", "Failed to apply Phi model patch, generation may fail", Colors.RED)
+    
+    return model
+
 def create_peft_model_with_adapter(base_model, peft_config):
     """Create a PEFT model with a properly initialized adapter using PEFT's standard API.
     
@@ -1207,4 +1363,50 @@ def create_peft_model_with_adapter(base_model, peft_config):
         colored_print("Troubleshooting", "This is expected for a newly initialized adapter and will be fixed during training", Colors.YELLOW)
     
     return model
+
+def test_tokenization_for_model(model_name, phrases=None):
+    """Test tokenization of specific phrases for a model.
+    
+    This is useful for debugging and verifying token IDs across model variants.
+    
+    Args:
+        model_name: HuggingFace model name to load tokenizer for
+        phrases: List of phrases to tokenize (defaults to common ones)
+        
+    Returns:
+        Dictionary of phrase -> token IDs mappings
+    """
+    # Set default phrases including answer patterns for different models
+    if phrases is None:
+        phrases = [
+            "Answer:",
+            " Answer:",
+            "answer:",
+            " answer:",
+            "Answer: ",
+            "The answer is",
+        ]
+    
+    # Load tokenizer with trust_remote_code for models that need it
+    trust_remote_code = "phi" in model_name or "gemma" in model_name
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name, 
+        padding_side="left",
+        trust_remote_code=trust_remote_code
+    )
+    
+    # Set pad token if needed
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    
+    # Tokenize each phrase and print results
+    results = {}
+    print(f"\nTokenization test for {model_name}:")
+    for phrase in phrases:
+        tokens = tokenizer.encode(phrase, add_special_tokens=False)
+        results[phrase] = tokens
+        token_strings = [tokenizer.decode([t]) for t in tokens]
+        print(f"{phrase!r}: {tokens} -> {token_strings}")
+    
+    return results
 

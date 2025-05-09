@@ -69,7 +69,7 @@ def find_answer_start_position(input_ids, model_type):
             & (input_ids[1:] == 29901)  # ":"
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
-    elif model_type == "gemma-3":
+    elif model_type in ["gemma-3", "gemma-3-small"]:
         # For Gemma-3, we need to handle multiple potential tokens for "Answer"
         # followed by colon token (236787)
         matching_indices = (
@@ -259,7 +259,6 @@ class TrainingState:
     batch_index: int
     previous_normalized_rewards: List[float]
     previous_advantages: List[float]
-    grad_accum_count: int
 
     # Models and optimization
     actor_model: nn.Module
@@ -303,7 +302,6 @@ class TrainingState:
             batch_index=start_batch,
             previous_normalized_rewards=prev_rewards,
             previous_advantages=prev_advantages,
-            grad_accum_count=0,
             actor_model=actor_model,
             critic_model=critic_model,
             actor_optimizer=actor_optimizer,
@@ -316,7 +314,7 @@ class TrainingState:
 
 
 def generate_reasoning_and_kl(
-    state: TrainingState, questions: List[str]
+    state: TrainingState, questions: List[str], calculate_kl: bool = True
 ) -> ReasoningOutput:
     """Generate reasoning from both models and calculate KL divergence.
     
@@ -326,6 +324,7 @@ def generate_reasoning_and_kl(
     Args:
         state: Current training state
         questions: List of input questions
+        calculate_kl: Whether to calculate KL divergence (if False, will return zeros)
     
     Returns:
         ReasoningOutput: Contains generated reasoning and associated metrics
@@ -393,41 +392,50 @@ def generate_reasoning_and_kl(
             q_r_tokens = None
             critic_reasoning = None
 
-    # Get logits from both models on actor's reasoning
-    q_R_actor_logits = (
-        state.actor_model(q_R_tokens).logits / state.hyperparameters["temperature"]
-    )
-    q_R_critic_logits = (
-        state.critic_model(q_R_tokens).logits / state.hyperparameters["temperature"]
-    )
-
-    # Calculate log probabilities and KL
-    R_actor_logprobs = q_R_actor_logits[
-        :, -state.hyperparameters["cot_length"] - 1 : -1, :
-    ].log_softmax(dim=-1)
-    R_critic_logprobs = q_R_critic_logits[
-        :, -state.hyperparameters["cot_length"] - 1 : -1, :
-    ].log_softmax(dim=-1)
-
-    R_mean_actor_logprobs = (
-        R_actor_logprobs.gather(
-            2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
+    # Only compute the KL if we need it (kl_penalty is not None, or if we want to track it)
+    if calculate_kl:
+        # Get logits from both models on actor's reasoning
+        q_R_actor_logits = (
+            state.actor_model(q_R_tokens).logits / state.hyperparameters["temperature"]
         )
-        .squeeze(-1)
-        .mean(dim=1)
-    )
-
-    R_mean_critic_logprobs = (
-        R_critic_logprobs.gather(
-            2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
+        q_R_critic_logits = (
+            state.critic_model(q_R_tokens).logits / state.hyperparameters["temperature"]
         )
-        .squeeze(-1)
-        .mean(dim=1)
-    )
 
-    kl = calculate_mean_kl(
-        q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"]
-    )
+        # Calculate log probabilities and KL
+        R_actor_logprobs = q_R_actor_logits[
+            :, -state.hyperparameters["cot_length"] - 1 : -1, :
+        ].log_softmax(dim=-1)
+        R_critic_logprobs = q_R_critic_logits[
+            :, -state.hyperparameters["cot_length"] - 1 : -1, :
+        ].log_softmax(dim=-1)
+
+        R_mean_actor_logprobs = (
+            R_actor_logprobs.gather(
+                2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
+            )
+            .squeeze(-1)
+            .mean(dim=1)
+        )
+
+        R_mean_critic_logprobs = (
+            R_critic_logprobs.gather(
+                2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
+            )
+            .squeeze(-1)
+            .mean(dim=1)
+        )
+
+        kl = calculate_mean_kl(
+            q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"]
+        )
+    else:
+        # Return zero tensors if we're not calculating KL
+        device = q_R_tokens.device
+        batch_size = len(q_R_tokens)
+        R_mean_actor_logprobs = torch.zeros(batch_size, device=device)
+        R_mean_critic_logprobs = torch.zeros(batch_size, device=device)
+        kl = torch.zeros(batch_size, device=device)
 
     # Decode actor reasoning text
     actor_reasoning = state.tokenizer.batch_decode(
@@ -921,7 +929,6 @@ class LogMetrics:
         cls,
         batch_data: BatchData,
         grad_norm: float,
-        grad_accum_count: int,
         previous_advantages: List[float],
         batch_size: int,
     ):
@@ -1133,8 +1140,14 @@ def log_batch_results(
     raw_mean_pg_loss = batch_data.metrics["pg_losses"].mean().item() if "pg_losses" in batch_data.metrics and len(batch_data.metrics["pg_losses"]) > 0 else float('nan')
     
     # KL values
-    first_kl_to_log = metrics.first_weighted_kl if metrics.first_weighted_kl is not None else metrics.first_kl
-    kl_to_log = metrics.weighted_kl if metrics.weighted_kl is not None else metrics.kl
+    if metrics.weighted_kl is not None and state.hyperparameters.get("kl_penalty", 0) != 0:
+        # Use weighted KL only if penalty is non-zero
+        first_kl_to_log = metrics.first_weighted_kl 
+        kl_to_log = metrics.weighted_kl
+    else:
+        # Use raw KL if penalty is zero or None
+        first_kl_to_log = metrics.first_kl
+        kl_to_log = metrics.kl
     
     # Helper function to format values concisely
     def fmt(val):
@@ -1191,7 +1204,7 @@ def log_batch_results(
             "Actor Answer Log Probs": float(metrics.actor_answer_logprobs),
             "Critic Answer Log Probs": float(metrics.critic_answer_logprobs),
             "KL": float(kl_to_log),
-            "KL Type": "Weighted KL" if metrics.weighted_kl is not None else "KL",
+            "KL Type": "Raw KL" if kl_to_log == metrics.kl else "Weighted KL",
             "PPO Ratio": (
                 float(metrics.ppo_ratio) if metrics.ppo_ratio is not None else None
             ),
@@ -1217,7 +1230,7 @@ def log_batch_results(
             "First Actor Answer Log Probs": float(metrics.first_actor_answer_logprobs),
             "First Critic Answer Log Probs": float(metrics.first_critic_answer_logprobs),
             "First KL": float(first_kl_to_log),
-            "First KL Type": "First Weighted KL" if metrics.first_weighted_kl is not None else "First KL",
+            "First KL Type": "Raw KL" if first_kl_to_log == metrics.first_kl else "Weighted KL",
             "First Advantage": safe_float(metrics.first_advantage),
             "First Normalized Reward": float(metrics.first_normalized_reward),
             
@@ -1570,8 +1583,12 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
     """
     questions, answers = zip(*qa_batch)
 
+    # Determine if we need to calculate KL
+    kl_penalty = state.hyperparameters.get("kl_penalty", None)
+    calculate_kl = kl_penalty is not None
+
     # Generate reasoning from both models and compute KL
-    reasoning_output = generate_reasoning_and_kl(state, questions)
+    reasoning_output = generate_reasoning_and_kl(state, questions, calculate_kl=calculate_kl)
 
     # Calculate advantages
     advantage_output = calculate_advantages(
@@ -1620,8 +1637,7 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
         if batch_data.training_mask is not None
         else len(batch_data.losses)
     )
-    state.grad_accum_count += num_active
-
+    
     # Log information about active examples
     if batch_data.training_mask is not None:
         total_examples = len(batch_data.training_mask)
@@ -1629,7 +1645,7 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
         colored_print(
             "EI Active:", 
             f"{num_active}/{total_examples} examples ({active_fraction:.1%}) above threshold",
-            Colors.BOLD if active_fraction < 0.1 else Colors.CYAN  # Highlight in bold red if < 10%
+            Colors.BOLD if active_fraction < 0.1 else Colors.CYAN  # Highlight in bold if < 10%
         )
     else:
         # Explicitly log when not using EI
@@ -1639,6 +1655,7 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
             Colors.GREEN
         )
 
+    grad_norm = 0
     if num_active > 0:
         # Calculate mean loss over active examples instead of sum
         # This ensures consistent loss values regardless of how many examples pass the threshold
@@ -1652,22 +1669,15 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
         ).sum() / num_active  # Use mean instead of sum
         loss.backward()
 
-    if state.grad_accum_count > 0:
-        grad_norm = (
-            get_grad_norm(state.actor_model.parameters()) / state.grad_accum_count
-        )
-    else:
-        grad_norm = 0
-
-    if state.grad_accum_count >= state.hyperparameters["gradient_accumulation_steps"]:
-        for p in state.actor_model.parameters():
-            if p.grad is not None:
-                p.grad.data.div_(state.grad_accum_count)
-
+        # Calculate gradient norm before optimization step
+        grad_norm = get_grad_norm(state.actor_model.parameters())
+        
+        # Apply gradient clipping
         clip_grad_norm_(state.actor_model.parameters(), 1.0)
+        
+        # Take optimizer step immediately (no gradient accumulation)
         state.actor_optimizer.step()
         state.actor_optimizer.zero_grad()
-        state.grad_accum_count = 0
 
     return grad_norm
 
@@ -1758,7 +1768,6 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             metrics = LogMetrics.from_batch(
                 batch_data,
                 grad_norm,
-                state.grad_accum_count,
                 state.previous_advantages,
                 state.hyperparameters["batch_size"],
             )
@@ -1803,7 +1812,6 @@ class TrainingConfig:
     temperature: float
     question_length: int
     target_length: int
-    gradient_accumulation_steps: int
     kl_penalty: Optional[float]
     batch_size: int
     normalize_loss: bool
@@ -1836,7 +1844,6 @@ class TrainingConfig:
             temperature=args.temperature,
             question_length=args.question_length,
             target_length=args.target_length,
-            gradient_accumulation_steps=args.gradient_accumulation_steps,
             kl_penalty=args.kl_penalty,
             batch_size=args.batch_size,
             normalize_loss=args.normalize_loss,
@@ -1885,7 +1892,7 @@ if __name__ == "__main__":
         "--model_type",
         type=str,
         default="llama",
-        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4", "gemma-3"],
+        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4", "gemma-3", "gemma-3-small"],
         help="Model type (default: llama)",
     )
     parser.add_argument("--resume", action="store_true")
@@ -1901,7 +1908,6 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--question_length", type=int, default=50)
     parser.add_argument("--target_length", type=int, default=50)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--kl_penalty", type=float, default=0.1)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument(

@@ -36,7 +36,6 @@ def sample_hyperparameters():
         
         # Training configuration
         "batch_size": 6,
-        "gradient_accumulation_steps": 8,
         "num_batches": 10000,
         "normalize_loss": True,
         
@@ -68,7 +67,6 @@ def training_state(model_setup, sample_hyperparameters):
         batch_index=0,
         previous_normalized_rewards=[],
         previous_advantages=[],
-        grad_accum_count=0,
         actor_model=model,
         critic_model=frozen_model,
         actor_optimizer=bitsandbytes.optim.AdamW8bit(
@@ -362,8 +360,7 @@ def test_get_default_hyperparameters():
         "temperature": 0.7,
         "question_length": 500,
         "target_length": 500,
-        "ei_threshold": None,
-        "gradient_accumulation_steps": 8
+        "ei_threshold": None
     }
     
     params = get_default_hyperparameters(**default_params)
