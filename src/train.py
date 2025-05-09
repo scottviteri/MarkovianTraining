@@ -315,258 +315,42 @@ class TrainingState:
         )
 
 
-def generate_reasoning_parallel_and_kl(
+def generate_reasoning_and_kl(
     state: TrainingState, questions: List[str]
 ) -> ReasoningOutput:
-    """Generate multiple reasoning paths per question in parallel and calculate KL divergence.
+    """Generate reasoning from both models and calculate KL divergence.
     
-    This implements the parallel sampling part of GRPO (Group-Relative Policy Optimization)
-    where multiple samples are generated for each input, and advantages are calculated
-    relative to the mean reward within each group.
+    This unified implementation handles both standard and parallel (GRPO) generation.
+    In parallel mode, it generates multiple reasoning paths for each input question.
     
     Args:
         state: Current training state
         questions: List of input questions
     
     Returns:
-        ReasoningOutput: Contains generated reasoning and associated metrics,
-                        with sample_groups field indicating which group each sample belongs to
+        ReasoningOutput: Contains generated reasoning and associated metrics
     """
     parallel_samples = state.hyperparameters.get("parallel_samples", 1)
-    if parallel_samples <= 1:
-        # Instead of calling generate_reasoning_and_kl (which would create circular reference),
-        # implement the non-parallel logic directly
-        # Create prompts for each question
-        prompts = [
-            construct_prompts(
-                question=q,
-                hyperparameters=state.hyperparameters,
-            )
-            for q in questions
-        ]
-
-        # Tokenize inputs
-        tokenized_inputs = state.tokenizer(
-            prompts,
-            padding=True,
-            return_tensors="pt",
-        ).to(state.device)
-
-        # Generate reasoning tokens from both models
-        with torch.no_grad():
-            # Actor (unfrozen) generates reasoning
-            q_R_tokens = state.actor_model.generate(
-                tokenized_inputs.input_ids,
-                attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=state.hyperparameters["cot_length"],
-                min_new_tokens=state.hyperparameters["cot_length"],
-                do_sample=True,
-                temperature=state.hyperparameters["temperature"],
-                pad_token_id=state.tokenizer.pad_token_id,
-            )
-            
-            # Only generate critic reasoning if we're normalizing loss
-            if state.hyperparameters.get("normalize_loss", True):
-                # Critic (frozen) generates reasoning
-                q_r_tokens = state.critic_model.generate(
-                    tokenized_inputs.input_ids,
-                    attention_mask=tokenized_inputs.attention_mask,
-                    max_new_tokens=state.hyperparameters["cot_length"],
-                    min_new_tokens=state.hyperparameters["cot_length"],
-                    do_sample=False,
-                    pad_token_id=state.tokenizer.pad_token_id,
-                )
-                # Decode critic reasoning text
-                critic_reasoning = state.tokenizer.batch_decode(
-                    q_r_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
-                )
-            else:
-                # Skip critic reasoning generation when not normalizing
-                q_r_tokens = None
-                critic_reasoning = None
-
-        # Get logits from both models on actor's reasoning
-        q_R_actor_logits = (
-            state.actor_model(q_R_tokens).logits / state.hyperparameters["temperature"]
-        )
-        q_R_critic_logits = (
-            state.critic_model(q_R_tokens).logits / state.hyperparameters["temperature"]
-        )
-
-        # Calculate log probabilities and KL
-        R_actor_logprobs = q_R_actor_logits[
-            :, -state.hyperparameters["cot_length"] - 1 : -1, :
-        ].log_softmax(dim=-1)
-        R_critic_logprobs = q_R_critic_logits[
-            :, -state.hyperparameters["cot_length"] - 1 : -1, :
-        ].log_softmax(dim=-1)
-
-        R_mean_actor_logprobs = (
-            R_actor_logprobs.gather(
-                2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
-            )
-            .squeeze(-1)
-            .mean(dim=1)
-        )
-
-        R_mean_critic_logprobs = (
-            R_critic_logprobs.gather(
-                2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
-            )
-            .squeeze(-1)
-            .mean(dim=1)
-        )
-
-        kl = calculate_mean_kl(
-            q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"]
-        )
-
-        # Decode actor reasoning text
-        actor_reasoning = state.tokenizer.batch_decode(
-            q_R_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
-        )
-
-        return ReasoningOutput(
-            actor_reasoning=actor_reasoning,
-            critic_reasoning=critic_reasoning,
-            R_mean_actor_logprobs=R_mean_actor_logprobs,
-            R_mean_critic_logprobs=R_mean_critic_logprobs,
-            kl=kl,
-        )
+    is_parallel = parallel_samples > 1
     
-    # Repeat each question parallel_samples times
-    expanded_questions = []
-    for q in questions:
-        expanded_questions.extend([q] * parallel_samples)
+    # In parallel mode, repeat each question multiple times
+    if is_parallel:
+        # Repeat each question parallel_samples times
+        expanded_questions = []
+        for q in questions:
+            expanded_questions.extend([q] * parallel_samples)
+        questions_to_use = expanded_questions
+    else:
+        # Standard mode - use questions as-is
+        questions_to_use = questions
     
-    # Create prompts for each expanded question
-    prompts = [
-        construct_prompts(
-            question=q,
-            hyperparameters=state.hyperparameters,
-        )
-        for q in expanded_questions
-    ]
-
-    # Tokenize inputs
-    tokenized_inputs = state.tokenizer(
-        prompts,
-        padding=True,
-        return_tensors="pt",
-    ).to(state.device)
-
-    # Generate reasoning tokens from both models
-    with torch.no_grad():
-        # Actor (unfrozen) generates reasoning
-        q_R_tokens = state.actor_model.generate(
-            tokenized_inputs.input_ids,
-            attention_mask=tokenized_inputs.attention_mask,
-            max_new_tokens=state.hyperparameters["cot_length"],
-            min_new_tokens=state.hyperparameters["cot_length"],
-            do_sample=True,
-            temperature=state.hyperparameters["temperature"],
-            pad_token_id=state.tokenizer.pad_token_id,
-        )
-        
-        # Only generate critic reasoning if we're normalizing loss
-        if state.hyperparameters.get("normalize_loss", True):
-            # Critic (frozen) generates reasoning
-            q_r_tokens = state.critic_model.generate(
-                tokenized_inputs.input_ids,
-                attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=state.hyperparameters["cot_length"],
-                min_new_tokens=state.hyperparameters["cot_length"],
-                do_sample=False,
-                pad_token_id=state.tokenizer.pad_token_id,
-            )
-            # Decode critic reasoning text
-            critic_reasoning = state.tokenizer.batch_decode(
-                q_r_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
-            )
-        else:
-            # Skip critic reasoning generation when not normalizing
-            q_r_tokens = None
-            critic_reasoning = None
-
-    # Get logits from both models on actor's reasoning
-    q_R_actor_logits = (
-        state.actor_model(q_R_tokens).logits / state.hyperparameters["temperature"]
-    )
-    q_R_critic_logits = (
-        state.critic_model(q_R_tokens).logits / state.hyperparameters["temperature"]
-    )
-
-    # Calculate log probabilities and KL
-    R_actor_logprobs = q_R_actor_logits[
-        :, -state.hyperparameters["cot_length"] - 1 : -1, :
-    ].log_softmax(dim=-1)
-    R_critic_logprobs = q_R_critic_logits[
-        :, -state.hyperparameters["cot_length"] - 1 : -1, :
-    ].log_softmax(dim=-1)
-
-    R_mean_actor_logprobs = (
-        R_actor_logprobs.gather(
-            2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
-        )
-        .squeeze(-1)
-        .mean(dim=1)
-    )
-
-    R_mean_critic_logprobs = (
-        R_critic_logprobs.gather(
-            2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
-        )
-        .squeeze(-1)
-        .mean(dim=1)
-    )
-
-    kl = calculate_mean_kl(
-        q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"]
-    )
-
-    # Decode actor reasoning text
-    actor_reasoning = state.tokenizer.batch_decode(
-        q_R_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
-    )
-    
-    # Create sample groups tensor - reshape flat tensors into [num_questions, parallel_samples]
-    batch_size = len(questions)
-    
-    # Reshape the flat tensors into [batch_size, parallel_samples]
-    R_mean_actor_logprobs = R_mean_actor_logprobs.reshape(batch_size, parallel_samples)
-    R_mean_critic_logprobs = R_mean_critic_logprobs.reshape(batch_size, parallel_samples)
-    kl = kl.reshape(batch_size, parallel_samples)
-    
-    # Create sample_groups as a list for backward compatibility
-    sample_groups = []
-    for i in range(batch_size):
-        sample_groups.extend([i] * parallel_samples)
-
-    return ReasoningOutput(
-        actor_reasoning=actor_reasoning,
-        critic_reasoning=critic_reasoning,
-        R_mean_actor_logprobs=R_mean_actor_logprobs.reshape(-1),  # Flatten for compatibility
-        R_mean_critic_logprobs=R_mean_critic_logprobs.reshape(-1),  # Flatten for compatibility
-        kl=kl.reshape(-1),  # Flatten for compatibility
-        sample_groups=sample_groups,  # Track group membership
-    )
-
-
-def generate_reasoning_and_kl(
-    state: TrainingState, questions: List[str]
-) -> ReasoningOutput:
-    """Generate reasoning from both models and calculate KL divergence."""
-    # If parallel sampling is enabled, use the parallel version
-    if state.hyperparameters.get("parallel_samples", 1) > 1:
-        return generate_reasoning_parallel_and_kl(state, questions)
-        
     # Create prompts for each question
     prompts = [
         construct_prompts(
             question=q,
             hyperparameters=state.hyperparameters,
         )
-        for q in questions
+        for q in questions_to_use
     ]
 
     # Tokenize inputs
@@ -649,6 +433,28 @@ def generate_reasoning_and_kl(
     actor_reasoning = state.tokenizer.batch_decode(
         q_R_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
     )
+    
+    # For parallel mode, track sample groups and reshape tensors
+    if is_parallel:
+        # Create sample groups tensor - reshape flat tensors into [num_questions, parallel_samples]
+        batch_size = len(questions)
+        
+        # Reshape the flat tensors into [batch_size, parallel_samples]
+        R_mean_actor_logprobs_reshaped = R_mean_actor_logprobs.reshape(batch_size, parallel_samples)
+        R_mean_critic_logprobs_reshaped = R_mean_critic_logprobs.reshape(batch_size, parallel_samples)
+        kl_reshaped = kl.reshape(batch_size, parallel_samples)
+        
+        # Create sample_groups as a list for backward compatibility
+        sample_groups = []
+        for i in range(batch_size):
+            sample_groups.extend([i] * parallel_samples)
+            
+        # Flatten the reshaped tensors
+        R_mean_actor_logprobs = R_mean_actor_logprobs_reshaped.reshape(-1)
+        R_mean_critic_logprobs = R_mean_critic_logprobs_reshaped.reshape(-1)
+        kl = kl_reshaped.reshape(-1)
+    else:
+        sample_groups = None
 
     return ReasoningOutput(
         actor_reasoning=actor_reasoning,
@@ -656,6 +462,7 @@ def generate_reasoning_and_kl(
         R_mean_actor_logprobs=R_mean_actor_logprobs,
         R_mean_critic_logprobs=R_mean_critic_logprobs,
         kl=kl,
+        sample_groups=sample_groups,
     )
 
 
