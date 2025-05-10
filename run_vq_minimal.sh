@@ -4,17 +4,17 @@
 # Default parameters
 MODEL="gpt2"
 LEARNING_RATE=1e-4
-BATCH_SIZE=32
-NUM_BATCHES=10000
+BATCH_SIZE=700
+NUM_BATCHES=100000
 VQ_REASON_LENGTH=25
 VQ_SAMPLING_TEMP=0 # Sampling temperature (higher = more diversity)
-PRINT_FREQUENCY=20
+PRINT_FREQUENCY=100
 LORA_RANK=0
 TASK_TYPE="wiki_continuation"
-CONTEXT_LENGTH=25
-MAX_TARGET_LENGTH=25
+CONTEXT_LENGTH=50
+MAX_TARGET_LENGTH=50
 #FILLER_TOKEN="<REASONING>"
-DEBUG_REPEAT=true # Changed default for clarity
+DEBUG_REPEAT=false # Changed default for clarity
 DEBUG_GRADIENTS=false
 CODEBOOK_LOSS_WEIGHT=0 # New default parameter for codebook loss weight
 COPY_TEST=0  # Run copy test every N batches (0 to disable)
@@ -23,11 +23,12 @@ VQ_USE_ARGMAX=true # New default parameter for using argmax instead of sampling
 ACTOR_HIDDEN_LAYER_INDEX=-1 
 NORMALIZE_REASONING_STATES=true # New: Default to normalizing actor reasoning states
 VQ_SEQUENTIAL_GENERATION=false # New default: sequential generation for VQ
-CHECKPOINT_FREQUENCY=0 # Default checkpoint frequency
-PLOT_FREQUENCY=30 # New: Default plot frequency
-DEBUG_ANSWER_IS_QUESTION=true # New: Default for answer is question debug
+CHECKPOINT_FREQUENCY=1000 # Default checkpoint frequency
+PLOT_FREQUENCY=200 # New: Default plot frequency
+DEBUG_ANSWER_IS_QUESTION=false # New: Default for answer is question debug
 USE_GUMBEL_SOFTMAX_VQ=true # New: Use Gumbel-Softmax VQ
-GUMBEL_TAU=1.0              # New: Tau for Gumbel-Softmax
+GUMBEL_TAU=2.0              # New: Tau for Gumbel-Softmax
+USE_8BIT_ADAM=true           # New: Use 8-bit Adam
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -74,10 +75,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --max_target_length)
       MAX_TARGET_LENGTH="$2"
-      shift 2
-      ;;
-    --filler_token)
-      FILLER_TOKEN="$2"
       shift 2
       ;;
     --debug_repeat)
@@ -148,6 +145,10 @@ while [[ $# -gt 0 ]]; do
       GUMBEL_TAU="$2"
       shift 2
       ;;
+    --use_8bit_adam) # New flag for 8-bit Adam
+      USE_8BIT_ADAM=true
+      shift 1
+      ;;
     *)
       echo "Unknown option: $1"
       exit 1
@@ -184,6 +185,7 @@ echo "$_PLOT_FREQ_MSG"
 echo "  LoRA rank: $LORA_RANK"
 echo "  Use Gumbel-Softmax VQ: $USE_GUMBEL_SOFTMAX_VQ"
 echo "  Gumbel Tau: $GUMBEL_TAU"
+echo "  Use 8-bit Adam: $USE_8BIT_ADAM"
 
 _DEBUG_AIQ_MSG="  Debug Answer is Question: $DEBUG_ANSWER_IS_QUESTION"
 echo "$_DEBUG_AIQ_MSG"
@@ -235,6 +237,11 @@ if [ "$USE_GUMBEL_SOFTMAX_VQ" = true ]; then
   USE_GUMBEL_SOFTMAX_VQ_FLAG="--use_gumbel_softmax_vq"
 fi
 
+USE_8BIT_ADAM_FLAG=""
+if [ "$USE_8BIT_ADAM" = true ]; then
+  USE_8BIT_ADAM_FLAG="--use_8bit_adam"
+fi
+
 # Run the training script
 python3 vq_training_minimal.py \
   --model_name "$MODEL" \
@@ -262,6 +269,7 @@ python3 vq_training_minimal.py \
   $VQ_SEQUENTIAL_FLAG \
   $DEBUG_ANSWER_IS_QUESTION_FLAG \
   $USE_GUMBEL_SOFTMAX_VQ_FLAG \
-  --gumbel_tau "$GUMBEL_TAU"
+  --gumbel_tau "$GUMBEL_TAU" \
+  $USE_8BIT_ADAM_FLAG
 
 echo "Training complete!" 

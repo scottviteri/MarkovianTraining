@@ -37,6 +37,7 @@ class VQConfig:
     batch_size: int = 8
     num_batches: int = 1000
     debug_repeat_datapoint: bool = False  # Whether to use the same datapoint repeatedly
+    use_8bit_adam: bool = False       # New: Use 8-bit Adam optimizer
     
     # VQ specific parameters
     vq_reason_length: int = 50
@@ -47,7 +48,7 @@ class VQConfig:
     vq_sequential_generation: bool = False # Generate VQ reasoning tokens sequentially (autoregressively)
     use_gumbel_softmax_vq: bool = False # New: Use Gumbel-Softmax for VQ
     gumbel_tau: float = 1.0           # New: Temperature for Gumbel-Softmax
-    placeholder_token_id: Optional[int] = None  # Token ID to use as placeholder, defaults to EOS if None
+    placeholder_token_id: Optional[int] = None  # Token ID to use as placeholder, defaults in setup_model
     debug_answer_is_question: bool = False # New: If true, answer is a copy of the question
     
     # Logging parameters
@@ -144,15 +145,18 @@ def setup_model(config: VQConfig) -> VQTrainingState:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
-    # Set placeholder_token_id to EOS if not specified
-    if config.placeholder_token_id is None:
-        if tokenizer.eos_token_id is None:
-            raise ValueError("Tokenizer does not have an EOS token, and no placeholder_token_id was specified.")
-        config.placeholder_token_id = tokenizer.eos_token_id
-        print(f"Using EOS token (ID: {config.placeholder_token_id}) as placeholder for VQ reasoning.")
+    # Set placeholder_token_id based on UNK token, then EOS, then error.
+    if config.placeholder_token_id is None: # Only set if not already provided
+        if tokenizer.unk_token_id is not None:
+            config.placeholder_token_id = tokenizer.unk_token_id
+            print(f"Using UNK token (ID: {config.placeholder_token_id}) as default placeholder for VQ reasoning.")
+        elif tokenizer.eos_token_id is not None:
+            config.placeholder_token_id = tokenizer.eos_token_id
+            print(f"Warning: UNK token not found. Using EOS token (ID: {config.placeholder_token_id}) as placeholder for VQ reasoning.")
+        else:
+            raise ValueError("Tokenizer does not have an UNK or EOS token, and no placeholder_token_id was specified.")
     else:
         # If a specific placeholder_token_id was provided in config, verify it exists.
-        # This path is less common if relying on default EOS behavior.
         try:
             _ = tokenizer.decode([config.placeholder_token_id]) # Simple check if ID is valid
             print(f"Using pre-configured placeholder_token_id: {config.placeholder_token_id}")
@@ -206,10 +210,18 @@ def setup_model(config: VQConfig) -> VQTrainingState:
     print(f"Token embeddings shape: {token_embeddings.shape}")
     
     # Setup optimizer - ONLY for actor model parameters
-    optimizer = torch.optim.AdamW(
-        [p for p in actor_model.parameters() if p.requires_grad], 
-        lr=config.learning_rate
-    )
+    trainable_params = [p for p in actor_model.parameters() if p.requires_grad]
+    if config.use_8bit_adam:
+        try:
+            import bitsandbytes as bnb
+            optimizer = bnb.optim.AdamW8bit(trainable_params, lr=config.learning_rate)
+            print("Using 8-bit AdamW optimizer from bitsandbytes.")
+        except ImportError:
+            print("Warning: bitsandbytes not found. Falling back to standard AdamW optimizer.")
+            optimizer = torch.optim.AdamW(trainable_params, lr=config.learning_rate)
+    else:
+        optimizer = torch.optim.AdamW(trainable_params, lr=config.learning_rate)
+        print("Using standard AdamW optimizer.")
     
     # Create output directory
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1215,6 +1227,7 @@ def plot_metrics(metrics_history: Dict[str, List[float]], save_path: str, config
         title_parts.append(f"GTau: {config.gumbel_tau:.2f}")
     else:
         title_parts.append(f"GumbelVQ: F")
+    title_parts.append(f"8bitAdam: {'T' if config.use_8bit_adam else 'F'}")
     
     param_summary = ", ".join(title_parts)
     
@@ -1531,6 +1544,8 @@ def main():
                        help="Number of batches to train")
     parser.add_argument("--debug_repeat_datapoint", action="store_true",
                        help="Debug by training on the same datapoint repeatedly")
+    parser.add_argument("--use_8bit_adam", action="store_true",
+                        help="Use 8-bit Adam optimizer (requires bitsandbytes).")
     
     # VQ specific parameters
     parser.add_argument("--vq_reason_length", type=int, default=50,
@@ -1603,6 +1618,7 @@ def main():
         batch_size=args.batch_size,
         num_batches=args.num_batches,
         debug_repeat_datapoint=args.debug_repeat_datapoint,
+        use_8bit_adam=args.use_8bit_adam, # New
         vq_reason_length=args.vq_reason_length,
         vq_sampling_temp=args.vq_sampling_temp,
         vq_use_argmax=args.vq_use_argmax,
