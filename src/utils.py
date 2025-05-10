@@ -1,7 +1,7 @@
 import os
 from typing import Dict, Any, Optional
 from peft import LoraConfig, get_peft_model, PeftModel
-from constants import (
+from src.constants import (
     MISTRAL_INST_START, 
     MISTRAL_INST_END, 
     PHI4_IM_START, 
@@ -9,7 +9,8 @@ from constants import (
     PHI4_IM_END,
     GEMMA3_BOS,
     GEMMA3_START_OF_TURN,
-    GEMMA3_END_OF_TURN
+    GEMMA3_END_OF_TURN,
+    EI_SKIP_INITIAL
 )
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
@@ -18,7 +19,6 @@ import hashlib
 import re
 import glob
 import numpy as np
-from constants import EI_SKIP_INITIAL
 from datasets import load_dataset
 from tqdm import tqdm
 
@@ -1233,7 +1233,7 @@ def verify_actor_weights_changing_comprehensive(model, full_snapshot):
     
     # Get current model state
     current_hash = get_model_hash(model)
-    
+        
     if current_hash == full_snapshot:
         colored_print("Actor Weight Check", "ERROR: Actor weights did not change at all from initial snapshot!", Colors.RED)
         colored_print("Debug Info", f"Initial hash: {full_snapshot[:16]}...", Colors.RED)
@@ -1339,11 +1339,11 @@ def create_peft_model_with_adapter(base_model, peft_config):
         adapter_name = "default"
         if adapter_name in model.peft_config:
             colored_print("Note", f"Adapter '{adapter_name}' already exists, will use it", Colors.YELLOW)
-        else:
-            colored_print("Adding Adapter", f"Creating adapter '{adapter_name}'", Colors.BLUE)
-            model.add_adapter(adapter_name, peft_config)
     else:
+        # Define adapter_name first
+        adapter_name = "default"
         # Create a new PEFT model with the default adapter
+        colored_print("Creating New Model", f"Creating PEFT model with adapter '{adapter_name}'", Colors.BLUE)
         model = get_peft_model(base_model, peft_config)
     
     # Ensure there's an active adapter

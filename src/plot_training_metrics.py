@@ -166,7 +166,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             # Add critic log probs only if normalization is enabled and they're available
             if normalize_loss and has_critic_probs:
                 base_metrics.append(
-                    ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)")
+                ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)")
                 )
         
         # Add Contains Answer metric for GSM8K

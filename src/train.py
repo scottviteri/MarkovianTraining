@@ -12,13 +12,12 @@ import os
 from typing import Union, List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass, asdict
 from tqdm import tqdm
-from evaluate_gsm8k import evaluate_model, save_results
+from .evaluate_gsm8k import evaluate_model, save_results
 from peft import PeftModel
-from utils import (
+from .utils import (
     Colors,
     colored_print,
     construct_prompts,
-    find_latest_result,
     print_batch_delimiter,
     print_grpo_overview,
     get_model_hash,
@@ -374,15 +373,15 @@ def generate_reasoning_and_kl(
         
         # Only generate critic reasoning if we're normalizing loss
         if state.hyperparameters.get("normalize_loss", True):
-            # Critic (frozen) generates reasoning
-            q_r_tokens = state.critic_model.generate(
-                tokenized_inputs.input_ids,
-                attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=state.hyperparameters["cot_length"],
-                min_new_tokens=state.hyperparameters["cot_length"],
-                do_sample=False,
-                pad_token_id=state.tokenizer.pad_token_id,
-            )
+        # Critic (frozen) generates reasoning
+        q_r_tokens = state.critic_model.generate(
+            tokenized_inputs.input_ids,
+            attention_mask=tokenized_inputs.attention_mask,
+            max_new_tokens=state.hyperparameters["cot_length"],
+            min_new_tokens=state.hyperparameters["cot_length"],
+            do_sample=False,
+            pad_token_id=state.tokenizer.pad_token_id,
+        )
             # Decode critic reasoning text
             critic_reasoning = state.tokenizer.batch_decode(
                 q_r_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
@@ -394,41 +393,41 @@ def generate_reasoning_and_kl(
 
     # Only compute the KL if we need it (kl_penalty is not None, or if we want to track it)
     if calculate_kl:
-        # Get logits from both models on actor's reasoning
-        q_R_actor_logits = (
-            state.actor_model(q_R_tokens).logits / state.hyperparameters["temperature"]
-        )
-        q_R_critic_logits = (
-            state.critic_model(q_R_tokens).logits / state.hyperparameters["temperature"]
-        )
+    # Get logits from both models on actor's reasoning
+    q_R_actor_logits = (
+        state.actor_model(q_R_tokens).logits / state.hyperparameters["temperature"]
+    )
+    q_R_critic_logits = (
+        state.critic_model(q_R_tokens).logits / state.hyperparameters["temperature"]
+    )
 
-        # Calculate log probabilities and KL
-        R_actor_logprobs = q_R_actor_logits[
-            :, -state.hyperparameters["cot_length"] - 1 : -1, :
-        ].log_softmax(dim=-1)
-        R_critic_logprobs = q_R_critic_logits[
-            :, -state.hyperparameters["cot_length"] - 1 : -1, :
-        ].log_softmax(dim=-1)
+    # Calculate log probabilities and KL
+    R_actor_logprobs = q_R_actor_logits[
+        :, -state.hyperparameters["cot_length"] - 1 : -1, :
+    ].log_softmax(dim=-1)
+    R_critic_logprobs = q_R_critic_logits[
+        :, -state.hyperparameters["cot_length"] - 1 : -1, :
+    ].log_softmax(dim=-1)
 
-        R_mean_actor_logprobs = (
-            R_actor_logprobs.gather(
-                2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
-            )
-            .squeeze(-1)
-            .mean(dim=1)
+    R_mean_actor_logprobs = (
+        R_actor_logprobs.gather(
+            2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
         )
+        .squeeze(-1)
+        .mean(dim=1)
+    )
 
-        R_mean_critic_logprobs = (
-            R_critic_logprobs.gather(
-                2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
-            )
-            .squeeze(-1)
-            .mean(dim=1)
+    R_mean_critic_logprobs = (
+        R_critic_logprobs.gather(
+            2, q_R_tokens[:, -state.hyperparameters["cot_length"] :].unsqueeze(-1)
         )
+        .squeeze(-1)
+        .mean(dim=1)
+    )
 
-        kl = calculate_mean_kl(
-            q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"]
-        )
+    kl = calculate_mean_kl(
+        q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"]
+    )
     else:
         # Return zero tensors if we're not calculating KL
         device = q_R_tokens.device
@@ -512,7 +511,7 @@ def calculate_advantages(
         answers_to_use = answers
         questions_to_use = questions
         sample_groups = None
-    
+
     # Calculate log probs of answers given actor's reasoning
     actor_answer_logprobs, extracted_answers = calculate_answer_log_probs(
         state.critic_model,
@@ -528,23 +527,23 @@ def calculate_advantages(
     # Calculate normalized rewards
     if state.hyperparameters.get("normalize_loss", True):
         # Only calculate critic answer log probs if we're normalizing loss
-        critic_answer_logprobs, _ = calculate_answer_log_probs(
-            state.critic_model,
-            state.tokenizer,
-            state.device,
+    critic_answer_logprobs, _ = calculate_answer_log_probs(
+        state.critic_model,
+        state.tokenizer,
+        state.device,
             questions_to_use,
-            reasoning_output.critic_reasoning,
+        reasoning_output.critic_reasoning,
             answers_to_use,
-            state.hyperparameters,
-            include_question=False,  # Default behavior: don't include question in prompt
-        )
+        state.hyperparameters,
+        include_question=False,  # Default behavior: don't include question in prompt
+    )
         # Normalize reward as improvement over baseline
         normalized_rewards = actor_answer_logprobs - critic_answer_logprobs
     else:
         # Skip critic calculation when not normalizing
         critic_answer_logprobs = torch.zeros_like(actor_answer_logprobs)  # Placeholder
         normalized_rewards = actor_answer_logprobs
-    
+
     # Calculate advantages - different approaches for parallel vs standard
     if is_parallel:
         # GRPO advantage calculation - group-relative advantages
@@ -564,15 +563,15 @@ def calculate_advantages(
         group_means_flat = group_means.squeeze(1)  # [batch_size]
     else:
         # Standard advantage calculation
-        # Calculate advantage using exponential moving average baseline
-        r = state.hyperparameters.get("r", None)
-        if len(state.previous_normalized_rewards) > 0 and r is not None:
-            value = exponential_weighted_average(state.previous_normalized_rewards, r)
-            advantages = normalized_rewards - value
-        else:
-            advantages = normalized_rewards
+    # Calculate advantage using exponential moving average baseline
+    r = state.hyperparameters.get("r", None)
+    if len(state.previous_normalized_rewards) > 0 and r is not None:
+        value = exponential_weighted_average(state.previous_normalized_rewards, r)
+        advantages = normalized_rewards - value
+    else:
+        advantages = normalized_rewards
         group_means_flat = None
-    
+
     return AdvantageOutput(
         advantages=advantages,
         normalized_rewards=normalized_rewards,
@@ -1637,7 +1636,7 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
         if batch_data.training_mask is not None
         else len(batch_data.losses)
     )
-    
+
     # Log information about active examples
     if batch_data.training_mask is not None:
         total_examples = len(batch_data.training_mask)
