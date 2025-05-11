@@ -66,6 +66,9 @@ class VQConfig:
     max_target_length: int = 100  # Maximum length of target (for wiki)
     cot_length: int = 50
     
+    # Resume parameters
+    resume_from_checkpoint: Optional[str] = None # Path to checkpoint directory to resume from
+
     # Testing parameters
     copy_test_frequency: int = 0  # Run copy test every n batches, 0 to disable
     copy_test_samples: int = 3  # Number of samples to use for copy test
@@ -104,49 +107,183 @@ class VQTrainingState:
 # -----------------------------------------
 
 def setup_model(config: VQConfig) -> VQTrainingState:
-    """Initialize the actor and critic models, tokenizer, and training state"""
+    """Initialize the actor and critic models, tokenizer, and training state, handling resume logic."""
     print(f"Loading model: {config.model_name}")
     
-    # Load actor and critic models
-    actor_model = AutoModelForCausalLM.from_pretrained(
-        config.model_name, 
-        device_map="auto", 
-        torch_dtype=torch.bfloat16
-    )
-    
-    # Load separate critic model with same weights but no gradient
-    critic_model = AutoModelForCausalLM.from_pretrained(
-        config.model_name, 
-        device_map="auto",
-        torch_dtype=torch.bfloat16
-    )
-    
-    # IMPORTANT: Explicitly enable gradients for actor model parameters
+    start_batch_index = 0
+    loaded_metrics_history = None
+    output_dir = None
+    log_file = None
+    original_config_loaded = None
+
+    if config.resume_from_checkpoint:
+        print(f"Attempting to resume from checkpoint: {config.resume_from_checkpoint}")
+        if not os.path.isdir(config.resume_from_checkpoint):
+            raise FileNotFoundError(f"Resume checkpoint directory not found: {config.resume_from_checkpoint}")
+
+        output_dir = os.path.dirname(config.resume_from_checkpoint)
+        log_file = os.path.join(output_dir, "log.jsonl")
+        print(f"Resuming in directory: {output_dir}")
+
+        if not os.path.exists(log_file):
+            raise FileNotFoundError(f"Original log file not found for resuming: {log_file}")
+
+        original_config_data = None
+        with open(log_file, "r") as f_orig_config:
+            try:
+                original_config_data_str = f_orig_config.readline()
+                original_config_data = json.loads(original_config_data_str)
+                original_config_loaded = VQConfig(**original_config_data)
+                print("Loaded original config for resume.")
+            except json.JSONDecodeError:
+                raise ValueError(f"Could not parse original config from {log_file}")
+        
+        current_config_dict = asdict(config)
+        original_config_dict = asdict(original_config_loaded)
+        sticky_params = [
+            'model_name', 'lora_rank', 'lora_alpha', 'vq_reason_length', 
+            'actor_hidden_layer_index', 'normalize_reasoning_states', 
+            'vq_sequential_generation', 'use_gumbel_softmax_vq', 'gumbel_tau',
+            'placeholder_token_id', 'task_type', 'context_length', 
+            'max_target_length', 'cot_length', 'codebook_loss_weight',
+            # 'weights_check_frequency' could also be sticky
+        ]
+        default_vq_config = VQConfig()
+        for param_name in sticky_params:
+            if getattr(config, param_name) == getattr(default_vq_config, param_name) and \
+               hasattr(original_config_loaded, param_name) and \
+               getattr(original_config_loaded, param_name) is not None:
+                print(f"Resuming with original config value for '{param_name}': {getattr(original_config_loaded, param_name)}")
+                setattr(config, param_name, getattr(original_config_loaded, param_name))
+
+        # Determine truncation_point_batch_idx and current_start_batch_index (for the training loop)
+        checkpoint_name = os.path.basename(config.resume_from_checkpoint)
+        parsed_batch_from_cp_name = -1
+        is_regular_checkpoint_format = False
+        current_start_batch_index = 0 # Default to 0, will be updated
+        truncation_point_batch_idx = -1 # Batch index to truncate logs/metrics AT (inclusive)
+
+        if checkpoint_name.startswith("checkpoint_"):
+            try:
+                parsed_batch_from_cp_name = int(checkpoint_name.split("_")[-1])
+                is_regular_checkpoint_format = True
+            except ValueError:
+                print(f"Warning: Could not parse batch number from checkpoint name '{checkpoint_name}'.")
+                pass # Fall through to other methods or log-based determination
+
+        # Read all metric log entries to determine max batch in log and for filtering
+        all_metric_log_entries_tuples = [] # List of (dict_entry, raw_line_string)
+        max_batch_in_log = -1
+        raw_log_lines_for_rewrite = []
+
+        if os.path.exists(log_file):
+            with open(log_file, "r") as f_log_read:
+                temp_lines = f_log_read.readlines()
+                if len(temp_lines) > 0:
+                    raw_log_lines_for_rewrite.append(temp_lines[0]) # Keep config line for rewrite
+                    if len(temp_lines) > 1:
+                        for line_str in temp_lines[1:]:
+                            if line_str.strip():
+                                try:
+                                    entry_dict = json.loads(line_str)
+                                    if 'batch' in entry_dict:
+                                        all_metric_log_entries_tuples.append((entry_dict, line_str))
+                                        max_batch_in_log = max(max_batch_in_log, entry_dict['batch'])
+                                except json.JSONDecodeError:
+                                    print(f"Warning: Skipping unparseable log line during scan: {line_str.strip()}")
+        
+        if is_regular_checkpoint_format:
+            truncation_point_batch_idx = parsed_batch_from_cp_name
+            current_start_batch_index = parsed_batch_from_cp_name + 1
+            print(f"Resuming from checkpoint_{parsed_batch_from_cp_name}. Log/metrics up to batch {truncation_point_batch_idx}. Next batch: {current_start_batch_index}.")
+        elif checkpoint_name == "interrupted_checkpoint":
+            truncation_point_batch_idx = max_batch_in_log
+            current_start_batch_index = max_batch_in_log + 1
+            print(f"Resuming from interrupted_checkpoint. Log/metrics up to batch {truncation_point_batch_idx} (last logged). Next batch: {current_start_batch_index}.")
+        else:
+            # Fallback for unusually named checkpoint dir, or if path is to run dir itself.
+            print(f"Warning: Checkpoint path {config.resume_from_checkpoint} is not 'checkpoint_N' or 'interrupted_checkpoint'. Using log to determine resume point.")
+            truncation_point_batch_idx = max_batch_in_log
+            current_start_batch_index = max_batch_in_log + 1 # If max_batch_in_log is -1, this becomes 0.
+            print(f"Using log: Log/metrics up to batch {truncation_point_batch_idx}. Next batch: {current_start_batch_index}.")
+
+        if truncation_point_batch_idx == -1 and current_start_batch_index == 0:
+            print("Warning: No valid checkpoint batch num or log entries found. Starting as if from scratch in this directory, or there might be issues.")
+
+        # Load metrics history, TRUNCATING based on truncation_point_batch_idx
+        loaded_metrics_history = {k: [] for k in VQTrainingState().metrics_history.keys()} # Ensure all keys exist
+        for entry_dict, _ in all_metric_log_entries_tuples:
+            if entry_dict['batch'] <= truncation_point_batch_idx:
+                for key_metric in loaded_metrics_history.keys():
+                    if key_metric in entry_dict:
+                        loaded_metrics_history[key_metric].append(entry_dict[key_metric])
+        print(f"Loaded metrics history with {len(loaded_metrics_history['total_loss'])} entries (up to batch {truncation_point_batch_idx}).")
+
+        # Rewrite the log file to be truncated
+        with open(log_file, "w") as f_rewrite:
+            f_rewrite.write(json.dumps(original_config_data) + "\n") # Write original config (already loaded)
+            for entry_dict, raw_line_str in all_metric_log_entries_tuples:
+                if entry_dict['batch'] <= truncation_point_batch_idx:
+                    f_rewrite.write(raw_line_str) # Write filtered raw lines
+        print(f"Log file {log_file} has been rewritten, truncated to batch {truncation_point_batch_idx}.")
+        
+        # Load actor model from checkpoint path (config.resume_from_checkpoint)
+        actor_model = AutoModelForCausalLM.from_pretrained(
+            config.resume_from_checkpoint, 
+            device_map="auto",
+            torch_dtype=torch.bfloat16
+        )
+        # Critic is reloaded based on the (potentially original) config.model_name
+        critic_model = AutoModelForCausalLM.from_pretrained(
+            config.model_name, 
+            device_map="auto",
+            torch_dtype=torch.bfloat16
+        )
+        tokenizer = AutoTokenizer.from_pretrained(config.resume_from_checkpoint) # Load tokenizer from checkpoint path
+        start_batch_index = current_start_batch_index # Use the determined start index for the VQState
+
+    else: # Not resuming, standard setup
+        # Create output directory
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = os.path.join("results", config.task_type, timestamp)
+        os.makedirs(output_dir, exist_ok=True)
+        log_file = os.path.join(output_dir, "log.jsonl")
+        
+        # Initialize log file with config
+        with open(log_file, "w") as f:
+            json.dump(asdict(config), f)
+            f.write("\\n")
+        
+        actor_model = AutoModelForCausalLM.from_pretrained(
+            config.model_name, 
+            device_map="auto", 
+            torch_dtype=torch.bfloat16
+        )
+        critic_model = AutoModelForCausalLM.from_pretrained(
+            config.model_name, 
+            device_map="auto",
+            torch_dtype=torch.bfloat16
+        )
+        tokenizer = AutoTokenizer.from_pretrained(config.model_name)
+
+    # Common setup for both resume and new run
     for param in actor_model.parameters():
         param.requires_grad = True
-    
-    # IMPORTANT: Freeze critic model parameters to prevent any updates
     for param in critic_model.parameters():
         param.requires_grad = False
-    
+        
     print("Actor model parameters enabled for gradients")
     print("Critic model parameters frozen - no gradients will be computed")
     
-    # Verify parameter separation
     actor_trainable = sum(p.numel() for p in actor_model.parameters() if p.requires_grad)
     critic_trainable = sum(p.numel() for p in critic_model.parameters() if p.requires_grad)
     print(f"Actor trainable parameters: {actor_trainable}")
     print(f"Critic trainable parameters: {critic_trainable} (should be 0)")
     
-    # Load tokenizer (shared between actor and critic)
-    tokenizer = AutoTokenizer.from_pretrained(config.model_name)
-    
-    # Add padding token if needed
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
-    # Set placeholder_token_id based on UNK token, then EOS, then error.
-    if config.placeholder_token_id is None: # Only set if not already provided
+    if config.placeholder_token_id is None:
         if tokenizer.unk_token_id is not None:
             config.placeholder_token_id = tokenizer.unk_token_id
             print(f"Using UNK token (ID: {config.placeholder_token_id}) as default placeholder for VQ reasoning.")
@@ -156,120 +293,99 @@ def setup_model(config: VQConfig) -> VQTrainingState:
         else:
             raise ValueError("Tokenizer does not have an UNK or EOS token, and no placeholder_token_id was specified.")
     else:
-        # If a specific placeholder_token_id was provided in config, verify it exists.
         try:
-            _ = tokenizer.decode([config.placeholder_token_id]) # Simple check if ID is valid
+            _ = tokenizer.decode([config.placeholder_token_id])
             print(f"Using pre-configured placeholder_token_id: {config.placeholder_token_id}")
         except Exception as e:
             raise ValueError(f"Provided placeholder_token_id {config.placeholder_token_id} is not valid for the tokenizer: {e}")
     
-    # Setup LoRA if needed - ONLY FOR ACTOR MODEL
-    if config.lora_rank > 0:
+    if config.lora_rank > 0: # Apply LoRA if resuming and original had LoRA, or if new run with LoRA
         try:
             from peft import LoraConfig, get_peft_model
-            
-            # Determine target modules based on model type
             if "gpt2" in config.model_name.lower():
                 lora_target_modules = ["c_attn", "c_proj"]
-                print(f"Using LoRA target modules for GPT-2: {lora_target_modules}")
             else:
                 lora_target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
-                print(f"Using default LoRA target modules: {lora_target_modules}")
             
             lora_config = LoraConfig(
-                r=config.lora_rank,
-                lora_alpha=config.lora_alpha,
-                target_modules=lora_target_modules,
-                bias="none",
-                task_type="CAUSAL_LM",
+                r=config.lora_rank, lora_alpha=config.lora_alpha,
+                target_modules=lora_target_modules, bias="none", task_type="CAUSAL_LM"
             )
-            
-            print(f"Applying LoRA with rank={config.lora_rank}, alpha={config.lora_alpha} to ACTOR model only")
-            actor_model = get_peft_model(actor_model, lora_config)
+            # If model is already a PeftModel (e.g. from resume_from_checkpoint),
+            # this call might error or behave unexpectedly.
+            # However, from_pretrained on a PEFT checkpoint should load it as a PeftModel directly.
+            # We only call get_peft_model if it's NOT already a PeftModel.
+            if not hasattr(actor_model, 'print_trainable_parameters'): # Heuristic: check if it's already PEFT
+                 print(f"Applying LoRA with rank={config.lora_rank}, alpha={config.lora_alpha} to ACTOR model.")
+                 actor_model = get_peft_model(actor_model, lora_config)
+            else:
+                print("Actor model appears to be already PEFT-enabled (likely from checkpoint). Skipping get_peft_model.")
             actor_model.print_trainable_parameters()
         except ImportError:
             print("PEFT library not found. Running without LoRA.")
+            if config.lora_rank > 0 : # if lora was specified but peft not found
+                print("WARNING: LoRA rank > 0 but PEFT not found. LoRA will not be applied.")
     
-    # Get device
     device = next(actor_model.parameters()).device
     print(f"Using device: {device}")
     
-    # Get token embeddings (from actor model)
     token_embeddings = None
     if hasattr(actor_model, 'get_input_embeddings'):
         token_embeddings = actor_model.get_input_embeddings().weight
-    else:
-        # Try common locations
-        if hasattr(actor_model, 'transformer') and hasattr(actor_model.transformer, 'wte'):
+    else: # Common for PEFT models, need to get from base_model
+        if hasattr(actor_model, 'base_model') and hasattr(actor_model.base_model, 'get_input_embeddings'):
+             token_embeddings = actor_model.base_model.get_input_embeddings().weight
+        elif hasattr(actor_model, 'transformer') and hasattr(actor_model.transformer, 'wte'): # GPT-2 specific
             token_embeddings = actor_model.transformer.wte.weight
-        elif hasattr(actor_model, 'model') and hasattr(actor_model.model, 'embed_tokens'):
+        elif hasattr(actor_model, 'model') and hasattr(actor_model.model, 'embed_tokens'): # Other models
             token_embeddings = actor_model.model.embed_tokens.weight
         else:
-            raise ValueError("Could not locate token embeddings in model")
-    
+            raise ValueError("Could not locate token embeddings in model or its base_model")
+
     print(f"Token embeddings shape: {token_embeddings.shape}")
     
-    # Setup optimizer - ONLY for actor model parameters
     trainable_params = [p for p in actor_model.parameters() if p.requires_grad]
+    optimizer_class = torch.optim.AdamW
     if config.use_8bit_adam:
         try:
             import bitsandbytes as bnb
-            optimizer = bnb.optim.AdamW8bit(trainable_params, lr=config.learning_rate)
+            optimizer_class = bnb.optim.AdamW8bit
             print("Using 8-bit AdamW optimizer from bitsandbytes.")
         except ImportError:
             print("Warning: bitsandbytes not found. Falling back to standard AdamW optimizer.")
-            optimizer = torch.optim.AdamW(trainable_params, lr=config.learning_rate)
-    else:
-        optimizer = torch.optim.AdamW(trainable_params, lr=config.learning_rate)
-        print("Using standard AdamW optimizer.")
     
-    # Create output directory
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_dir = os.path.join("results", config.task_type, timestamp)
-    os.makedirs(output_dir, exist_ok=True)
-    log_file = os.path.join(output_dir, "log.jsonl")
+    # Ensure learning_rate from potentially updated config is used for new/resumed optimizer
+    current_lr = config.learning_rate 
+    optimizer = optimizer_class(trainable_params, lr=current_lr)
+    print(f"Using optimizer: {optimizer.__class__.__name__} with LR: {current_lr}")
+
+    if config.resume_from_checkpoint:
+        optimizer_path = os.path.join(config.resume_from_checkpoint, "optimizer.pt")
+        if os.path.exists(optimizer_path):
+            try:
+                optimizer.load_state_dict(torch.load(optimizer_path, map_location=device))
+                print(f"Loaded optimizer state from {optimizer_path}")
+            except Exception as e:
+                print(f"Warning: Could not load optimizer state from {optimizer_path}: {e}. Initializing new optimizer state.")
+        else:
+            print(f"Warning: Optimizer state file not found at {optimizer_path}. Initializing new optimizer state.")
     
-    # Initialize log file with config
-    with open(log_file, "w") as f:
-        json.dump(asdict(config), f)
-        f.write("\n")
-    
-    # Initialize metrics history
-    metrics_history = {
-        'total_loss': [],
-        'answer_logprobs': [],
-        'grad_norm': [],
-        'quantization_error_norm': [],
-        'codebook_loss': [] # Add new metric for codebook loss
+    metrics_history_to_use = loaded_metrics_history if loaded_metrics_history is not None else {
+        'total_loss': [], 'answer_logprobs': [], 'grad_norm': [],
+        'quantization_error_norm': [], 'codebook_loss': []
     }
     
-    # Create training state
     state = VQTrainingState(
-        actor_model=actor_model,
-        critic_model=critic_model,
-        tokenizer=tokenizer,
-        optimizer=optimizer,
-        device=device,
-        token_embeddings=token_embeddings,
-        batch_index=0,
-        metrics_history=metrics_history,
-        output_dir=output_dir,
-        log_file=log_file,
-        config=config,
+        actor_model=actor_model, critic_model=critic_model, tokenizer=tokenizer,
+        optimizer=optimizer, device=device, token_embeddings=token_embeddings,
+        batch_index=start_batch_index, # This is the key for resuming batch count
+        metrics_history=metrics_history_to_use,
+        output_dir=output_dir, log_file=log_file, config=config,
     )
     
-    # Calculate and assign answer_suffix_len to the created state object
     answer_suffix_str = " Answer: "
-    # Ensure tokenizer is on the correct device if it matters for this dummy tokenization.
-    # .to(state.device) might be needed if tokenizer isn't already device-aware from model loading.
     temp_tokenized_suffix = tokenizer(answer_suffix_str, add_special_tokens=False, return_tensors="pt")
-    state.answer_suffix_len = temp_tokenized_suffix.input_ids.shape[1] # Assign to state.answer_suffix_len
-    # print(f"DEBUG setup_model: Determined answer_suffix_len: {state.answer_suffix_len} for suffix '{answer_suffix_str}'") # Commented out
-    
-    # print(f"DEBUG setup_model: actor_model.config.vocab_size: {state.actor_model.config.vocab_size}") # Commented out
-    # print(f"DEBUG setup_model: token_embeddings.shape[0]: {state.token_embeddings.shape[0]}") # Commented out
-    # print(f"DEBUG setup_model: len(tokenizer): {len(state.tokenizer)}") # Commented out
-    # print(f"DEBUG setup_model: tokenizer.vocab_size: {state.tokenizer.vocab_size}") # Commented out
+    state.answer_suffix_len = temp_tokenized_suffix.input_ids.shape[1]
     
     return state
 
@@ -1487,7 +1603,10 @@ def train_vq(config: VQConfig):
                 # Save only the actor model (what we're training)
                 state.actor_model.save_pretrained(checkpoint_path)
                 state.tokenizer.save_pretrained(checkpoint_path)
-                print(f"\nSaved checkpoint at batch {batch_idx} to {checkpoint_path}")
+                # Save optimizer state
+                optimizer_save_path = os.path.join(checkpoint_path, "optimizer.pt")
+                torch.save(state.optimizer.state_dict(), optimizer_save_path)
+                print(f"\nSaved checkpoint at batch {batch_idx} to {checkpoint_path} (incl. optimizer)")
         
         # Save final metrics plot
         final_plot_path = os.path.join(state.output_dir, "metrics.png")
@@ -1515,7 +1634,10 @@ def train_vq(config: VQConfig):
         # Save only the actor model (what we're training)
         state.actor_model.save_pretrained(interrupt_path)
         state.tokenizer.save_pretrained(interrupt_path)
-        print(f"Saved interrupted state to {interrupt_path}")
+        # Save optimizer state on interrupt
+        optimizer_interrupt_save_path = os.path.join(interrupt_path, "optimizer.pt")
+        torch.save(state.optimizer.state_dict(), optimizer_interrupt_save_path)
+        print(f"Saved interrupted state to {interrupt_path} (incl. optimizer)")
 
 
 # -----------------------------------------
@@ -1604,6 +1726,10 @@ def main():
     parser.add_argument("--debug_answer_is_question", action="store_true", 
                         help="Set answer to be identical to the question for debugging.")
     
+    # Add resume argument
+    parser.add_argument("--resume_from_checkpoint", type=str, default=None,
+                       help="Path to a checkpoint directory (e.g., results/task/timestamp/checkpoint_N) to resume training from.")
+    
     # Parse arguments
     args = parser.parse_args()
     
@@ -1641,6 +1767,10 @@ def main():
         debug_answer_is_question=args.debug_answer_is_question # New arg
     )
     
+    # Update config with resume path if provided
+    if args.resume_from_checkpoint:
+        config.resume_from_checkpoint = args.resume_from_checkpoint
+
     # Start training
     train_vq(config)
 
