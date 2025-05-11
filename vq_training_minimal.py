@@ -211,7 +211,7 @@ def setup_model(config: VQConfig) -> VQTrainingState:
             print("Warning: No valid checkpoint batch num or log entries found. Starting as if from scratch in this directory, or there might be issues.")
 
         # Load metrics history, TRUNCATING based on truncation_point_batch_idx
-        loaded_metrics_history = {k: [] for k in VQTrainingState().metrics_history.keys()} # Ensure all keys exist
+        loaded_metrics_history = {key: [] for key in ['total_loss', 'answer_logprobs', 'grad_norm', 'quantization_error_norm', 'codebook_loss']} # Ensure all keys exist
         for entry_dict, _ in all_metric_log_entries_tuples:
             if entry_dict['batch'] <= truncation_point_batch_idx:
                 for key_metric in loaded_metrics_history.keys():
@@ -222,9 +222,16 @@ def setup_model(config: VQConfig) -> VQTrainingState:
         # Rewrite the log file to be truncated
         with open(log_file, "w") as f_rewrite:
             f_rewrite.write(json.dumps(original_config_data) + "\n") # Write original config (already loaded)
+            
+            lines_to_write_for_metrics = []
             for entry_dict, raw_line_str in all_metric_log_entries_tuples:
                 if entry_dict['batch'] <= truncation_point_batch_idx:
-                    f_rewrite.write(raw_line_str) # Write filtered raw lines
+                    # Ensure raw_line_str ends with a newline if it contains data
+                    current_line_to_write = raw_line_str.strip() # Remove existing newlines/whitespace
+                    if current_line_to_write: # Only add newline if there's content
+                        lines_to_write_for_metrics.append(current_line_to_write + '\n')
+            
+            f_rewrite.writelines(lines_to_write_for_metrics)
         print(f"Log file {log_file} has been rewritten, truncated to batch {truncation_point_batch_idx}.")
         
         # Load actor model from checkpoint path (config.resume_from_checkpoint)
@@ -1441,6 +1448,8 @@ def train_vq(config: VQConfig):
     # print("DEBUG: Entered train_vq() function.") # Commented out
     state = setup_model(config)
     
+    # print(f"DEBUG train_vq: state.batch_index immediately after setup_model: {state.batch_index}") # DEBUG PRINT REMOVED
+
     print(f"\nStarting VQ training with:")
     print(f"  Model: {config.model_name}")
     print(f"  Task: {config.task_type}")
@@ -1465,8 +1474,13 @@ def train_vq(config: VQConfig):
     
     # Main training loop
     try:
-        for batch_idx in range(config.num_batches):
-            state.batch_index = batch_idx
+        # first_loop_batch_idx = -1 # DEBUG PRINT REMOVED
+        for batch_idx in range(state.batch_index, config.num_batches): # Start from state.batch_index
+            # if first_loop_batch_idx == -1: # DEBUG PRINT REMOVED
+            #     first_loop_batch_idx = batch_idx # DEBUG PRINT REMOVED
+            #     print(f"DEBUG train_vq: First value of batch_idx in loop: {first_loop_batch_idx}") # DEBUG PRINT REMOVED
+
+            state.batch_index = batch_idx # Keep state.batch_index updated for internal use (e.g. process_batch verbose)
             
             # Whether to print verbose output for this batch
             verbose = (batch_idx % config.print_frequency) == 0
