@@ -377,11 +377,63 @@ def setup_model(config: VQConfig) -> VQTrainingState:
         else:
             print(f"Warning: Optimizer state file not found at {optimizer_path}. Initializing new optimizer state.")
     
-    metrics_history_to_use = loaded_metrics_history if loaded_metrics_history is not None else {
-        'total_loss': [], 'answer_logprobs': [], 'grad_norm': [],
-        'quantization_error_norm': [], 'codebook_loss': []
-    }
-    
+    # Initialize metrics_history for both new and resumed runs
+    # Ensure all_metric_keys are present.
+    metrics_history_to_use = {key: [] for key in ['total_loss', 'answer_logprobs', 'grad_norm', 'quantization_error_norm', 'codebook_loss']}
+
+    if loaded_metrics_history is not None: # Resuming run
+        # Reconstruct metrics history, including batch_indices and padding with NaN
+        # First, determine the maximum length based on any of the loaded metric lists (they should be same length)
+        max_len_loaded = 0
+        if loaded_metrics_history and loaded_metrics_history.get('total_loss'): # Check if any metrics were loaded
+            max_len_loaded = len(loaded_metrics_history['total_loss'])
+            
+        # Find all batch numbers that were part of the loaded history up to truncation_point_batch_idx
+        # This assumes 'batch' was always present in the logged entries that contributed to loaded_metrics_history
+        logged_batches_up_to_truncation = []
+        for entry_dict_scan, _ in all_metric_log_entries_tuples:
+            if entry_dict_scan['batch'] <= truncation_point_batch_idx:
+                if 'batch' in entry_dict_scan: # Ensure batch key exists
+                    logged_batches_up_to_truncation.append(entry_dict_scan['batch'])
+                else: # This case should ideally not happen if logs are consistent
+                    print(f"Warning: Log entry for batch around {truncation_point_batch_idx} missing 'batch' key. Cannot accurately get its batch index.")
+        
+        # Sort and unique batch numbers, in case of any disorder or duplicates in raw log before processing
+        # However, all_metric_log_entries_tuples should already be ordered by file read.
+        # The critical part is associating the correct batch index to each *position* in the loaded_metrics_history lists.
+        # This assumes that loaded_metrics_history['some_metric'][i] corresponds to the i-th valid log entry
+        # up to truncation_point_batch_idx.
+        
+        # We need to populate 'batch_indices' based on the 'batch' field from the *original log entries*
+        # that made it into loaded_metrics_history.
+        
+        temp_metrics_from_log = {key: [] for key in ['total_loss', 'answer_logprobs', 'grad_norm', 'quantization_error_norm', 'codebook_loss']}
+        processed_log_batches = [] # Store batch numbers from log to populate batch_indices
+
+        for entry_dict, _ in all_metric_log_entries_tuples:
+            if entry_dict['batch'] <= truncation_point_batch_idx:
+                if 'batch' not in entry_dict:
+                    # This should not happen if logs are well-formed, but good to be defensive
+                    print(f"Warning: Log entry around batch {truncation_point_batch_idx} is missing 'batch' key. Skipping this entry for historical data.")
+                    continue
+                
+                processed_log_batches.append(entry_dict['batch'])
+                
+                for key in ['total_loss', 'answer_logprobs', 'grad_norm', 'quantization_error_norm', 'codebook_loss']:
+                    if key == 'batch_indices': # Handled by processed_log_batches
+                        continue
+                    temp_metrics_from_log[key].append(entry_dict.get(key, float('nan')))
+        
+        metrics_history_to_use['batch_indices'] = processed_log_batches
+        for key in ['total_loss', 'answer_logprobs', 'grad_norm', 'quantization_error_norm', 'codebook_loss']:
+            if key != 'batch_indices':
+                metrics_history_to_use[key] = temp_metrics_from_log[key]
+        
+        print(f"Reconstructed metrics_history for resume. Found {len(metrics_history_to_use['batch_indices'])} historical batch entries.")
+        if metrics_history_to_use['batch_indices']:
+            print(f"  Historical batch range: {min(metrics_history_to_use['batch_indices'])} to {max(metrics_history_to_use['batch_indices'])}")
+
+
     state = VQTrainingState(
         actor_model=actor_model, critic_model=critic_model, tokenizer=tokenizer,
         optimizer=optimizer, device=device, token_embeddings=token_embeddings,
@@ -1287,6 +1339,11 @@ def plot_metrics(metrics_history: Dict[str, List[float]], save_path: str, config
     """Plot training metrics over time."""
     # Determine the number of metrics to plot that have data
     available_metrics = {k: v for k, v in metrics_history.items() if v and len(v) > 0}
+    
+    # Extract batch_indices for x-axis, and remove it from metrics to be plotted as y-axes
+    # .pop returns None if 'batch_indices' isn't in available_metrics or if its list is empty
+    x_coords = available_metrics.pop('batch_indices', None) 
+
     num_metrics_to_plot = len(available_metrics)
 
     if num_metrics_to_plot == 0:
@@ -1382,12 +1439,25 @@ def plot_metrics(metrics_history: Dict[str, List[float]], save_path: str, config
             print(f"Warning: More metrics ({len(metrics_to_display)}) than available subplots ({len(axs_flat)}). Some metrics will not be plotted.")
             break
         
-        config = plot_config[metric_key]
+        metric_plot_config = plot_config[metric_key] # Renamed to avoid conflict
         ax = axs_flat[plot_idx]
-        ax.plot(available_metrics[metric_key], config['color'])
-        ax.set_title(config['title'])
-        ax.set_xlabel('Batch')
-        ax.set_ylabel(config['ylabel'])
+        y_values = available_metrics[metric_key]
+
+        # Use actual batch numbers for x-axis if available and lengths match
+        if x_coords and len(x_coords) == len(y_values):
+            ax.plot(x_coords, y_values, metric_plot_config['color'])
+            ax.set_xlabel('Batch Number (from log)')
+        else:
+            if x_coords and len(x_coords) != len(y_values):
+                 print(f"Warning: Mismatch length between batch_indices ({len(x_coords)}) and metric {metric_key} ({len(y_values)}). Plotting against index.")
+            elif not x_coords:
+                 print(f"Warning: 'batch_indices' not found or empty. Plotting metric {metric_key} against index.")
+            ax.plot(y_values, metric_plot_config['color']) # Fallback to plotting against index
+            ax.set_xlabel('Batch Index (sequential)')
+
+        ax.set_title(metric_plot_config['title'])
+        # ax.set_xlabel('Batch') # X-label is set conditionally above
+        ax.set_ylabel(metric_plot_config['ylabel'])
         ax.grid(True)
         plot_idx += 1
     
@@ -1587,6 +1657,9 @@ def train_vq(config: VQConfig):
             state.metrics_history['grad_norm'].append(actor_grad_norm.item())
             state.metrics_history['quantization_error_norm'].append(batch_data['quantization_error_norm'])
             state.metrics_history['codebook_loss'].append(batch_data['codebook_loss_term'].item()) # Add codebook loss
+            # Also append the current batch_idx to batch_indices
+            state.metrics_history.setdefault('batch_indices', []).append(batch_idx)
+
             
             # Log metrics to file
             if verbose:
