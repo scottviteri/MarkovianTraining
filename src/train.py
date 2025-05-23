@@ -1,339 +1,40 @@
 import datetime
 import torch
 from torch import nn
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import LoraConfig, get_peft_model
 import bitsandbytes
 import random
 import numpy as np
 import json
-import copy
 from torch.nn.utils import clip_grad_norm_
 import argparse
-from datasets import load_dataset
 import re
 import os
-from constants import EI_SKIP_INITIAL
 from typing import Union, List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass, asdict
 from tqdm import tqdm
-from evaluate_gsm8k import evaluate_model, save_results
-from utils import (
+from .evaluate_gsm8k import evaluate_model, save_results
+from peft import PeftModel
+from .utils import (
     Colors,
     colored_print,
     construct_prompts,
-    find_latest_result,
+    print_batch_delimiter,
+    print_grpo_overview,
+    get_model_hash,
+    verify_all_frozen_weights,
+    verify_actor_weights_changing_comprehensive,
+    calculate_threshold,
+    find_latest_checkpoint,
+    generate_question_answer_batches,
+    load_gsm8k_dataset,
+    extract_answer,
+    load_mmlu_dataset,
+    load_model,
+    get_grad_norm,
 )
+import glob
+from datasets import load_dataset
 
-
-def print_batch_delimiter():
-    """Print a visually distinct line between batches"""
-    print("\n" + "=" * 80)
-
-
-def colored_print(
-    label: str, text: str, color: str = Colors.BLUE, inline: bool = False
-):
-    """Print text with colored label, optionally on same line."""
-    if inline:
-        print(f"\n{color}{label}{Colors.END} {text}", end="")
-    else:
-        print(f"\n{color}{label}{Colors.END}")
-        print(repr(text))
-
-
-def load_model(model_type="mistral", hyperparameters=None):
-    """Load either Mistral, Llama, GPT2, TinyStories, or Phi model based on parameter."""
-    if model_type == "mistral":
-        model_name = "mistralai/Mistral-7B-Instruct-v0.2"
-    elif model_type == "llama":
-        model_name = "meta-llama/Llama-3.1-8B-Instruct"
-    elif model_type == "gpt2":
-        model_name = "openai-community/gpt2"
-    elif model_type == "tinystories":
-        model_name = "roneneldan/TinyStories"
-    elif model_type == "phi":
-        model_name = "microsoft/Phi-3.5-mini-instruct"
-    else:
-        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', or 'phi'")
-
-    tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side="left")
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.pad_token_id = tokenizer.eos_token_id
-
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
-        trust_remote_code=model_type=="phi"  # Phi needs trust_remote_code=True
-    )
-
-    peft_config = LoraConfig(
-        task_type="CAUSAL_LM",
-        inference_mode=False,
-        r=8,
-        lora_alpha=16,
-        lora_dropout=0.1,
-        target_modules="all-linear",
-    )
-    model = get_peft_model(model, peft_config)
-    model.print_trainable_parameters()
-
-    # Create frozen copy
-    frozen_model = copy.deepcopy(model)
-    for param in frozen_model.parameters():
-        param.requires_grad = False
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-    frozen_model.to(device)
-
-    return model, frozen_model, tokenizer, device
-
-
-def calculate_threshold(previous_advantages, ei_std_multiplier):
-    """
-    Calculate threshold for expert iteration.
-
-    Args:
-        previous_advantages: List of previous advantage values
-        ei_std_multiplier: Number of standard deviations above mean for threshold
-
-    Returns:
-        float: Threshold value (inf if not enough previous advantages)
-    """
-    if len(previous_advantages) <= EI_SKIP_INITIAL:
-        return float("inf")
-
-    return np.mean(previous_advantages) + ei_std_multiplier * np.std(
-        previous_advantages
-    )
-
-
-def generate_arithmetic_pairs(task_type: str, num_examples: int = 1000):
-    """Lazily generate arithmetic QA pairs with shuffling within chunks."""
-    qa_pairs = []
-    for _ in range(num_examples):
-        if task_type == "arithmetic-negative":
-            # Generate numbers between -99 and 99, excluding 0
-            numbers = [random.randint(-99, 99) for _ in range(15)]
-            numbers = [n for n in numbers if n != 0]  # Remove any zeros
-
-            # Format each number, wrapping negatives in parentheses
-            formatted_numbers = []
-            for n in numbers:
-                if n < 0:
-                    formatted_numbers.append(f"({n})")
-                else:
-                    formatted_numbers.append(str(n))
-
-            question = " + ".join(formatted_numbers)
-            answer = str(sum(numbers))
-        else:  # regular arithmetic
-            numbers = [random.randint(1, 99) for _ in range(15)]
-            question = " + ".join(map(str, numbers))
-            answer = str(sum(numbers))
-        qa_pairs.append((question, answer))
-
-    random.shuffle(qa_pairs)
-    return qa_pairs
-
-
-def load_gsm8k_dataset(chunk_size: int = 1000, split: str = "train"):
-    """
-    Lazily load GSM8K dataset in chunks.
-    
-    Args:
-        chunk_size: Number of examples to yield at a time
-        split: Dataset split to use ("train" or "test")
-    """
-    ds = load_dataset("openai/gsm8k", "main")
-    questions = ds[split]["question"]
-    answers = list(map(lambda x: x[x.index("####") + 5 :], ds[split]["answer"]))
-    qa_pairs = list(zip(questions, answers))
-
-    for i in range(0, len(qa_pairs), chunk_size):
-        chunk = qa_pairs[i : i + chunk_size]
-        if split == "train":  # Only shuffle training data
-            random.shuffle(chunk)
-        yield from chunk
-
-
-def get_text_with_token_length(
-    text: str, desired_tokens: int, tokenizer
-) -> tuple[str, int]:
-    """
-    Binary search to find text that tokenizes to desired number of tokens.
-    Returns (text_chunk, actual_token_count) or (None, 0) if text is too short.
-    """
-    # Initial check
-    tokens = tokenizer(text, return_tensors="pt").input_ids[0]
-    if len(tokens) < desired_tokens:
-        return None, 0
-
-    # Binary search for correct length
-    left, right = 1, len(text)
-    best_text = None
-    best_count = 0
-
-    while left <= right:
-        mid = (left + right) // 2
-        chunk = text[:mid]
-        tokens = tokenizer(chunk, return_tensors="pt").input_ids[0]
-        token_count = len(tokens)
-
-        if token_count == desired_tokens:
-            return chunk, token_count
-        elif token_count < desired_tokens:
-            left = mid + 1
-            # Save this as best if it's closer than previous best
-            if abs(token_count - desired_tokens) < abs(best_count - desired_tokens):
-                best_text = chunk
-                best_count = token_count
-        else:
-            right = mid - 1
-            # Save this as best if it's closer than previous best
-            if abs(token_count - desired_tokens) < abs(best_count - desired_tokens):
-                best_text = chunk
-                best_count = token_count
-
-    return best_text, best_count
-
-
-def generate_question_answer_batches(
-    num_batches: int,
-    batch_size: int,
-    task_type: str,
-    tokenizer,
-    hyperparameters: dict = None,
-    chunk_size: int = 5000,
-):
-    """Generate batches of Q&A pairs lazily."""
-    if task_type == "gsm8k":
-        # Use load_gsm8k_dataset directly which already processes answers correctly
-        dataset_iter = load_gsm8k_dataset(chunk_size=chunk_size)
-        for batch_start in range(0, num_batches * batch_size, batch_size):
-            batch = []
-            for _ in range(batch_size):
-                try:
-                    qa_pair = next(dataset_iter)
-                    batch.append(qa_pair)
-                except StopIteration:
-                    # Reset iterator if we run out of data
-                    dataset_iter = load_gsm8k_dataset(chunk_size=chunk_size)
-                    qa_pair = next(dataset_iter)
-                    batch.append(qa_pair)
-            yield batch
-            
-    elif task_type in ["wiki_compression", "wiki_continuation"]:
-        print("Loading Wikipedia dataset...")
-        wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
-        article_idx = 0
-        articles_examined = 0
-        qa_pairs = []
-        
-        pbar = tqdm(total=chunk_size, desc="Collecting examples")
-        last_qa_pairs_len = 0
-
-        while len(qa_pairs) < chunk_size:
-            if article_idx >= len(wiki_dataset):
-                print("\nReached end of dataset!")
-                break
-            
-            article = wiki_dataset[article_idx]
-            article_idx += 1
-            articles_examined += 1
-            
-            text = article['text']
-            tokens = tokenizer(text, truncation=False, return_tensors="pt")
-            token_length = tokens.input_ids.size(1)
-            
-            # Calculate required total length based on task type
-            if "question_length" in hyperparameters and "target_length" in hyperparameters:
-                required_length = hyperparameters["question_length"] + hyperparameters["target_length"]
-            else:
-                required_length = hyperparameters.get("target_length", 0)
-            
-            if token_length < required_length:
-                continue
-            
-            if "question_length" in hyperparameters and "target_length" in hyperparameters:
-                # Get question chunk
-                question_chunk, actual_q_tokens = get_text_with_token_length(
-                    text, 
-                    hyperparameters["question_length"], 
-                    tokenizer
-                )
-                
-                if question_chunk is None:
-                    continue
-                
-                # Get remaining text after question chunk
-                remaining_text = text[len(question_chunk):]
-                
-                # Get target chunk from remaining text
-                target_chunk, actual_t_tokens = get_text_with_token_length(
-                    remaining_text,
-                    hyperparameters["target_length"],
-                    tokenizer
-                )
-                
-                if target_chunk is None:
-                    continue
-                    
-                qa_pairs.append((question_chunk, target_chunk))
-                
-            else:
-                # Single chunk mode (for base model analysis)
-                text_chunk, actual_tokens = get_text_with_token_length(
-                    text, 
-                    hyperparameters["target_length"], 
-                    tokenizer
-                )
-                
-                if text_chunk is None:
-                    continue
-                    
-                qa_pairs.append((text_chunk, ""))
-
-            # Update progress bar only when we've added new pairs
-            new_pairs = len(qa_pairs) - last_qa_pairs_len
-            if new_pairs > 0:
-                pbar.update(new_pairs)
-                last_qa_pairs_len = len(qa_pairs)
-
-        pbar.close()
-        print(f"\nFinished collecting examples. "
-              f"Examined {articles_examined} articles to find {len(qa_pairs)} valid examples.")
-
-        # Yield batches from collected pairs
-        for i in range(0, len(qa_pairs), batch_size):
-            batch = qa_pairs[i:i + batch_size]
-            yield batch
-
-
-def get_grad_norm(parameters):
-    total_norm = 0
-    for p in parameters:
-        if p.grad is not None:
-            param_norm = p.grad.data.norm(2)
-            total_norm += param_norm.item() ** 2
-    return total_norm**0.5
-
-
-def extract_answer(answer):
-    if "=" in answer:
-        answer = answer.split("=")[-1].strip()
-    answer = answer.replace(",", "")
-    try:
-        matches = re.findall(r"-?\d+", answer.strip())
-        if matches:
-            answer = int(matches[0])
-        else:
-            answer = "[invalid]"
-    except:
-        answer = "[invalid]"
-    return answer
 
 
 def find_answer_start_position(input_ids, model_type):
@@ -349,7 +50,7 @@ def find_answer_start_position(input_ids, model_type):
             )
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
-    elif model_type == "llama":
+    elif model_type in ["llama", "phi-4"]:  # phi-4 uses the same token IDs as llama for "Answer:"
         matching_indices = (
             ((input_ids[:-1] == 16533) | (input_ids[:-1] == 22559))
             & (input_ids[1:] == 25)
@@ -367,6 +68,31 @@ def find_answer_start_position(input_ids, model_type):
             & (input_ids[1:] == 29901)  # ":"
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
+    elif model_type in ["gemma-3", "gemma-3-small"]:
+        # For Gemma-3, we need to handle multiple potential tokens for "Answer"
+        # followed by colon token (236787)
+        matching_indices = (
+            (
+                (input_ids[:-1] == 25685)  # " Answer"
+                | (input_ids[:-1] == 7925)  # "Answer"
+                | (input_ids[:-1] == 14433)  # "answer"
+                | (input_ids[:-1] == 3890)  # " answer"
+            )
+            & (input_ids[1:] == 236787)  # ":"
+        ).nonzero(as_tuple=True)[0]
+        
+        if len(matching_indices) > 0:
+            pos = matching_indices[-1].item() + 2
+        else:
+            # Fallback in case the exact pattern isn't found
+            colored_print("Warning", "Could not find 'Answer:' in Gemma-3 output, using fallback position", Colors.YELLOW)
+            # Try to find a plausible position - the colon might be there
+            colon_indices = (input_ids == 236787).nonzero(as_tuple=True)[0]
+            if len(colon_indices) > 0:
+                pos = colon_indices[-1].item() + 1
+            else:
+                # Worst case: use the last 20% of tokens
+                pos = int(len(input_ids) * 0.8)
     else:
         raise ValueError("Unsupported model type")
     return pos
@@ -380,14 +106,19 @@ def calculate_answer_log_probs(
     reasoning,
     answers,
     hyperparameters,
+    include_question=False,
 ):
     """Calculate the log probabilities of the answers given the reasoning.
 
     Args:
         frozen_model: The critic model (frozen)
+        tokenizer: Tokenizer for the model
+        device: The device to run on
         questions: List of question strings
         reasoning: List of reasoning strings (from either actor or critic)
         answers: List of answer strings
+        hyperparameters: Dictionary of hyperparameters
+        include_question: Whether to include the question in the prompt (default: False)
 
     Returns:
         tuple: (
@@ -396,22 +127,23 @@ def calculate_answer_log_probs(
             extracted_answers      # Only for GSM8K: extracted numerical answers
         )
     """
-    # Create prompts with reasoning
+    # Create prompts with reasoning (may have <Redacted> instead of actual question when include_question=False)
     partial_prompts = [
         construct_prompts(
             question=q,
             hyperparameters=hyperparameters,
             reasoning=r,
+            include_question=include_question,
         )
         for q, r in zip(questions, reasoning)
     ]
 
     # Add answers to create full prompts
-    q_r_a_prompts = [x + y for x, y in zip(partial_prompts, answers)]
+    full_prompts = [x + y for x, y in zip(partial_prompts, answers)]
 
     # Tokenize full prompts
-    q_r_a_tokens = tokenizer(
-        q_r_a_prompts,
+    full_prompt_tokens = tokenizer(
+        full_prompts,
         padding=True,
         return_tensors="pt",
     ).to(device)
@@ -420,16 +152,16 @@ def calculate_answer_log_probs(
     extracted_generated_answers = None
     if hyperparameters["task_type"] == "gsm8k":
         # Tokenize partial prompts (without answers) for generation
-        q_r_tokens = tokenizer(partial_prompts, padding=True, return_tensors="pt").to(
+        partial_prompt_tokens = tokenizer(partial_prompts, padding=True, return_tensors="pt").to(
             device
         )
 
         # Generate answer tokens
         max_answer_length = 15
         with torch.no_grad():
-            q_r_a_generated = frozen_model.generate(
-                input_ids=q_r_tokens.input_ids,
-                attention_mask=q_r_tokens.attention_mask,
+            generated_outputs = frozen_model.generate(
+                input_ids=partial_prompt_tokens.input_ids,
+                attention_mask=partial_prompt_tokens.attention_mask,
                 max_new_tokens=max_answer_length,
                 do_sample=False,
                 pad_token_id=tokenizer.pad_token_id,
@@ -437,7 +169,7 @@ def calculate_answer_log_probs(
 
         # Decode and extract numerical answers
         generated_answers = tokenizer.batch_decode(
-            q_r_a_generated[:, -max_answer_length - 1 :], skip_special_tokens=True
+            generated_outputs[:, -max_answer_length - 1 :], skip_special_tokens=True
         )
         selected_answers = [x.split("\n")[-1] for x in generated_answers]
         extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
@@ -445,13 +177,13 @@ def calculate_answer_log_probs(
     # Find the starting positions of answers in the full prompts
     answer_start_positions = [
         find_answer_start_position(input_ids, hyperparameters["model_type"])
-        for input_ids in q_r_a_tokens.input_ids
+        for input_ids in full_prompt_tokens.input_ids
     ]
 
     # Verify answer positions are correct
     for i in range(len(answers)):
         decoded_answer = tokenizer.decode(
-            q_r_a_tokens.input_ids[i][answer_start_positions[i] :]
+            full_prompt_tokens.input_ids[i][answer_start_positions[i] :]
         ).strip()
         expected_answer = answers[i].strip()
         if (
@@ -462,18 +194,18 @@ def calculate_answer_log_probs(
 
     # Calculate log probabilities
     with torch.no_grad():
-        q_r_a_critic_logits = frozen_model(
-            input_ids=q_r_a_tokens.input_ids,
-            attention_mask=q_r_a_tokens.attention_mask,
+        model_logits = frozen_model(
+            input_ids=full_prompt_tokens.input_ids,
+            attention_mask=full_prompt_tokens.attention_mask,
         ).logits
 
     # Convert to log probabilities
-    q_r_a_logprobs = torch.nn.functional.log_softmax(q_r_a_critic_logits, dim=-1)
+    log_probs = torch.nn.functional.log_softmax(model_logits, dim=-1)
 
     # Get log probs for each answer token
     answer_logprobs = [
-        q_r_a_logprobs[i, start - 1 : -1]
-        .gather(1, q_r_a_tokens.input_ids[i, start:].unsqueeze(-1))
+        log_probs[i, start - 1 : -1]
+        .gather(1, full_prompt_tokens.input_ids[i, start:].unsqueeze(-1))
         .squeeze(-1)
         for i, start in enumerate(answer_start_positions)
     ]
@@ -499,6 +231,9 @@ class ReasoningOutput:
     R_mean_actor_logprobs: torch.Tensor
     R_mean_critic_logprobs: torch.Tensor
     kl: torch.Tensor
+    
+    # For parallel sampling
+    sample_groups: Optional[List[int]] = None  # Tracks which group each sample belongs to
 
 
 @dataclass
@@ -510,6 +245,10 @@ class AdvantageOutput:
     actor_answer_logprobs: torch.Tensor
     critic_answer_logprobs: torch.Tensor
     extracted_answers: Optional[List[Any]]
+    
+    # For parallel sampling
+    sample_groups: Optional[List[int]] = None  # Tracks which group each sample belongs to
+    group_means: Optional[torch.Tensor] = None  # Mean rewards per group
 
 
 @dataclass
@@ -519,7 +258,6 @@ class TrainingState:
     batch_index: int
     previous_normalized_rewards: List[float]
     previous_advantages: List[float]
-    grad_accum_count: int
 
     # Models and optimization
     actor_model: nn.Module
@@ -563,7 +301,6 @@ class TrainingState:
             batch_index=start_batch,
             previous_normalized_rewards=prev_rewards,
             previous_advantages=prev_advantages,
-            grad_accum_count=0,
             actor_model=actor_model,
             critic_model=critic_model,
             actor_optimizer=actor_optimizer,
@@ -576,16 +313,42 @@ class TrainingState:
 
 
 def generate_reasoning_and_kl(
-    state: TrainingState, questions: List[str]
+    state: TrainingState, questions: List[str], calculate_kl: bool = True
 ) -> ReasoningOutput:
-    """Generate reasoning from both models and calculate KL divergence."""
+    """Generate reasoning from both models and calculate KL divergence.
+    
+    This unified implementation handles both standard and parallel (GRPO) generation.
+    In parallel mode, it generates multiple reasoning paths for each input question.
+    
+    Args:
+        state: Current training state
+        questions: List of input questions
+        calculate_kl: Whether to calculate KL divergence (if False, will return zeros)
+    
+    Returns:
+        ReasoningOutput: Contains generated reasoning and associated metrics
+    """
+    parallel_samples = state.hyperparameters.get("parallel_samples", 1)
+    is_parallel = parallel_samples > 1
+    
+    # In parallel mode, repeat each question multiple times
+    if is_parallel:
+        # Repeat each question parallel_samples times
+        expanded_questions = []
+        for q in questions:
+            expanded_questions.extend([q] * parallel_samples)
+        questions_to_use = expanded_questions
+    else:
+        # Standard mode - use questions as-is
+        questions_to_use = questions
+    
     # Create prompts for each question
     prompts = [
         construct_prompts(
             question=q,
             hyperparameters=state.hyperparameters,
         )
-        for q in questions
+        for q in questions_to_use
     ]
 
     # Tokenize inputs
@@ -607,6 +370,9 @@ def generate_reasoning_and_kl(
             temperature=state.hyperparameters["temperature"],
             pad_token_id=state.tokenizer.pad_token_id,
         )
+        
+        # Only generate critic reasoning if we're normalizing loss
+        if state.hyperparameters.get("normalize_loss", True):
         # Critic (frozen) generates reasoning
         q_r_tokens = state.critic_model.generate(
             tokenized_inputs.input_ids,
@@ -616,7 +382,17 @@ def generate_reasoning_and_kl(
             do_sample=False,
             pad_token_id=state.tokenizer.pad_token_id,
         )
+            # Decode critic reasoning text
+            critic_reasoning = state.tokenizer.batch_decode(
+                q_r_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
+            )
+        else:
+            # Skip critic reasoning generation when not normalizing
+            q_r_tokens = None
+            critic_reasoning = None
 
+    # Only compute the KL if we need it (kl_penalty is not None, or if we want to track it)
+    if calculate_kl:
     # Get logits from both models on actor's reasoning
     q_R_actor_logits = (
         state.actor_model(q_R_tokens).logits / state.hyperparameters["temperature"]
@@ -652,14 +428,40 @@ def generate_reasoning_and_kl(
     kl = calculate_mean_kl(
         q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"]
     )
+    else:
+        # Return zero tensors if we're not calculating KL
+        device = q_R_tokens.device
+        batch_size = len(q_R_tokens)
+        R_mean_actor_logprobs = torch.zeros(batch_size, device=device)
+        R_mean_critic_logprobs = torch.zeros(batch_size, device=device)
+        kl = torch.zeros(batch_size, device=device)
 
-    # Decode reasoning text
+    # Decode actor reasoning text
     actor_reasoning = state.tokenizer.batch_decode(
         q_R_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
     )
-    critic_reasoning = state.tokenizer.batch_decode(
-        q_r_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
-    )
+    
+    # For parallel mode, track sample groups and reshape tensors
+    if is_parallel:
+        # Create sample groups tensor - reshape flat tensors into [num_questions, parallel_samples]
+        batch_size = len(questions)
+        
+        # Reshape the flat tensors into [batch_size, parallel_samples]
+        R_mean_actor_logprobs_reshaped = R_mean_actor_logprobs.reshape(batch_size, parallel_samples)
+        R_mean_critic_logprobs_reshaped = R_mean_critic_logprobs.reshape(batch_size, parallel_samples)
+        kl_reshaped = kl.reshape(batch_size, parallel_samples)
+        
+        # Create sample_groups as a list for backward compatibility
+        sample_groups = []
+        for i in range(batch_size):
+            sample_groups.extend([i] * parallel_samples)
+            
+        # Flatten the reshaped tensors
+        R_mean_actor_logprobs = R_mean_actor_logprobs_reshaped.reshape(-1)
+        R_mean_critic_logprobs = R_mean_critic_logprobs_reshaped.reshape(-1)
+        kl = kl_reshaped.reshape(-1)
+    else:
+        sample_groups = None
 
     return ReasoningOutput(
         actor_reasoning=actor_reasoning,
@@ -667,6 +469,7 @@ def generate_reasoning_and_kl(
         R_mean_actor_logprobs=R_mean_actor_logprobs,
         R_mean_critic_logprobs=R_mean_critic_logprobs,
         kl=kl,
+        sample_groups=sample_groups,
     )
 
 
@@ -676,36 +479,90 @@ def calculate_advantages(
     answers: List[str],
     reasoning_output: ReasoningOutput,
 ) -> AdvantageOutput:
-    """Calculate advantages by comparing answer probabilities under different reasoning."""
+    """Calculate advantages with support for both standard and parallel sampling approaches.
+    
+    This unified implementation handles both standard advantage calculation and 
+    Group-Relative Policy Optimization (GRPO) advantage calculation. In GRPO mode,
+    advantages are calculated relative to the mean reward within each question group.
+    
+    Args:
+        state: Current training state
+        questions: Original questions (not expanded in parallel case)
+        answers: Original answers 
+        reasoning_output: Output from generate_reasoning functions
+        
+    Returns:
+        AdvantageOutput: Contains advantage calculations and metrics
+    """
+    parallel_samples = state.hyperparameters.get("parallel_samples", 1)
+    is_parallel = parallel_samples > 1
+    
+    # In parallel mode, we need to expand answers to match reasoning count
+    if is_parallel:
+        # Expand answers to match the expanded questions
+        expanded_answers = []
+        for a in answers:
+            expanded_answers.extend([a] * parallel_samples)
+        answers_to_use = expanded_answers
+        questions_to_use = questions * parallel_samples
+        sample_groups = reasoning_output.sample_groups
+    else:
+        # Standard mode - use answers and questions as-is
+        answers_to_use = answers
+        questions_to_use = questions
+        sample_groups = None
 
     # Calculate log probs of answers given actor's reasoning
     actor_answer_logprobs, extracted_answers = calculate_answer_log_probs(
         state.critic_model,
         state.tokenizer,
         state.device,
-        questions,
+        questions_to_use,
         reasoning_output.actor_reasoning,
-        answers,
+        answers_to_use,
         state.hyperparameters,
+        include_question=False,  # Default behavior: don't include question in prompt
     )
 
-    # Calculate log probs of answers given critic's reasoning
+    # Calculate normalized rewards
+    if state.hyperparameters.get("normalize_loss", True):
+        # Only calculate critic answer log probs if we're normalizing loss
     critic_answer_logprobs, _ = calculate_answer_log_probs(
         state.critic_model,
         state.tokenizer,
         state.device,
-        questions,
+            questions_to_use,
         reasoning_output.critic_reasoning,
-        answers,
+            answers_to_use,
         state.hyperparameters,
+        include_question=False,  # Default behavior: don't include question in prompt
     )
-
-    if state.hyperparameters.get("normalize_loss", True):
         # Normalize reward as improvement over baseline
         normalized_rewards = actor_answer_logprobs - critic_answer_logprobs
     else:
+        # Skip critic calculation when not normalizing
+        critic_answer_logprobs = torch.zeros_like(actor_answer_logprobs)  # Placeholder
         normalized_rewards = actor_answer_logprobs
 
+    # Calculate advantages - different approaches for parallel vs standard
+    if is_parallel:
+        # GRPO advantage calculation - group-relative advantages
+        batch_size = len(questions)
+        # Reshape rewards tensor into [batch_size, parallel_samples] for group operations
+        rewards_by_group = normalized_rewards.reshape(batch_size, parallel_samples)
+        
+        # Calculate group means (mean reward for each question across its parallel samples)
+        group_means = rewards_by_group.mean(dim=1, keepdim=True)  # [batch_size, 1]
+        
+        # Calculate advantages by subtracting group means from individual rewards
+        # This implements the GRPO baseline
+        advantages_by_group = rewards_by_group - group_means
+        
+        # Flatten the tensors back for compatibility with rest of training loop
+        advantages = advantages_by_group.reshape(-1)
+        group_means_flat = group_means.squeeze(1)  # [batch_size]
+    else:
+        # Standard advantage calculation
     # Calculate advantage using exponential moving average baseline
     r = state.hyperparameters.get("r", None)
     if len(state.previous_normalized_rewards) > 0 and r is not None:
@@ -713,6 +570,7 @@ def calculate_advantages(
         advantages = normalized_rewards - value
     else:
         advantages = normalized_rewards
+        group_means_flat = None
 
     return AdvantageOutput(
         advantages=advantages,
@@ -720,6 +578,8 @@ def calculate_advantages(
         actor_answer_logprobs=actor_answer_logprobs,
         critic_answer_logprobs=critic_answer_logprobs,
         extracted_answers=extracted_answers,
+        sample_groups=sample_groups,
+        group_means=group_means_flat,
     )
 
 
@@ -732,6 +592,7 @@ def calculate_losses(
     previous_advantages,
     previous_normalized_rewards,
     hyperparameters,
+    batch_index=None,
 ):
     """Calculate training losses using specified methods (PG/PPO/EI).
 
@@ -742,6 +603,7 @@ def calculate_losses(
         advantages: Advantage values for actor's reasoning
         previous_advantages: History of advantages for EI threshold
         hyperparameters: Training configuration
+        batch_index: Current batch index for accurate EI threshold calculation
 
     Returns:
         tuple: (
@@ -776,50 +638,26 @@ def calculate_losses(
     metrics["clipped_ratios"] = clipped_ratios
     if use_ppo:
         losses = -torch.min(prob_ratios * advantages, clipped_ratios * advantages)
+    
     # Apply Expert Iteration mask if specified
     training_mask = None
     if hyperparameters["use_ei"] is not None:
         threshold = calculate_threshold(
-            previous_normalized_rewards, hyperparameters["use_ei"]
+            previous_normalized_rewards, hyperparameters["use_ei"], batch_index
         )
         training_mask = (normalized_rewards > threshold).float()
         metrics["ei_threshold"] = threshold
         metrics["ei_mask"] = training_mask
+        metrics["ei_enabled"] = True
+    else:
+        # Explicitly mark that EI is disabled
+        metrics["ei_enabled"] = False
 
     return (
-        -R_mean_actor_logprobs if hyperparameters["flatten"] else losses,
+        losses,  # No longer using flatten parameter
         training_mask,
         metrics,
     )
-
-
-def get_latest_result_and_log(dataset_type):
-    results_dir = f"results/{dataset_type}"
-    if not os.path.exists(results_dir):
-        return None, None
-
-    # Get all subdirectories (timestamps) in the results directory
-    results_folders = sorted(
-        [
-            os.path.join(results_dir, d)
-            for d in os.listdir(results_dir)
-            if os.path.isdir(os.path.join(results_dir, d))
-        ],
-        key=os.path.getmtime,
-        reverse=True,
-    )
-
-    if not results_folders:
-        return None, None
-
-    latest_result_folder = results_folders[0]
-    model_save_path = os.path.join(latest_result_folder, "model")
-    log_file = os.path.join(latest_result_folder, "log.jsonl")
-
-    if not os.path.exists(model_save_path) or not os.path.exists(log_file):
-        return None, None
-
-    return model_save_path, log_file
 
 
 def load_training_state(log_file):
@@ -846,61 +684,76 @@ def load_previous_rewards_and_advantages(log_file):
     return previous_normalized_rewards, previous_advantages
 
 
-def tensor_to_python(value):
-    if isinstance(value, torch.Tensor):
-        return value.item() if value.numel() == 1 else value.tolist()
-    elif isinstance(value, np.ndarray):
-        return value.item() if value.size == 1 else value.tolist()
-    elif isinstance(value, np.float32) or isinstance(value, np.float64):
-        return float(value)
-    elif isinstance(value, np.int32) or isinstance(value, np.int64):
-        return int(value)
-    return value
-
-
-def should_decrease_cot_length(recent_log_probs, threshold=-0.5, window_size=10):
-    """
-    Check if we should decrease the cot_length based on recent log probabilities.
-
-    Args:
-        recent_log_probs: List of recent log probabilities
-        threshold: Threshold value for log probabilities (default: -0.5)
-        window_size: Number of consecutive values needed above threshold (default: 10)
-
-    Returns:
-        bool: True if cot_length should be decreased
-    """
-    if len(recent_log_probs) < window_size:
-        return False
-
-    # Check last window_size values
-    recent_window = recent_log_probs[-window_size:]
-    return all(prob > threshold for prob in recent_window)
-
-
 def setup_training_environment(task_type, resume, hyperparameters):
     """Set up the results directory and load checkpoints if resuming."""
     if resume:
-        latest_dir = find_latest_result()
-        if not latest_dir:
-            raise ValueError(f"No previous run found for task type: {task_type}")
-            
-        model_save_path = os.path.join(latest_dir, "model.pt")
-        log_file = os.path.join(latest_dir, "log.jsonl")
+        # Get the task results directory
+        results_dir = os.path.join("results", task_type)
+        if not os.path.exists(results_dir):
+            raise ValueError(f"No results directory found for task type: {task_type}")
         
-        if not os.path.exists(model_save_path) or not os.path.exists(log_file):
-            raise ValueError(f"Missing required files in latest result directory: {latest_dir}")
-
+        # Look for timestamped run directories
+        run_dirs = [os.path.join(results_dir, d) for d in os.listdir(results_dir)
+                  if os.path.isdir(os.path.join(results_dir, d)) and re.match(r"^\d{8}_\d{6}$", d)]
+        
+        if not run_dirs:
+            raise ValueError(f"No previous runs found in {results_dir}")
+        
+        # Get the latest run directory
+        latest_dir = max(run_dirs, key=os.path.getmtime)
+        colored_print("Resume", f"Using latest run directory: {latest_dir}", Colors.BOLD)
+        
+        # Check if this run directory has a log file
+        log_file = os.path.join(latest_dir, "log.jsonl")
+        if not os.path.exists(log_file):
+            # Check if there are adapter directories in this run
+            adapter_dirs = sorted(
+                [d for d in glob.glob(os.path.join(latest_dir, "adapter_*")) if os.path.isdir(d)],
+                key=lambda x: int(x.split("_")[-1])  # Sort by batch number
+            )
+            
+            if adapter_dirs:
+                # Use the latest adapter to get batch information
+                latest_adapter = adapter_dirs[-1]
+                batch_number = int(latest_adapter.split("_")[-1])
+                colored_print("Log File", f"Creating log file using adapter at batch {batch_number}", Colors.YELLOW)
+                
+                # Check if metadata exists
+                metadata_path = os.path.join(latest_adapter, "training_metadata.pt")
+                if os.path.exists(metadata_path):
+                    # Load metadata for hyperparameters
+                    metadata = torch.load(metadata_path)
+                    if "hyperparameters" in metadata:
+                        hyperparameters = metadata["hyperparameters"]
+                        
+                # Create a minimal log file with just the batch index and hyperparameters
+                with open(log_file, "w") as f:
+                    json.dump(hyperparameters, f)
+                    f.write("\n")
+                    
+                    # Add an entry for the current batch
+                    entry = {"Batch Index": batch_number}
+                    json.dump(entry, f)
+                    f.write("\n")
+                
+                colored_print("Log File", f"Created new log file for resuming from adapter", Colors.GREEN)
+            else:
+                raise ValueError(f"Missing required log file and no adapter checkpoints found in: {latest_dir}")
+        
         start_batch, hyperparameters = load_training_state(log_file)
         previous_normalized_rewards, previous_advantages = (
             load_previous_rewards_and_advantages(log_file)
         )
+        
+        # Use the latest run directory for saving future checkpoints
+        model_save_path = latest_dir
     else:
+        # Create a new timestamped directory for this run
         results_dir = os.path.join(
             "results", task_type, datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         )
         os.makedirs(results_dir, exist_ok=True)
-        model_save_path = os.path.join(results_dir, "model.pt")
+        model_save_path = results_dir  # Directory, not specific file
         log_file = os.path.join(results_dir, "log.jsonl")
         start_batch = 0
         previous_normalized_rewards = []
@@ -919,16 +772,83 @@ def setup_training_environment(task_type, resume, hyperparameters):
     )
 
 
+
 def initialize_model_and_optimizer(model_type, hyperparameters, checkpoint_path=None):
     """Initialize the model, frozen model, tokenizer, device, and optimizer."""
-    model, frozen_model, tokenizer, device = load_model(model_type)
+    model, frozen_model, tokenizer, device = load_model(model_type, hyperparameters)
     model_optimizer = bitsandbytes.optim.AdamW8bit(
         model.parameters(), lr=hyperparameters["lr"]
     )
 
     if checkpoint_path is not None:
+        # Find the latest checkpoint in the directory if checkpoint_path points to a directory
+        if os.path.isdir(checkpoint_path):
+            # First check for adapter directories within this run directory
+            adapter_dirs = sorted(
+                [d for d in glob.glob(os.path.join(checkpoint_path, "adapter_*")) if os.path.isdir(d)],
+                key=lambda x: int(x.split("_")[-1])  # Sort by batch number
+            )
+            
+            if adapter_dirs:
+                # Use the latest adapter directory
+                latest_adapter = adapter_dirs[-1]
+                colored_print("Resume", f"Using latest adapter: {os.path.basename(latest_adapter)}", Colors.BOLD)
+                
+                # Get the batch number for logging 
+                batch_num = int(latest_adapter.split("_")[-1])
+                
+                # Load the adapter using PEFT's load_pretrained
+                from peft import PeftModel
+                
+                colored_print("Loading Adapter", f"Loading adapter from {latest_adapter}", Colors.BLUE)
+                model = PeftModel.from_pretrained(
+                    model,  # Base model
+                    latest_adapter,  # Adapter path
+                    is_trainable=True  # Ensure it's set to training mode
+                )
+                
+                # Load optimizer state and other metadata
+                metadata_path = os.path.join(latest_adapter, "training_metadata.pt")
+                if os.path.exists(metadata_path):
+                    metadata = torch.load(metadata_path)
+                    model_optimizer.load_state_dict(metadata["optimizer_state_dict"])
+                    colored_print("Metadata", f"Loaded optimizer state from batch {batch_num}", Colors.GREEN)
+                    
+                    # Print key info about the loaded adapter
+                    colored_print("Adapter Info", f"Loaded adapter from batch {batch_num}", Colors.GREEN)
+                    colored_print("Active Adapter", f"Current active adapter: {model.active_adapter}", Colors.GREEN)
+                else:
+                    colored_print("Warning", f"No metadata found at {metadata_path}", Colors.YELLOW)
+                
+                return model, frozen_model, tokenizer, device, model_optimizer
+            
+            # Fall back to traditional checkpoint files if no adapters found
+            colored_print("Note", "No adapter directories found in this run", Colors.YELLOW)
+            latest_checkpoint = find_latest_checkpoint(checkpoint_path)
+            if latest_checkpoint:
+                checkpoint_path = latest_checkpoint
+                colored_print("Resume", f"Using latest checkpoint: {os.path.basename(latest_checkpoint)}", Colors.BOLD)
+            else:
+                colored_print("Warning", f"No checkpoints found in {checkpoint_path}", Colors.RED)
+                return model, frozen_model, tokenizer, device, model_optimizer
+        
+        # Load checkpoint
         checkpoint = torch.load(checkpoint_path)
-        model.load_state_dict(checkpoint["model_state_dict"])
+        
+        # Check if this is a LoRA adapter checkpoint or full model checkpoint
+        if "adapter_state_dict" in checkpoint:
+            colored_print("Resume", "Loading LoRA adapter weights from checkpoint file", Colors.BOLD)
+            model.load_adapter_state_dict(checkpoint["adapter_state_dict"])
+            size_bytes = sum(tensor.nelement() * tensor.element_size() 
+                           for tensor in checkpoint["adapter_state_dict"].values())
+            size_mb = size_bytes / (1024 * 1024)
+            colored_print("Checkpoint Info", f"Loaded LoRA weights, size: {size_mb:.2f}MB", Colors.GREEN)
+        elif "model_state_dict" in checkpoint:
+            colored_print("Resume", "Loading full model weights (old format)", Colors.BOLD)
+            model.load_state_dict(checkpoint["model_state_dict"])
+        else:
+            colored_print("Warning", "Checkpoint has unknown format", Colors.RED)
+        
         model_optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
     return model, frozen_model, tokenizer, device, model_optimizer
@@ -969,6 +889,7 @@ class BatchData:
 class LogMetrics:
     """Holds metrics for logging"""
 
+    # Mean metrics across batch
     loss: float
     pg_loss: float
     actor_logprobs: float
@@ -981,6 +902,20 @@ class LogMetrics:
     ppo_clipped_ratio: Optional[float]
     advantage: float
     normalized_reward: float
+    
+    # First example metrics
+    first_loss: float
+    first_pg_loss: float
+    first_actor_logprobs: float
+    first_critic_logprobs: float
+    first_actor_answer_logprobs: float
+    first_critic_answer_logprobs: float
+    first_kl: float
+    first_weighted_kl: Optional[float]
+    first_advantage: float
+    first_normalized_reward: float
+    
+    # Other metrics
     gradient_norm: float
     num_active: int
     fraction_active: float
@@ -993,16 +928,61 @@ class LogMetrics:
         cls,
         batch_data: BatchData,
         grad_norm: float,
-        grad_accum_count: int,
         previous_advantages: List[float],
         batch_size: int,
     ):
         """Create LogMetrics from batch data and training state"""
+        # Calculate number of active examples
+        training_mask = batch_data.training_mask
         num_active = (
-            batch_data.training_mask.sum().item()
-            if batch_data.training_mask is not None
+            training_mask.sum().item()
+            if training_mask is not None
             else len(batch_data.losses)
         )
+
+        # Handle case where no examples are active
+        if num_active == 0:
+            colored_print("Warning", "No active examples in batch!", Colors.RED)
+            # Use placeholder values for metrics when no examples are active
+            return cls(
+                # Mean metrics
+                loss=float('nan'),  # NaN indicates no active examples
+                pg_loss=float('nan'),
+                actor_logprobs=batch_data.R_mean_actor_logprobs.mean().item(),
+                critic_logprobs=batch_data.R_mean_critic_logprobs.mean().item(),
+                actor_answer_logprobs=batch_data.actor_answer_logprobs.mean().item(),
+                critic_answer_logprobs=batch_data.critic_answer_logprobs.mean().item(),
+                kl=batch_data.kl.mean().item(),
+                weighted_kl=None,
+                ppo_ratio=None,
+                ppo_clipped_ratio=None,
+                advantage=batch_data.advantages.mean().item(),
+                normalized_reward=batch_data.normalized_rewards.mean().item(),
+                
+                # First example metrics
+                first_loss=float('nan'),
+                first_pg_loss=float('nan'),
+                first_actor_logprobs=batch_data.R_mean_actor_logprobs[0].item() if len(batch_data.R_mean_actor_logprobs) > 0 else float('nan'),
+                first_critic_logprobs=batch_data.R_mean_critic_logprobs[0].item() if len(batch_data.R_mean_critic_logprobs) > 0 else float('nan'),
+                first_actor_answer_logprobs=batch_data.actor_answer_logprobs[0].item() if len(batch_data.actor_answer_logprobs) > 0 else float('nan'),
+                first_critic_answer_logprobs=batch_data.critic_answer_logprobs[0].item() if len(batch_data.critic_answer_logprobs) > 0 else float('nan'),
+                first_kl=batch_data.kl[0].item() if len(batch_data.kl) > 0 else float('nan'),
+                first_weighted_kl=None,
+                first_advantage=batch_data.advantages[0].item() if len(batch_data.advantages) > 0 else float('nan'),
+                first_normalized_reward=batch_data.normalized_rewards[0].item() if len(batch_data.normalized_rewards) > 0 else float('nan'),
+                
+                # Other metrics
+                gradient_norm=0.0,  # No gradient if no active examples
+                num_active=0,
+                fraction_active=0.0,
+                ei_threshold=batch_data.metrics.get("ei_threshold", None),
+                mean_prev_advantage=(
+                    np.mean(previous_advantages) if previous_advantages else None
+                ),
+                std_prev_advantage=(
+                    np.std(previous_advantages) if previous_advantages else None
+                ),
+            )
 
         # Get PPO metrics
         ppo_ratio = batch_data.metrics.get("prob_ratios", [None])[0]
@@ -1014,24 +994,80 @@ class LogMetrics:
             float(ppo_clipped_ratio.item()) if ppo_clipped_ratio is not None else None
         )
 
-        # Get KL values
-        raw_kl = batch_data.kl[0].item()
-        weighted_kl = batch_data.metrics.get("weighted_kl", [None])[0]
-        weighted_kl = float(weighted_kl.item()) if weighted_kl is not None else None
+        # Get KL values - average across all examples, not just first one
+        raw_kl_mean = batch_data.kl.mean().item()
+        raw_kl_first = batch_data.kl[0].item() if len(batch_data.kl) > 0 else float('nan')
+        
+        weighted_kl = batch_data.metrics.get("weighted_kl", None)
+        weighted_kl_mean = float(weighted_kl.mean().item()) if weighted_kl is not None else None
+        weighted_kl_first = float(weighted_kl[0].item()) if weighted_kl is not None and len(weighted_kl) > 0 else None
+
+        # Calculate metrics that should be averaged over all examples (regardless of active status)
+        mean_actor_logprobs = batch_data.R_mean_actor_logprobs.mean().item()
+        mean_critic_logprobs = batch_data.R_mean_critic_logprobs.mean().item()
+        mean_actor_answer_logprobs = batch_data.actor_answer_logprobs.mean().item()
+        mean_critic_answer_logprobs = batch_data.critic_answer_logprobs.mean().item()
+        mean_advantage = batch_data.advantages.mean().item()
+        mean_normalized_reward = batch_data.normalized_rewards.mean().item()
+        
+        # Get metrics for the first example
+        first_actor_logprobs = batch_data.R_mean_actor_logprobs[0].item()
+        first_critic_logprobs = batch_data.R_mean_critic_logprobs[0].item()
+        first_actor_answer_logprobs = batch_data.actor_answer_logprobs[0].item()
+        first_critic_answer_logprobs = batch_data.critic_answer_logprobs[0].item()
+        first_advantage = batch_data.advantages[0].item()
+        first_normalized_reward = batch_data.normalized_rewards[0].item()
+        
+        # Calculate loss metrics across ALL examples (not just active ones)
+        # This gives a more consistent view of model performance regardless of threshold
+        mean_loss = batch_data.losses.mean().item()
+        mean_pg_loss = batch_data.metrics["pg_losses"].mean().item()
+        
+        # Get loss metrics for first example
+        first_loss = batch_data.losses[0].item()
+        first_pg_loss = batch_data.metrics["pg_losses"][0].item()
+        
+        # For reference, also calculate loss metrics for active examples only
+        if training_mask is not None and num_active > 0:
+            # Get only the active losses for calculating means
+            active_mask = training_mask.bool()
+            active_losses = batch_data.losses[active_mask]
+            active_pg_losses = batch_data.metrics["pg_losses"][active_mask]
+            active_only_mean_loss = active_losses.mean().item()
+            active_only_mean_pg_loss = active_pg_losses.mean().item()
+            
+            # Add these to metrics dictionary for potential logging but don't use as primary metrics
+            batch_data.metrics["active_only_loss"] = active_only_mean_loss
+            batch_data.metrics["active_only_pg_loss"] = active_only_mean_pg_loss
 
         return cls(
-            loss=batch_data.losses.mean().item(),
-            pg_loss=batch_data.metrics["pg_losses"][0].item(),
-            actor_logprobs=batch_data.R_mean_actor_logprobs[0].item(),
-            critic_logprobs=batch_data.R_mean_critic_logprobs[0].item(),
-            actor_answer_logprobs=batch_data.actor_answer_logprobs[0].item(),
-            critic_answer_logprobs=batch_data.critic_answer_logprobs[0].item(),
-            kl=raw_kl,
-            weighted_kl=weighted_kl,
+            # Mean metrics
+            loss=mean_loss,
+            pg_loss=mean_pg_loss,
+            actor_logprobs=mean_actor_logprobs,
+            critic_logprobs=mean_critic_logprobs,
+            actor_answer_logprobs=mean_actor_answer_logprobs,
+            critic_answer_logprobs=mean_critic_answer_logprobs,
+            kl=raw_kl_mean,
+            weighted_kl=weighted_kl_mean,
             ppo_ratio=ppo_ratio,
             ppo_clipped_ratio=ppo_clipped_ratio,
-            advantage=batch_data.advantages[0].item(),
-            normalized_reward=batch_data.normalized_rewards[0].item(),
+            advantage=mean_advantage,
+            normalized_reward=mean_normalized_reward,
+            
+            # First example metrics
+            first_loss=first_loss,
+            first_pg_loss=first_pg_loss,
+            first_actor_logprobs=first_actor_logprobs,
+            first_critic_logprobs=first_critic_logprobs,
+            first_actor_answer_logprobs=first_actor_answer_logprobs,
+            first_critic_answer_logprobs=first_critic_answer_logprobs,
+            first_kl=raw_kl_first,
+            first_weighted_kl=weighted_kl_first,
+            first_advantage=first_advantage,
+            first_normalized_reward=first_normalized_reward,
+            
+            # Other metrics
             gradient_norm=grad_norm,
             num_active=num_active,
             fraction_active=num_active / batch_size,
@@ -1055,7 +1091,7 @@ def log_batch_results(
     q = batch_data.questions[0]
     a = batch_data.answers[0]
     actor_reasoning_text = batch_data.actor_reasoning[0]
-    critic_reasoning_text = batch_data.critic_reasoning[0]
+    critic_reasoning_text = batch_data.critic_reasoning[0] if batch_data.critic_reasoning is not None else "None (normalize_loss=False)"
 
     # Calculate fraction of answers contained in reasoning across batch
     contains_answer_fraction = sum(
@@ -1063,21 +1099,90 @@ def log_batch_results(
         for answer, reasoning in zip(batch_data.answers, batch_data.actor_reasoning)
     ) / len(batch_data.answers)
 
+    # Print the question/context and actor reasoning (always shown)
     if state.hyperparameters["task_type"] in ["wiki_compression", "wiki_continuation"]:
         colored_print("Context:", q, Colors.BLUE)
         colored_print("Actor Reasoning:", actor_reasoning_text, Colors.YELLOW)
-        colored_print("Critic Reasoning:", critic_reasoning_text, Colors.CYAN)
     else:  # arithmetic or gsm8k
         colored_print("Question:", q, Colors.BLUE)
         colored_print("Actor Reasoning:", actor_reasoning_text, Colors.YELLOW)
+    
+    # Only show critic reasoning if normalize_loss is True
+    if state.hyperparameters.get("normalize_loss", True) and batch_data.critic_reasoning is not None:
         colored_print("Critic Reasoning:", critic_reasoning_text, Colors.CYAN)
 
     colored_print("Answer:", a, Colors.GREEN)
-    colored_print("Advantage:", f"{metrics.advantage:.4f}", Colors.BOLD, inline=True)
+    
+    # Only show EI status if it's enabled
+    ei_enabled = "ei_enabled" in batch_data.metrics and batch_data.metrics["ei_enabled"]
+    if ei_enabled:
+        ei_status = f"Enabled (std_mult={state.hyperparameters['use_ei']})"
+        colored_print("Expert Iteration:", ei_status, Colors.CYAN)
+    
+    # Only show parallel sampling status if enabled (more than 1 sample)
+    parallel_samples = state.hyperparameters.get("parallel_samples", 1)
+    if parallel_samples > 1:
+        colored_print("Parallel Sampling:", f"Enabled ({parallel_samples} samples per question)", Colors.BOLD)
+        
+        # If available, print group information
+        sample_groups = getattr(batch_data.metrics, "sample_groups", None)
+        if sample_groups:
+            group_count = len(set(sample_groups))
+            colored_print("Groups:", f"{group_count} unique question groups", Colors.CYAN)
+    
+    # Get raw unfiltered losses directly from the tensors
+    # Always use the raw tensors instead of potentially filtered metrics
+    raw_first_loss = batch_data.losses[0].item() if len(batch_data.losses) > 0 else float('nan')
+    raw_mean_loss = batch_data.losses.mean().item() if len(batch_data.losses) > 0 else float('nan')
+    
+    raw_first_pg_loss = batch_data.metrics["pg_losses"][0].item() if "pg_losses" in batch_data.metrics and len(batch_data.metrics["pg_losses"]) > 0 else float('nan')
+    raw_mean_pg_loss = batch_data.metrics["pg_losses"].mean().item() if "pg_losses" in batch_data.metrics and len(batch_data.metrics["pg_losses"]) > 0 else float('nan')
+    
+    # KL values
+    if metrics.weighted_kl is not None and state.hyperparameters.get("kl_penalty", 0) != 0:
+        # Use weighted KL only if penalty is non-zero
+        first_kl_to_log = metrics.first_weighted_kl 
+        kl_to_log = metrics.weighted_kl
+    else:
+        # Use raw KL if penalty is zero or None
+        first_kl_to_log = metrics.first_kl
+        kl_to_log = metrics.kl
+    
+    # Helper function to format values concisely
+    def fmt(val):
+        if isinstance(val, float) and not np.isnan(val):
+            return f"{val:.4f}"
+        return "NaN"
+    
+    # Print condensed metrics (horizontal layout)
+    print("\n" + "=" * 100)
+    
+    # Advantage and reward metrics (line 1)
+    print(f"{Colors.MAGENTA}Advantage{Colors.END} [F: {fmt(metrics.first_advantage)} | M: {fmt(metrics.advantage)}]  "
+          f"{Colors.MAGENTA}Reward{Colors.END} [F: {fmt(metrics.first_normalized_reward)} | M: {fmt(metrics.normalized_reward)}]  "
+          f"{Colors.GREEN}KL{Colors.END} [F: {fmt(first_kl_to_log)} | M: {fmt(kl_to_log)}]")
+    
+    # Log probabilities (line 2)
+    print(f"{Colors.YELLOW}Actor ⟨LP⟩{Colors.END} [A: {fmt(metrics.first_actor_answer_logprobs)} | R: {fmt(metrics.first_actor_logprobs)}]  "
+          f"{Colors.YELLOW}Critic ⟨LP⟩{Colors.END} [A: {fmt(metrics.first_critic_answer_logprobs)} | R: {fmt(metrics.first_critic_logprobs)}]")
+    
+    # Losses (line 3)
+    print(f"{Colors.CYAN}Loss{Colors.END} [F: {fmt(raw_first_loss)} | M: {fmt(raw_mean_loss)}]  "
+          f"{Colors.CYAN}PG Loss{Colors.END} [F: {fmt(raw_first_pg_loss)} | M: {fmt(raw_mean_pg_loss)}]  "
+          f"{Colors.BOLD}Active{Colors.END} [{metrics.num_active}/{state.hyperparameters['batch_size']} ({metrics.fraction_active:.1%})]")
+    
+    # Legend
+    print(f"{Colors.BOLD}Legend:{Colors.END} F=First example, M=Mean, A=Answer, R=Reasoning, LP=Log Probs")
+    
+    # If no examples were active, add a clear indicator
+    if metrics.num_active == 0:
+        print(f"{Colors.RED}Warning: No examples passed the EI threshold in this batch{Colors.END}")
 
-    # Determine which KL value to log
-    kl_to_log = metrics.weighted_kl if metrics.weighted_kl is not None else metrics.kl
-    kl_label = "Weighted KL" if metrics.weighted_kl is not None else "KL"
+    # Safely convert metrics to Python values, handling NaN
+    def safe_float(value):
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return "NaN (no active examples)"
+        return float(value)
 
     log_entry = {
         "Batch Index": int(state.batch_index),
@@ -1090,14 +1195,15 @@ def log_batch_results(
             "Contains Answer": contains_answer_fraction,
         },
         "Training Metrics": {
-            "Loss": float(metrics.loss),
-            "Policy Gradient Loss": float(metrics.pg_loss),
+            # Mean metrics
+            "Loss": safe_float(metrics.loss),
+            "Policy Gradient Loss": safe_float(metrics.pg_loss),
             "Actor Reasoning Log Probs": float(metrics.actor_logprobs),
             "Critic Reasoning Log Probs": float(metrics.critic_logprobs),
             "Actor Answer Log Probs": float(metrics.actor_answer_logprobs),
             "Critic Answer Log Probs": float(metrics.critic_answer_logprobs),
             "KL": float(kl_to_log),
-            "KL Type": kl_label,
+            "KL Type": "Raw KL" if kl_to_log == metrics.kl else "Weighted KL",
             "PPO Ratio": (
                 float(metrics.ppo_ratio) if metrics.ppo_ratio is not None else None
             ),
@@ -1106,8 +1212,28 @@ def log_batch_results(
                 if metrics.ppo_clipped_ratio is not None
                 else None
             ),
-            "Advantage": float(metrics.advantage),
+            "Advantage": safe_float(metrics.advantage),
             "Normalized Reward": float(metrics.normalized_reward),
+            
+            # Raw unfiltered loss metrics
+            "Raw Loss": safe_float(raw_mean_loss),
+            "Raw Policy Gradient Loss": safe_float(raw_mean_pg_loss),
+            "Raw First Loss": safe_float(raw_first_loss),
+            "Raw First Policy Gradient Loss": safe_float(raw_first_pg_loss),
+            
+            # First example metrics
+            "First Loss": safe_float(metrics.first_loss),
+            "First Policy Gradient Loss": safe_float(metrics.first_pg_loss),
+            "First Actor Reasoning Log Probs": float(metrics.first_actor_logprobs),
+            "First Critic Reasoning Log Probs": float(metrics.first_critic_logprobs),
+            "First Actor Answer Log Probs": float(metrics.first_actor_answer_logprobs),
+            "First Critic Answer Log Probs": float(metrics.first_critic_answer_logprobs),
+            "First KL": float(first_kl_to_log),
+            "First KL Type": "Raw KL" if first_kl_to_log == metrics.first_kl else "Weighted KL",
+            "First Advantage": safe_float(metrics.first_advantage),
+            "First Normalized Reward": float(metrics.first_normalized_reward),
+            
+            # Other metrics
             "Gradient Norm": float(metrics.gradient_norm),
             "Active Samples": {
                 "Count": int(metrics.num_active),
@@ -1120,6 +1246,7 @@ def log_batch_results(
                 if state.hyperparameters["use_ei"] is not None
                 else None
             ),
+            "EI Enabled": ei_enabled,
             "Mean Previous Advantage": (
                 float(metrics.mean_prev_advantage)
                 if metrics.mean_prev_advantage is not None
@@ -1140,8 +1267,15 @@ def log_batch_results(
             "Batch Size": int(state.hyperparameters["batch_size"]),
             "CoT Length": int(state.hyperparameters["cot_length"]),
             "Temperature": float(state.hyperparameters["temperature"]),
+            "Use PPO": bool(state.hyperparameters["use_ppo"]),
         },
     }
+    
+    # Add active-only metrics if available
+    if "active_only_loss" in batch_data.metrics:
+        log_entry["Training Metrics"]["Active Only Loss"] = safe_float(batch_data.metrics["active_only_loss"])
+    if "active_only_pg_loss" in batch_data.metrics:
+        log_entry["Training Metrics"]["Active Only PG Loss"] = safe_float(batch_data.metrics["active_only_pg_loss"])
 
     # Write to log file
     with open(state.log_file, "a") as f:
@@ -1149,23 +1283,223 @@ def log_batch_results(
         f.write("\n")
 
 
+def evaluate_model_on_mmlu(
+    actor_model,
+    critic_model,
+    tokenizer,
+    device,
+    test_data,
+    hyperparameters,
+    batch_size=16,
+    num_samples=500  # Use fewer samples for quicker evaluation
+):
+    """Evaluate model performance on MMLU dataset
+    
+    Args:
+        actor_model: The model to evaluate
+        critic_model: The critic model (frozen)
+        tokenizer: Tokenizer for the models
+        device: Device to run on
+        test_data: List of MMLU question-answer pairs
+        hyperparameters: Training hyperparameters
+        batch_size: Evaluation batch size
+        num_samples: Number of samples to evaluate (for quicker evaluation)
+        
+    Returns:
+        tuple: (accuracy, detailed_results)
+    """
+    # Limit number of samples for quicker evaluation
+    if num_samples and num_samples < len(test_data):
+        test_data = random.sample(test_data, num_samples)
+    
+    actor_model.eval()
+    
+    correct = 0
+    results = []
+    
+    for i in tqdm(range(0, len(test_data), batch_size), desc="Evaluating MMLU"):
+        batch = test_data[i:i+batch_size]
+        questions, answers = zip(*batch)
+        
+        # Generate chain-of-thought reasoning
+        reasoning_prompts = []
+        for question in questions:
+            # Use the same prompt format as in training
+            prompt = (
+                f"{question}\n\n"
+                f"Let's think step by step to determine the correct answer."
+            )
+            reasoning_prompts.append(prompt)
+        
+        # Generate reasoning with actor model
+        inputs = tokenizer(
+            reasoning_prompts, 
+            return_tensors="pt", 
+            padding=True, 
+            truncation=True,
+            max_length=hyperparameters.get("question_length", 512)
+        ).to(device)
+        
+        reasoning_outputs = actor_model.generate(
+            **inputs,
+            max_new_tokens=hyperparameters.get("cot_length", 50),
+            do_sample=True,
+            temperature=hyperparameters.get("temperature", 1.0)
+        )
+        
+        # Decode the reasoning
+        actor_reasoning = tokenizer.batch_decode(
+            reasoning_outputs[:, inputs.input_ids.shape[1]:], 
+            skip_special_tokens=True
+        )
+        
+        # Extract predicted answers from reasoning
+        # For MMLU, we're looking for a letter A-E in the reasoning
+        predicted_answers = []
+        for reasoning in actor_reasoning:
+            # Look for answer pattern like "The answer is A" or "Therefore, C is correct"
+            answer_matches = re.findall(r"(?:answer|correct|choice) is ([A-E])", reasoning, re.IGNORECASE)
+            answer_matches += re.findall(r"([A-E]) is (?:correct|the answer)", reasoning, re.IGNORECASE)
+            answer_matches += re.findall(r"(?:I choose|I select|select|choose) ([A-E])", reasoning, re.IGNORECASE)
+            answer_matches += re.findall(r"^([A-E])$", reasoning.strip(), re.MULTILINE)
+            
+            # If no clear pattern is found, check for the last occurrence of a letter
+            if not answer_matches:
+                # Look for standalone A, B, C, D, E as a last resort
+                answer_matches = re.findall(r"\b([A-E])\b", reasoning)
+            
+            predicted = answer_matches[-1] if answer_matches else "X"  # X indicates no answer found
+            predicted_answers.append(predicted)
+        
+        # Calculate accuracy
+        for q, r, p, a in zip(questions, actor_reasoning, predicted_answers, answers):
+            is_correct = p == a
+            if is_correct:
+                correct += 1
+                
+            results.append({
+                "question": q,
+                "reasoning": r,
+                "predicted": p,
+                "answer": a,
+                "correct": is_correct
+            })
+    
+    accuracy = correct / len(test_data)
+    return accuracy, results
+
+
+def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, total, subject=None):
+    """Save MMLU evaluation results to a file"""
+    # Create output filename with timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    subject_str = f"_{subject}" if subject else ""
+    outfile = os.path.join(output_dir, f"mmlu_results{subject_str}_{timestamp}.json")
+    
+    # Compile results data
+    data = {
+        "model_path": model_path,
+        "model_type": model_type,
+        "accuracy": accuracy,
+        "total_examples": total,
+        "timestamp": timestamp,
+        "subject": subject,
+        "results": results
+    }
+    
+    # Save to file
+    with open(outfile, "w") as f:
+        json.dump(data, f, indent=2)
+    
+    print(f"Saved evaluation results to {outfile}")
+    return outfile
+
+
 def save_checkpoint(state: TrainingState):
-    """Save model checkpoint and evaluate if GSM8K"""
+    """Save model checkpoint and evaluate if GSM8K or MMLU"""
     colored_print(
         "Checkpoint", f"Saving model at batch {state.batch_index}", Colors.BOLD
     )
     
-    # Save model checkpoint
-    torch.save(
-        {
-            "model_state_dict": state.actor_model.state_dict(),
-            "optimizer_state_dict": state.actor_optimizer.state_dict(),
-            "batch_index": state.batch_index,
-            "hyperparameters": state.hyperparameters,
-        },
-        state.model_save_path
-    )
-
+    # Only verify critic model weights if weight verification is enabled
+    critic_hash_before = None
+    enable_weight_verification = state.hyperparameters.get("enable_weight_verification", False)
+    
+    if enable_weight_verification:
+        # Take snapshot of critic model before saving to verify it doesn't change
+        critic_hash_before = get_model_hash(state.critic_model)
+        colored_print("Critic Verification", f"Critic hash before saving: {critic_hash_before[:16]}...", Colors.BLUE)
+    
+    # Create checkpoint path with batch index to avoid overwriting
+    checkpoint_dir = os.path.dirname(state.model_save_path)
+    checkpoint_filename = f"model_batch_{state.batch_index}.pt"
+    checkpoint_path = os.path.join(checkpoint_dir, checkpoint_filename)
+    
+    # Create adapter path as a subdirectory of the run folder, not at the task level
+    adapter_path = os.path.join(state.model_save_path, f"adapter_{state.batch_index}")
+    
+    # Save only LoRA adapter weights instead of full model
+    model_to_save = state.actor_model
+    
+    # Print diagnostics about the model before trying to save
+    colored_print("Model Diagnostics", "Checking model state before saving", Colors.BLUE)
+    
+    # Check if model is still a PEFT model
+    is_peft_model = isinstance(model_to_save, PeftModel)
+    colored_print("PEFT Check", f"Is PeftModel: {is_peft_model}", Colors.BLUE if is_peft_model else Colors.RED)
+    
+    # Check trainable parameters
+    total_params = sum(p.numel() for p in model_to_save.parameters())
+    trainable_params = sum(p.numel() for p in model_to_save.parameters() if p.requires_grad)
+    trainable_ratio = trainable_params / total_params if total_params > 0 else 0
+    colored_print("Params", f"Total: {total_params:,}, Trainable: {trainable_params:,} ({trainable_ratio:.4%})", 
+                Colors.BLUE if trainable_ratio > 0 else Colors.RED)
+    
+    try:
+        if is_peft_model:
+            # Get the active adapter
+            colored_print("Active Adapter", f"Current active adapter: {model_to_save.active_adapter}", Colors.GREEN)
+            
+            # Save the adapter using PEFT's built-in method
+            colored_print("Saving Adapter", f"Saving adapter to {adapter_path}", Colors.BLUE)
+            model_to_save.save_pretrained(adapter_path)
+            
+            # Also save optimizer state and batch index metadata
+            metadata_path = os.path.join(adapter_path, "training_metadata.pt")
+            torch.save(
+                {
+                    "optimizer_state_dict": state.actor_optimizer.state_dict(),
+                    "batch_index": state.batch_index,
+                    "hyperparameters": state.hyperparameters,
+                },
+                metadata_path
+            )
+            
+            colored_print("Save Success", f"Saved adapter at batch {state.batch_index} to {adapter_path}", Colors.GREEN)
+        else:
+            # If not a PEFT model, raise an error - we don't want to save full model
+            raise ValueError("Model is not a PEFT model with adapters. Cannot save checkpoint.")
+    except Exception as e:
+        colored_print("Error Saving Model", f"Error: {str(e)}", Colors.RED)
+        
+        # Print detailed traceback
+        import traceback
+        colored_print("Error Traceback", traceback.format_exc(), Colors.RED)
+        
+        # Don't fall back to saving full model - just report the error
+        colored_print("Checkpoint Failed", "Could not save adapter weights. Check model configuration.", Colors.RED)
+    
+    # Only verify critic model weights if weight verification is enabled
+    if enable_weight_verification and critic_hash_before is not None:
+        # Verify critic model hasn't changed due to saving process
+        critic_hash_after = get_model_hash(state.critic_model)
+        if critic_hash_before != critic_hash_after:
+            colored_print("WARNING", "Critic model changed during saving process!", Colors.RED)
+            colored_print("Hash Before", critic_hash_before, Colors.RED)
+            colored_print("Hash After", critic_hash_after, Colors.RED)
+        else:
+            colored_print("Critic Verification", "Critic model unchanged during saving", Colors.GREEN)
+    
     # If GSM8K, evaluate the model
     if state.hyperparameters["task_type"] == "gsm8k":
         colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
@@ -1191,7 +1525,7 @@ def save_checkpoint(state: TrainingState):
         model_dir = os.path.dirname(state.model_save_path)
         results_file = save_results(
             model_dir,
-            state.model_save_path,
+            checkpoint_path,  # Use the new checkpoint path here
             state.hyperparameters["model_type"],
             accuracy,
             results,
@@ -1199,14 +1533,61 @@ def save_checkpoint(state: TrainingState):
         )
         
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+    
+    # If MMLU, evaluate the model
+    elif state.hyperparameters["task_type"] == "mmlu":
+        colored_print("Evaluation", "Running MMLU evaluation...", Colors.BOLD)
+        
+        # Get subject filter from hyperparameters
+        subject = state.hyperparameters.get("mmlu_subject", None)
+        
+        # Use test split for evaluation
+        test_data = list(load_mmlu_dataset(split="test", subject=subject))
+        
+        # Run evaluation in eval mode
+        with torch.no_grad():
+            state.actor_model.eval()
+            accuracy, results = evaluate_model_on_mmlu(
+                state.actor_model,
+                state.critic_model,
+                state.tokenizer,
+                state.device,
+                test_data,
+                state.hyperparameters,
+                batch_size=state.hyperparameters["batch_size"] * 2
+            )
+            state.actor_model.train()
+        
+        # Save results
+        model_dir = os.path.dirname(state.model_save_path)
+        results_file = save_results_mmlu(
+            model_dir,
+            checkpoint_path,  # Use the new checkpoint path here
+            state.hyperparameters["model_type"],
+            accuracy,
+            results,
+            len(test_data),
+            subject=subject
+        )
+        
+        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
 
 
 def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> BatchData:
-    """Process a single batch of data"""
+    """Process a single batch of data.
+    
+    This function handles both standard and parallel sampling modes transparently.
+    When parallel_samples > 1, it will use parallel generation and group-relative
+    advantage calculation automatically.
+    """
     questions, answers = zip(*qa_batch)
 
+    # Determine if we need to calculate KL
+    kl_penalty = state.hyperparameters.get("kl_penalty", None)
+    calculate_kl = kl_penalty is not None
+
     # Generate reasoning from both models and compute KL
-    reasoning_output = generate_reasoning_and_kl(state, questions)
+    reasoning_output = generate_reasoning_and_kl(state, questions, calculate_kl=calculate_kl)
 
     # Calculate advantages
     advantage_output = calculate_advantages(
@@ -1226,9 +1607,10 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         state.previous_advantages,
         state.previous_normalized_rewards,
         state.hyperparameters,
+        state.batch_index,  # Pass batch index for accurate EI threshold calculation
     )
 
-    return BatchData(
+    batch_data = BatchData(
         questions=questions,
         answers=answers,
         actor_reasoning=reasoning_output.actor_reasoning,
@@ -1239,36 +1621,13 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         advantages=advantage_output.advantages,
         normalized_rewards=advantage_output.normalized_rewards,
         actor_answer_logprobs=advantage_output.actor_answer_logprobs,
-        critic_answer_logprobs=advantage_output.critic_answer_logprobs,  # Added critic_answer_logprobs
+        critic_answer_logprobs=advantage_output.critic_answer_logprobs,
         losses=losses,
         training_mask=training_mask,
         metrics=metrics,
     )
 
-def get_random_weight_snapshot(model, num_weights=1000):
-    """Take a snapshot of random weights from the model."""
-    snapshots = []
-    for name, param in model.named_parameters():
-        # Get flattened view of the parameter
-        flat_param = param.data.view(-1)
-        if len(flat_param) > 0:
-            # Randomly sample an index from this parameter
-            idx = random.randint(0, len(flat_param) - 1)
-            snapshots.append((name, idx, flat_param[idx].item()))
-            if len(snapshots) >= num_weights:
-                break
-    return snapshots
-
-def verify_frozen_weights(model, weight_snapshot):
-    """Verify that sampled weights haven't changed."""
-    for name, idx, original_value in weight_snapshot:
-        current_param = model.get_parameter(name)
-        current_value = current_param.data.view(-1)[idx].item()
-        if not torch.allclose(torch.tensor(current_value), torch.tensor(original_value)):
-            raise RuntimeError(
-                f"Critic weight changed in {name}[{idx}]: "
-                f"was {original_value}, now {current_value}"
-            )
+    return batch_data
 
 def update_model(state: TrainingState, batch_data: BatchData) -> float:
     """Perform model update and return gradient norm"""
@@ -1277,9 +1636,28 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
         if batch_data.training_mask is not None
         else len(batch_data.losses)
     )
-    state.grad_accum_count += num_active
 
+    # Log information about active examples
+    if batch_data.training_mask is not None:
+        total_examples = len(batch_data.training_mask)
+        active_fraction = num_active / total_examples
+        colored_print(
+            "EI Active:", 
+            f"{num_active}/{total_examples} examples ({active_fraction:.1%}) above threshold",
+            Colors.BOLD if active_fraction < 0.1 else Colors.CYAN  # Highlight in bold if < 10%
+        )
+    else:
+        # Explicitly log when not using EI
+        colored_print(
+            "EI Status:", 
+            "Disabled - training on all examples without thresholding",
+            Colors.GREEN
+        )
+
+    grad_norm = 0
     if num_active > 0:
+        # Calculate mean loss over active examples instead of sum
+        # This ensures consistent loss values regardless of how many examples pass the threshold
         loss = (
             batch_data.losses
             * (
@@ -1287,25 +1665,18 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
                 if batch_data.training_mask is not None
                 else 1.0
             )
-        ).sum()
+        ).sum() / num_active  # Use mean instead of sum
         loss.backward()
 
-    if state.grad_accum_count > 0:
-        grad_norm = (
-            get_grad_norm(state.actor_model.parameters()) / state.grad_accum_count
-        )
-    else:
-        grad_norm = 0
-
-    if state.grad_accum_count >= state.hyperparameters["gradient_accumulation_steps"]:
-        for p in state.actor_model.parameters():
-            if p.grad is not None:
-                p.grad.data.div_(state.grad_accum_count)
-
+        # Calculate gradient norm before optimization step
+        grad_norm = get_grad_norm(state.actor_model.parameters())
+        
+        # Apply gradient clipping
         clip_grad_norm_(state.actor_model.parameters(), 1.0)
+        
+        # Take optimizer step immediately (no gradient accumulation)
         state.actor_optimizer.step()
         state.actor_optimizer.zero_grad()
-        state.grad_accum_count = 0
 
     return grad_norm
 
@@ -1314,8 +1685,8 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     """Main training loop"""
     state = TrainingState.initialize(task_type, resume, model_type, hyperparameters)
     
-    # Update the model loading call to include hyperparameters
-    model, frozen_model, tokenizer, device = load_model(model_type=model_type, hyperparameters=hyperparameters)
+    # Display GRPO overview if parallel sampling is enabled
+    print_grpo_overview(state.hyperparameters)
     
     # Get dataset size for tracking full passes
     if task_type == "gsm8k":
@@ -1335,12 +1706,26 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
         num_batches=hyperparameters["num_batches"],
         batch_size=hyperparameters["batch_size"],
         task_type=task_type,
-        tokenizer=tokenizer,
+        tokenizer=state.tokenizer,
         hyperparameters=hyperparameters,
     )
 
-    # After initializing models
-    critic_weight_snapshot = get_random_weight_snapshot(state.critic_model)
+    # Only create weight snapshots if verification is enabled
+    enable_weight_verification = hyperparameters.get("enable_weight_verification", False)
+    critic_full_snapshot = None
+    actor_full_snapshot = None
+
+    if enable_weight_verification:
+        # Take full snapshots of both models' weights using the new hashing method
+        colored_print("Weight Verification", "Taking complete snapshot of critic model weights", Colors.BLUE)
+        critic_full_snapshot = get_model_hash(state.critic_model)
+        colored_print("Weight Verification", f"Created critic model hash: {critic_full_snapshot[:16]}...", Colors.BLUE)
+        
+        colored_print("Weight Verification", "Taking complete snapshot of actor model weights", Colors.BLUE)
+        actor_full_snapshot = get_model_hash(state.actor_model)
+        colored_print("Weight Verification", f"Created actor model hash: {actor_full_snapshot[:16]}...", Colors.BLUE)
+    else:
+        colored_print("Weight Verification", "Weight verification disabled", Colors.YELLOW)
     
     try:
         for batch_index in range(state.batch_index, hyperparameters["num_batches"]):
@@ -1351,13 +1736,13 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             try:
                 qa_batch = next(qa_generator)
             except StopIteration:
-                # Reset generator if we need more batches
+                # Reset generator if we run out of data
                 if batch_index < hyperparameters["num_batches"] - 1:
                     qa_generator = generate_question_answer_batches(
                         num_batches=hyperparameters["num_batches"] - batch_index,
                         batch_size=hyperparameters["batch_size"],
                         task_type=task_type,
-                        tokenizer=tokenizer,
+                        tokenizer=state.tokenizer,
                         hyperparameters=hyperparameters,
                     )
                     qa_batch = next(qa_generator)
@@ -1371,18 +1756,17 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             batch_data = process_batch(state, qa_batch)
             grad_norm = update_model(state, batch_data)
 
-            # Update history and log as before
+            # Update history and log
             state.previous_normalized_rewards.extend(
-                batch_data.normalized_rewards.detach().float().cpu().numpy()
+                batch_data.normalized_rewards.float().detach().cpu().numpy()
             )
             state.previous_advantages.extend(
-                batch_data.advantages.detach().float().cpu().numpy()
+                batch_data.advantages.float().detach().cpu().numpy()
             )
 
             metrics = LogMetrics.from_batch(
                 batch_data,
                 grad_norm,
-                state.grad_accum_count,
                 state.previous_advantages,
                 state.hyperparameters["batch_size"],
             )
@@ -1392,9 +1776,15 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             if batch_index % checkpoint_frequency == 0 and batch_index > 0:
                 save_checkpoint(state)
 
-            # Verify critic weights haven't changed (e.g., every 100 batches)
-            if batch_index % 100 == 0:
-                verify_frozen_weights(state.critic_model, critic_weight_snapshot)
+            # Every X batches, verify model weights are behaving as expected if verification is enabled
+            if enable_weight_verification and batch_index % state.hyperparameters.get("weight_verification_freq", 10) == 0 and batch_index > 0:
+                colored_print("Weight Verification", f"Performing verification at batch {batch_index}", Colors.BLUE)
+                
+                # Verify critic model weights aren't changing (frozen correctly)
+                verify_all_frozen_weights(state.critic_model, critic_full_snapshot)
+                    
+                # Verify actor model weights are changing properly
+                verify_actor_weights_changing_comprehensive(state.actor_model, actor_full_snapshot)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
@@ -1405,27 +1795,6 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             print("No checkpoint saved (no full epochs completed)")
         return
 
-
-def get_latest_log_file():
-    """
-    Find the most recent log file in the results directory.
-    Searches across all task subdirectories.
-    """
-    results_dir = "results"
-
-    # Find all log files recursively
-    log_files = []
-    for root, dirs, files in os.walk(results_dir):
-        for file in files:
-            if file == "log.jsonl" or file.endswith(".log"):
-                log_file_path = os.path.join(root, file)
-                log_files.append(log_file_path)
-
-    if not log_files:
-        raise FileNotFoundError("No log files found in results directory.")
-
-    # Return the most recently modified log file
-    return max(log_files, key=os.path.getmtime)
 
 
 @dataclass
@@ -1442,30 +1811,26 @@ class TrainingConfig:
     temperature: float
     question_length: int
     target_length: int
-    shrink_cot: Union[bool, int, None]
-    gradient_accumulation_steps: int
     kl_penalty: Optional[float]
     batch_size: int
     normalize_loss: bool
-    flatten: bool
     lr: float
     num_batches: int
     ppo_epsilon: float
     checkpoint_frequency: Optional[int]
+    weight_verification_freq: int
+    enable_weight_verification: bool
+    # LoRA parameters
+    lora_rank: int
+    lora_alpha: float
+    # Debug options
+    debug_repeat_datapoint: bool
+    # Parallel sampling (GRPO-style)
+    parallel_samples: int = 1
 
     @classmethod
     def from_args(cls, args):
         """Create config from parsed command line arguments"""
-        # Convert shrink_cot argument
-        shrink_cot = args.shrink_cot
-        if isinstance(shrink_cot, float):
-            if shrink_cot.is_integer():
-                shrink_cot = int(shrink_cot)
-            else:
-                raise ValueError(
-                    "--shrink_cot value must be a whole number if provided"
-                )
-
         # Create config with all arguments
         return cls(
             task_type=args.task_type,
@@ -1478,16 +1843,19 @@ class TrainingConfig:
             temperature=args.temperature,
             question_length=args.question_length,
             target_length=args.target_length,
-            shrink_cot=shrink_cot,
-            gradient_accumulation_steps=args.gradient_accumulation_steps,
             kl_penalty=args.kl_penalty,
             batch_size=args.batch_size,
             normalize_loss=args.normalize_loss,
-            flatten=args.flatten,
             lr=args.lr,
             num_batches=args.num_batches,
             ppo_epsilon=args.ppo_epsilon,
             checkpoint_frequency=args.checkpoint_frequency,
+            weight_verification_freq=args.weight_verification_freq,
+            enable_weight_verification=args.enable_weight_verification,
+            lora_rank=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            debug_repeat_datapoint=args.debug_repeat_datapoint,
+            parallel_samples=args.parallel_samples if hasattr(args, 'parallel_samples') else 1,
         )
 
 
@@ -1513,6 +1881,7 @@ if __name__ == "__main__":
             "arithmetic",
             "arithmetic_negative",
             "gsm8k",
+            "mmlu",
             "wiki_compression",
             "wiki_continuation",
         ],
@@ -1522,7 +1891,7 @@ if __name__ == "__main__":
         "--model_type",
         type=str,
         default="llama",
-        choices=["llama", "mistral", "gpt2", "tinystories", "phi"],
+        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4", "gemma-3", "gemma-3-small"],
         help="Model type (default: llama)",
     )
     parser.add_argument("--resume", action="store_true")
@@ -1530,7 +1899,7 @@ if __name__ == "__main__":
         "--use_ei",
         type=float,
         default=None,
-        help="Use Expert Iteration with specified number of standard deviations",
+        help="Use Expert Iteration with specified number of standard deviations (default: None, which disables thresholding)",
     )
     parser.add_argument("--use_ppo", action="store_true")
     parser.add_argument("--cot_length", type=int, default=50)
@@ -1538,14 +1907,11 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--question_length", type=int, default=50)
     parser.add_argument("--target_length", type=int, default=50)
-    parser.add_argument("--shrink_cot", type=float, nargs="?", const=True)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--kl_penalty", type=float, default=0.1)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument(
         "--normalize_loss", type=lambda x: x.lower() == "true", default=True
     )
-    parser.add_argument("--flatten", action="store_true")
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--num_batches", type=int, default=100000)
     parser.add_argument("--ppo_epsilon", type=float, default=0.2)
@@ -1554,7 +1920,63 @@ if __name__ == "__main__":
         type=int,
         help="Override default checkpoint frequency (default: 500 for GSM8K, 1000 for others)",
     )
+    # Add weight verification frequency parameter
+    parser.add_argument(
+        "--weight_verification_freq",
+        type=int,
+        default=10,
+        help="Frequency (in batches) to run comprehensive weight verification (default: 10)",
+    )
+    # Add new flag to enable/disable weight verification
+    parser.add_argument(
+        "--enable_weight_verification",
+        action="store_true",
+        help="Enable weight verification (disabled by default)",
+    )
+    # MMLU-specific arguments
+    parser.add_argument(
+        "--mmlu_subject",
+        type=str,
+        default=None,
+        help="Specific MMLU subject to train on (default: all subjects)",
+    )
+    parser.add_argument(
+        "--mmlu_split",
+        type=str,
+        default="validation",
+        choices=["train", "validation", "test"],
+        help="MMLU dataset split to use (default: validation)",
+    )
+    # LoRA configuration arguments
+    parser.add_argument(
+        "--lora_rank",
+        type=int,
+        default=8,
+        help="Rank for LoRA adapter (default: 8). Higher values use more parameters but can capture more complex patterns.",
+    )
+    parser.add_argument(
+        "--lora_alpha",
+        type=float,
+        default=16,
+        help="Alpha scaling for LoRA adapter (default: 16). Usually set to 2x the rank.",
+    )
+    # Debug options
+    parser.add_argument(
+        "--debug_repeat_datapoint",
+        action="store_true",
+        help="Debug mode: train on the same datapoint repeatedly to test optimization",
+    )
+    # Parallel sampling (GRPO-style)
+    parser.add_argument(
+        "--parallel_samples",
+        type=int,
+        default=1,
+        help="Number of parallel samples to use for parallel sampling (default: 1)",
+    )
 
     args = parser.parse_args()
     config = TrainingConfig.from_args(args)
     main(config)
+
+
+

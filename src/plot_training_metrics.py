@@ -5,33 +5,84 @@ from collections import defaultdict
 import os
 import argparse
 import math
-from train import get_latest_log_file
 from constants import EI_SKIP_INITIAL
 import sys
+import glob
+
+
+def get_latest_log_file():
+    """
+    Find the most recent log.jsonl file in any results subdirectory.
+    
+    Returns:
+        str: Path to the most recent log file, or None if no log files found
+    """
+    # Look for any log.jsonl file in subdirectories of results/
+    log_files = glob.glob("results/**/log.jsonl", recursive=True)
+    
+    if not log_files:
+        return None
+    
+    # Sort by modification time, most recent first
+    return sorted(log_files, key=os.path.getmtime, reverse=True)[0]
 
 
 def get_nested_value(entry, path, metrics_dict=None):
     """Helper function to get nested dictionary values using dot notation, with optional derived metrics"""
+    # Handle special cases for missing metrics
+    if path == "Training Metrics.Active Only Loss" or path == "Training Metrics.Active Only PG Loss":
+        # Check if EI is enabled in this log entry
+        if "EI Metrics" not in entry:
+            return np.nan
+    
+    if path == "Training Metrics.Active Samples.Fraction":
+        # Check if Active Samples metrics exist (EI enabled)
+        if "Training Metrics" not in entry or "Active Samples" not in entry.get("Training Metrics", {}):
+            return np.nan
+    
     if path == "Training Metrics.Critic Answer Log Probs" and metrics_dict is not None:
         # Calculate Critic Answer Log Probs if not directly available
         actor_probs = get_nested_value(entry, "Training Metrics.Actor Answer Log Probs")
         norm_reward = get_nested_value(entry, "Training Metrics.Normalized Reward")
         if actor_probs is not None and norm_reward is not None:
             return actor_probs - norm_reward
-        return None
+        return np.nan
 
+    # Standard nested dictionary access
     value = entry
     for key in path.split("."):
         if value is None or key not in value:
-            return None
+            return np.nan
         value = value[key]
+    
+    # Handle special string indicators like "NaN (no active examples)"
+    if isinstance(value, str) and "NaN" in value:
+        return np.nan
+        
     return value
 
 
 def moving_average(data, window_size):
+    """Calculate moving average, properly handling NaN values"""
     if len(data) < window_size:
         return data
-    return np.convolve(data, np.ones(window_size), "valid") / window_size
+        
+    # Convert the data to a numpy array to ensure correct handling of NaN values
+    data_array = np.array(data, dtype=float)
+    
+    # Use a technique that doesn't count NaN values in the average
+    result = np.zeros(len(data_array) - window_size + 1)
+    
+    for i in range(len(result)):
+        window = data_array[i:i+window_size]
+        # Count only non-NaN values
+        valid_values = window[~np.isnan(window)]
+        if len(valid_values) > 0:
+            result[i] = np.mean(valid_values)
+        else:
+            result[i] = np.nan
+    
+    return result
 
 
 def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, plot_summary=False, max_index=None, average=False, show_std=False, show_legend=True, label_size=10, show_title=True):
@@ -46,6 +97,10 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
     has_answer_logprobs = "Actor Answer Log Probs" in first_entry.get("Training Metrics", {})
     has_critic_probs = "Critic Answer Log Probs" in first_entry.get("Training Metrics", {})
     
+    # Check if important features are enabled
+    normalize_loss = hyperparameters.get('normalize_loss', True)
+    ei_enabled = hyperparameters.get('use_ei') is not None
+    
     # Initialize metrics_dict for deriving critic probs if needed
     metrics_dict = None if has_critic_probs else {"derive_critic": True}
     
@@ -59,14 +114,22 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
                 ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
             ]
+            
+            # Add critic metrics only if normalization is enabled
+            if normalize_loss and has_critic_probs:
+                metrics_to_plot.insert(1, ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)"))
+                
         # For wiki tasks
         elif task_type.startswith('wiki_'):
             if has_answer_logprobs:
                 metrics_to_plot = [
                     ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')"),
-                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
-                    ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)")
+                    ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)")
                 ]
+                
+                # Add critic metrics only if normalization is enabled
+                if normalize_loss and has_critic_probs:
+                    metrics_to_plot.append(("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)"))
             else:
                 metrics_to_plot = [
                     ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
@@ -76,21 +139,35 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
             ]
     else:
+        # Start with basic metrics that are always present
         base_metrics = [
-            ("Training Metrics.Loss", "Total Loss", "Training Batch No. []", "Loss"),
-            ("Training Metrics.Policy Gradient Loss", "Policy Gradient Loss", "Training Batch No. []", "Loss"),
+            ("Training Metrics.Loss", "Total Loss (All Examples)", "Training Batch No. []", "Loss"),
+            ("Training Metrics.Policy Gradient Loss", "PG Loss (All Examples)", "Training Batch No. []", "Loss"),
             ("Training Metrics.KL", "KL Divergence", "Training Batch No. []", "KL"),
             ("Training Metrics.Gradient Norm", "Gradient Norm", "Training Batch No. []", "Norm"),
             ("Training Metrics.Advantage", "Advantage", "Training Batch No. []", "Value"),
-            ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')"),
-            ("Training Metrics.Active Samples.Fraction", "Fraction of Active Samples", "Training Batch No. []", "Fraction")
+            ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
         ]
         
-        if has_answer_logprobs:
+        # Add EI-specific metrics only if EI is enabled
+        if ei_enabled:
             base_metrics.extend([
-                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
-                ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)")
+                ("Training Metrics.Active Only Loss", "Total Loss (Active Examples)", "Training Batch No. []", "Loss"),
+                ("Training Metrics.Active Only PG Loss", "PG Loss (Active Examples)", "Training Batch No. []", "Loss"),
+                ("Training Metrics.Active Samples.Fraction", "Fraction of Active Samples", "Training Batch No. []", "Fraction")
             ])
+        
+        # Add actor log probs if available
+        if has_answer_logprobs:
+            base_metrics.append(
+                ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)")
+            )
+            
+            # Add critic log probs only if normalization is enabled and they're available
+            if normalize_loss and has_critic_probs:
+                base_metrics.append(
+                ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)")
+                )
         
         # Add Contains Answer metric for GSM8K
         if task_type == "gsm8k":
@@ -129,30 +206,55 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             if max_index is not None:
                 entries = entries[:max_index]
             
-            data = [
+            # Extract data points, handling None values, NaN, and strings
+            raw_data = [
                 get_nested_value(entry, metric_path, metrics_dict)
                 for entry in entries[EI_SKIP_INITIAL:]
-                if get_nested_value(entry, metric_path, metrics_dict) is not None
             ]
             
-            if data:
-                if metric_path == "Example.Contains Answer":
-                    data = [1 if x else 0 for x in data]
-                
-                if average:
-                    all_data.append(data)
+            # Filter out None values and convert to float array
+            valid_data = []
+            for d in raw_data:
+                if d is None:
+                    valid_data.append(np.nan)  # Convert None to NaN for proper handling
+                elif isinstance(d, str) and "NaN" in d:
+                    valid_data.append(np.nan)  # Handle "NaN" strings
                 else:
-                    smoothed_data = moving_average(data, window_size)
-                    offset = window_size // 2
-                    axs[metric_idx].plot(
-                        range(offset, offset + len(smoothed_data)),
-                        smoothed_data,
-                        linewidth=2,
-                        label=label
-                    )
+                    # Handle special cases for certain metrics
+                    if metric_path == "Example.Contains Answer":
+                        valid_data.append(1 if d else 0)
+                    else:
+                        try:
+                            valid_data.append(float(d))
+                        except (ValueError, TypeError):
+                            valid_data.append(np.nan)
+            
+            # Only proceed if we have valid data
+            if valid_data and not all(np.isnan(d) for d in valid_data):
+                if average:
+                    all_data.append(valid_data)
+                else:
+                    # Convert to numpy array for handling NaN values
+                    data_array = np.array(valid_data, dtype=float)
+                    # Smooth the data, properly handling NaN values
+                    smoothed_data = moving_average(data_array, window_size)
+                    
+                    # Create x-coordinates for plotting, accounting for the window size
+                    offset = (window_size - 1) // 2 if window_size > 1 else 0
+                    x_coords = np.arange(EI_SKIP_INITIAL + offset, EI_SKIP_INITIAL + offset + len(smoothed_data))
+                    
+                    # Filter out NaN values before plotting
+                    mask = ~np.isnan(smoothed_data)
+                    if np.any(mask):  # Only plot if we have any valid points
+                        axs[metric_idx].plot(
+                            x_coords[mask],
+                            smoothed_data[mask],
+                            linewidth=2,
+                            label=label
+                        )
         
-        if average and all_data:
-            # Convert all data to float arrays first
+        if average and all_data and any(len(d) > 0 for d in all_data):
+            # Convert all data to float arrays
             all_data = [np.array(d, dtype=float) for d in all_data]
             
             # Pad shorter sequences with NaN
@@ -166,37 +268,44 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             
             # Remove trailing NaN values
             valid_mask = ~np.isnan(mean_data)
-            mean_data = mean_data[valid_mask]
-            if show_std:
-                std_data = std_data[valid_mask]
-            
-            # Smooth mean and std data
-            smoothed_mean = moving_average(mean_data, window_size)
-            if show_std:
-                smoothed_std = moving_average(std_data, window_size)
-            
-            offset = window_size // 2
-            x_range = range(offset, offset + len(smoothed_mean))
-            
-            # Plot mean line
-            line = axs[metric_idx].plot(
-                x_range,
-                smoothed_mean,
-                linewidth=2,
-                label="Average",
-                color='blue'
-            )[0]
-            
-            # Add std bands if requested
-            if show_std:
-                axs[metric_idx].fill_between(
-                    x_range,
-                    smoothed_mean - smoothed_std,
-                    smoothed_mean + smoothed_std,
-                    alpha=0.2,
-                    color=line.get_color(),
-                    label='±1 SD'
-                )
+            if np.any(valid_mask):  # Only continue if we have valid data
+                mean_data = mean_data[valid_mask]
+                if show_std:
+                    std_data = std_data[valid_mask]
+                
+                # Smooth mean and std data
+                smoothed_mean = moving_average(mean_data, window_size)
+                if show_std:
+                    smoothed_std = moving_average(std_data, window_size)
+                
+                # Create x-coordinates for plotting
+                offset = (window_size - 1) // 2 if window_size > 1 else 0
+                x_range = np.arange(EI_SKIP_INITIAL + offset, EI_SKIP_INITIAL + offset + len(smoothed_mean))
+                
+                # Filter out NaN values before plotting
+                mask = ~np.isnan(smoothed_mean)
+                if np.any(mask):  # Only plot if we have any valid points
+                    # Plot mean line
+                    line = axs[metric_idx].plot(
+                        x_range[mask],
+                        smoothed_mean[mask],
+                        linewidth=2,
+                        label="Average",
+                        color='blue'
+                    )[0]
+                    
+                    # Add std bands if requested
+                    if show_std:
+                        # Ensure std data is aligned with mean data
+                        smoothed_std_filtered = smoothed_std[mask]
+                        axs[metric_idx].fill_between(
+                            x_range[mask],
+                            smoothed_mean[mask] - smoothed_std_filtered,
+                            smoothed_mean[mask] + smoothed_std_filtered,
+                            alpha=0.2,
+                            color=line.get_color(),
+                            label='±1 SD'
+                        )
 
         # Set y-limits for Contains Answer plot
         if title == "Contains Answer":
@@ -366,6 +475,9 @@ if __name__ == "__main__":
     else:
         # Single file plotting (use latest log file)
         log_file = get_latest_log_file()
+        if log_file is None:
+            print("Error: No log files found in results directory")
+            sys.exit(1)
         files_to_plot = [log_file]
         host_names_to_plot = ["local"]
         valid_files = True

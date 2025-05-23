@@ -12,7 +12,7 @@ import glob
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Dict
-from utils import construct_prompts, find_latest_result
+from .utils import construct_prompts, find_latest_result
 import copy
 
 def extract_answer(answer):
@@ -97,8 +97,6 @@ def get_hyperparameters_from_log(model_dir):
             "temperature": 1.0,
             "r": 0.9,
             "question_length": 200,
-            "shrink_cot": None,
-            "flatten": False,
         }
 
 

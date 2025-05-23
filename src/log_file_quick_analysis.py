@@ -5,6 +5,23 @@ from pprint import pprint
 import matplotlib.pyplot as plt
 import argparse
 import os
+import glob
+
+def find_latest_log_file():
+    """
+    Find the most recent log.jsonl file in any results subdirectory.
+    
+    Returns:
+        str: Path to the most recent log file, or None if no log files found
+    """
+    # Look for any log.jsonl file in subdirectories of results/
+    log_files = glob.glob("results/**/log.jsonl", recursive=True)
+    
+    if not log_files:
+        return None
+    
+    # Sort by modification time, most recent first
+    return sorted(log_files, key=os.path.getmtime, reverse=True)[0]
 
 def load_and_analyze_metrics(file_paths=None, window_size=50, target_batch_index=None):
     """
@@ -17,8 +34,7 @@ def load_and_analyze_metrics(file_paths=None, window_size=50, target_batch_index
     """
     # If no file paths provided, use the latest result
     if not file_paths:
-        from train import find_latest_result
-        latest_log = find_latest_result(return_log=True)
+        latest_log = find_latest_log_file()
         if latest_log:
             file_paths = [latest_log]
             print(f"Using latest log file: {latest_log}")
