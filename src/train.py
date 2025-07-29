@@ -273,6 +273,9 @@ class TrainingState:
 
     # Configuration
     hyperparameters: Dict[str, Any]
+    
+    # Gradient accumulation tracking
+    accumulation_step: int
 
     @classmethod
     def initialize(
@@ -310,6 +313,7 @@ class TrainingState:
             model_save_path=model_save_path,
             log_file=log_file,
             hyperparameters=updated_hyperparameters,  # Use the updated hyperparameters
+            accumulation_step=0,
         )
 
 
@@ -1638,6 +1642,9 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
         else len(batch_data.losses)
     )
     
+    # Get gradient accumulation steps from hyperparameters
+    accumulation_steps = state.hyperparameters.get("gradient_accumulation_steps", 1)
+    
     # Log information about active examples
     if batch_data.training_mask is not None:
         total_examples = len(batch_data.training_mask)
@@ -1657,8 +1664,8 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
 
     grad_norm = 0
     if num_active > 0:
-        # Calculate mean loss over active examples instead of sum
-        # This ensures consistent loss values regardless of how many examples pass the threshold
+        # Calculate mean loss over active examples, scaled for gradient accumulation
+        # Divide by accumulation_steps to get proper gradient scaling
         loss = (
             batch_data.losses
             * (
@@ -1666,18 +1673,42 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
                 if batch_data.training_mask is not None
                 else 1.0
             )
-        ).sum() / num_active  # Use mean instead of sum
+        ).sum() / (num_active * accumulation_steps)  # Scale by accumulation steps
         loss.backward()
 
-        # Calculate gradient norm before optimization step
-        grad_norm = get_grad_norm(state.actor_model.parameters())
+        # Increment accumulation step
+        state.accumulation_step += 1
         
-        # Apply gradient clipping
-        clip_grad_norm_(state.actor_model.parameters(), 1.0)
-        
-        # Take optimizer step immediately (no gradient accumulation)
-        state.actor_optimizer.step()
-        state.actor_optimizer.zero_grad()
+        # Check if we should take an optimizer step
+        if state.accumulation_step >= accumulation_steps:
+            # Calculate gradient norm before optimization step
+            grad_norm = get_grad_norm(state.actor_model.parameters())
+            
+            # Apply gradient clipping
+            clip_grad_norm_(state.actor_model.parameters(), 1.0)
+            
+            # Take optimizer step
+            state.actor_optimizer.step()
+            state.actor_optimizer.zero_grad()
+            
+            # Reset accumulation step
+            state.accumulation_step = 0
+            
+            if accumulation_steps > 1:
+                colored_print(
+                    "Gradient Accumulation:", 
+                    f"Optimizer step taken after {accumulation_steps} accumulation steps",
+                    Colors.CYAN
+                )
+        else:
+            # Just accumulating gradients, don't calculate grad norm yet
+            grad_norm = 0
+            if accumulation_steps > 1:
+                colored_print(
+                    "Gradient Accumulation:", 
+                    f"Step {state.accumulation_step}/{accumulation_steps} - accumulating gradients",
+                    Colors.YELLOW
+                )
 
     return grad_norm
 
@@ -1795,6 +1826,19 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
         else:
             print("No checkpoint saved (no full epochs completed)")
         return
+    
+    # Handle any remaining accumulated gradients at the end of training
+    if state.accumulation_step > 0:
+        colored_print(
+            "Gradient Accumulation:", 
+            f"Applying final accumulated gradients ({state.accumulation_step} steps)",
+            Colors.CYAN
+        )
+        grad_norm = get_grad_norm(state.actor_model.parameters())
+        clip_grad_norm_(state.actor_model.parameters(), 1.0)
+        state.actor_optimizer.step()
+        state.actor_optimizer.zero_grad()
+        state.accumulation_step = 0
 
 
 
@@ -1813,6 +1857,7 @@ class TrainingConfig:
     question_length: int
     target_length: int
     kl_penalty: Optional[float]
+    gradient_accumulation_steps: int
     batch_size: int
     normalize_loss: bool
     lr: float
@@ -1845,6 +1890,7 @@ class TrainingConfig:
             question_length=args.question_length,
             target_length=args.target_length,
             kl_penalty=args.kl_penalty,
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
             batch_size=args.batch_size,
             normalize_loss=args.normalize_loss,
             lr=args.lr,
@@ -1909,6 +1955,8 @@ if __name__ == "__main__":
     parser.add_argument("--question_length", type=int, default=50)
     parser.add_argument("--target_length", type=int, default=50)
     parser.add_argument("--kl_penalty", type=float, default=0.1)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1, 
+                       help="Number of batches to accumulate gradients before updating (default: 1)")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument(
         "--normalize_loss", type=lambda x: x.lower() == "true", default=True
