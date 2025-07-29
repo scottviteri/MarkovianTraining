@@ -1,6 +1,6 @@
 # MarkovianTraining 
 
-This project implements and evaluates various reinforcement learning algorithms for training language models on question-answering tasks, with a focus on chain-of-thought (CoT) reasoning. The code implements the figures for "Markovian Transformers for Informative Language Modeling" (https://arxiv.org/abs/2404.18988).
+This project implements and evaluates various reinforcement learning algorithms for training language models on question-answering tasks, with a focus on chain-of-thought (CoT) reasoning. The code implements the figures for "Markovian Transformers for Informative Language Modeling".
 
 ## Installation
 
@@ -67,8 +67,10 @@ python src/train.py [options]
 #### Additional Options
 ```bash
 --resume                   # Resume training from latest checkpoint
+--shrink_cot <float>      # Shrink chain-of-thought length
 --gradient_accumulation_steps <int>  # Steps before update (default: 1)
 --normalize_loss          # Enable loss normalization (default: True)
+--flatten                 # Flatten input sequences
 ```
 
 ### 2. Model Evaluation Scripts
