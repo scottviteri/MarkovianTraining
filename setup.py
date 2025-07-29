@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages
+from setuptools import setup
 import os
 
 # Read the contents of README file
@@ -10,8 +10,7 @@ setup(
     description="Markovian Training with Vector Quantization",
     author="Scott Viteri",
     author_email="scottviteri@gmail.com",
-    packages=find_packages(where="src"),
-    package_dir={"": "src"},
+    # Use py_modules instead of packages for top-level modules
     py_modules=[
         "utils", "train", "evaluate_gsm8k", "constants", 
         "analyze_base_logprobs", "evaluate_cross_model",
@@ -19,6 +18,7 @@ setup(
         "plot_cot_answer_accuracy", "plot_training_metrics",
         "test_tokenizers"
     ],
+    package_dir={"": "src"},
     python_requires='>=3.8',
     install_requires=[
         "torch>=2.0.0",
