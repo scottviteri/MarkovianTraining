@@ -1,7 +1,7 @@
 import os
 from typing import Dict, Any, Optional
 from peft import LoraConfig, get_peft_model, PeftModel
-from src.constants import (
+from constants import (
     MISTRAL_INST_START, 
     MISTRAL_INST_END, 
     PHI4_IM_START, 
