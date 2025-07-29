@@ -85,8 +85,23 @@ def moving_average(data, window_size):
     return result
 
 
-def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, plot_summary=False, max_index=None, average=False, show_std=False, show_legend=True, label_size=10, show_title=True):
-    """Plot metrics from multiple files on the same plot."""
+def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, plot_summary=False, max_index=None, average=False, show_std=False, show_legend=True, label_size=10, show_title=True, show_raw=True):
+    """Plot metrics from multiple files on the same plot.
+    
+    Args:
+        file_paths: List of paths to log files
+        host_names: List of host names for legend labels
+        window_size: Size of moving average window for smoothing (default: 10)
+        output_file: Path for output plot file
+        plot_summary: Whether to plot summary metrics only (varies by task)
+        max_index: Maximum batch index to plot (truncates data)
+        average: Whether to average values across input files
+        show_std: Whether to show standard deviation bands when averaging
+        show_legend: Whether to show legend in plots
+        label_size: Font size for labels
+        show_title: Whether to show titles on plots
+        show_raw: Whether to show both raw and smoothed versions (default: True)
+    """
     # Read first file to get task type and check available metrics
     with open(file_paths[0], "r") as f:
         file_contents = f.readlines()
@@ -236,21 +251,41 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 else:
                     # Convert to numpy array for handling NaN values
                     data_array = np.array(valid_data, dtype=float)
+                    
+                    # Create x-coordinates for raw data
+                    x_coords_raw = np.arange(EI_SKIP_INITIAL, EI_SKIP_INITIAL + len(data_array))
+                    
+                    # Plot raw data with transparency (only if show_raw is enabled)
+                    if show_raw:
+                        mask_raw = ~np.isnan(data_array)
+                        if np.any(mask_raw):  # Only plot if we have any valid points
+                            axs[metric_idx].plot(
+                                x_coords_raw[mask_raw],
+                                data_array[mask_raw],
+                                alpha=0.3,
+                                linewidth=1,
+                                label=f"{label} (Raw)",
+                                linestyle='-'
+                            )
+                    
                     # Smooth the data, properly handling NaN values
                     smoothed_data = moving_average(data_array, window_size)
                     
-                    # Create x-coordinates for plotting, accounting for the window size
+                    # Create x-coordinates for smoothed data, accounting for the window size
                     offset = (window_size - 1) // 2 if window_size > 1 else 0
                     x_coords = np.arange(EI_SKIP_INITIAL + offset, EI_SKIP_INITIAL + offset + len(smoothed_data))
                     
-                    # Filter out NaN values before plotting
+                    # Filter out NaN values before plotting smoothed data
                     mask = ~np.isnan(smoothed_data)
                     if np.any(mask):  # Only plot if we have any valid points
+                        # Adjust label based on whether raw data is shown
+                        smooth_label = f"{label} (Smoothed)" if show_raw else label
                         axs[metric_idx].plot(
                             x_coords[mask],
                             smoothed_data[mask],
                             linewidth=2,
-                            label=label
+                            label=smooth_label,
+                            linestyle='-'
                         )
         
         if average and all_data and any(len(d) > 0 for d in all_data):
@@ -273,38 +308,71 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 if show_std:
                     std_data = std_data[valid_mask]
                 
+                # Create x-coordinates for raw averaged data
+                x_range_raw = np.arange(EI_SKIP_INITIAL, EI_SKIP_INITIAL + len(mean_data))
+                
+                # Plot raw averaged data with transparency (only if show_raw is enabled)
+                if show_raw:
+                    mask_raw = ~np.isnan(mean_data)
+                    if np.any(mask_raw):  # Only plot if we have any valid points
+                        axs[metric_idx].plot(
+                            x_range_raw[mask_raw],
+                            mean_data[mask_raw],
+                            alpha=0.3,
+                            linewidth=1,
+                            label="Average (Raw)",
+                            color='blue',
+                            linestyle='-'
+                        )
+                        
+                        # Add raw std bands if requested
+                        if show_std:
+                            std_data_filtered = std_data[mask_raw]
+                            axs[metric_idx].fill_between(
+                                x_range_raw[mask_raw],
+                                mean_data[mask_raw] - std_data_filtered,
+                                mean_data[mask_raw] + std_data_filtered,
+                                alpha=0.1,
+                                color='blue',
+                                label='±1 SD (Raw)'
+                            )
+                
                 # Smooth mean and std data
                 smoothed_mean = moving_average(mean_data, window_size)
                 if show_std:
                     smoothed_std = moving_average(std_data, window_size)
                 
-                # Create x-coordinates for plotting
+                # Create x-coordinates for smoothed data
                 offset = (window_size - 1) // 2 if window_size > 1 else 0
                 x_range = np.arange(EI_SKIP_INITIAL + offset, EI_SKIP_INITIAL + offset + len(smoothed_mean))
                 
-                # Filter out NaN values before plotting
+                # Filter out NaN values before plotting smoothed data
                 mask = ~np.isnan(smoothed_mean)
                 if np.any(mask):  # Only plot if we have any valid points
-                    # Plot mean line
+                    # Adjust label based on whether raw data is shown
+                    smooth_label = "Average (Smoothed)" if show_raw else "Average"
+                    # Plot smoothed mean line
                     line = axs[metric_idx].plot(
                         x_range[mask],
                         smoothed_mean[mask],
                         linewidth=2,
-                        label="Average",
-                        color='blue'
+                        label=smooth_label,
+                        color='blue',
+                        linestyle='-'
                     )[0]
                     
-                    # Add std bands if requested
+                    # Add smoothed std bands if requested
                     if show_std:
                         # Ensure std data is aligned with mean data
                         smoothed_std_filtered = smoothed_std[mask]
+                        std_label = '±1 SD (Smoothed)' if show_raw else '±1 SD'
                         axs[metric_idx].fill_between(
                             x_range[mask],
                             smoothed_mean[mask] - smoothed_std_filtered,
                             smoothed_mean[mask] + smoothed_std_filtered,
                             alpha=0.2,
                             color=line.get_color(),
-                            label='±1 SD'
+                            label=std_label
                         )
 
         # Set y-limits for Contains Answer plot
@@ -421,6 +489,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Don't show titles on the plots",
     )
+    parser.add_argument(
+        "--no-raw",
+        action="store_true",
+        help="Show only smoothed versions (default: show both raw and smoothed)",
+    )
     args = parser.parse_args()
 
     if args.files:
@@ -495,6 +568,7 @@ if __name__ == "__main__":
             show_legend=not args.no_legend,
             label_size=args.label_size,
             show_title=not args.no_title,
+            show_raw=not args.no_raw,
         )
     else:
         print("No valid files found to plot")
