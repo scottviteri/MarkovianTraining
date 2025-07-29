@@ -5,4 +5,6 @@ This package provides tools for training language models with Vector Quantizatio
 """
  
 from .utils import colored_print, Colors
-from .vq import ParallelVQEncoder 
+
+# VQ functionality is available in separate vq_training_minimal.py file
+# and in the vq-development branch 

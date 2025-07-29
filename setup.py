@@ -6,7 +6,8 @@ setup(
     description="Markovian Training with Vector Quantization",
     author="",
     author_email="",
-    packages=find_packages(),
+    packages=['src'],
+    package_data={'src': ['*.py']},
     python_requires='>=3.8',
     install_requires=[
         "torch>=2.0.0",
