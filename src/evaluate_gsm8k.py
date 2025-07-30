@@ -44,14 +44,12 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
         model_name = "microsoft/Phi-3.5-mini-instruct"
     elif model_type == "phi-4":
         model_name = "microsoft/phi-4"
-    elif model_type == "qwen25":
-        model_name = "Qwen/Qwen2.5-7B-Instruct"
     elif model_type == "gemma-3":
         model_name = "google/gemma-3-12b-it"
     elif model_type == "gemma-3-small":
         model_name = "google/gemma-3-1b-it"
     else:
-        raise ValueError("model_type must be one of: 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', 'phi-4', 'qwen25', 'gemma-3', 'gemma-3-small'")
+        raise ValueError("model_type must be one of: 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', 'phi-4', 'qwen3', 'gemma-3', 'gemma-3-small'")
 
     # Check if model needs trust_remote_code
     trust_remote_code = model_type in ["phi", "phi-4", "gemma-3", "gemma-3-small"]
@@ -496,7 +494,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_type",
         type=str,
-        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4", "qwen25", "qwen3", "gemma-3", "gemma-3-small"],
+        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4", "qwen3", "gemma-3", "gemma-3-small"],
         default=None,
         help="Choose between Mistral and Llama 3.1 models (default: infer from model path)",
     )

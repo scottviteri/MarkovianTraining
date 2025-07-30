@@ -57,7 +57,7 @@ def find_answer_start_position(input_ids, model_type):
             & (input_ids[1:] == 25)
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
-    elif model_type in ["qwen25", "qwen3"]:
+    elif model_type in ["qwen3"]:
         # Qwen2.5 and Qwen3 use same token IDs: " Answer" (21806) or "Answer" (16141) followed by ":" (25)
         matching_indices = (
             ((input_ids[:-1] == 21806) | (input_ids[:-1] == 16141))  # " Answer" or "Answer"
@@ -1966,7 +1966,7 @@ if __name__ == "__main__":
         "--model_type",
         type=str,
         default="llama",
-        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4", "qwen25", "qwen3", "gemma-3", "gemma-3-small"],
+        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4", "qwen3", "gemma-3", "gemma-3-small"],
         help="Model type (default: llama)",
     )
     parser.add_argument("--resume", action="store_true")

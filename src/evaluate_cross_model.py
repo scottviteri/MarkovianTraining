@@ -56,8 +56,6 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
                 hyperparameters["model_name"] = "roneneldan/TinyStories"
             elif results["evaluator_model"] == "phi":
                 hyperparameters["model_name"] = "microsoft/Phi-3.5-mini-instruct"
-            elif results["evaluator_model"] == "qwen25":
-                hyperparameters["model_name"] = "Qwen/Qwen2.5-7B-Instruct"
             else:
                 raise ValueError("Unsupported model type")
 
@@ -592,7 +590,7 @@ def main():
     parser.add_argument(
         "--critic_model",
         type=str,
-        choices=["mistral", "llama", "gpt2", "tinystories", "phi", "phi-4", "qwen25", "qwen3", "gemma-3", "gemma-3-small"],
+        choices=["mistral", "llama", "gpt2", "tinystories", "phi", "phi-4", "qwen3", "gemma-3", "gemma-3-small"],
         help="Specify which model to use as the critic"
     )
     parser.add_argument(

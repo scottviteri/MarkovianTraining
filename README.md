@@ -43,7 +43,6 @@ python src/train.py [options]
 --model_type <type>    # Choose from:
                        # - llama (default, 8B version)
                        # - mistral (7B-Instruct-v0.2)
-                       # - qwen25 (Qwen2.5-7B-Instruct)
                        # - qwen3 (Qwen3-4B)
 ```
 
