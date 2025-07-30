@@ -11,3 +11,7 @@ PHI4_IM_END = "<|im_end|>"
 GEMMA3_BOS = "<bos>"
 GEMMA3_START_OF_TURN = "<start_of_turn>"
 GEMMA3_END_OF_TURN = "<end_of_turn>"
+
+# Qwen2.5 formatting tokens (same as Phi-4, ChatML format)
+QWEN25_IM_START = "<|im_start|>"
+QWEN25_IM_END = "<|im_end|>"

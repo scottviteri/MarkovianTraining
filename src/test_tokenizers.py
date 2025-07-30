@@ -1,27 +1,30 @@
 from transformers import AutoTokenizer
 
 def load_tokenizer(model_name="tinystories"):
-    """
-    Load a tokenizer for testing.
-    
-    Args:
-        model_name: One of ["tinystories", "phi", "gpt2", "mistral", "llama"]
-    """
     if model_name == "tinystories":
-        model_id = "roneneldan/TinyStories-33M"
+        tokenizer = AutoTokenizer.from_pretrained("roneneldan/TinyStories", padding_side="left")
     elif model_name == "phi":
-        model_id = "microsoft/Phi-3.5-mini-instruct"
+        tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3.5-mini-instruct", padding_side="left", trust_remote_code=True)
     elif model_name == "gpt2":
-        model_id = "openai-community/gpt2"
+        tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2", padding_side="left")
     elif model_name == "mistral":
-        model_id = "mistralai/Mistral-7B-Instruct-v0.2"
+        tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-Instruct-v0.2", padding_side="left")
     elif model_name == "llama":
-        model_id = "meta-llama/Llama-3.1-8B-Instruct"
+        tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.1-8B-Instruct", padding_side="left")
+    elif model_name == "qwen25":
+        tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct", padding_side="left")
     else:
-        raise ValueError(f"Unknown model: {model_name}. Choose from ['tinystories', 'phi', 'gpt2', 'mistral', 'llama']")
+        raise ValueError(f"Unknown model: {model_name}")
     
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    # Set pad token to eos token for consistency
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token_id = tokenizer.eos_token_id
+    
+    # Print tokenizer info
+    print(f"Tokenizer: {model_name}")
+    print(f"  EOS token: '{tokenizer.eos_token}' (ID: {tokenizer.eos_token_id})")
+    print(f"  PAD token: '{tokenizer.pad_token}' (ID: {tokenizer.pad_token_id})")
+    
     return tokenizer
 
 if __name__ == "__main__":
@@ -32,7 +35,7 @@ if __name__ == "__main__":
         "--model", 
         type=str, 
         default="tinystories",
-        choices=["tinystories", "phi", "gpt2", "mistral", "llama"],
+        choices=["tinystories", "phi", "gpt2", "mistral", "llama", "qwen25"],
         help="Model tokenizer to test"
     )
     args = parser.parse_args()
