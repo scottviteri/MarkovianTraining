@@ -295,9 +295,6 @@ class TrainingState:
     
     # Gradient accumulation tracking
     accumulation_step: int
-    
-    # Critic update tracking
-    last_critic_update_batch: int
 
     @classmethod
     def initialize(
@@ -336,7 +333,6 @@ class TrainingState:
             log_file=log_file,
             hyperparameters=updated_hyperparameters,  # Use the updated hyperparameters
             accumulation_step=0,
-            last_critic_update_batch=start_batch,
         )
 
 
@@ -1736,53 +1732,6 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
     return grad_norm
 
 
-def update_critic_from_actor(state: TrainingState):
-    """Update the critic model with the actor model's weights.
-    
-    Since the actor has LoRA adapters and the critic doesn't, we need to merge
-    the LoRA weights into the base model to create an updated critic.
-    """
-    colored_print("Critic Update", f"Updating critic model with actor weights at batch {state.batch_index}", Colors.MAGENTA)
-    
-    try:
-        # First, we need to check if the actor is a PEFT model
-        if hasattr(state.actor_model, 'merge_and_unload'):
-            # Create a temporary merged version of the actor model
-            # This combines base weights + LoRA adaptations
-            colored_print("Critic Update", "Merging LoRA weights into base model", Colors.BLUE)
-            
-            # Save the current actor state
-            actor_state_before = state.actor_model.state_dict()
-            
-            # Merge LoRA weights into base model temporarily
-            merged_model_state = state.actor_model.merge_and_unload().state_dict()
-            
-            # Update critic with merged weights
-            state.critic_model.load_state_dict(merged_model_state)
-            
-            # Restore the actor model to its original state (with LoRA adapters separate)
-            # This is important to continue training with LoRA
-            state.actor_model.load_state_dict(actor_state_before)
-            
-        else:
-            # If not a PEFT model, do a direct state dict copy
-            colored_print("Critic Update", "Direct state dict copy (non-PEFT model)", Colors.BLUE)
-            state.critic_model.load_state_dict(state.actor_model.state_dict())
-        
-        # Re-freeze the critic model parameters after update
-        for param in state.critic_model.parameters():
-            param.requires_grad = False
-        
-        # Update tracking
-        state.last_critic_update_batch = state.batch_index
-        
-        colored_print("Critic Update", "Critic model successfully updated with actor weights", Colors.GREEN)
-        
-    except Exception as e:
-        colored_print("Critic Update Error", f"Failed to update critic: {str(e)}", Colors.RED)
-        import traceback
-        colored_print("Traceback", traceback.format_exc(), Colors.RED)
-
 
 def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     """Main training loop"""
@@ -1889,15 +1838,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 # Verify actor model weights are changing properly
                 verify_actor_weights_changing_comprehensive(state.actor_model, actor_full_snapshot)
             
-            # Update critic model with actor weights if enabled
-            critic_update_freq = state.hyperparameters.get("critic_update_freq", 0)
-            if critic_update_freq > 0 and batch_index % critic_update_freq == 0 and batch_index > 0:
-                update_critic_from_actor(state)
-                
-                # If weight verification is enabled, update the critic snapshot after updating
-                if enable_weight_verification:
-                    colored_print("Weight Verification", "Updating critic snapshot after critic update", Colors.BLUE)
-                    critic_full_snapshot = get_model_hash(state.critic_model)
+
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
@@ -1947,7 +1888,6 @@ class TrainingConfig:
     checkpoint_frequency: Optional[int]
     weight_verification_freq: int
     enable_weight_verification: bool
-    critic_update_freq: int
     # LoRA parameters
     lora_rank: int
     lora_alpha: float
@@ -1981,7 +1921,6 @@ class TrainingConfig:
             checkpoint_frequency=args.checkpoint_frequency,
             weight_verification_freq=args.weight_verification_freq,
             enable_weight_verification=args.enable_weight_verification,
-            critic_update_freq=args.critic_update_freq,
             lora_rank=args.lora_rank,
             lora_alpha=args.lora_alpha,
             debug_repeat_datapoint=args.debug_repeat_datapoint,
@@ -2065,13 +2004,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Enable weight verification (disabled by default)",
     )
-    # Add critic update frequency parameter
-    parser.add_argument(
-        "--critic_update_freq",
-        type=int,
-        default=0,
-        help="Frequency (in batches) to update critic model with actor weights. 0 disables updates (default: 0)",
-    )
+
     # MMLU-specific arguments
     parser.add_argument(
         "--mmlu_subject",
