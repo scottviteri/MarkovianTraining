@@ -496,7 +496,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_type",
         type=str,
-        choices=["mistral", "llama", "gpt2", "tinystories", "phi", "phi-4", "qwen25", "gemma-3", "gemma-3-small"],
+        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4", "qwen25", "qwen3", "gemma-3", "gemma-3-small"],
         default=None,
         help="Choose between Mistral and Llama 3.1 models (default: infer from model path)",
     )

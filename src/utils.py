@@ -2,17 +2,10 @@ import os
 from typing import Dict, Any, Optional
 from peft import LoraConfig, get_peft_model, PeftModel
 from constants import (
-    MISTRAL_INST_START, 
-    MISTRAL_INST_END, 
-    PHI4_IM_START, 
-    PHI4_IM_SEP, 
-    PHI4_IM_END,
-    GEMMA3_BOS,
-    GEMMA3_START_OF_TURN,
-    GEMMA3_END_OF_TURN,
-    QWEN25_IM_START,
-    QWEN25_IM_END,
-    EI_SKIP_INITIAL
+    MISTRAL_INST_START, MISTRAL_INST_END, EI_SKIP_INITIAL, 
+    PHI4_IM_START, PHI4_IM_SEP, PHI4_IM_END,
+    GEMMA3_BOS, GEMMA3_START_OF_TURN, GEMMA3_END_OF_TURN,
+    QWEN25_IM_START, QWEN25_IM_END, QWEN3_IM_START, QWEN3_IM_END
 )
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
@@ -138,6 +131,12 @@ def get_model_specific_tokens(model_type):
             "im_end": QWEN25_IM_END,
             "format_type": "qwen25"
         }
+    elif model_type == "qwen3":
+        return {
+            "im_start": QWEN3_IM_START,
+            "im_end": QWEN3_IM_END,
+            "format_type": "qwen3"
+        }
     elif model_type in ["gemma-3", "gemma-3-small"]:
         return {
             "bos": GEMMA3_BOS,
@@ -233,6 +232,24 @@ def construct_prompts(
                 f"{tokens['im_start']}user\n{base_prompt} {question_placeholder}{tokens['im_end']}\n"
                 f"{tokens['im_start']}assistant\n{prompt_type}{reasoning} Answer: "
             )
+    elif format_type == "qwen3":
+        system_msg = "You are a helpful AI assistant that solves problems step by step."
+        
+        if reasoning is None:
+            # Initial prompt without reasoning
+            return (
+                f"{tokens['im_start']}system\n{system_msg}{tokens['im_end']}\n"
+                f"{tokens['im_start']}user\n{base_prompt} {question}{tokens['im_end']}\n"
+                f"{tokens['im_start']}assistant\n{prompt_type}"
+            )
+        else:
+            # Prompt with reasoning (for generating/evaluating the answer)
+            question_placeholder = question if include_question else "<Redacted>"
+            return (
+                f"{tokens['im_start']}system\n{system_msg}{tokens['im_end']}\n"
+                f"{tokens['im_start']}user\n{base_prompt} {question_placeholder}{tokens['im_end']}\n"
+                f"{tokens['im_start']}assistant\n{prompt_type}{reasoning} Answer: "
+            )
     elif format_type == "gemma-3":
         if reasoning is None:
             # Initial prompt without reasoning
@@ -286,12 +303,14 @@ def load_model(model_type, hyperparameters=None):
         model_name = "microsoft/phi-4"
     elif model_type == "qwen25":
         model_name = "Qwen/Qwen2.5-7B-Instruct"
+    elif model_type == "qwen3":
+        model_name = "Qwen/Qwen3-4B"
     elif model_type == "gemma-3":
         model_name = "google/gemma-3-12b-it"
     elif model_type == "gemma-3-small":
         model_name = "google/gemma-3-1b-it"
     else:
-        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', 'phi-4', 'qwen25', 'gemma-3', 'gemma-3-small', or 'gemma-3-12b-it'")
+        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', 'phi-4', 'qwen25', 'qwen3', 'gemma-3', 'gemma-3-small', or 'gemma-3-12b-it'")
 
     # Common settings
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

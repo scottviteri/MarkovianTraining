@@ -592,7 +592,7 @@ def main():
     parser.add_argument(
         "--critic_model",
         type=str,
-        choices=["mistral", "llama", "gpt2", "tinystories", "phi", "qwen25"],
+        choices=["mistral", "llama", "gpt2", "tinystories", "phi", "phi-4", "qwen25", "qwen3", "gemma-3", "gemma-3-small"],
         help="Specify which model to use as the critic"
     )
     parser.add_argument(

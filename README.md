@@ -43,6 +43,8 @@ python src/train.py [options]
 --model_type <type>    # Choose from:
                        # - llama (default, 8B version)
                        # - mistral (7B-Instruct-v0.2)
+                       # - qwen25 (Qwen2.5-7B-Instruct)
+                       # - qwen3 (Qwen3-4B)
 ```
 
 #### Training Methods
@@ -82,6 +84,8 @@ To train a model on the GSM8K dataset:
 
 ```bash
 python src/train.py --task_type gsm8k --model_type mistral [options]
+# OR with Qwen3-4B:
+python src/train.py --task_type gsm8k --model_type qwen3 [options]
 ```
 
 Key training options:
@@ -252,4 +256,4 @@ The training script uses LoRA (Low-Rank Adaptation) for efficient fine-tuning wi
 - Dropout: 0.1
 - Target: All linear layers
 
-Both Llama (8B) and Mistral (7B-Instruct-v0.2) models are supported with automatic mixed precision (bfloat16) and automated device placement.
+Supported models include Llama 3.1 8B Instruct, Mistral 7B Instruct v0.2, Qwen2.5 7B Instruct, and Qwen3 4B with automatic mixed precision (bfloat16) and automated device placement.

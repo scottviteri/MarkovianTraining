@@ -13,6 +13,8 @@ def load_tokenizer(model_name="tinystories"):
         tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.1-8B-Instruct", padding_side="left")
     elif model_name == "qwen25":
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct", padding_side="left")
+    elif model_name == "qwen3":
+        tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-4B", padding_side="left")
     else:
         raise ValueError(f"Unknown model: {model_name}")
     
@@ -35,7 +37,7 @@ if __name__ == "__main__":
         "--model", 
         type=str, 
         default="tinystories",
-        choices=["tinystories", "phi", "gpt2", "mistral", "llama", "qwen25"],
+        choices=["tinystories", "phi", "gpt2", "mistral", "llama", "qwen25", "qwen3"],
         help="Model tokenizer to test"
     )
     args = parser.parse_args()

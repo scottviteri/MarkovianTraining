@@ -57,8 +57,8 @@ def find_answer_start_position(input_ids, model_type):
             & (input_ids[1:] == 25)
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
-    elif model_type == "qwen25":
-        # Qwen2.5 uses different token IDs: " Answer" (21806) or "Answer" (16141) followed by ":" (25)
+    elif model_type in ["qwen25", "qwen3"]:
+        # Qwen2.5 and Qwen3 use same token IDs: " Answer" (21806) or "Answer" (16141) followed by ":" (25)
         matching_indices = (
             ((input_ids[:-1] == 21806) | (input_ids[:-1] == 16141))  # " Answer" or "Answer"
             & (input_ids[1:] == 25)  # ":"
@@ -68,7 +68,7 @@ def find_answer_start_position(input_ids, model_type):
             pos = matching_indices[-1].item() + 2
         else:
             # Fallback in case the exact pattern isn't found
-            colored_print("Warning", "Could not find 'Answer:' in Qwen2.5 output, using fallback position", Colors.YELLOW)
+            colored_print("Warning", f"Could not find 'Answer:' in {model_type} output, using fallback position", Colors.YELLOW)
             # Try to find just the colon
             colon_indices = (input_ids == 25).nonzero(as_tuple=True)[0]
             if len(colon_indices) > 0:
@@ -2021,7 +2021,7 @@ if __name__ == "__main__":
         "--model_type",
         type=str,
         default="llama",
-        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4", "qwen25", "gemma-3", "gemma-3-small"],
+        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4", "qwen25", "qwen3", "gemma-3", "gemma-3-small"],
         help="Model type (default: llama)",
     )
     parser.add_argument("--resume", action="store_true")
