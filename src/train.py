@@ -51,12 +51,31 @@ def find_answer_start_position(input_ids, model_type):
             )
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
-    elif model_type in ["llama", "phi-4", "qwen25"]:  # phi-4 and qwen25 use the same token IDs as llama for "Answer:"
+    elif model_type in ["llama", "phi-4"]:  # phi-4 uses the same token IDs as llama for "Answer:"
         matching_indices = (
-            ((input_ids[:-1] == 16533) | (input_ids[:-1] == 22559) | (input_ids[:-1] == 16141))  # Added Qwen2.5's "Answer" token
+            ((input_ids[:-1] == 16533) | (input_ids[:-1] == 22559))
             & (input_ids[1:] == 25)
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
+    elif model_type == "qwen25":
+        # Qwen2.5 uses different token IDs: " Answer" (21806) or "Answer" (16141) followed by ":" (25)
+        matching_indices = (
+            ((input_ids[:-1] == 21806) | (input_ids[:-1] == 16141))  # " Answer" or "Answer"
+            & (input_ids[1:] == 25)  # ":"
+        ).nonzero(as_tuple=True)[0]
+        
+        if len(matching_indices) > 0:
+            pos = matching_indices[-1].item() + 2
+        else:
+            # Fallback in case the exact pattern isn't found
+            colored_print("Warning", "Could not find 'Answer:' in Qwen2.5 output, using fallback position", Colors.YELLOW)
+            # Try to find just the colon
+            colon_indices = (input_ids == 25).nonzero(as_tuple=True)[0]
+            if len(colon_indices) > 0:
+                pos = colon_indices[-1].item() + 1
+            else:
+                # Worst case: use the last 20% of tokens
+                pos = int(len(input_ids) * 0.8)
     elif model_type in ["gpt2", "tinystories"]:  # TinyStories uses same tokens as GPT2
         matching_indices = (
             (input_ids[:-1] == 23998)
