@@ -15,18 +15,20 @@ def load_tokenizer(model_name="tinystories"):
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct", padding_side="left")
     elif model_name == "qwen3":
         tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-4B", padding_side="left")
+    elif model_name == "gemma-3":
+        tokenizer = AutoTokenizer.from_pretrained("google/gemma-3-1b-it", padding_side="left")
     else:
         raise ValueError(f"Unknown model: {model_name}")
-    
+
     # Set pad token to eos token for consistency
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.pad_token_id = tokenizer.eos_token_id
-    
+
     # Print tokenizer info
     print(f"Tokenizer: {model_name}")
     print(f"  EOS token: '{tokenizer.eos_token}' (ID: {tokenizer.eos_token_id})")
     print(f"  PAD token: '{tokenizer.pad_token}' (ID: {tokenizer.pad_token_id})")
-    
+
     return tokenizer
 
 if __name__ == "__main__":
@@ -34,14 +36,14 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model", 
-        type=str, 
+        "--model",
+        type=str,
         default="tinystories",
-        choices=["tinystories", "phi", "gpt2", "mistral", "llama", "qwen25", "qwen3"],
-        help="Model tokenizer to test"
+        choices=["tinystories", "phi", "gpt2", "mistral", "llama", "qwen25", "qwen3", "gemma-3"],
+        help="Choose the model to test"
     )
     args = parser.parse_args()
-    
+
     # Load the specified tokenizer
     tokenizer = load_tokenizer(args.model)
     print(f"\nTesting {args.model} tokenizer:")
@@ -60,7 +62,7 @@ if __name__ == "__main__":
     for text in test_strings:
         print(f"\nAnalyzing: '{text}'")
         tokens = tokenizer.encode(text)
-        
+
         # Print token details
         print("Tokens:")
         for token in tokens:

@@ -575,6 +575,12 @@ def calculate_advantages(
     # Calculate advantages - different approaches for parallel vs standard
     if is_parallel:
         # GRPO advantage calculation - group-relative advantages
+        
+        # Warn if r parameter is set with GRPO (they use different baseline strategies)
+        if state.hyperparameters.get("r") is not None:
+            colored_print("Warning", f"r parameter ({state.hyperparameters['r']}) is ignored when using GRPO (parallel_samples > 1)", Colors.YELLOW)
+            colored_print("Info", "GRPO uses group means as baselines instead of exponential moving average", Colors.CYAN)
+        
         batch_size = len(questions)
         # Reshape rewards tensor into [batch_size, parallel_samples] for group operations
         rewards_by_group = normalized_rewards.reshape(batch_size, parallel_samples)

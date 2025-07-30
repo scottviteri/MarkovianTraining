@@ -398,6 +398,7 @@ def print_grpo_overview(hyperparameters):
     colored_print("GRPO Info", "This implements a form of Group-Relative Policy Optimization", Colors.CYAN)
     colored_print("GRPO Info", "Each batch element generates multiple reasoning paths in parallel", Colors.CYAN)
     colored_print("GRPO Info", "Advantages are calculated relative to the mean reward of each group", Colors.CYAN)
+    colored_print("GRPO Note", "The 'r' parameter (EMA baseline) is not used in GRPO mode", Colors.YELLOW)
     print("\n" + "-" * 80 + "\n")
 
 
