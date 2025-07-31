@@ -50,12 +50,18 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
                 hyperparameters["model_name"] = "mistralai/Mistral-7B-Instruct-v0.2"
             elif results["evaluator_model"] == "llama":
                 hyperparameters["model_name"] = "meta-llama/Llama-3.1-8B-Instruct"
+            elif results["evaluator_model"] == "llama3.2-1b":
+                hyperparameters["model_name"] = "meta-llama/Llama-3.2-1B-Instruct"
             elif results["evaluator_model"] == "gpt2":
                 hyperparameters["model_name"] = "openai-community/gpt2"
             elif results["evaluator_model"] == "tinystories":
                 hyperparameters["model_name"] = "roneneldan/TinyStories"
             elif results["evaluator_model"] == "phi":
                 hyperparameters["model_name"] = "microsoft/Phi-3.5-mini-instruct"
+            elif results["evaluator_model"] == "qwen3":
+                hyperparameters["model_name"] = "Qwen/Qwen3-4B"
+            elif results["evaluator_model"] == "qwen3-14b":
+                hyperparameters["model_name"] = "Qwen/Qwen3-14B"
             else:
                 raise ValueError("Unsupported model type")
 
@@ -590,7 +596,7 @@ def main():
     parser.add_argument(
         "--critic_model",
         type=str,
-        choices=["mistral", "llama", "gpt2", "tinystories", "phi", "phi-4", "qwen3", "gemma-3", "gemma-3-small"],
+        choices=["mistral", "llama", "llama3.2-1b", "gpt2", "tinystories", "phi", "phi-4", "qwen3", "qwen3-14b", "gemma-3", "gemma-3-small"],
         help="Specify which model to use as the critic"
     )
     parser.add_argument(

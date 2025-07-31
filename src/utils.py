@@ -126,7 +126,7 @@ def get_model_specific_tokens(model_type):
             "format_type": "phi-4"
         }
 
-    elif model_type == "qwen3":
+    elif model_type in ["qwen3", "qwen3-14b"]:
         return {
             "im_start": QWEN3_IM_START,
             "im_end": QWEN3_IM_END,
@@ -270,6 +270,8 @@ def load_model(model_type, hyperparameters=None):
         model_name = "mistralai/Mistral-7B-Instruct-v0.2"
     elif model_type == "llama":
         model_name = "meta-llama/Llama-3.1-8B-Instruct"
+    elif model_type == "llama3.2-1b":
+        model_name = "meta-llama/Llama-3.2-1B-Instruct"
     elif model_type == "gpt2":
         model_name = "openai-community/gpt2"
     elif model_type == "tinystories":
@@ -280,12 +282,14 @@ def load_model(model_type, hyperparameters=None):
         model_name = "microsoft/phi-4"
     elif model_type == "qwen3":
         model_name = "Qwen/Qwen3-4B"
+    elif model_type == "qwen3-14b":
+        model_name = "Qwen/Qwen3-14B"
     elif model_type == "gemma-3":
         model_name = "google/gemma-3-12b-it"
     elif model_type == "gemma-3-small":
         model_name = "google/gemma-3-1b-it"
     else:
-        raise ValueError("model_type must be either 'mistral', 'llama', 'gpt2', 'tinystories', 'phi', 'phi-4', 'qwen3', 'gemma-3', 'gemma-3-small', or 'gemma-3-12b-it'")
+        raise ValueError("model_type must be either 'mistral', 'llama', 'llama3.2-1b', 'gpt2', 'tinystories', 'phi', 'phi-4', 'qwen3', 'qwen3-14b', 'gemma-3', 'gemma-3-small', or 'gemma-3-12b-it'")
 
     # Common settings
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

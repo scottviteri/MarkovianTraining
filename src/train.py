@@ -51,13 +51,13 @@ def find_answer_start_position(input_ids, model_type):
             )
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
-    elif model_type in ["llama", "phi-4"]:  # phi-4 uses the same token IDs as llama for "Answer:"
+    elif model_type in ["llama", "llama3.2-1b", "phi-4"]:  # phi-4 uses the same token IDs as llama for "Answer:"
         matching_indices = (
             ((input_ids[:-1] == 16533) | (input_ids[:-1] == 22559))
             & (input_ids[1:] == 25)
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
-    elif model_type in ["qwen3"]:
+    elif model_type in ["qwen3", "qwen3-14b"]:
         # Qwen2.5 and Qwen3 use same token IDs: " Answer" (21806) or "Answer" (16141) followed by ":" (25)
         matching_indices = (
             ((input_ids[:-1] == 21806) | (input_ids[:-1] == 16141))  # " Answer" or "Answer"
@@ -1966,7 +1966,7 @@ if __name__ == "__main__":
         "--model_type",
         type=str,
         default="llama",
-        choices=["llama", "mistral", "gpt2", "tinystories", "phi", "phi-4", "qwen3", "gemma-3", "gemma-3-small"],
+        choices=["llama", "llama3.2-1b", "mistral", "gpt2", "tinystories", "phi", "phi-4", "qwen3", "qwen3-14b", "gemma-3", "gemma-3-small"],
         help="Model type (default: llama)",
     )
     parser.add_argument("--resume", action="store_true")
