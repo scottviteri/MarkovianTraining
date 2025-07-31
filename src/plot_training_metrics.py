@@ -221,10 +221,13 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             if max_index is not None:
                 entries = entries[:max_index]
             
+            # Determine skip amount based on whether EI is enabled
+            skip_initial = EI_SKIP_INITIAL if hyperparameters.get('use_ei') is not None else 0
+            
             # Extract data points, handling None values, NaN, and strings
             raw_data = [
                 get_nested_value(entry, metric_path, metrics_dict)
-                for entry in entries[EI_SKIP_INITIAL:]
+                for entry in entries[skip_initial:]
             ]
             
             # Filter out None values and convert to float array
@@ -253,7 +256,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                     data_array = np.array(valid_data, dtype=float)
                     
                     # Create x-coordinates for raw data
-                    x_coords_raw = np.arange(EI_SKIP_INITIAL, EI_SKIP_INITIAL + len(data_array))
+                    x_coords_raw = np.arange(skip_initial, skip_initial + len(data_array))
                     
                     # Plot raw data with transparency (only if show_raw is enabled)
                     if show_raw:
@@ -273,7 +276,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                     
                     # Create x-coordinates for smoothed data, accounting for the window size
                     offset = (window_size - 1) // 2 if window_size > 1 else 0
-                    x_coords = np.arange(EI_SKIP_INITIAL + offset, EI_SKIP_INITIAL + offset + len(smoothed_data))
+                    x_coords = np.arange(skip_initial + offset, skip_initial + offset + len(smoothed_data))
                     
                     # Filter out NaN values before plotting smoothed data
                     mask = ~np.isnan(smoothed_data)
@@ -309,7 +312,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                     std_data = std_data[valid_mask]
                 
                 # Create x-coordinates for raw averaged data
-                x_range_raw = np.arange(EI_SKIP_INITIAL, EI_SKIP_INITIAL + len(mean_data))
+                x_range_raw = np.arange(skip_initial, skip_initial + len(mean_data))
                 
                 # Plot raw averaged data with transparency (only if show_raw is enabled)
                 if show_raw:
@@ -344,7 +347,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 
                 # Create x-coordinates for smoothed data
                 offset = (window_size - 1) // 2 if window_size > 1 else 0
-                x_range = np.arange(EI_SKIP_INITIAL + offset, EI_SKIP_INITIAL + offset + len(smoothed_mean))
+                x_range = np.arange(skip_initial + offset, skip_initial + offset + len(smoothed_mean))
                 
                 # Filter out NaN values before plotting smoothed data
                 mask = ~np.isnan(smoothed_mean)
