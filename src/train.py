@@ -250,10 +250,17 @@ class ReasoningOutput:
     critic_reasoning: List[str]
     R_mean_actor_logprobs: torch.Tensor
     R_mean_critic_logprobs: torch.Tensor
-    kl: torch.Tensor
+    kl_actor_critic: torch.Tensor  # KL divergence between actor and critic
+    kl_actor_reference: torch.Tensor  # KL divergence between actor and reference
     
     # For parallel sampling
     sample_groups: Optional[List[int]] = None  # Tracks which group each sample belongs to
+    
+    # Backward compatibility
+    @property
+    def kl(self):
+        """Backward compatibility - returns actor-critic KL"""
+        return self.kl_actor_critic
 
 
 @dataclass
@@ -282,6 +289,7 @@ class TrainingState:
     # Models and optimization
     actor_model: nn.Module
     critic_model: nn.Module
+    reference_model: nn.Module  # Original frozen base model for KL calculation
     actor_optimizer: torch.optim.Optimizer
     tokenizer: Any
     device: torch.device
@@ -295,6 +303,9 @@ class TrainingState:
     
     # Gradient accumulation tracking
     accumulation_step: int
+    
+    # Critic update tracking
+    last_critic_update_batch: int
 
     @classmethod
     def initialize(
@@ -317,6 +328,11 @@ class TrainingState:
                 checkpoint_path=model_save_path if resume else None,
             )
         )
+        
+        # Keep a reference to the original critic model as the reference model
+        # This stays frozen throughout training for KL calculation with original policy
+        import copy
+        reference_model = copy.deepcopy(critic_model)
         critic_model.generation_config.temperature = None
         critic_model.generation_config.top_p = None
 
@@ -326,6 +342,7 @@ class TrainingState:
             previous_advantages=prev_advantages,
             actor_model=actor_model,
             critic_model=critic_model,
+            reference_model=reference_model,
             actor_optimizer=actor_optimizer,
             tokenizer=tokenizer,
             device=device,
@@ -333,6 +350,7 @@ class TrainingState:
             log_file=log_file,
             hyperparameters=updated_hyperparameters,  # Use the updated hyperparameters
             accumulation_step=0,
+            last_critic_update_batch=start_batch,
         )
 
 
@@ -417,15 +435,18 @@ def generate_reasoning_and_kl(
 
     # Only compute the KL if we need it (kl_penalty is not None, or if we want to track it)
     if calculate_kl:
-        # Get logits from both models on actor's reasoning
+        # Get logits from all three models on actor's reasoning
         q_R_actor_logits = (
             state.actor_model(q_R_tokens).logits / state.hyperparameters["temperature"]
         )
         q_R_critic_logits = (
             state.critic_model(q_R_tokens).logits / state.hyperparameters["temperature"]
         )
+        q_R_reference_logits = (
+            state.reference_model(q_R_tokens).logits / state.hyperparameters["temperature"]
+        )
 
-        # Calculate log probabilities and KL
+        # Calculate log probabilities
         R_actor_logprobs = q_R_actor_logits[
             :, -state.hyperparameters["cot_length"] - 1 : -1, :
         ].log_softmax(dim=-1)
@@ -449,8 +470,12 @@ def generate_reasoning_and_kl(
             .mean(dim=1)
         )
 
-        kl = calculate_mean_kl(
+        # Calculate both KL divergences
+        kl_actor_critic = calculate_mean_kl(
             q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"]
+        )
+        kl_actor_reference = calculate_mean_kl(
+            q_R_actor_logits, q_R_reference_logits, state.hyperparameters["cot_length"]
         )
     else:
         # Return zero tensors if we're not calculating KL
@@ -458,7 +483,8 @@ def generate_reasoning_and_kl(
         batch_size = len(q_R_tokens)
         R_mean_actor_logprobs = torch.zeros(batch_size, device=device)
         R_mean_critic_logprobs = torch.zeros(batch_size, device=device)
-        kl = torch.zeros(batch_size, device=device)
+        kl_actor_critic = torch.zeros(batch_size, device=device)
+        kl_actor_reference = torch.zeros(batch_size, device=device)
 
     # Decode actor reasoning text
     actor_reasoning = state.tokenizer.batch_decode(
@@ -473,7 +499,8 @@ def generate_reasoning_and_kl(
         # Reshape the flat tensors into [batch_size, parallel_samples]
         R_mean_actor_logprobs_reshaped = R_mean_actor_logprobs.reshape(batch_size, parallel_samples)
         R_mean_critic_logprobs_reshaped = R_mean_critic_logprobs.reshape(batch_size, parallel_samples)
-        kl_reshaped = kl.reshape(batch_size, parallel_samples)
+        kl_actor_critic_reshaped = kl_actor_critic.reshape(batch_size, parallel_samples)
+        kl_actor_reference_reshaped = kl_actor_reference.reshape(batch_size, parallel_samples)
         
         # Create sample_groups as a list for backward compatibility
         sample_groups = []
@@ -483,7 +510,8 @@ def generate_reasoning_and_kl(
         # Flatten the reshaped tensors
         R_mean_actor_logprobs = R_mean_actor_logprobs_reshaped.reshape(-1)
         R_mean_critic_logprobs = R_mean_critic_logprobs_reshaped.reshape(-1)
-        kl = kl_reshaped.reshape(-1)
+        kl_actor_critic = kl_actor_critic_reshaped.reshape(-1)
+        kl_actor_reference = kl_actor_reference_reshaped.reshape(-1)
     else:
         sample_groups = None
 
@@ -492,7 +520,8 @@ def generate_reasoning_and_kl(
         critic_reasoning=critic_reasoning,
         R_mean_actor_logprobs=R_mean_actor_logprobs,
         R_mean_critic_logprobs=R_mean_critic_logprobs,
-        kl=kl,
+        kl_actor_critic=kl_actor_critic,
+        kl_actor_reference=kl_actor_reference,
         sample_groups=sample_groups,
     )
 
@@ -536,9 +565,9 @@ def calculate_advantages(
         questions_to_use = questions
         sample_groups = None
     
-    # Calculate log probs of answers given actor's reasoning
+    # Calculate log probs of answers given actor's reasoning using reference model as baseline
     actor_answer_logprobs, extracted_answers = calculate_answer_log_probs(
-        state.critic_model,
+        state.reference_model,
         state.tokenizer,
         state.device,
         questions_to_use,
@@ -550,9 +579,9 @@ def calculate_advantages(
 
     # Calculate normalized rewards
     if state.hyperparameters.get("normalize_loss", True):
-        # Only calculate critic answer log probs if we're normalizing loss
+        # Only calculate critic answer log probs if we're normalizing loss using reference model as baseline
         critic_answer_logprobs, _ = calculate_answer_log_probs(
-            state.critic_model,
+            state.reference_model,
             state.tokenizer,
             state.device,
             questions_to_use,
@@ -899,7 +928,14 @@ class BatchData:
     critic_reasoning: List[str]
     R_mean_actor_logprobs: torch.Tensor  # Reasoning logprobs
     R_mean_critic_logprobs: torch.Tensor  # Reasoning logprobs
-    kl: torch.Tensor
+    kl_actor_critic: torch.Tensor  # KL divergence between actor and critic
+    kl_actor_reference: torch.Tensor  # KL divergence between actor and reference
+    
+    # Backward compatibility
+    @property
+    def kl(self):
+        """Backward compatibility - returns actor-critic KL"""
+        return self.kl_actor_critic
     advantages: torch.Tensor
     normalized_rewards: torch.Tensor
     actor_answer_logprobs: torch.Tensor
@@ -920,24 +956,21 @@ class LogMetrics:
     critic_logprobs: float
     actor_answer_logprobs: float
     critic_answer_logprobs: float
-    kl: float
+    kl_actor_critic: float
+    kl_actor_reference: float
     weighted_kl: Optional[float]
+    
+    # Backward compatibility
+    @property
+    def kl(self):
+        """Backward compatibility - returns actor-critic KL"""
+        return self.kl_actor_critic
     ppo_ratio: Optional[float]
     ppo_clipped_ratio: Optional[float]
     advantage: float
     normalized_reward: float
     
-    # First example metrics
-    first_loss: float
-    first_pg_loss: float
-    first_actor_logprobs: float
-    first_critic_logprobs: float
-    first_actor_answer_logprobs: float
-    first_critic_answer_logprobs: float
-    first_kl: float
-    first_weighted_kl: Optional[float]
-    first_advantage: float
-    first_normalized_reward: float
+    # Removed first_* metrics - they were just duplicating the first element unnecessarily
     
     # Other metrics
     gradient_norm: float
@@ -976,24 +1009,15 @@ class LogMetrics:
                 critic_logprobs=batch_data.R_mean_critic_logprobs.mean().item(),
                 actor_answer_logprobs=batch_data.actor_answer_logprobs.mean().item(),
                 critic_answer_logprobs=batch_data.critic_answer_logprobs.mean().item(),
-                kl=batch_data.kl.mean().item(),
+                kl_actor_critic=batch_data.kl_actor_critic.mean().item(),
+                kl_actor_reference=batch_data.kl_actor_reference.mean().item(),
                 weighted_kl=None,
                 ppo_ratio=None,
                 ppo_clipped_ratio=None,
                 advantage=batch_data.advantages.mean().item(),
                 normalized_reward=batch_data.normalized_rewards.mean().item(),
                 
-                # First example metrics
-                first_loss=float('nan'),
-                first_pg_loss=float('nan'),
-                first_actor_logprobs=batch_data.R_mean_actor_logprobs[0].item() if len(batch_data.R_mean_actor_logprobs) > 0 else float('nan'),
-                first_critic_logprobs=batch_data.R_mean_critic_logprobs[0].item() if len(batch_data.R_mean_critic_logprobs) > 0 else float('nan'),
-                first_actor_answer_logprobs=batch_data.actor_answer_logprobs[0].item() if len(batch_data.actor_answer_logprobs) > 0 else float('nan'),
-                first_critic_answer_logprobs=batch_data.critic_answer_logprobs[0].item() if len(batch_data.critic_answer_logprobs) > 0 else float('nan'),
-                first_kl=batch_data.kl[0].item() if len(batch_data.kl) > 0 else float('nan'),
-                first_weighted_kl=None,
-                first_advantage=batch_data.advantages[0].item() if len(batch_data.advantages) > 0 else float('nan'),
-                first_normalized_reward=batch_data.normalized_rewards[0].item() if len(batch_data.normalized_rewards) > 0 else float('nan'),
+                # Removed first_* metrics
                 
                 # Other metrics
                 gradient_norm=0.0,  # No gradient if no active examples
@@ -1018,38 +1042,23 @@ class LogMetrics:
             float(ppo_clipped_ratio.item()) if ppo_clipped_ratio is not None else None
         )
 
-        # Get KL values - average across all examples, not just first one
-        raw_kl_mean = batch_data.kl.mean().item()
-        raw_kl_first = batch_data.kl[0].item() if len(batch_data.kl) > 0 else float('nan')
+        # Get KL values - average across all examples
+        raw_kl_actor_critic_mean = batch_data.kl_actor_critic.mean().item()
+        raw_kl_actor_reference_mean = batch_data.kl_actor_reference.mean().item()
         
         weighted_kl = batch_data.metrics.get("weighted_kl", None)
         weighted_kl_mean = float(weighted_kl.mean().item()) if weighted_kl is not None else None
-        weighted_kl_first = float(weighted_kl[0].item()) if weighted_kl is not None and len(weighted_kl) > 0 else None
 
-        # Calculate metrics that should be averaged over all examples (regardless of active status)
+        # Calculate metrics averaged over all examples (regardless of active status)
+        # This gives a more consistent view of model performance regardless of threshold
         mean_actor_logprobs = batch_data.R_mean_actor_logprobs.mean().item()
         mean_critic_logprobs = batch_data.R_mean_critic_logprobs.mean().item()
         mean_actor_answer_logprobs = batch_data.actor_answer_logprobs.mean().item()
         mean_critic_answer_logprobs = batch_data.critic_answer_logprobs.mean().item()
         mean_advantage = batch_data.advantages.mean().item()
         mean_normalized_reward = batch_data.normalized_rewards.mean().item()
-        
-        # Get metrics for the first example
-        first_actor_logprobs = batch_data.R_mean_actor_logprobs[0].item()
-        first_critic_logprobs = batch_data.R_mean_critic_logprobs[0].item()
-        first_actor_answer_logprobs = batch_data.actor_answer_logprobs[0].item()
-        first_critic_answer_logprobs = batch_data.critic_answer_logprobs[0].item()
-        first_advantage = batch_data.advantages[0].item()
-        first_normalized_reward = batch_data.normalized_rewards[0].item()
-        
-        # Calculate loss metrics across ALL examples (not just active ones)
-        # This gives a more consistent view of model performance regardless of threshold
         mean_loss = batch_data.losses.mean().item()
         mean_pg_loss = batch_data.metrics["pg_losses"].mean().item()
-        
-        # Get loss metrics for first example
-        first_loss = batch_data.losses[0].item()
-        first_pg_loss = batch_data.metrics["pg_losses"][0].item()
         
         # For reference, also calculate loss metrics for active examples only
         if training_mask is not None and num_active > 0:
@@ -1072,24 +1081,15 @@ class LogMetrics:
             critic_logprobs=mean_critic_logprobs,
             actor_answer_logprobs=mean_actor_answer_logprobs,
             critic_answer_logprobs=mean_critic_answer_logprobs,
-            kl=raw_kl_mean,
+            kl_actor_critic=raw_kl_actor_critic_mean,
+            kl_actor_reference=raw_kl_actor_reference_mean,
             weighted_kl=weighted_kl_mean,
             ppo_ratio=ppo_ratio,
             ppo_clipped_ratio=ppo_clipped_ratio,
             advantage=mean_advantage,
             normalized_reward=mean_normalized_reward,
             
-            # First example metrics
-            first_loss=first_loss,
-            first_pg_loss=first_pg_loss,
-            first_actor_logprobs=first_actor_logprobs,
-            first_critic_logprobs=first_critic_logprobs,
-            first_actor_answer_logprobs=first_actor_answer_logprobs,
-            first_critic_answer_logprobs=first_critic_answer_logprobs,
-            first_kl=raw_kl_first,
-            first_weighted_kl=weighted_kl_first,
-            first_advantage=first_advantage,
-            first_normalized_reward=first_normalized_reward,
+            # Removed first_* metrics
             
             # Other metrics
             gradient_norm=grad_norm,
@@ -1155,21 +1155,15 @@ def log_batch_results(
             colored_print("Groups:", f"{group_count} unique question groups", Colors.CYAN)
     
     # Get raw unfiltered losses directly from the tensors
-    # Always use the raw tensors instead of potentially filtered metrics
-    raw_first_loss = batch_data.losses[0].item() if len(batch_data.losses) > 0 else float('nan')
     raw_mean_loss = batch_data.losses.mean().item() if len(batch_data.losses) > 0 else float('nan')
-    
-    raw_first_pg_loss = batch_data.metrics["pg_losses"][0].item() if "pg_losses" in batch_data.metrics and len(batch_data.metrics["pg_losses"]) > 0 else float('nan')
     raw_mean_pg_loss = batch_data.metrics["pg_losses"].mean().item() if "pg_losses" in batch_data.metrics and len(batch_data.metrics["pg_losses"]) > 0 else float('nan')
     
     # KL values
     if metrics.weighted_kl is not None and state.hyperparameters.get("kl_penalty", 0) != 0:
         # Use weighted KL only if penalty is non-zero
-        first_kl_to_log = metrics.first_weighted_kl 
         kl_to_log = metrics.weighted_kl
     else:
         # Use raw KL if penalty is zero or None
-        first_kl_to_log = metrics.first_kl
         kl_to_log = metrics.kl
     
     # Helper function to format values concisely
@@ -1181,22 +1175,24 @@ def log_batch_results(
     # Print condensed metrics (horizontal layout)
     print("\n" + "=" * 100)
     
-    # Advantage and reward metrics (line 1)
-    print(f"{Colors.MAGENTA}Advantage{Colors.END} [F: {fmt(metrics.first_advantage)} | M: {fmt(metrics.advantage)}]  "
-          f"{Colors.MAGENTA}Reward{Colors.END} [F: {fmt(metrics.first_normalized_reward)} | M: {fmt(metrics.normalized_reward)}]  "
-          f"{Colors.GREEN}KL{Colors.END} [F: {fmt(first_kl_to_log)} | M: {fmt(kl_to_log)}]")
+    # Core metrics (line 1)
+    print(f"{Colors.MAGENTA}Advantage{Colors.END}: {fmt(metrics.advantage)}  "
+          f"{Colors.MAGENTA}Reward{Colors.END}: {fmt(metrics.normalized_reward)}  "
+          f"{Colors.GREEN}KL{Colors.END}: {fmt(kl_to_log)}  "
+          f"{Colors.CYAN}Loss{Colors.END}: {fmt(raw_mean_loss)}")
     
-    # Log probabilities (line 2)
-    print(f"{Colors.YELLOW}Actor ⟨LP⟩{Colors.END} [A: {fmt(metrics.first_actor_answer_logprobs)} | R: {fmt(metrics.first_actor_logprobs)}]  "
-          f"{Colors.YELLOW}Critic ⟨LP⟩{Colors.END} [A: {fmt(metrics.first_critic_answer_logprobs)} | R: {fmt(metrics.first_critic_logprobs)}]")
+    # KL details (line 2)
+    print(f"{Colors.GREEN}KL Actor↔Critic{Colors.END}: {fmt(metrics.kl_actor_critic)}  "
+          f"{Colors.GREEN}KL Actor↔Reference{Colors.END}: {fmt(metrics.kl_actor_reference)}  "
+          f"{Colors.CYAN}PG Loss{Colors.END}: {fmt(raw_mean_pg_loss)}")
     
-    # Losses (line 3)
-    print(f"{Colors.CYAN}Loss{Colors.END} [F: {fmt(raw_first_loss)} | M: {fmt(raw_mean_loss)}]  "
-          f"{Colors.CYAN}PG Loss{Colors.END} [F: {fmt(raw_first_pg_loss)} | M: {fmt(raw_mean_pg_loss)}]  "
-          f"{Colors.BOLD}Active{Colors.END} [{metrics.num_active}/{state.hyperparameters['batch_size']} ({metrics.fraction_active:.1%})]")
+    # Log probabilities (line 3)
+    print(f"{Colors.YELLOW}Actor ⟨LP⟩{Colors.END} [Answer: {fmt(metrics.actor_answer_logprobs)} | Reasoning: {fmt(metrics.actor_logprobs)}]  "
+          f"{Colors.YELLOW}Critic ⟨LP⟩{Colors.END} [Answer: {fmt(metrics.critic_answer_logprobs)} | Reasoning: {fmt(metrics.critic_logprobs)}]")
     
-    # Legend
-    print(f"{Colors.BOLD}Legend:{Colors.END} F=First example, M=Mean, A=Answer, R=Reasoning, LP=Log Probs")
+    # Training stats (line 4)
+    print(f"{Colors.BOLD}Active{Colors.END}: {metrics.num_active}/{state.hyperparameters['batch_size']} ({metrics.fraction_active:.1%})  "
+          f"{Colors.BOLD}Grad Norm{Colors.END}: {fmt(metrics.gradient_norm)}")
     
     # If no examples were active, add a clear indicator
     if metrics.num_active == 0:
@@ -1228,6 +1224,8 @@ def log_batch_results(
             "Critic Answer Log Probs": float(metrics.critic_answer_logprobs),
             "KL": float(kl_to_log),
             "KL Type": "Raw KL" if kl_to_log == metrics.kl else "Weighted KL",
+            "KL Actor-Critic": float(metrics.kl_actor_critic),
+            "KL Actor-Reference": float(metrics.kl_actor_reference),
             "PPO Ratio": (
                 float(metrics.ppo_ratio) if metrics.ppo_ratio is not None else None
             ),
@@ -1239,23 +1237,9 @@ def log_batch_results(
             "Advantage": safe_float(metrics.advantage),
             "Normalized Reward": float(metrics.normalized_reward),
             
-            # Raw unfiltered loss metrics
+            # Raw unfiltered loss metrics (mean values)
             "Raw Loss": safe_float(raw_mean_loss),
             "Raw Policy Gradient Loss": safe_float(raw_mean_pg_loss),
-            "Raw First Loss": safe_float(raw_first_loss),
-            "Raw First Policy Gradient Loss": safe_float(raw_first_pg_loss),
-            
-            # First example metrics
-            "First Loss": safe_float(metrics.first_loss),
-            "First Policy Gradient Loss": safe_float(metrics.first_pg_loss),
-            "First Actor Reasoning Log Probs": float(metrics.first_actor_logprobs),
-            "First Critic Reasoning Log Probs": float(metrics.first_critic_logprobs),
-            "First Actor Answer Log Probs": float(metrics.first_actor_answer_logprobs),
-            "First Critic Answer Log Probs": float(metrics.first_critic_answer_logprobs),
-            "First KL": float(first_kl_to_log),
-            "First KL Type": "Raw KL" if first_kl_to_log == metrics.first_kl else "Weighted KL",
-            "First Advantage": safe_float(metrics.first_advantage),
-            "First Normalized Reward": float(metrics.first_normalized_reward),
             
             # Other metrics
             "Gradient Norm": float(metrics.gradient_norm),
@@ -1641,7 +1625,8 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         critic_reasoning=reasoning_output.critic_reasoning,
         R_mean_actor_logprobs=reasoning_output.R_mean_actor_logprobs,
         R_mean_critic_logprobs=reasoning_output.R_mean_critic_logprobs,
-        kl=reasoning_output.kl,
+        kl_actor_critic=reasoning_output.kl_actor_critic,
+        kl_actor_reference=reasoning_output.kl_actor_reference,
         advantages=advantage_output.advantages,
         normalized_rewards=advantage_output.normalized_rewards,
         actor_answer_logprobs=advantage_output.actor_answer_logprobs,
@@ -1731,6 +1716,61 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
 
     return grad_norm
 
+
+def update_critic_from_actor(state: TrainingState):
+    """Update the critic model with the actor model's learned weights.
+    
+    This implements a proper actor-critic update by:
+    1. Creating a deep copy of the actor (inherits all learned LoRA weights)
+    2. Adding small noise to the copy's LoRA parameters (breaks symmetry)
+    3. Merging the noisy LoRA weights to create a standalone critic model
+    
+    This ensures the critic reflects the actor's learning while remaining distinct.
+    """
+    colored_print("Critic Update", f"Updating critic model with actor weights at batch {state.batch_index}", Colors.MAGENTA)
+    
+    # Check if the actor is a PEFT model
+    if hasattr(state.actor_model, 'merge_and_unload'):
+        import copy
+        import torch
+        colored_print("Critic Update", "Step 1: Creating deep copy of actor model", Colors.BLUE)
+        
+        # Step 1: Create a deep copy of the actor model (gets all learned LoRA weights)
+        temp_critic = copy.deepcopy(state.actor_model)
+        
+        # Step 2: Add small noise to LoRA parameters to break symmetry
+        colored_print("Critic Update", "Step 2: Adding noise to LoRA parameters for symmetry breaking", Colors.BLUE)
+        noise_scale = 0.001
+        with torch.no_grad():
+            for name, param in temp_critic.named_parameters():
+                if 'lora' in name.lower():  # Only add noise to LoRA parameters
+                    noise = torch.randn_like(param) * noise_scale
+                    param.add_(noise)
+        
+        # Step 3: Merge the critic's LoRA weights into base model (creates standalone critic)
+        colored_print("Critic Update", "Step 3: Merging LoRA weights to create standalone model", Colors.BLUE)
+        temp_merged = temp_critic.merge_and_unload()
+        
+        # Step 4: Replace the critic model (this is memory efficient and safe)
+        colored_print("Critic Update", "Step 4: Replacing critic model", Colors.BLUE)
+        state.critic_model = temp_merged
+        
+        # Clean up temporary models
+        del temp_critic
+        
+        colored_print("Critic Update", f"Successfully updated critic model", Colors.GREEN)
+        
+    else:
+        colored_print("Critic Update", "Actor model is not a PEFT model, copying state directly", Colors.YELLOW)
+        # For non-PEFT models, just copy the state dict
+        state.critic_model.load_state_dict(state.actor_model.state_dict())
+    
+    # Re-freeze the critic model parameters after update
+    for param in state.critic_model.parameters():
+        param.requires_grad = False
+    
+    # Update tracking
+    state.last_critic_update_batch = state.batch_index
 
 
 def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
@@ -1838,7 +1878,15 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 # Verify actor model weights are changing properly
                 verify_actor_weights_changing_comprehensive(state.actor_model, actor_full_snapshot)
             
-
+            # Update critic model with actor weights if enabled
+            critic_update_freq = state.hyperparameters.get("critic_update_freq", 0)
+            if critic_update_freq > 0 and batch_index % critic_update_freq == 0 and batch_index > 0:
+                update_critic_from_actor(state)
+                
+                # If weight verification is enabled, update the critic snapshot after updating
+                if enable_weight_verification:
+                    colored_print("Weight Verification", "Updating critic snapshot after critic update", Colors.BLUE)
+                    critic_full_snapshot = get_model_hash(state.critic_model)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user")
@@ -1888,6 +1936,7 @@ class TrainingConfig:
     checkpoint_frequency: Optional[int]
     weight_verification_freq: int
     enable_weight_verification: bool
+    critic_update_freq: int
     # LoRA parameters
     lora_rank: int
     lora_alpha: float
@@ -1921,6 +1970,7 @@ class TrainingConfig:
             checkpoint_frequency=args.checkpoint_frequency,
             weight_verification_freq=args.weight_verification_freq,
             enable_weight_verification=args.enable_weight_verification,
+            critic_update_freq=args.critic_update_freq,
             lora_rank=args.lora_rank,
             lora_alpha=args.lora_alpha,
             debug_repeat_datapoint=args.debug_repeat_datapoint,
@@ -2004,7 +2054,13 @@ if __name__ == "__main__":
         action="store_true",
         help="Enable weight verification (disabled by default)",
     )
-
+    # Add critic update frequency parameter
+    parser.add_argument(
+        "--critic_update_freq",
+        type=int,
+        default=0,
+        help="Frequency (in batches) to update critic model with actor weights. 0 disables updates (default: 0)",
+    )
     # MMLU-specific arguments
     parser.add_argument(
         "--mmlu_subject",

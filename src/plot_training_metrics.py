@@ -158,7 +158,8 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         base_metrics = [
             ("Training Metrics.Loss", "Total Loss (All Examples)", "Training Batch No. []", "Loss"),
             ("Training Metrics.Policy Gradient Loss", "PG Loss (All Examples)", "Training Batch No. []", "Loss"),
-            ("Training Metrics.KL", "KL Divergence", "Training Batch No. []", "KL"),
+            ("Training Metrics.KL Actor-Critic", "KL Divergence (Actor ↔ Critic)", "Training Batch No. []", "KL"),
+            ("Training Metrics.KL Actor-Reference", "KL Divergence (Actor ↔ Reference)", "Training Batch No. []", "KL"),
             ("Training Metrics.Gradient Norm", "Gradient Norm", "Training Batch No. []", "Norm"),
             ("Training Metrics.Advantage", "Advantage", "Training Batch No. []", "Value"),
             ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
@@ -221,10 +222,13 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             if max_index is not None:
                 entries = entries[:max_index]
             
+            # Determine whether to skip initial batches (only for EI)
+            skip_initial = EI_SKIP_INITIAL if ei_enabled else 0
+            
             # Extract data points, handling None values, NaN, and strings
             raw_data = [
                 get_nested_value(entry, metric_path, metrics_dict)
-                for entry in entries[EI_SKIP_INITIAL:]
+                for entry in entries[skip_initial:]
             ]
             
             # Filter out None values and convert to float array
@@ -253,7 +257,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                     data_array = np.array(valid_data, dtype=float)
                     
                     # Create x-coordinates for raw data
-                    x_coords_raw = np.arange(EI_SKIP_INITIAL, EI_SKIP_INITIAL + len(data_array))
+                    x_coords_raw = np.arange(skip_initial, skip_initial + len(data_array))
                     
                     # Plot raw data with transparency (only if show_raw is enabled)
                     if show_raw:
@@ -273,7 +277,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                     
                     # Create x-coordinates for smoothed data, accounting for the window size
                     offset = (window_size - 1) // 2 if window_size > 1 else 0
-                    x_coords = np.arange(EI_SKIP_INITIAL + offset, EI_SKIP_INITIAL + offset + len(smoothed_data))
+                    x_coords = np.arange(skip_initial + offset, skip_initial + offset + len(smoothed_data))
                     
                     # Filter out NaN values before plotting smoothed data
                     mask = ~np.isnan(smoothed_data)
@@ -309,7 +313,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                     std_data = std_data[valid_mask]
                 
                 # Create x-coordinates for raw averaged data
-                x_range_raw = np.arange(EI_SKIP_INITIAL, EI_SKIP_INITIAL + len(mean_data))
+                x_range_raw = np.arange(skip_initial, skip_initial + len(mean_data))
                 
                 # Plot raw averaged data with transparency (only if show_raw is enabled)
                 if show_raw:
@@ -344,7 +348,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 
                 # Create x-coordinates for smoothed data
                 offset = (window_size - 1) // 2 if window_size > 1 else 0
-                x_range = np.arange(EI_SKIP_INITIAL + offset, EI_SKIP_INITIAL + offset + len(smoothed_mean))
+                x_range = np.arange(skip_initial + offset, skip_initial + offset + len(smoothed_mean))
                 
                 # Filter out NaN values before plotting smoothed data
                 mask = ~np.isnan(smoothed_mean)
