@@ -85,6 +85,93 @@ def moving_average(data, window_size):
     return result
 
 
+def add_hyperparameters_display(fig, hyperparameters):
+    """Add a text box showing all hyperparameters at the top of the figure."""
+    # Format hyperparameters for display
+    param_text = format_hyperparameters_text(hyperparameters)
+    
+    # Adjust subplot spacing to make room for hyperparameters
+    fig.subplots_adjust(top=0.85)
+    
+    # Add text box at the top of the figure with better positioning
+    fig.text(0.02, 0.97, param_text, fontsize=7, verticalalignment='top',
+             bbox=dict(boxstyle='round,pad=0.4', facecolor='lightgray', alpha=0.8),
+             family='monospace')
+
+
+def format_hyperparameters_text(hyperparameters):
+    """Format hyperparameters dictionary into a readable multi-line string."""
+    # Group related parameters for better organization
+    training_params = {}
+    model_params = {}
+    task_params = {}
+    other_params = {}
+    
+    # Categorize parameters
+    for key, value in hyperparameters.items():
+        if key in ['lr', 'batch_size', 'num_batches', 'use_ppo', 'use_ei', 'normalize_loss', 
+                   'parallel', 'kl_penalty', 'temperature', 'entropy_bonus']:
+            training_params[key] = value
+        elif key in ['model_type', 'model_name', 'cot_length', 'lora_rank', 'lora_alpha']:
+            model_params[key] = value
+        elif key in ['task_type', 'num_examples_per_task', 'r']:
+            task_params[key] = value
+        else:
+            other_params[key] = value
+    
+    # Build formatted text with shorter lines to prevent cutoff
+    lines = ["Hyperparameters:"]
+    
+    def format_line(params, max_chars=80):
+        """Format parameters into lines that don't exceed max_chars"""
+        if not params:
+            return []
+        
+        param_strs = [f"{k}={v}" for k, v in params.items()]
+        lines = []
+        current_line = ""
+        
+        for param_str in param_strs:
+            test_line = current_line + (" | " if current_line else "") + param_str
+            if len(test_line) <= max_chars:
+                current_line = test_line
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = param_str
+        
+        if current_line:
+            lines.append(current_line)
+        
+        return lines
+    
+    if training_params:
+        train_lines = format_line(training_params)
+        for i, line in enumerate(train_lines):
+            prefix = "Training: " if i == 0 else "         "
+            lines.append(prefix + line)
+    
+    if model_params:
+        model_lines = format_line(model_params)
+        for i, line in enumerate(model_lines):
+            prefix = "Model: " if i == 0 else "       "
+            lines.append(prefix + line)
+    
+    if task_params:
+        task_lines = format_line(task_params)
+        for i, line in enumerate(task_lines):
+            prefix = "Task: " if i == 0 else "      "
+            lines.append(prefix + line)
+    
+    if other_params:
+        other_lines = format_line(other_params)
+        for i, line in enumerate(other_lines):
+            prefix = "Other: " if i == 0 else "       "
+            lines.append(prefix + line)
+    
+    return "\n".join(lines)
+
+
 def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, plot_summary=False, max_index=None, average=False, show_std=False, show_legend=True, label_size=10, show_title=True, show_raw=True):
     """Plot metrics from multiple files on the same plot.
     
@@ -425,6 +512,9 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
     for i in range(len(metrics_to_plot), len(axs)):
         fig.delaxes(axs[i])
 
+    # Add hyperparameters display at the top
+    add_hyperparameters_display(fig, hyperparameters)
+    
     plt.tight_layout()
     plt.savefig(output_file)
     print(f"Combined plot saved to {output_file}")
