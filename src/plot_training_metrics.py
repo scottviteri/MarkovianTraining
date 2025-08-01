@@ -48,6 +48,21 @@ def get_nested_value(entry, path, metrics_dict=None):
             return actor_probs - norm_reward
         return np.nan
     
+    # Handle computed actor reward metrics
+    if path == "computed_loss_balance":
+        pg_loss = get_nested_value(entry, "Training Metrics.Policy Gradient Loss")
+        reward_loss = get_nested_value(entry, "Actor Reward Metrics.Reward Gradient Loss")
+        if pg_loss is not None and reward_loss is not None:
+            return compute_loss_balance_score(pg_loss, reward_loss)
+        return np.nan
+    
+    if path == "computed_sign_agreement":
+        pg_loss = get_nested_value(entry, "Training Metrics.Policy Gradient Loss")
+        reward_loss = get_nested_value(entry, "Actor Reward Metrics.Reward Gradient Loss")
+        if pg_loss is not None and reward_loss is not None:
+            return 1.0 if np.sign(pg_loss) == np.sign(reward_loss) else 0.0
+        return np.nan
+    
     # Handle actor reward metrics that might not exist in older logs
     if path.startswith("Actor Reward Metrics.") and "Actor Reward Metrics" not in entry:
         return np.nan
@@ -62,8 +77,17 @@ def get_nested_value(entry, path, metrics_dict=None):
     # Handle special string indicators like "NaN (no active examples)"
     if isinstance(value, str) and "NaN" in value:
         return np.nan
+    
+    # Handle infinite values in PG vs Reward Ratio - convert to NaN for better plotting
+    if path == "Actor Reward Metrics.PG vs Reward Ratio" and (value == "inf" or value == float('inf') or value == float('-inf')):
+        return np.nan
         
     return value
+
+
+def compute_loss_balance_score(pg_loss, reward_loss):
+    """Compute a normalized loss balance score that avoids division by zero."""
+    return (pg_loss - reward_loss) / np.maximum(np.abs(pg_loss) + np.abs(reward_loss), 1e-10)
 
 
 def moving_average(data, window_size):
@@ -90,16 +114,20 @@ def moving_average(data, window_size):
 
 
 def add_hyperparameters_display(fig, hyperparameters):
-    """Add a text box showing all hyperparameters at the top of the figure."""
+    """Add a text box showing all hyperparameters at the top center of the figure."""
     # Format hyperparameters for display
     param_text = format_hyperparameters_text(hyperparameters)
     
-    # Adjust subplot spacing to make room for hyperparameters
-    fig.subplots_adjust(top=0.85)
+    # Calculate appropriate spacing based on number of parameter lines
+    param_lines = param_text.count('\n') + 1
+    # Reserve more space for hyperparameters - scale with number of lines
+    top_margin = max(0.82, 0.95 - param_lines * 0.02)
+    fig.subplots_adjust(top=top_margin)
     
-    # Add text box at the top of the figure with better positioning
-    fig.text(0.02, 0.97, param_text, fontsize=7, verticalalignment='top',
-             bbox=dict(boxstyle='round,pad=0.4', facecolor='lightgray', alpha=0.8),
+    # Add text box at the top center of the figure
+    fig.text(0.5, 0.98, param_text, fontsize=7, 
+             verticalalignment='top', horizontalalignment='center',
+             bbox=dict(boxstyle='round,pad=0.4', facecolor='lightblue', alpha=0.9),
              family='monospace')
 
 
@@ -287,8 +315,10 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         # Add actor reward specific metrics if enabled
         if actor_rewards_enabled and has_actor_reward_metrics:
             base_metrics.extend([
+                ("Training Metrics.Policy Gradient Loss", "Policy Gradient Loss", "Training Batch No. []", "PG Loss"),
                 ("Actor Reward Metrics.Reward Gradient Loss", "Reward Gradient Loss", "Training Batch No. []", "∇_θ R_θ(τ)"),
-                ("Actor Reward Metrics.PG vs Reward Ratio", "PG vs Reward Ratio", "Training Batch No. []", "PG Loss / Reward Loss")
+                ("computed_loss_balance", "Loss Balance Score", "Training Batch No. []", "Normalized Difference"),
+                ("computed_sign_agreement", "Loss Sign Agreement", "Training Batch No. []", "Same Direction (0/1)")
             ])
             
         metrics_to_plot = base_metrics
