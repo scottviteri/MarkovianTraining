@@ -85,6 +85,55 @@ def moving_average(data, window_size):
     return result
 
 
+def add_hyperparameters_display(fig, hyperparameters):
+    """Add a text box showing all hyperparameters at the top of the figure."""
+    # Format hyperparameters for display
+    param_text = format_hyperparameters_text(hyperparameters)
+    
+    # Add text box at the top of the figure
+    fig.text(0.02, 0.98, param_text, fontsize=8, verticalalignment='top',
+             bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgray', alpha=0.8),
+             family='monospace')
+
+
+def format_hyperparameters_text(hyperparameters):
+    """Format hyperparameters dictionary into a readable multi-line string."""
+    # Group related parameters for better organization
+    training_params = {}
+    model_params = {}
+    task_params = {}
+    other_params = {}
+    
+    # Categorize parameters
+    for key, value in hyperparameters.items():
+        if key in ['lr', 'batch_size', 'num_batches', 'use_ppo', 'use_ei', 'normalize_loss', 
+                   'parallel', 'kl_penalty', 'temperature', 'entropy_bonus']:
+            training_params[key] = value
+        elif key in ['model_type', 'model_name', 'cot_length', 'lora_rank', 'lora_alpha']:
+            model_params[key] = value
+        elif key in ['task_type', 'num_examples_per_task', 'r']:
+            task_params[key] = value
+        else:
+            other_params[key] = value
+    
+    # Build formatted text
+    lines = ["Hyperparameters:"]
+    
+    if training_params:
+        lines.append("Training: " + " | ".join([f"{k}={v}" for k, v in training_params.items()]))
+    
+    if model_params:
+        lines.append("Model: " + " | ".join([f"{k}={v}" for k, v in model_params.items()]))
+    
+    if task_params:
+        lines.append("Task: " + " | ".join([f"{k}={v}" for k, v in task_params.items()]))
+    
+    if other_params:
+        lines.append("Other: " + " | ".join([f"{k}={v}" for k, v in other_params.items()]))
+    
+    return "\n".join(lines)
+
+
 def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=None, plot_summary=False, max_index=None, average=False, show_std=False, show_legend=True, label_size=10, show_title=True, show_raw=True):
     """Plot metrics from multiple files on the same plot.
     
@@ -425,6 +474,9 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
     for i in range(len(metrics_to_plot), len(axs)):
         fig.delaxes(axs[i])
 
+    # Add hyperparameters display at the top
+    add_hyperparameters_display(fig, hyperparameters)
+    
     plt.tight_layout()
     plt.savefig(output_file)
     print(f"Combined plot saved to {output_file}")
