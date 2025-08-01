@@ -114,19 +114,20 @@ def moving_average(data, window_size):
 
 
 def add_hyperparameters_display(fig, hyperparameters):
-    """Add a text box showing all hyperparameters at the top center of the figure."""
+    """Add a text box showing all hyperparameters at the bottom of the figure like a caption."""
     # Format hyperparameters for display
     param_text = format_hyperparameters_text(hyperparameters)
     
     # Calculate appropriate spacing based on number of parameter lines
     param_lines = param_text.count('\n') + 1
-    # Reserve more space for hyperparameters - scale with number of lines
-    top_margin = max(0.82, 0.95 - param_lines * 0.02)
-    fig.subplots_adjust(top=top_margin)
+    # Reserve generous space at the bottom for hyperparameters - scale with number of lines
+    # Increased margins to prevent overlap with bottom plots
+    bottom_margin = max(0.25, 0.15 + param_lines * 0.025)
+    fig.subplots_adjust(bottom=bottom_margin)
     
-    # Add text box at the top center of the figure
-    fig.text(0.5, 0.98, param_text, fontsize=7, 
-             verticalalignment='top', horizontalalignment='center',
+    # Add text box at the bottom center of the figure like a caption
+    fig.text(0.5, 0.02, param_text, fontsize=7, 
+             verticalalignment='bottom', horizontalalignment='center',
              bbox=dict(boxstyle='round,pad=0.4', facecolor='lightblue', alpha=0.9),
              family='monospace')
 
