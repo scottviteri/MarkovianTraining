@@ -505,31 +505,45 @@ def calculate_advantages(
     # Use markovian flag to determine whether to include question context
     include_question_in_reward = not state.hyperparameters.get("markovian", True)
     
+    # Check if we should use actor model for rewards
+    actor_reward_weight = state.hyperparameters.get("actor_reward_weight", 0.0)
+    use_actor_rewards = actor_reward_weight > 0.0
+    
     # Log which reward mode is being used (only on first batch to avoid spam)
     if state.batch_index == 0:
         if include_question_in_reward:
             colored_print("Reward Mode", "Non-Markovian: P(answer | question, CoT)", Colors.CYAN)
         else:
             colored_print("Reward Mode", "Markovian: P(answer | CoT)", Colors.CYAN)
+        
+        if use_actor_rewards:
+            colored_print("Actor Rewards", f"Using actor model for rewards with weight {actor_reward_weight}", Colors.MAGENTA)
+        else:
+            colored_print("Critic Rewards", "Using critic model for rewards (standard)", Colors.CYAN)
+    
+    # Choose reward model and reasoning based on configuration
+    reward_model = state.actor_model if use_actor_rewards else state.critic_model
+    reward_reasoning = reasoning_output.actor_reasoning if use_actor_rewards else reasoning_output.actor_reasoning
+    
     actor_answer_logprobs, extracted_answers = calculate_answer_log_probs(
-        state.critic_model,
+        reward_model,
         state.tokenizer,
         state.device,
         questions,
-        reasoning_output.actor_reasoning,
+        reward_reasoning,
         answers,
         state.hyperparameters,
         include_question=include_question_in_reward,
     )
 
-    # Calculate normalized rewards
+    # Calculate normalized rewards - always use critic model for baseline
     if state.hyperparameters.get("normalize_loss", True):
         if parallel_mode:
             # OPTIMIZATION: In parallel mode, calculate critic answer log prob only once
             colored_print("Critic Answer Optimization", "Computing single critic answer and replicating", Colors.GREEN)
             
             critic_answer_logprob_single, _ = calculate_answer_log_probs(
-                state.critic_model,
+                state.critic_model,  # Always use critic for baseline
                 state.tokenizer,
                 state.device,
                 [questions[0]],  # Just first question
@@ -545,7 +559,7 @@ def calculate_advantages(
         else:
             # Normal mode: calculate for all
             critic_answer_logprobs, _ = calculate_answer_log_probs(
-                state.critic_model,
+                state.critic_model,  # Always use critic for baseline
                 state.tokenizer,
                 state.device,
                 questions,
@@ -556,7 +570,11 @@ def calculate_advantages(
             )
         
         # Normalize reward as improvement over baseline
-        normalized_rewards = actor_answer_logprobs - critic_answer_logprobs
+        # If using actor rewards, don't detach actor_answer_logprobs to preserve gradients
+        if use_actor_rewards:
+            normalized_rewards = actor_answer_logprobs - critic_answer_logprobs.detach()
+        else:
+            normalized_rewards = actor_answer_logprobs - critic_answer_logprobs
     else:
         # Skip critic calculation when not normalizing
         critic_answer_logprobs = torch.zeros_like(actor_answer_logprobs)
@@ -621,14 +639,26 @@ def calculate_losses(
     use_ppo = hyperparameters["use_ppo"]
     ppo_epsilon = hyperparameters.get("ppo_epsilon", 0.2)
     kl_penalty = hyperparameters.get("kl_penalty", None)
+    actor_reward_weight = hyperparameters.get("actor_reward_weight", 0.0)
 
     # Initialize metrics dictionary
     metrics = {}
 
-    # Base policy gradient loss
-    pg_losses = -R_mean_actor_logprobs * advantages.detach()
-    metrics["pg_losses"] = pg_losses
-    losses = pg_losses
+    # Policy gradient loss: R_θ(τ) * ∇_θ log P_θ(τ)
+    # Detach advantages to isolate this term when using actor rewards
+    if actor_reward_weight > 0.0:
+        pg_losses = -R_mean_actor_logprobs * advantages.detach()
+        # Actor reward gradient loss: ∇_θ R_θ(τ) 
+        # Don't detach advantages - let gradients flow through reward model
+        reward_gradient_losses = -actor_reward_weight * advantages
+        losses = pg_losses + reward_gradient_losses
+        metrics["pg_losses"] = pg_losses
+        metrics["reward_gradient_losses"] = reward_gradient_losses
+    else:
+        # Standard policy gradient loss
+        pg_losses = -R_mean_actor_logprobs * advantages.detach()
+        metrics["pg_losses"] = pg_losses
+        losses = pg_losses
 
     # Add KL penalty if specified
     weighted_kl = None
@@ -1875,6 +1905,8 @@ class TrainingConfig:
     parallel: bool = False
     # Markovian vs Non-Markovian rewards
     markovian: bool = True
+    # Actor reward gradients
+    actor_reward_weight: float = 0.0
 
     @classmethod
     def from_args(cls, args):
@@ -1909,6 +1941,7 @@ class TrainingConfig:
             debug_repeat_datapoint=args.debug_repeat_datapoint,
             parallel=args.parallel,
             markovian=markovian_mode,
+            actor_reward_weight=args.actor_reward_weight,
         )
 
 
@@ -2033,6 +2066,13 @@ if __name__ == "__main__":
         "--no-markovian",
         action="store_true",
         help="Use Non-Markovian rewards P(answer|question,CoT) instead of default Markovian P(answer|CoT)",
+    )
+    # Actor reward gradients
+    parser.add_argument(
+        "--actor_reward_weight",
+        type=float,
+        default=0.0,
+        help="Weight for actor reward gradients. If > 0, use actor model for rewards with this weight (default: 0.0, uses critic)",
     )
 
     args = parser.parse_args()
