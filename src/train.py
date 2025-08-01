@@ -501,7 +501,16 @@ def calculate_advantages(
     """
     parallel_mode = state.hyperparameters.get("parallel", False)
     
-    # Calculate log probs of answers given actor's reasoning (no expansion needed)
+    # Calculate log probs of answers given actor's reasoning
+    # Use markovian flag to determine whether to include question context
+    include_question_in_reward = not state.hyperparameters.get("markovian", True)
+    
+    # Log which reward mode is being used (only on first batch to avoid spam)
+    if state.batch_index == 0:
+        if include_question_in_reward:
+            colored_print("Reward Mode", "Non-Markovian: P(answer | question, CoT)", Colors.CYAN)
+        else:
+            colored_print("Reward Mode", "Markovian: P(answer | CoT)", Colors.CYAN)
     actor_answer_logprobs, extracted_answers = calculate_answer_log_probs(
         state.critic_model,
         state.tokenizer,
@@ -510,7 +519,7 @@ def calculate_advantages(
         reasoning_output.actor_reasoning,
         answers,
         state.hyperparameters,
-        include_question=False,  # Default behavior: don't include question in prompt
+        include_question=include_question_in_reward,
     )
 
     # Calculate normalized rewards
@@ -527,7 +536,7 @@ def calculate_advantages(
                 [reasoning_output.critic_reasoning[0]],  # Just first reasoning
                 [answers[0]],  # Just first answer
                 state.hyperparameters,
-                include_question=False,
+                include_question=include_question_in_reward,
             )
             
             # Replicate across batch
@@ -543,7 +552,7 @@ def calculate_advantages(
                 reasoning_output.critic_reasoning,
                 answers,
                 state.hyperparameters,
-                include_question=False,
+                include_question=include_question_in_reward,
             )
         
         # Normalize reward as improvement over baseline
@@ -1260,6 +1269,7 @@ def log_batch_results(
             "CoT Length": int(state.hyperparameters["cot_length"]),
             "Temperature": float(state.hyperparameters["temperature"]),
             "Use PPO": bool(state.hyperparameters["use_ppo"]),
+            "Markovian": bool(state.hyperparameters.get("markovian", True)),
         },
     }
     
@@ -1863,10 +1873,15 @@ class TrainingConfig:
     debug_repeat_datapoint: bool
     # Parallel sampling (whole-batch repetition)
     parallel: bool = False
+    # Markovian vs Non-Markovian rewards
+    markovian: bool = True
 
     @classmethod
     def from_args(cls, args):
         """Create config from parsed command line arguments"""
+        # Handle markovian flag logic: default True unless --no-markovian is specified
+        markovian_mode = not args.no_markovian
+        
         # Create config with all arguments
         return cls(
             task_type=args.task_type,
@@ -1893,6 +1908,7 @@ class TrainingConfig:
             lora_alpha=args.lora_alpha,
             debug_repeat_datapoint=args.debug_repeat_datapoint,
             parallel=args.parallel,
+            markovian=markovian_mode,
         )
 
 
@@ -2011,6 +2027,12 @@ if __name__ == "__main__":
         "--parallel",
         action="store_true",
         help="Use parallel sampling: each batch contains batch_size copies of the same example",
+    )
+    # Markovian vs Non-Markovian reward calculation
+    parser.add_argument(
+        "--no-markovian",
+        action="store_true",
+        help="Use Non-Markovian rewards P(answer|question,CoT) instead of default Markovian P(answer|CoT)",
     )
 
     args = parser.parse_args()
