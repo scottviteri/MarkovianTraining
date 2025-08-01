@@ -47,6 +47,10 @@ def get_nested_value(entry, path, metrics_dict=None):
         if actor_probs is not None and norm_reward is not None:
             return actor_probs - norm_reward
         return np.nan
+    
+    # Handle actor reward metrics that might not exist in older logs
+    if path.startswith("Actor Reward Metrics.") and "Actor Reward Metrics" not in entry:
+        return np.nan
 
     # Standard nested dictionary access
     value = entry
@@ -202,6 +206,9 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
     # Check if important features are enabled
     normalize_loss = hyperparameters.get('normalize_loss', True)
     ei_enabled = hyperparameters.get('use_ei') is not None
+    actor_reward_weight = hyperparameters.get('actor_reward_weight', 0.0)
+    actor_rewards_enabled = actor_reward_weight > 0.0
+    has_actor_reward_metrics = "Actor Reward Metrics" in first_entry
     
     # Initialize metrics_dict for deriving critic probs if needed
     metrics_dict = None if has_critic_probs else {"derive_critic": True}
@@ -276,6 +283,13 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             base_metrics.append(
                 ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
             )
+        
+        # Add actor reward specific metrics if enabled
+        if actor_rewards_enabled and has_actor_reward_metrics:
+            base_metrics.extend([
+                ("Actor Reward Metrics.Reward Gradient Loss", "Reward Gradient Loss", "Training Batch No. []", "∇_θ R_θ(τ)"),
+                ("Actor Reward Metrics.PG vs Reward Ratio", "PG vs Reward Ratio", "Training Batch No. []", "PG Loss / Reward Loss")
+            ])
             
         metrics_to_plot = base_metrics
 
