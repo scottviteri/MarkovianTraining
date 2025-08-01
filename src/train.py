@@ -185,6 +185,8 @@ def calculate_answer_log_probs(
                 attention_mask=partial_prompt_tokens.attention_mask,
                 max_new_tokens=max_answer_length,
                 do_sample=False,
+                top_k=None,
+                top_p=None,
                 pad_token_id=tokenizer.pad_token_id,
             )
 
@@ -311,8 +313,14 @@ class TrainingState:
                 checkpoint_path=model_save_path if resume else None,
             )
         )
+        # Configure generation configs to avoid parameter conflicts
         critic_model.generation_config.temperature = None
         critic_model.generation_config.top_p = None
+        critic_model.generation_config.top_k = None
+        
+        # Also configure actor model to avoid warnings during generation
+        actor_model.generation_config.top_k = None
+        actor_model.generation_config.top_p = None
 
         return cls(
             batch_index=start_batch,
@@ -369,6 +377,8 @@ def generate_reasoning_and_kl(
             min_new_tokens=state.hyperparameters["cot_length"],
             do_sample=True,
             temperature=state.hyperparameters["temperature"],
+            top_k=None,
+            top_p=None,
             pad_token_id=state.tokenizer.pad_token_id,
         )
         
@@ -391,6 +401,8 @@ def generate_reasoning_and_kl(
                     max_new_tokens=state.hyperparameters["cot_length"],
                     min_new_tokens=state.hyperparameters["cot_length"],
                     do_sample=False,  # Critic is deterministic
+                    top_k=None,
+                    top_p=None,
                     pad_token_id=state.tokenizer.pad_token_id,
                 )
                 
@@ -412,6 +424,8 @@ def generate_reasoning_and_kl(
                     max_new_tokens=state.hyperparameters["cot_length"],
                     min_new_tokens=state.hyperparameters["cot_length"],
                     do_sample=False,
+                    top_k=None,
+                    top_p=None,
                     pad_token_id=state.tokenizer.pad_token_id,
                 )
                 # Decode critic reasoning text
@@ -1393,7 +1407,9 @@ def evaluate_model_on_mmlu(
             **inputs,
             max_new_tokens=hyperparameters.get("cot_length", 50),
             do_sample=True,
-            temperature=hyperparameters.get("temperature", 1.0)
+            temperature=hyperparameters.get("temperature", 1.0),
+            top_k=None,
+            top_p=None
         )
         
         # Decode the reasoning
