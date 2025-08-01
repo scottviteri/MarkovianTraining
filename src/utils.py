@@ -365,19 +365,20 @@ def print_batch_delimiter():
     print("\n" + "=" * 80 + "\n")
 
 
-def print_grpo_overview(hyperparameters):
-    """Print an overview of GRPO (Group-Relative Policy Optimization) settings when enabled."""
-    parallel_samples = hyperparameters.get("parallel_samples", 1)
+def print_parallel_overview(hyperparameters):
+    """Print an overview of parallel sampling settings when enabled."""
+    parallel_mode = hyperparameters.get("parallel", False)
     
-    if parallel_samples <= 1:
+    if not parallel_mode:
         return  # No overview needed for standard mode
     
-    colored_print("GRPO Overview", f"Parallel sampling is enabled with {parallel_samples} samples per question", Colors.BOLD)
-    colored_print("GRPO Mode", "Using group means as baselines for advantage calculation", Colors.CYAN)
-    colored_print("GRPO Info", "This implements a form of Group-Relative Policy Optimization", Colors.CYAN)
-    colored_print("GRPO Info", "Each batch element generates multiple reasoning paths in parallel", Colors.CYAN)
-    colored_print("GRPO Info", "Advantages are calculated relative to the mean reward of each group", Colors.CYAN)
-    colored_print("GRPO Note", "The 'r' parameter (EMA baseline) is not used in GRPO mode", Colors.YELLOW)
+    batch_size = hyperparameters.get("batch_size", 8)
+    colored_print("Parallel Overview", f"Parallel sampling is enabled with batch_size={batch_size} copies per example", Colors.BOLD)
+    colored_print("Parallel Mode", "Each batch contains multiple copies of the same example", Colors.CYAN)
+    colored_print("Parallel Info", "Actor generates different reasoning for each copy (sampling enabled)", Colors.CYAN)
+    colored_print("Parallel Info", "Critic generates reasoning once and replicates (deterministic)", Colors.CYAN)
+    colored_print("Parallel Info", "Advantages are calculated relative to the batch mean", Colors.CYAN)
+    colored_print("Parallel Note", "The 'r' parameter (EMA baseline) is not used in parallel mode", Colors.YELLOW)
     print("\n" + "-" * 80 + "\n")
 
 
@@ -619,6 +620,131 @@ def generate_question_answer_batches(
     chunk_size: int = 500,
 ):
     """Generate batches of Q&A pairs lazily."""
+    parallel_mode = hyperparameters.get("parallel", False) if hyperparameters else False
+    
+    # If parallel mode is enabled, each batch contains batch_size copies of one example
+    if parallel_mode:
+        colored_print("Parallel Mode", "Generating batches with whole-batch repetition", Colors.BOLD)
+        
+        # Generate unique examples for each batch
+        if task_type in ["arithmetic", "arithmetic_negative"]:
+            # Generate num_batches unique arithmetic problems
+            unique_pairs = list(generate_arithmetic_pairs(task_type, num_examples=num_batches))
+            for unique_qa in unique_pairs:
+                repeated_batch = [unique_qa] * batch_size
+                yield repeated_batch
+                
+        elif task_type == "gsm8k":
+            # Use GSM8K dataset iterator for unique examples
+            dataset_iter = load_gsm8k_dataset(chunk_size=chunk_size)
+            for batch_idx in range(num_batches):
+                try:
+                    unique_qa = next(dataset_iter)
+                except StopIteration:
+                    # Reset iterator if we run out of data
+                    dataset_iter = load_gsm8k_dataset(chunk_size=chunk_size)
+                    unique_qa = next(dataset_iter)
+                repeated_batch = [unique_qa] * batch_size
+                yield repeated_batch
+                
+        elif task_type == "mmlu":
+            # Use MMLU dataset iterator for unique examples
+            subject = hyperparameters.get("mmlu_subject", None)
+            split = hyperparameters.get("mmlu_split", "validation")
+            dataset_iter = load_mmlu_dataset(chunk_size=chunk_size, split=split, subject=subject)
+            for batch_idx in range(num_batches):
+                try:
+                    unique_qa = next(dataset_iter)
+                except StopIteration:
+                    # Reset iterator if we run out of data
+                    dataset_iter = load_mmlu_dataset(chunk_size=chunk_size, split=split, subject=subject)
+                    unique_qa = next(dataset_iter)
+                repeated_batch = [unique_qa] * batch_size
+                yield repeated_batch
+                
+        elif task_type in ["wiki_compression", "wiki_continuation"]:
+            # For wiki tasks, generate unique examples and repeat each
+            colored_print("Wiki Parallel", "Loading Wikipedia dataset for parallel mode...", Colors.CYAN)
+            wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
+            article_idx = 0
+            
+            # Define indices to skip (from 1900*8 to 2800*8)
+            skip_start = 15200  # 1900 * 8
+            skip_end = 22400    # 2800 * 8
+            
+            for batch_idx in range(num_batches):
+                # Find one valid example for this batch
+                unique_qa = None
+                attempts = 0
+                max_attempts = 1000
+                
+                while unique_qa is None and attempts < max_attempts:
+                    if article_idx >= len(wiki_dataset):
+                        article_idx = 0
+                    
+                    # Skip indices in the specified range
+                    if skip_start <= article_idx < skip_end:
+                        article_idx = skip_end
+                        continue
+                        
+                    article = wiki_dataset[article_idx]
+                    article_idx += 1
+                    attempts += 1
+                    
+                    text = article['text']
+                    tokens = tokenizer(text, truncation=False, return_tensors="pt")
+                    token_length = tokens.input_ids.size(1)
+                    
+                    # Calculate required total length based on task type
+                    if "question_length" in hyperparameters and "target_length" in hyperparameters:
+                        required_length = hyperparameters["question_length"] + hyperparameters["target_length"]
+                    else:
+                        required_length = hyperparameters.get("target_length", 0)
+                    
+                    if token_length < required_length:
+                        continue
+                    
+                    # Process article to create QA pair (same logic as normal mode)
+                    if "question_length" in hyperparameters and "target_length" in hyperparameters:
+                        # Get question chunk
+                        question_chunk, actual_q_tokens = get_text_with_token_length(
+                            text, hyperparameters["question_length"], tokenizer
+                        )
+                        if question_chunk is None:
+                            continue
+                        
+                        # Get target chunk from remaining text
+                        remaining_text = text[len(question_chunk):]
+                        target_chunk, actual_t_tokens = get_text_with_token_length(
+                            remaining_text, hyperparameters["target_length"], tokenizer
+                        )
+                        if target_chunk is None:
+                            continue
+                            
+                        unique_qa = (question_chunk, target_chunk)
+                    else:
+                        # Single chunk mode
+                        text_chunk, actual_tokens = get_text_with_token_length(
+                            text, hyperparameters["target_length"], tokenizer
+                        )
+                        if text_chunk is None:
+                            continue
+                            
+                        unique_qa = (text_chunk, "")
+                
+                if unique_qa is None:
+                    raise ValueError(f"Could not find valid example for batch {batch_idx} after {max_attempts} attempts")
+                
+                # Create batch with batch_size copies of this example
+                repeated_batch = [unique_qa] * batch_size
+                yield repeated_batch
+                
+        else:
+            raise ValueError(f"Parallel mode not implemented for task_type: {task_type}")
+        
+        # Return early to avoid executing normal mode logic
+        return
+    
     # If debug_repeat_datapoint mode is enabled, generate a single batch and repeat it
     if hyperparameters.get("debug_repeat_datapoint", False):
         colored_print("Debug Mode", "Training on the same datapoint repeatedly", Colors.RED)
