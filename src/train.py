@@ -20,7 +20,7 @@ from utils import (
     construct_prompts,
     find_latest_result,
     print_batch_delimiter,
-    print_grpo_overview,
+    print_parallel_overview,
     get_model_hash,
     verify_all_frozen_weights,
     verify_actor_weights_changing_comprehensive,
@@ -252,9 +252,6 @@ class ReasoningOutput:
     R_mean_actor_logprobs: torch.Tensor
     R_mean_critic_logprobs: torch.Tensor
     kl: torch.Tensor
-    
-    # For parallel sampling
-    sample_groups: Optional[List[int]] = None  # Tracks which group each sample belongs to
 
 
 @dataclass
@@ -266,10 +263,6 @@ class AdvantageOutput:
     actor_answer_logprobs: torch.Tensor
     critic_answer_logprobs: torch.Tensor
     extracted_answers: Optional[List[Any]]
-    
-    # For parallel sampling
-    sample_groups: Optional[List[int]] = None  # Tracks which group each sample belongs to
-    group_means: Optional[torch.Tensor] = None  # Mean rewards per group
 
 
 @dataclass
@@ -342,38 +335,21 @@ def generate_reasoning_and_kl(
 ) -> ReasoningOutput:
     """Generate reasoning from both models and calculate KL divergence.
     
-    This unified implementation handles both standard and parallel (GRPO) generation.
-    In parallel mode, it generates multiple reasoning paths for each input question.
-    
     Args:
         state: Current training state
-        questions: List of input questions
+        questions: List of input questions (dataset handles any repetition)
         calculate_kl: Whether to calculate KL divergence (if False, will return zeros)
     
     Returns:
         ReasoningOutput: Contains generated reasoning and associated metrics
     """
-    parallel_samples = state.hyperparameters.get("parallel_samples", 1)
-    is_parallel = parallel_samples > 1
-    
-    # In parallel mode, repeat each question multiple times
-    if is_parallel:
-        # Repeat each question parallel_samples times
-        expanded_questions = []
-        for q in questions:
-            expanded_questions.extend([q] * parallel_samples)
-        questions_to_use = expanded_questions
-    else:
-        # Standard mode - use questions as-is
-        questions_to_use = questions
-    
-    # Create prompts for each question
+    # Create prompts for each question (no expansion needed - dataset handles repetition)
     prompts = [
         construct_prompts(
             question=q,
             hyperparameters=state.hyperparameters,
         )
-        for q in questions_to_use
+        for q in questions
     ]
 
     # Tokenize inputs
@@ -398,19 +374,50 @@ def generate_reasoning_and_kl(
         
         # Only generate critic reasoning if we're normalizing loss
         if state.hyperparameters.get("normalize_loss", True):
-            # Critic (frozen) generates reasoning
-            q_r_tokens = state.critic_model.generate(
-                tokenized_inputs.input_ids,
-                attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=state.hyperparameters["cot_length"],
-                min_new_tokens=state.hyperparameters["cot_length"],
-                do_sample=False,
-                pad_token_id=state.tokenizer.pad_token_id,
-            )
-            # Decode critic reasoning text
-            critic_reasoning = state.tokenizer.batch_decode(
-                q_r_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
-            )
+            parallel_mode = state.hyperparameters.get("parallel", False)
+            
+            if parallel_mode:
+                # OPTIMIZATION: In parallel mode, all questions are identical, so only generate once
+                colored_print("Critic Optimization", "Using single critic computation with replication", Colors.GREEN)
+                
+                # Generate critic reasoning for just the first (unique) example
+                unique_tokenized = state.tokenizer(
+                    [prompts[0]], padding=True, return_tensors="pt"
+                ).to(state.device)
+                
+                q_r_tokens_unique = state.critic_model.generate(
+                    unique_tokenized.input_ids,
+                    attention_mask=unique_tokenized.attention_mask,
+                    max_new_tokens=state.hyperparameters["cot_length"],
+                    min_new_tokens=state.hyperparameters["cot_length"],
+                    do_sample=False,  # Critic is deterministic
+                    pad_token_id=state.tokenizer.pad_token_id,
+                )
+                
+                # Replicate the result for all batch positions
+                batch_size = len(questions)
+                q_r_tokens = q_r_tokens_unique.repeat(batch_size, 1)
+                
+                # Decode once and replicate
+                critic_reasoning_unique = state.tokenizer.batch_decode(
+                    q_r_tokens_unique[:, -state.hyperparameters["cot_length"] :], 
+                    skip_special_tokens=True
+                )[0]
+                critic_reasoning = [critic_reasoning_unique] * batch_size
+            else:
+                # Normal mode: generate for all examples
+                q_r_tokens = state.critic_model.generate(
+                    tokenized_inputs.input_ids,
+                    attention_mask=tokenized_inputs.attention_mask,
+                    max_new_tokens=state.hyperparameters["cot_length"],
+                    min_new_tokens=state.hyperparameters["cot_length"],
+                    do_sample=False,
+                    pad_token_id=state.tokenizer.pad_token_id,
+                )
+                # Decode critic reasoning text
+                critic_reasoning = state.tokenizer.batch_decode(
+                    q_r_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
+                )
         else:
             # Skip critic reasoning generation when not normalizing
             q_r_tokens = None
@@ -465,28 +472,6 @@ def generate_reasoning_and_kl(
     actor_reasoning = state.tokenizer.batch_decode(
         q_R_tokens[:, -state.hyperparameters["cot_length"] :], skip_special_tokens=True
     )
-    
-    # For parallel mode, track sample groups and reshape tensors
-    if is_parallel:
-        # Create sample groups tensor - reshape flat tensors into [num_questions, parallel_samples]
-        batch_size = len(questions)
-        
-        # Reshape the flat tensors into [batch_size, parallel_samples]
-        R_mean_actor_logprobs_reshaped = R_mean_actor_logprobs.reshape(batch_size, parallel_samples)
-        R_mean_critic_logprobs_reshaped = R_mean_critic_logprobs.reshape(batch_size, parallel_samples)
-        kl_reshaped = kl.reshape(batch_size, parallel_samples)
-        
-        # Create sample_groups as a list for backward compatibility
-        sample_groups = []
-        for i in range(batch_size):
-            sample_groups.extend([i] * parallel_samples)
-            
-        # Flatten the reshaped tensors
-        R_mean_actor_logprobs = R_mean_actor_logprobs_reshaped.reshape(-1)
-        R_mean_critic_logprobs = R_mean_critic_logprobs_reshaped.reshape(-1)
-        kl = kl_reshaped.reshape(-1)
-    else:
-        sample_groups = None
 
     return ReasoningOutput(
         actor_reasoning=actor_reasoning,
@@ -494,7 +479,6 @@ def generate_reasoning_and_kl(
         R_mean_actor_logprobs=R_mean_actor_logprobs,
         R_mean_critic_logprobs=R_mean_critic_logprobs,
         kl=kl,
-        sample_groups=sample_groups,
     )
 
 
@@ -504,104 +488,88 @@ def calculate_advantages(
     answers: List[str],
     reasoning_output: ReasoningOutput,
 ) -> AdvantageOutput:
-    """Calculate advantages with support for both standard and parallel sampling approaches.
-    
-    This unified implementation handles both standard advantage calculation and 
-    Group-Relative Policy Optimization (GRPO) advantage calculation. In GRPO mode,
-    advantages are calculated relative to the mean reward within each question group.
+    """Calculate advantages for both standard and parallel sampling modes.
     
     Args:
         state: Current training state
-        questions: Original questions (not expanded in parallel case)
-        answers: Original answers 
+        questions: List of questions (dataset handles any repetition)
+        answers: List of answers (dataset handles any repetition)
         reasoning_output: Output from generate_reasoning functions
         
     Returns:
         AdvantageOutput: Contains advantage calculations and metrics
     """
-    parallel_samples = state.hyperparameters.get("parallel_samples", 1)
-    is_parallel = parallel_samples > 1
+    parallel_mode = state.hyperparameters.get("parallel", False)
     
-    # In parallel mode, we need to expand answers to match reasoning count
-    if is_parallel:
-        # Expand answers to match the expanded questions
-        expanded_answers = []
-        for a in answers:
-            expanded_answers.extend([a] * parallel_samples)
-        answers_to_use = expanded_answers
-        questions_to_use = questions * parallel_samples
-        sample_groups = reasoning_output.sample_groups
-    else:
-        # Standard mode - use answers and questions as-is
-        answers_to_use = answers
-        questions_to_use = questions
-        sample_groups = None
-    
-    # Calculate log probs of answers given actor's reasoning
+    # Calculate log probs of answers given actor's reasoning (no expansion needed)
     actor_answer_logprobs, extracted_answers = calculate_answer_log_probs(
         state.critic_model,
         state.tokenizer,
         state.device,
-        questions_to_use,
+        questions,
         reasoning_output.actor_reasoning,
-        answers_to_use,
+        answers,
         state.hyperparameters,
         include_question=False,  # Default behavior: don't include question in prompt
     )
 
     # Calculate normalized rewards
     if state.hyperparameters.get("normalize_loss", True):
-        # Only calculate critic answer log probs if we're normalizing loss
-        critic_answer_logprobs, _ = calculate_answer_log_probs(
-            state.critic_model,
-            state.tokenizer,
-            state.device,
-            questions_to_use,
-            reasoning_output.critic_reasoning,
-            answers_to_use,
-            state.hyperparameters,
-            include_question=False,  # Default behavior: don't include question in prompt
-        )
+        if parallel_mode:
+            # OPTIMIZATION: In parallel mode, calculate critic answer log prob only once
+            colored_print("Critic Answer Optimization", "Computing single critic answer and replicating", Colors.GREEN)
+            
+            critic_answer_logprob_single, _ = calculate_answer_log_probs(
+                state.critic_model,
+                state.tokenizer,
+                state.device,
+                [questions[0]],  # Just first question
+                [reasoning_output.critic_reasoning[0]],  # Just first reasoning
+                [answers[0]],  # Just first answer
+                state.hyperparameters,
+                include_question=False,
+            )
+            
+            # Replicate across batch
+            batch_size = len(questions)
+            critic_answer_logprobs = critic_answer_logprob_single.repeat(batch_size)
+        else:
+            # Normal mode: calculate for all
+            critic_answer_logprobs, _ = calculate_answer_log_probs(
+                state.critic_model,
+                state.tokenizer,
+                state.device,
+                questions,
+                reasoning_output.critic_reasoning,
+                answers,
+                state.hyperparameters,
+                include_question=False,
+            )
+        
         # Normalize reward as improvement over baseline
         normalized_rewards = actor_answer_logprobs - critic_answer_logprobs
     else:
         # Skip critic calculation when not normalizing
-        critic_answer_logprobs = torch.zeros_like(actor_answer_logprobs)  # Placeholder
+        critic_answer_logprobs = torch.zeros_like(actor_answer_logprobs)
         normalized_rewards = actor_answer_logprobs
     
-    # Calculate advantages - different approaches for parallel vs standard
-    if is_parallel:
-        # GRPO advantage calculation - group-relative advantages
-        
-        # Warn if r parameter is set with GRPO (they use different baseline strategies)
+    # Calculate advantages - simplified for both modes
+    if parallel_mode:
+        # Parallel mode: use simple batch mean baseline
         if state.hyperparameters.get("r") is not None:
-            colored_print("Warning", f"r parameter ({state.hyperparameters['r']}) is ignored when using GRPO (parallel_samples > 1)", Colors.YELLOW)
-            colored_print("Info", "GRPO uses group means as baselines instead of exponential moving average", Colors.CYAN)
+            colored_print("Warning", f"r parameter ({state.hyperparameters['r']}) is ignored in parallel mode", Colors.YELLOW)
+            colored_print("Info", "Parallel mode uses batch mean as baseline instead of exponential moving average", Colors.CYAN)
         
-        batch_size = len(questions)
-        # Reshape rewards tensor into [batch_size, parallel_samples] for group operations
-        rewards_by_group = normalized_rewards.reshape(batch_size, parallel_samples)
-        
-        # Calculate group means (mean reward for each question across its parallel samples)
-        group_means = rewards_by_group.mean(dim=1, keepdim=True)  # [batch_size, 1]
-        
-        # Calculate advantages by subtracting group means from individual rewards
-        # This implements the GRPO baseline
-        advantages_by_group = rewards_by_group - group_means
-        
-        # Flatten the tensors back for compatibility with rest of training loop
-        advantages = advantages_by_group.reshape(-1)
-        group_means_flat = group_means.squeeze(1)  # [batch_size]
+        batch_mean = normalized_rewards.mean()
+        advantages = normalized_rewards - batch_mean
     else:
-        # Standard advantage calculation
-        # Calculate advantage using exponential moving average baseline
+        # Standard mode: use exponential moving average baseline
         r = state.hyperparameters.get("r", None)
         if len(state.previous_normalized_rewards) > 0 and r is not None:
             value = exponential_weighted_average(state.previous_normalized_rewards, r)
             advantages = normalized_rewards - value
         else:
             advantages = normalized_rewards
-        group_means_flat = None
     
     return AdvantageOutput(
         advantages=advantages,
@@ -609,8 +577,6 @@ def calculate_advantages(
         actor_answer_logprobs=actor_answer_logprobs,
         critic_answer_logprobs=critic_answer_logprobs,
         extracted_answers=extracted_answers,
-        sample_groups=sample_groups,
-        group_means=group_means_flat,
     )
 
 
@@ -1150,16 +1116,11 @@ def log_batch_results(
         ei_status = f"Enabled (std_mult={state.hyperparameters['use_ei']})"
         colored_print("Expert Iteration:", ei_status, Colors.CYAN)
     
-    # Only show parallel sampling status if enabled (more than 1 sample)
-    parallel_samples = state.hyperparameters.get("parallel_samples", 1)
-    if parallel_samples > 1:
-        colored_print("Parallel Sampling:", f"Enabled ({parallel_samples} samples per question)", Colors.BOLD)
-        
-        # If available, print group information
-        sample_groups = getattr(batch_data.metrics, "sample_groups", None)
-        if sample_groups:
-            group_count = len(set(sample_groups))
-            colored_print("Groups:", f"{group_count} unique question groups", Colors.CYAN)
+    # Only show parallel sampling status if enabled
+    parallel_mode = state.hyperparameters.get("parallel", False)
+    if parallel_mode:
+        batch_size = state.hyperparameters.get("batch_size", 8)
+        colored_print("Parallel Sampling:", f"Enabled ({batch_size} copies per example)", Colors.BOLD)
     
     # Get raw unfiltered losses directly from the tensors
     # Always use the raw tensors instead of potentially filtered metrics
@@ -1608,8 +1569,8 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
     """Process a single batch of data.
     
     This function handles both standard and parallel sampling modes transparently.
-    When parallel_samples > 1, it will use parallel generation and group-relative
-    advantage calculation automatically.
+    When --parallel is enabled, the dataset provides repeated examples and simplified
+    advantage calculation is used automatically.
     """
     questions, answers = zip(*qa_batch)
 
@@ -1744,8 +1705,8 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     """Main training loop"""
     state = TrainingState.initialize(task_type, resume, model_type, hyperparameters)
     
-    # Display GRPO overview if parallel sampling is enabled
-    print_grpo_overview(state.hyperparameters)
+    # Display parallel overview if parallel sampling is enabled
+    print_parallel_overview(state.hyperparameters)
     
     # Get dataset size for tracking full passes
     if task_type == "gsm8k":
@@ -1900,8 +1861,8 @@ class TrainingConfig:
     lora_alpha: float
     # Debug options
     debug_repeat_datapoint: bool
-    # Parallel sampling (GRPO-style)
-    parallel_samples: int = 1
+    # Parallel sampling (whole-batch repetition)
+    parallel: bool = False
 
     @classmethod
     def from_args(cls, args):
@@ -1931,7 +1892,7 @@ class TrainingConfig:
             lora_rank=args.lora_rank,
             lora_alpha=args.lora_alpha,
             debug_repeat_datapoint=args.debug_repeat_datapoint,
-            parallel_samples=args.parallel_samples if hasattr(args, 'parallel_samples') else 1,
+            parallel=args.parallel,
         )
 
 
@@ -2045,12 +2006,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Debug mode: train on the same datapoint repeatedly to test optimization",
     )
-    # Parallel sampling (GRPO-style)
+    # Parallel sampling (whole-batch repetition)
     parser.add_argument(
-        "--parallel_samples",
-        type=int,
-        default=1,
-        help="Number of parallel samples to use for parallel sampling (default: 1)",
+        "--parallel",
+        action="store_true",
+        help="Use parallel sampling: each batch contains batch_size copies of the same example",
     )
 
     args = parser.parse_args()
