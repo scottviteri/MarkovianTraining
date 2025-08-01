@@ -23,7 +23,7 @@
 - `gemma-3-small` (gemma-3-1b-it)
 
 ### GRPO Compatible Models
-All models support GRPO (Group-Relative Policy Optimization) with `--parallel_samples > 1`
+All models support GRPO (Group-Relative Policy Optimization) with `--parallel`
 
 ### Performance Tier Recommendations
 
@@ -72,7 +72,7 @@ python src/train.py --model_type gpt2 --task_type arithmetic --num_batches 2
 python src/train.py --model_type llama --task_type gsm8k --use_ppo
 
 # GRPO training
-python src/train.py --model_type gemma-3-small --parallel_samples 4 --task_type arithmetic
+python src/train.py --model_type gemma-3-small --parallel --task_type arithmetic
 
 # Qwen3 training
 python src/train.py --model_type qwen3 --task_type arithmetic

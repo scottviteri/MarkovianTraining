@@ -23,7 +23,7 @@ hf auth login
 
 ### Quick Test (Single Model)
 ```bash
-python src/train.py --parallel_samples 2 --task_type arithmetic --num_batches 1 --batch_size 1 --model_type gemma-3-small
+python src/train.py --parallel --task_type arithmetic --num_batches 1 --batch_size 1 --model_type gemma-3-small
 ```
 
 ### Comprehensive Speed Test
@@ -58,13 +58,12 @@ Based on your hardware specs:
 
 Once authenticated, test GRPO performance:
 ```bash
-# Test GRPO with different parallel samples
-python src/train.py --parallel_samples 4 --model_type gemma-3-small --task_type arithmetic --num_batches 2 --batch_size 2
+# Test GRPO with parallel sampling
+python src/train.py --parallel --model_type gemma-3-small --task_type arithmetic --num_batches 2 --batch_size 4
 
-# Compare speeds:
-python src/train.py --parallel_samples 1 --model_type gemma-3-small --task_type arithmetic --num_batches 2 --batch_size 2  # Standard
-python src/train.py --parallel_samples 2 --model_type gemma-3-small --task_type arithmetic --num_batches 2 --batch_size 2  # GRPO 2x
-python src/train.py --parallel_samples 4 --model_type gemma-3-small --task_type arithmetic --num_batches 2 --batch_size 2  # GRPO 4x
+# Compare standard vs GRPO:
+python src/train.py --model_type gemma-3-small --task_type arithmetic --num_batches 2 --batch_size 2  # Standard mode
+python src/train.py --parallel --model_type gemma-3-small --task_type arithmetic --num_batches 2 --batch_size 4  # GRPO mode
 ```
 
 ## 🔧 Hardware Optimizations (Already Optimized!)
