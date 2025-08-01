@@ -83,6 +83,7 @@ def find_answer_start_position(input_ids, model_type):
         ).nonzero(as_tuple=True)[0]
         pos = matching_indices[-1].item() + 2
     elif model_type == "phi":
+        # Phi-3.5-mini tokenization: "Answer:" -> [673, 29901] or " Answer:" -> [29871, 673, 29901]
         matching_indices = (
             (input_ids[:-1] == 673)  # "Answer"
             & (input_ids[1:] == 29901)  # ":"

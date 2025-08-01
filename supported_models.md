@@ -8,7 +8,7 @@
 | `mistral` | `mistralai/Mistral-7B-Instruct-v0.2` | 7B | ✅ Yes (Gated) | Popular choice |
 | `gpt2` | `openai-community/gpt2` | 124M | ❌ No | Good for testing |
 | `tinystories` | `roneneldan/TinyStories` | 3.7M | ❌ No | Lightweight option |
-| `phi` | `microsoft/Phi-3.5-mini-instruct` | 3.8B | ⚠️ Possibly gated | Microsoft model |
+| `phi` | `microsoft/Phi-3.5-mini-instruct` | 3.8B | ❌ No | Microsoft model (upgraded) |
 | `phi-4` | `microsoft/phi-4` | ? | ⚠️ Possibly gated | Latest Phi model |
 | `qwen3` | `Qwen/Qwen3-4B` | 4B | ❌ No | Newer Qwen version |
 | `gemma-3` | `google/gemma-3-12b-it` | 12B | ✅ Yes (Gated) | Large Gemma |

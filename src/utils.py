@@ -1332,7 +1332,7 @@ def apply_model_specific_patches(model, model_type):
     Returns:
         model: The patched model
     """
-    if model_type == "phi":
+    if model_type in ["phi", "phi-4"]:
         # Apply Phi-specific patches
         colored_print("Model Patches", "Applying Phi model compatibility patches", Colors.YELLOW)
         
@@ -1344,8 +1344,47 @@ def apply_model_specific_patches(model, model_type):
             if not hasattr(DynamicCache, "get_max_length"):
                 colored_print("Patching", "Adding get_max_length method to DynamicCache", Colors.YELLOW)
                 DynamicCache.get_max_length = DynamicCache.get_seq_length
-        except (ImportError, AttributeError):
-            colored_print("Warning", "Failed to apply Phi model patch, generation may fail", Colors.RED)
+                
+            # Add seen_tokens property if it doesn't exist (for transformers < 4.56)
+            if not hasattr(DynamicCache, "seen_tokens"):
+                colored_print("Patching", "Adding seen_tokens property to DynamicCache", Colors.YELLOW)
+                
+                @property
+                def seen_tokens(self):
+                    """Compatibility property for older transformers versions"""
+                    if hasattr(self, "_seen_tokens"):
+                        return self._seen_tokens
+                    # Fallback to calculating from key cache length
+                    if self.key_cache and len(self.key_cache) > 0 and self.key_cache[0] is not None:
+                        return self.key_cache[0].shape[-2]
+                    return 0
+                
+                @seen_tokens.setter
+                def seen_tokens(self, value):
+                    """Compatibility setter for older transformers versions"""
+                    self._seen_tokens = value
+                
+                DynamicCache.seen_tokens = seen_tokens
+                
+            # Add get_usable_length method if it doesn't exist (for transformers < 4.56)
+            if not hasattr(DynamicCache, "get_usable_length"):
+                colored_print("Patching", "Adding get_usable_length method to DynamicCache", Colors.YELLOW)
+                
+                def get_usable_length(self, new_seq_length, layer_idx=0):
+                    """Compatibility method for older transformers versions"""
+                    # Return the sequence length that can be used (same as get_seq_length for most cases)
+                    if hasattr(self, "get_seq_length"):
+                        return self.get_seq_length(layer_idx)
+                    # Fallback implementation
+                    if self.key_cache and len(self.key_cache) > layer_idx and self.key_cache[layer_idx] is not None:
+                        return self.key_cache[layer_idx].shape[-2]
+                    return 0
+                
+                DynamicCache.get_usable_length = get_usable_length
+                
+        except (ImportError, AttributeError) as e:
+            colored_print("Warning", f"Failed to apply Phi model patch: {e}", Colors.RED)
+            colored_print("Warning", "Generation may fail - consider upgrading transformers", Colors.RED)
     
     return model
 
