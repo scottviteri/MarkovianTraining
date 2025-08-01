@@ -680,12 +680,8 @@ def construct_prompt(question: str, task_type: str, config: VQConfig) -> str:
         base_prompt_text = f"You will be given an arithmetic problem, which you have {config.vq_reason_length} tokens to work through step-by-step. Question:"
         prompt_type_suffix = "Reasoning:"
     elif task_type == "wiki_continuation":
-        base_prompt_text = (
-            f"You will need to predict the next {config.max_target_length} tokens which follow the provided passage."
-            f"You can write {config.vq_reason_length} thinking tokens which will be your sole context for prediction."
-            f"Feel free to be creative in your thinking strategy!\n\nOpening text:"
-        )
-        prompt_type_suffix = "Helpful Text:"
+        base_prompt_text = f"Compress your understanding of this text into {config.vq_reason_length} tokens, then predict the next {config.max_target_length} tokens.\n\nText:"
+        prompt_type_suffix = "Reasoning Bottleneck:"
     else:
         print(f"Warning: construct_prompt received an unexpected task_type: '{task_type}'. Using a generic prompt.")
         return f"Question: {question}\nAnswer:" # Basic fallback

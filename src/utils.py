@@ -175,12 +175,8 @@ def construct_prompts(
         )
         prompt_type = "Compression:"
     elif task_type == "wiki_continuation":
-        base_prompt = (
-            f"You will need to predict the next {hyperparameters['target_length']} tokens which follow the provided passage."
-            f"You can write {hyperparameters['cot_length']} thinking tokens which will be your sole context for prediction."
-            f"Feel free to be creative in your thinking strategy!\n\nOpening text:"
-        )
-        prompt_type = "Helpful Text:"
+        base_prompt = f"Compress your understanding of this text into {hyperparameters['cot_length']} tokens, then predict the next {hyperparameters['target_length']} tokens.\n\nText:"
+        prompt_type = "Reasoning Bottleneck:"
     elif task_type == "arithmetic":
         base_prompt = f"You will be given an arithmetic problem, which you have {hyperparameters['cot_length']} tokens to work through step-by-step. Question:"
         prompt_type = "Reasoning:"
@@ -192,12 +188,9 @@ def construct_prompts(
         
     # Construct initial prompt with model-specific tokens
     if format_type == "phi-4":
-        system_msg = "You are a helpful AI assistant that solves problems step by step."
-        
         if reasoning is None:
             # Initial prompt without reasoning
             return (
-                f"{tokens['im_start']}system{tokens['im_sep']}\n{system_msg}{tokens['im_end']}\n"
                 f"{tokens['im_start']}user{tokens['im_sep']}\n{base_prompt} {question}{tokens['im_end']}\n"
                 f"{tokens['im_start']}assistant{tokens['im_sep']}\n{prompt_type}"
             )
@@ -205,17 +198,13 @@ def construct_prompts(
             # Prompt with reasoning (for generating/evaluating the answer)
             question_placeholder = question if include_question else "<Redacted>"
             return (
-                f"{tokens['im_start']}system{tokens['im_sep']}\n{system_msg}{tokens['im_end']}\n"
                 f"{tokens['im_start']}user{tokens['im_sep']}\n{base_prompt} {question_placeholder}{tokens['im_end']}\n"
                 f"{tokens['im_start']}assistant{tokens['im_sep']}\n{prompt_type}{reasoning} Answer: "
             )
     elif format_type == "qwen3":
-        system_msg = "You are a helpful AI assistant that solves problems step by step."
-        
         if reasoning is None:
             # Initial prompt without reasoning
             return (
-                f"{tokens['im_start']}system\n{system_msg}{tokens['im_end']}\n"
                 f"{tokens['im_start']}user\n{base_prompt} {question}{tokens['im_end']}\n"
                 f"{tokens['im_start']}assistant\n{prompt_type}"
             )
@@ -223,7 +212,6 @@ def construct_prompts(
             # Prompt with reasoning (for generating/evaluating the answer)
             question_placeholder = question if include_question else "<Redacted>"
             return (
-                f"{tokens['im_start']}system\n{system_msg}{tokens['im_end']}\n"
                 f"{tokens['im_start']}user\n{base_prompt} {question_placeholder}{tokens['im_end']}\n"
                 f"{tokens['im_start']}assistant\n{prompt_type}{reasoning} Answer: "
             )
