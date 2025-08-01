@@ -177,6 +177,8 @@ def evaluate_model(
                 min_new_tokens=hyperparameters["cot_length"],
                 do_sample=True,
                 temperature=hyperparameters["temperature"],
+                top_k=None,
+                top_p=None,
                 pad_token_id=tokenizer.pad_token_id,
             )
             
@@ -208,6 +210,8 @@ def evaluate_model(
                 attention_mask=tokenized_answer_inputs.attention_mask,
                 max_new_tokens=10,  # Changed from 15 to 10 to match training
                 do_sample=False,    # Deterministic
+                top_k=None,
+                top_p=None,
                 pad_token_id=tokenizer.pad_token_id,
             )
         
