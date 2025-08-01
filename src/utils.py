@@ -365,7 +365,7 @@ def print_parallel_overview(hyperparameters):
     colored_print("Parallel Mode", "Each batch contains multiple copies of the same example", Colors.CYAN)
     colored_print("Parallel Info", "Actor generates different reasoning for each copy (sampling enabled)", Colors.CYAN)
     colored_print("Parallel Info", "Critic generates reasoning once and replicates (deterministic)", Colors.CYAN)
-    colored_print("Parallel Info", "Advantages are calculated relative to the batch mean", Colors.CYAN)
+    colored_print("Parallel Info", "Advantages are standardized: (reward - batch_mean) / batch_std", Colors.CYAN)
     colored_print("Parallel Note", "The 'r' parameter (EMA baseline) is not used in parallel mode", Colors.YELLOW)
     print("\n" + "-" * 80 + "\n")
 
