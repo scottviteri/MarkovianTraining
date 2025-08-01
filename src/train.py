@@ -1215,6 +1215,19 @@ def log_batch_results(
             return "NaN (no active examples)"
         return float(value)
 
+    # Add actor reward specific metrics
+    actor_reward_weight = state.hyperparameters.get("actor_reward_weight", 0.0)
+    actor_reward_metrics = {}
+    if actor_reward_weight > 0.0:
+        if "reward_gradient_losses" in batch_data.metrics:
+            reward_grad_loss = batch_data.metrics["reward_gradient_losses"]
+            actor_reward_metrics = {
+                "Actor Reward Weight": float(actor_reward_weight),
+                "Reward Gradient Loss": safe_float(reward_grad_loss.mean().item()),
+                "First Reward Gradient Loss": safe_float(reward_grad_loss[0].item()),
+                "PG vs Reward Ratio": safe_float(metrics.pg_loss / reward_grad_loss.mean().item()) if reward_grad_loss.mean().item() != 0 else "inf",
+            }
+
     log_entry = {
         "Batch Index": int(state.batch_index),
         "Task Type": state.hyperparameters["task_type"],
@@ -1302,6 +1315,10 @@ def log_batch_results(
             "Markovian": bool(state.hyperparameters.get("markovian", True)),
         },
     }
+    
+    # Add actor reward metrics if using actor rewards
+    if actor_reward_metrics:
+        log_entry["Actor Reward Metrics"] = actor_reward_metrics
     
     # Add active-only metrics if available
     if "active_only_loss" in batch_data.metrics:
@@ -1661,6 +1678,30 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
 
     return batch_data
 
+def check_gradient_flow(model, loss_type="total"):
+    """Check if gradients are flowing through the model after loss.backward()"""
+    total_params = 0
+    params_with_grad = 0
+    max_grad_norm = 0.0
+    
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            total_params += 1
+            if param.grad is not None:
+                params_with_grad += 1
+                grad_norm = param.grad.data.norm().item()
+                max_grad_norm = max(max_grad_norm, grad_norm)
+    
+    grad_ratio = params_with_grad / total_params if total_params > 0 else 0
+    
+    if grad_ratio < 1.0:
+        colored_print("Gradient Warning", f"{loss_type}: Only {params_with_grad}/{total_params} ({grad_ratio:.1%}) params have gradients", Colors.YELLOW)
+    else:
+        colored_print("Gradient Check", f"{loss_type}: All {params_with_grad}/{total_params} params have gradients (max: {max_grad_norm:.6f})", Colors.GREEN)
+    
+    return grad_ratio, max_grad_norm
+
+
 def update_model(state: TrainingState, batch_data: BatchData) -> float:
     """Perform model update and return gradient norm"""
     num_active = (
@@ -1702,6 +1743,11 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
             )
         ).sum() / (num_active * accumulation_steps)  # Scale by accumulation steps
         loss.backward()
+
+        # Check gradient flow if using actor rewards (only on first few batches to avoid spam)
+        actor_reward_weight = state.hyperparameters.get("actor_reward_weight", 0.0)
+        if actor_reward_weight > 0.0 and state.batch_index < 5:
+            grad_ratio, max_grad = check_gradient_flow(state.actor_model, "Actor Reward Path")
 
         # Increment accumulation step
         state.accumulation_step += 1
