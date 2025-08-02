@@ -170,6 +170,8 @@ def main():
     parser.add_argument("--gaussian_sigma", type=float, default=30.0, help="Gaussian smoothing sigma (default: 30.0)")
     parser.add_argument("--output", type=str, default="results/figures/combined_normalized_reward_gp_smoothed.png", help="Output filename")
     parser.add_argument("--task_type", type=str, default="wiki_continuation", help="Task type to plot (default: wiki_continuation)")
+    parser.add_argument("--use_max_x", action="store_true", help="Use maximum x extent instead of minimum (default: False)")
+    parser.add_argument("--font_size", type=int, default=18, help="Font size for all text elements in the plot (default: 18)")
     args = parser.parse_args()
     
     # Define the machine patterns and their labels/colors
@@ -196,11 +198,13 @@ def main():
     
     window_size = args.window_size
     gaussian_sigma = args.gaussian_sigma
+    font_size = args.font_size
     
     # Create the plot
     plt.figure(figsize=(12, 8))
     
     max_x = 0
+    min_x = float('inf')
     valid_experiments = []
     
     # Process each experiment
@@ -221,6 +225,7 @@ def main():
                 plt.plot(x_coords, y_smooth, color=color, linewidth=6, alpha=0.2)
                 
                 max_x = max(max_x, np.max(x_coords))
+                min_x = min(min_x, np.max(x_coords))
                 valid_experiments.append((model_type, label))
                 print(f"Successfully plotted {model_type} ({label}) with {len(x_coords)} points")
             else:
@@ -229,15 +234,20 @@ def main():
             print(f"Warning: File not found: {file_path}")
     
     # Set up the plot formatting similar to plot_training_metrics.py
-    plt.xlabel("Training Batch No. []", fontsize=14)
-    plt.ylabel("ln π(ans|cot) - ln π(ans|cot') []", fontsize=14)
-    plt.title("Normalized Reward Comparison (GP-Style Smoothing)", fontsize=16)
+    plt.xlabel("Training Batch No. []", fontsize=font_size)
+    plt.ylabel("ln π(ans|cot) - ln π(ans|cot') []", fontsize=font_size)
+    plt.title("Normalized Reward Comparison (GP-Style Smoothing)", fontsize=font_size + 2)
     plt.grid(True, linestyle='--', alpha=0.3, color='gray')
-    plt.legend(fontsize=12, framealpha=0.9)
+    plt.legend(fontsize=font_size - 2, framealpha=0.9)
     
-    # Set x-axis limit to the maximum x value
-    if max_x > 0:
-        plt.xlim(0, max_x)
+    # Set x-axis limit based on user preference (default: minimum extent)
+    if valid_experiments:
+        if args.use_max_x:
+            x_limit = max_x
+        else:
+            x_limit = min_x if min_x != float('inf') else max_x
+        
+        plt.xlim(0, x_limit)
     
     # Add smoothing info
     plt.text(
@@ -246,7 +256,7 @@ def main():
         transform=plt.gca().transAxes,
         horizontalalignment='right',
         verticalalignment='bottom',
-        fontsize=10,
+        fontsize=font_size - 6,
         bbox=dict(
             facecolor='white',
             alpha=0.9,
@@ -257,7 +267,7 @@ def main():
     )
     
     # Improve overall aesthetics
-    plt.tick_params(axis='both', which='major', labelsize=12)
+    plt.tick_params(axis='both', which='major', labelsize=font_size - 2)
     
     # Tight layout and save
     plt.tight_layout()
