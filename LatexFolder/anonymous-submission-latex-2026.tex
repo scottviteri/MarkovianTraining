@@ -75,7 +75,8 @@
 \maketitle
 
 \begin{abstract}
-Chain-of-Thought (CoT) reasoning often fails to faithfully reflect a language model's underlying decision process. We address this by introducing a \emph{Markovian} language model framework that structurally enforces CoT text to be causally essential, factoring next-token prediction through an intermediate CoT and training it to predict future tokens independently of the original prompt. Within this framework, we apply an informativeness objective to ensure the CoT effectively supports predictions, achieving a 33.2\% absolute accuracy improvement on GSM8K with Llama 3.1 8B. Perturbation tests confirm stronger reliance on the CoT, while cross-model transfers indicate these reasoning traces generalize across interpreters. Our approach enhances both accuracy and interpretability, potentially extending CoT reasoning to arbitrarily long contexts and diverse tasks.
+  Chain-of-Thought (CoT) reasoning often fails to faithfully reflect a language model's underlying decision process. We address this by introducing a \emph{Markovian} language model framework that structurally enforces CoT text to be causally essential, factoring next-token prediction through an intermediate CoT and training it to predict future tokens independently of the original prompt. Within this framework, we apply an informativeness objective to ensure the CoT effectively supports predictions, achieving a 33.2\% absolute accuracy improvement on GSM8K with Llama 3.1 8B. Perturbation tests confirm stronger reliance on the CoT, while cross-model transfers indicate these reasoning traces generalize across interpreters. Our approach enhances both accuracy and interpretability, potentially extending CoT reasoning to arbitrarily long contexts and diverse tasks.
+\
 \end{abstract}
 
 % Uncomment the following to link to your code, datasets, an extended version or similar.
@@ -88,7 +89,7 @@ Chain-of-Thought (CoT) reasoning often fails to faithfully reflect a language mo
 
 \section{Introduction}
 \label{sec:intro}
-The rapid advancement of language models (LMs) has led to impressive performance on complex cognitive tasks~\citep{NEURIPS2020_1457c0d6}. Yet it is often unclear \emph{why} an LM arrives at a particular conclusion, causing issues in high-stakes applications. Traditional interpretability methods analyze hidden activations or attention patterns to extract ``explanations''. Modern LMs, however, already generate coherent text: we might hope \emph{prompting} the model to articulate its reasoning (``Chain-of-Thought'' or CoT)~\citep{wei2022chain} would yield a faithful record of its thought process. 
+The rapid advancement of language models (LMs) has led to impressive performance on complex cognitive tasks~\citep{NEURIPS2020_1457c0d6}. Yet it is often unclear \emph{why} an LM arrives at a particular conclusion~\citep{lamparth2023analyzing,burns2024discovering,gurnee2024language}, causing issues in high-stakes applications~\citep{Grabb2024.04.07.24305462,lamparth2024human,rivera2024escalation}. Traditional interpretability methods analyze hidden activations or attention patterns to extract ``explanations''~\citep{geiger2022inducing,geva2022transformer,meng2022locating,raukur2022toward,wang2022interpretability,lamparth2023analyzing,nanda2023progress}. Modern LMs, however, already generate coherent text: we might hope \emph{prompting} the model to articulate its reasoning (``Chain-of-Thought'' or CoT)~\citep{nye2022show,wei2022chain} would yield a faithful record of its thought process. 
 
 Unfortunately, CoT explanations can be \emph{unfaithful}. For example, \citet{turpin2023language} show that spurious in-context biases often remain hidden in the CoT, and \citet{lanham2023measuring} find that altering CoT text may not affect the final answer. Such observations indicate that standard CoTs are not ``load-bearing.''
 
@@ -98,15 +99,19 @@ What distinguishes our approach is the clear distinction between the model \emph
 
 For instance, Mistral-7B's CoT on arithmetic tasks changed dramatically after training. \textbf{Before training}, it simply listed all numbers and their (incorrect) sum (e.g., ``Sum = 76 + 90 + 92 + ... = 2314''). \textbf{After training}, it performed correct step-by-step calculations (e.g., ``calculate 6 + 89 = 95; Next, calculate 95 + 38 = 133...''), breaking the task into manageable steps that can be verified independently and enabling accurate answer prediction even when the original question is removed.
 
-A key insight is that an \emph{informative} CoT can also serve as a \emph{recipient-specific compression} of the model's hidden knowledge: it distills the essential reasoning into text that another recipient (e.g.\ a different model or a human) can use to predict the same outcome. Our experiments confirm that the learned CoTs generalize across interpreters, suggesting that these textual explanations genuinely encode transferable problem-solving steps rather than model-specific quirks.
+\paragraph{Recipient-Specific Compression.}
+A key insight is that an \emph{informative} CoT can also serve as a \emph{recipient-specific compression} of the model's hidden knowledge: it distills the essential reasoning into text that another recipient (e.g.\ a different model or a human) can use to predict the same outcome. Our experiments confirm that the learned CoTs generalize across interpreters, suggesting that these textual explanations genuinely encode transferable problem-solving steps rather than model-specific quirks (Section~\ref{subsec:interp}).
 
-\subsection{Contributions}
+\paragraph{Contributions.}
 \begin{enumerate}
     \item We introduce a Markovian language model framework that structurally enforces Chain-of-Thought (CoT) generation to be causally essential, ensuring reliance on the CoT for predictions.
     \item We apply this framework to arithmetic problems (Mistral 7B) and the GSM8K dataset~\citep{cobbe2021gsm8k} (Llama 3.1 8B), observing a 33.2\% absolute improvement on GSM8K.
     \item We show that perturbing the CoT consistently degrades prediction accuracy, verifying \emph{fragility} and causal relevance.
     \item We demonstrate cross-model transfer: CoTs trained on one model remain informative for other models. This underscores the CoT's \emph{recipient-specific} interpretability and suggests it captures a shared reasoning strategy.
 \end{enumerate}
+
+Section~\ref{sec:related_work} reviews related work, Section~\ref{sec:MLM} details our Markovian framework, and Section~\ref{sec:method} describes the RL training. Section~\ref{sec:experiments} presents empirical results, and Section~\ref{sec:disc} discusses limitations and future directions.
+
 
 \begin{figure*}[t!]
   \centering
@@ -163,18 +168,26 @@ A key insight is that an \emph{informative} CoT can also serve as a \emph{recipi
 \node at (5,3) {Observation Sequence};
 
 \end{tikzpicture}
-\caption{Illustration of the Markovian framework. Left: Single time-step process from Question to CoT to Answer. Right: Causal structure showing the generation of states from observations and previous states using $u_\theta(s'|o,s)$, and prediction of observations from states using $\pi(o|s)$. In experiments, both $u_\theta$ and $\pi$ use the same transformer, but only $u_\theta$ weights are updated during training.}
-\label{fig:markovian-framework}
+\caption{Markovian training as a reasoning autoencoder. Left: Single time-step process from Question to CoT to Answer, creating a text-based bottleneck where the CoT must capture all information needed for answer prediction. Right: Causal structure showing the generation of states from observations and previous states using the state update function $u_\theta(s'|o,s)$, and the prediction of observations from states using the policy $\pi_\theta(o|s)$. This architecture forces reasoning through an interpretable text bottleneck, but prevents direct backpropagation, necessitating RL-based gradient estimation. In experiments, both $u_\theta$ and $\pi_\theta$ are implemented using the same transformer (Mistral 7B or Llama 3.1 8B), with only $u_\theta$'s weights updated during training.}
+\label{fig:training-method-causal-final}
+\end{figure*}
+
+\begin{figure*}
+  \centering
+    \includegraphics[width=.6\textwidth]{Figures/combined_normalized_reward_gp_smoothed.png}
+    \caption{Normalized reward progression during Wikipedia continuation training across four model architectures. The normalized reward $\ln \pi_\theta(\text{ans} \mid \text{CoT}) - \ln \pi_\theta(\text{ans} \mid \text{CoT}')$ measures how much more informative the trained CoT becomes compared to baseline reasoning from the unmodified model. Each curve represents a different model architecture: Llama 3.1 8B (blue), Phi-3.5 Mini (orange), Qwen3 4B (green), and Mistral 7B (red). The plot uses Gaussian Process-style smoothing with confidence bands to highlight training trends. All models show consistent improvement in CoT informativeness, demonstrating the generalizability of the Markovian training approach across diverse architectures.}
+    \label{fig:loss}
 \end{figure*}
 
 \section{Related Work}
 \label{sec:related_work}
 
-Prior work shows that CoT prompting can boost performance on reasoning tasks~\citep{wei2022chain}. Whereas typical CoT prompting methods do not alter a pre-trained model's parameters, some prior approaches do fine-tune the model for CoT generation. Our work differs by removing the original question or passage from the answer-prediction context, which enforces a stronger causal reliance on the CoT.
+Prior work shows that CoT prompting can boost performance on reasoning tasks \citep{wei2022chain, nye2022show}.
+Whereas typical CoT prompting methods do not alter a pre-trained model's parameters, some prior approaches do fine-tune the model for CoT generation \citep{eric_star2022, zelikman2024quietstar, deepseekai2025}. Our work differs by removing the original question or passage from the answer-prediction context, which enforces a stronger causal reliance on the CoT.
 
-Regarding faithfulness vs. interpretability, some authors discuss how a CoT may fail to reflect the true reason the LM arrived at its answer~\citep{lanham2023measuring, turpin2023language}, since small changes in the CoT do not necessarily change the final prediction. We build on these insights by \emph{training} the model to rely on this channel exclusively.
+Regarding faithfulness vs. interpretability, some authors discuss how a CoT may fail to reflect the true reason the LM arrived at its answer \citep{lanham2023measuring, turpin2023language}, since small changes in the CoT do not necessarily change the final prediction. \citet{zhou2023understanding} analyze CoT through an information-theoretic lens, finding that CoT can serve as a communication channel between different parts of a model. We build on these insights by \emph{training} the model to rely on this channel exclusively.
 
-Architecturally, our Markovian LM shares structural similarities with state space models like RNNs~\citep{rumelhart1986learning}, though with a key difference: MLMs have probabilistic state transitions to model token sampling, which necessitates gradient estimation methods such as policy gradient rather than direct backpropagation. This probabilistic structure also resembles Kalman filters and Variational Recurrent Neural Networks (VRNN), though we use categorical rather than Gaussian distributions for interpretable text generation. Other fine-tuned reasoning models have similar structure but allow seeing the full context before generating state/reasoning tokens, whereas our approach enforces a strict information bottleneck through the state.
+Architecturally, our Markovian LM shares structural similarities with state space models like RNNs \citep{rumelhart1986learning}, S4 \citep{gu2022efficientlymodelinglongsequences}, and Mamba \citep{gu2024mamba}, though with a key difference: MLMs have probabilistic state transitions to model token sampling, which necessitates gradient estimation methods such as policy gradient \citep{policy_gradient} rather than direct backpropagation. This probabilistic structure also resembles Kalman filters \citep{proto_pomdp1965}, Deep Variational Bayes Filters \citep{karl2017deepvariationalbayesfilters}, Deep Kalman Filters \citep{krishnan2015deepkalmanfilters}, and Variational Recurrent Neural Networks (VRNN) \citep{DBLP:journals/corr/ChungKDGCB15}, though we use categorical rather than Gaussian distributions for interpretable text generation. Other fine-tuned reasoning models mentioned above (R1, STaR, and QuietSTaR) have similar structure but allow seeing the full context before generating state/reasoning tokens, whereas our approach enforces a strict information bottleneck through the state.
 
 \citet{lyu2023faithful} also consider restricting the model's ability to see the original input while generating the final answer. Their approach, however, involves rewriting the question in a structured formal language or code that is then executed. Our approach uses natural language for the reasoning state to preserve interpretability across diverse tasks.
 
@@ -185,8 +198,7 @@ Here we provide our formalism for Markovian Language Models (MLMs) and define \e
 
 \subsection{Markovian Language Models (MLM)}
 
-A traditional LM can attend to the entire context when predicting the next token. This makes it possible for an LM to disregard the CoT or only partially rely on it. We impose a stricter, \emph{Markovian} structure:
-
+A traditional LM can attend to the entire context when predicting the next token. This makes it possible for an LM to disregard the CoT or only partially rely on it. We impose a stricter, \emph{Markovian} structure\footnote{This structure can be viewed as a stochastic variant of a Moore machine where both the transition function ($u$) and output function ($\pi$) are probabilistic, and the input and output alphabets are identical ($O$). Alternatively, an MLM can be formalized as an F-coalgebra where F(S) = P(O) $\times$ P(S)$^O$, with P representing probability distributions.}:
 \begin{definition}[Markovian LM]
 A Markovian Language Model is a tuple $M=(\mathcal{O}, \mathcal{S}, \pi, u, s_1)$, where
 \begin{itemize}
@@ -208,9 +220,9 @@ s_{t+1}\sim u(s_t, x_t), \quad x_{t+1}\sim P(x_{t+1}\mid x_{\le t}),
 \]
 with $s_1$ a fixed initial prompt. We define the \emph{reward} for a trajectory $\tau$ as:
 \[
-R(\tau)=\sum_{t=1}^T \left[\ln \pi(x_t\mid s_t)-\ln \pi(x_t\mid s'_t)\right],
+R_\theta(\tau)=\sum_{t=1}^T \left[\ln \pi_\theta(x_t\mid s_t)-\ln \pi_\theta(x_t\mid s'_t)\right],
 \]
-where $s'_t$ is generated by a \emph{baseline} update function $u'$, e.g., the \emph{untrained} model. In words, $R(\tau)$ measures how much more likely the correct observation $x_t$ is under the trained state $s_t$ compared to the baseline state $s'_t$.
+where $s'_t$ is generated by a \emph{baseline} update function $u'$, e.g., the \emph{untrained} model. In words, $R_\theta(\tau)$ measures how much more likely the correct observation $x_t$ is under the trained state $s_t$ compared to the baseline state $s'_t$.
 
 \subsection{Informativeness Objective}
 
@@ -222,115 +234,219 @@ where $\theta$ parameterizes $u_\theta$. Maximizing $J(\theta)$ ensures that the
 
 \section{Methods}
 \label{sec:method}
+
 \subsection{Implementation as Question-Answer Pairs}
 In many tasks like math problem solving, we have $T=2$ observations (question and answer) and implement the abstract MLM with a fixed maximum length for the CoT state. Let $\mathcal{V}$ be a token vocabulary. We set $\mathcal{O} = \mathcal{V}^N$ and $\mathcal{S} = \mathcal{V}^K$ for some $N, K \in \mathbb{N}$, where $K$ is the maximum tokens in the CoT. Note that while we limit the state to a maximum of $K$ tokens for implementation, we do not enforce fixed-length observations. 
 
-Our conceptual arguments rely on $K < N$, as otherwise the model could simply write the predicted observation into the state. We satisfy this in our Wikipedia experiments, and for other experiments we find empirically that the model does not learn this undesirable behavior due to the difficulty of predicting the answer directly without any CoT.
+Our conceptual arguments rely on $K < N$, as otherwise the model could simply write the predicted observation into the state. We satisfy this in our Wikipedia experiments (Sec~\ref{subsec:wikipedia}), and for other experiments we find empirically that the model does not learn this undesirable behavior due to the difficulty of predicting the answer directly without any CoT.
 
-In this setting, we denote our states as $s_1 = \text{CoT}_{\text{init}}$ and $s_2 = \text{CoT}$, where $\text{CoT}_{\text{init}}$ is a task-specific prompt. With pre-trained LM $\mathcal{L}$, we implement our update function $u$ as:
+In this setting, we denote our states as $s_1 = \text{CoT}_{\text{init}}$ and $s_2 = \text{CoT}$, where $\text{CoT}_{\text{init}}$ is a task-specific prompt\footnote{The exact prompt template varies by task type, with each template specifying the task objective, allowed $\text{CoT}$ length, and an invitation to reason strategically. Full templates are provided in Sec~\ref{subsec:stability}.}. With pre-trained LM $\mathcal{L}$, we can implement our update function $u$ and policy $\pi$ using:
 \begin{align}
-\ln u\bigl(s_2 = \text{CoT} \,\mid\, q, s_1 = \text{CoT}_{\text{init}}\bigr) &= 
-\sum_{i=1}^{K} \ln \mathcal{L}(c_i)\bigl[\text{CoT}_i\bigr]
+\ln & u \bigl(s_2 = \text{CoT} \,\mid\, q, s_1 = \text{CoT}_{\text{init}}\bigr) \\ &= 
+\sum_{i=1}^{K}
+    \ln \mathcal{L}\!\Bigl(\text{concat}\bigl(q,\,
+    \text{CoT}_{\text{init}},\, \text{CoT}_{<i}\bigr)\Bigr)\bigl[\text{CoT}_i\bigr], \\[1em]
+\ln & \pi_\theta (\text{ans} \mid \text{CoT}) \\ &=  \sum_{i=1}^{N} \ln \mathcal{L}(\text{concat}(\text{CoT}, \text{ans}_{<i})) [\text{ans}_i].
 \end{align}
-where $c_i = \text{concat}(q, \text{CoT}_{\text{init}}, \text{CoT}_{<i})$. The policy $\pi$ is implemented as:
-\begin{align}
-\ln \pi(\text{ans} \mid \text{CoT}) &=  \sum_{i=1}^{N} \ln \mathcal{L}(d_i) [\text{ans}_i]
-\end{align}
-where $d_i = \text{concat}(\text{CoT}, \text{ans}_{<i})$.
 
 Crucially, we do \emph{not} allow the answer generation to attend back to the question $q$ directly; the question is replaced by the $\text{CoT}$. For each question $q$, we generate the baseline state $s'_2$ (which we denote as $\text{CoT}'$ in this setting) by prompting the unmodified pre-trained model with $q$ plus an initial instruction (e.g., 'Think step-by-step...'), and recording its raw output.
 
 Our reward is:
 \[
-R = \ln \pi(\text{ans} \mid \text{CoT}) \;-\; \ln \pi(\text{ans} \mid \text{CoT}').
+R_\theta = \ln \pi_\theta(\text{ans} \mid \text{CoT}) \;-\; \ln \pi_\theta(\text{ans} \mid \text{CoT}').
 \]
 
-\subsection{Reinforcement Learning Objectives}
-\label{subsec:rl_objectives}
-Having defined the reward in terms of CoT informativeness, we explore three RL techniques to optimize $u_\theta$ toward producing high-reward CoTs. All three rely on sampling $\text{CoT}$ and $\text{CoT'}$ for a given question $q$, then comparing their contributions to the final answer likelihood. 
+\subsection{Policy Gradient with GRPO-Style Baseline}
+\label{subsec:grpo}
 
-\subsubsection{Threshold-based Expert Iteration (TEI)}
-\label{subsubsec:tei}
-Threshold-based Expert Iteration consists of the following steps:
-\begin{enumerate}
-    \item Sample $\text{CoT}$ from the trained policy $u_\theta$ and a baseline $\text{CoT'}$ from $u'$ for the same question $q$.
-    \item Estimate informativeness $I(\text{ans}, \text{CoT}, \text{CoT'}) \;=\; \pi(\text{ans}\mid \text{CoT}) \;-\; \pi(\text{ans}\mid \text{CoT'})$.
-    \item If $I$ is at least one standard deviation above the historical average:
+Markovian training can be understood as training a \emph{reasoning autoencoder}, where the CoT serves as a text-based bottleneck between question and answer. Like traditional autoencoders, this architecture forces information compression, but the intermediate representation is interpretable text rather than latent vectors. This text bottleneck prevents direct backpropagation and necessitates reinforcement learning techniques for gradient estimation.
+
+\subsubsection{Actor Reward Gradients: The Key Innovation}
+Our approach differs fundamentally from standard reinforcement learning by using the \emph{same} transformer with weights $\theta$ as both the policy model and the reward model. This creates a crucial mathematical distinction from traditional policy gradient methods.
+
+In classical policy gradient, the reward $R(\tau)$ is independent of the policy parameters, leading to the standard REINFORCE gradient:
+$$\nabla_\theta \mathbb{E}_{\tau \sim P_\theta}[R(\tau)] = \mathbb{E}_{\tau \sim P_\theta}[R(\tau) \cdot \nabla_\theta \ln P_\theta(\tau)]$$
+
+However, in our case, the reward is a function of the same parameters: $R_\theta(\tau) = \ln \pi_\theta(\text{ans} \mid \text{CoT})$. Applying the chain rule:
+\begin{align}
+\nabla_\theta \mathbb{E}_{\tau \sim P_\theta}[R_\theta(\tau)] &= \mathbb{E}_{\tau \sim P_\theta}[R_\theta(\tau) \cdot \nabla_\theta \ln P_\theta(\tau) + \nabla_\theta R_\theta(\tau)]
+\end{align}
+
+This yields two terms: the standard policy gradient ($R_\theta(\tau) \cdot \nabla_\theta \ln P_\theta(\tau)$) and the direct reward gradient ($\nabla_\theta R_\theta(\tau)$). We include both terms with equal weight in our implementation.
+
+\subsubsection{GRPO-Style Baseline with Local Subtraction}
+We implement a policy gradient algorithm inspired by Group Relative Policy Optimization (GRPO), originally introduced by Shao et al.~\cite{shao2024deepseekmath} in DeepSeek-Math. GRPO eliminates the critic model from PPO by using group-based advantage estimation, where multiple responses to the same query provide relative baselines for each other.
+
+However, we add an additional baseline subtraction step before applying GRPO's batch averaging. We first compute a local baseline using the frozen reference model $u'$, then apply GRPO-style standardization within each batch.
+
+\subsubsection{Parallel Sampling Strategy}
+\label{subsubsec:parallel}
+We employ \emph{parallel sampling} (inspired by GRPO): each training batch contains $B$ copies of the same question-answer pair $(q, a)$. The trainable model $u_\theta$ generates diverse reasoning chains $\{\text{CoT}_1, \text{CoT}_2, \ldots, \text{CoT}_B\}$ for the identical input through stochastic sampling.
+
+Additionally, we introduce a frozen baseline from the reasoning autoencoder: the unmodified model $u'$ generates a single reference $\text{CoT}'$ that provides a local baseline before applying GRPO-style batch averaging. This frozen baseline represents the "encoder" component of our reasoning autoencoder—capturing the model's initial reasoning ability before training. The frozen baseline $\text{CoT}'$ is \emph{not} part of the original GRPO algorithm—it is our contribution to provide a more stable reference point.
+
+This approach provides several advantages:
 \begin{itemize}
-            \item Compute $\nabla_\theta \ln u_\theta(\text{CoT} \mid q, \text{CoT}_{\text{init}})$.
-            \item Perform gradient ascent on $\theta$.
+    \item \textbf{Reasoning bottleneck}: The $\text{CoT}'$ baseline establishes the initial encoding capacity of the reasoning autoencoder
+    \item \textbf{Local baseline}: The frozen $\text{CoT}'$ provides a consistent reference for measuring informativeness improvement
+    \item \textbf{Computational efficiency}: Baseline reasoning and answer evaluation are computed once and replicated
+    \item \textbf{Stable variance estimation}: All samples share the same ground truth, enabling robust within-batch standardization
 \end{itemize}
-\end{enumerate}
-\noindent
-\textbf{Limitation:} TEI discards CoTs that yield moderate but still valuable rewards, potentially slowing learning.
 
-\subsubsection{Policy Gradient (PG)}
-\label{subsubsec:pg}
-Policy Gradient with thresholding extends TEI by weighing updates by $I$:
-\begin{enumerate}
-    \item Sample $\text{CoT}$ and a baseline $\text{CoT'}$ for each question $q$.
-    \item Compute $I = \pi(\text{ans}\mid \text{CoT}) - \pi(\text{ans}\mid \text{CoT'})$.
-    \item If $I$ is at least one standard deviation above its historical mean:
-\begin{itemize}
-            \item Calculate $\nabla_\theta \ln u_\theta(\text{CoT} \mid q, \text{CoT}_{\text{init}})$.
-            \item Scale this gradient by $I$ and ascend.
-\end{itemize}
-\end{enumerate}
-\noindent
-\textbf{Advantage:} Uses more of the reward signal, accelerating learning. \\
-\textbf{Disadvantage:} Potentially more instability, especially if $I$ is large or negative.
+\subsubsection{Implementation: Two-Term Loss Function}
+\label{subsubsec:actor_rewards}
+Our implementation combines both gradient terms from the chain rule derivation above. The loss function includes:
+\begin{align}
+\mathcal{L} &= \mathcal{L}_{\text{PG}} + \mathcal{L}_{\text{AR}} \\
+\mathcal{L}_{\text{PG}} &= -\ln u_\theta(\text{CoT} \mid q, \text{CoT}_{\text{init}}) \cdot A^{\text{detach}} \\
+\mathcal{L}_{\text{AR}} &= -A
+\end{align}
+where $A$ is the standardized advantage (after local baseline subtraction and GRPO-style batch averaging) and $A^{\text{detach}}$ blocks gradients to isolate the policy gradient term. 
 
-\subsubsection{Proximal Policy Optimization (PPO)}
-\label{subsubsec:ppo}
-PPO clips probability ratios to stabilize large policy updates:
+The first term $\mathcal{L}_{\text{PG}}$ corresponds to the standard REINFORCE gradient $R_\theta(\tau) \cdot \nabla_\theta \ln P_\theta(\tau)$, while the second term $\mathcal{L}_{\text{AR}}$ corresponds to the direct reward gradient $\nabla_\theta R_\theta(\tau)$. This enables simultaneous optimization of CoT generation and answer prediction.
+
+\subsubsection{Within-Batch Advantage Standardization}
+Instead of historical exponential moving averages, we standardize advantages within each batch:
+\begin{align}
+R_i &= \ln \pi_\theta(\text{ans} \mid \text{CoT}_i) - \ln \pi_\theta(\text{ans} \mid \text{CoT}') \\
+A_i &= \frac{R_i - \mu_{\text{batch}}}{\sigma_{\text{batch}} + \epsilon}
+\end{align}
+where $\mu_{\text{batch}} = \frac{1}{B}\sum_{i=1}^B R_i$ and $\sigma_{\text{batch}}^2 = \frac{1}{B}\sum_{i=1}^B (R_i - \mu_{\text{batch}})^2$.
+
+This ensures that advantages have zero mean and unit variance within each batch, providing stable gradients regardless of the absolute reward scale.
+
+\begin{algorithm}
+\caption{Policy Gradient with GRPO-Style Baseline}
+\label{alg:grpo}
+\begin{algorithmic}[1]
+\REQUIRE Actor model $u_\theta$ (trainable), Critic model $u'$ (frozen), batch size $B$
+\REQUIRE Dataset $\mathcal{D}$, learning rate $\alpha$, temperature $T$, gradient accumulation steps $G$
+
+\FOR{each training iteration}
+    \STATE Sample unique example $(q, a) \sim \mathcal{D}$
+    \STATE Create batch $\{(q, a), (q, a), \ldots, (q, a)\}$ with $B$ copies
+    
+    \STATE \textbf{// Generate reasoning chains}
+    \FOR{$i = 1$ to $B$}
+        \STATE $\text{CoT}_i \sim u_\theta(\cdot | q, \text{CoT}_{\text{init}})$ \COMMENT{Stochastic sampling with temperature $T$}
+    \ENDFOR
+    \STATE $\text{CoT}' \sim u'(\cdot | q, \text{CoT}_{\text{init}})$ \COMMENT{Deterministic baseline, computed once}
+    
+    \STATE \textbf{// Calculate informativeness rewards with local baseline}
+    \FOR{$i = 1$ to $B$}
+        \STATE $R_i = \ln u_\theta(\text{ans} | \text{CoT}_i) - \ln u_\theta(\text{ans} | \text{CoT}')$
+    \ENDFOR
+    
+    \STATE \textbf{// Standardize advantages within batch}
+    \STATE $\mu = \frac{1}{B} \sum_{i=1}^B R_i$, \quad $\sigma = \sqrt{\frac{1}{B} \sum_{i=1}^B (R_i - \mu)^2}$
+    \STATE $A_i = \frac{R_i - \mu}{\sigma + \epsilon}$ for $i = 1, \ldots, B$ \COMMENT{$\epsilon = 10^{-8}$}
+    
+    \STATE \textbf{// Calculate loss with actor reward gradients}
+    \FOR{$i = 1$ to $B$}
+        \STATE $\ell_i^{\text{PG}} = -\ln u_\theta(\text{CoT}_i | q, \text{CoT}_{\text{init}}) \cdot A_i^{\text{detach}}$
+        \STATE $\ell_i^{\text{AR}} = -A_i$ \COMMENT{Direct reward optimization}
+        \STATE $\ell_i = \ell_i^{\text{PG}} + \ell_i^{\text{AR}}$
+    \ENDFOR
+    
+    \STATE \textbf{// Gradient accumulation and update}
+    \STATE $L = \frac{1}{B \cdot G} \sum_{i=1}^B \ell_i$ \COMMENT{Scale by accumulation steps}
+    \STATE Accumulate gradients: $\nabla_\theta L$
+    \IF{accumulated $G$ steps}
+        \STATE Clip gradients: $\|\nabla_\theta\| \leq 1.0$
+        \STATE Update: $\theta \leftarrow \theta - \alpha \nabla_\theta$
+        \STATE Reset gradient accumulator
+    \ENDIF
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Training Stability and Implementation Details}
+\label{subsec:stability}
+Fine-tuning a pre-trained language model with a strong linguistic prior requires careful consideration to avoid irrecoverable weight updates that could push the model out of the language modeling loss basin. We implement several techniques to enhance training stability for the GRPO objective:
+
 \begin{enumerate}
-    \item For a sampled CoT $\text{CoT}$, compute the ratio $r = \frac{u_\theta(\text{CoT}\mid q,\text{CoT}_{\text{init}})}{u'(\text{CoT}\mid q,\text{CoT}_{\text{init}})}$.
-    \item Let $I = \pi(\text{ans}\mid \text{CoT}) - \pi(\text{ans}\mid \text{CoT'})$ be the informativeness reward.
-    \item Define the clipped objective:
-    \[
-    \text{obj} = \min\!\Bigl(r \cdot I, \;\text{clip}(r,1-\epsilon,1+\epsilon)\cdot I\Bigr), 
-     \text{where } \epsilon=0.2.
-    \]
-    \item Ascend on $\nabla_\theta \text{obj}$.
+    \item \textbf{Low-Rank Adaptation (LoRA) \citep{hu2022lora}:} 
+    \begin{itemize}
+        \item Freeze all weights except for small-rank LoRA adapters.
+        \item Use rank 8 with $\alpha = 16$.
+    \end{itemize}
+
+    \item \textbf{Gradient Clipping:} 
+    \begin{itemize}
+        \item If the $\ell_2$ norm of the gradient exceeds $1.0$, rescale it to norm $1.0$.
+    \end{itemize}
+
+    \item \textbf{Gradient Accumulation:} 
+    \begin{itemize}
+        \item Use gradient accumulation steps of 4 for Wikipedia experiments.
+        \item Scale loss by accumulation steps to maintain consistent gradient magnitudes.
+    \end{itemize}
+
+    \item \textbf{Within-Batch Advantage Standardization:} 
+    \begin{itemize}
+        \item GRPO's parallel sampling enables robust within-batch standardization, eliminating the need for historical baselines.
+        \item Each batch provides its own reference distribution for advantage calculation.
+    \end{itemize}
+
+    \item \textbf{Actor Reward Weight:} 
+    \begin{itemize}
+        \item Set actor reward weight to 1.0 to equally balance policy gradient and direct reward optimization.
+        \item This enables end-to-end learning through the reward model.
+    \end{itemize}
+
+    \item \textbf{Initial CoT Prompt Design:} 
+    \begin{itemize}
+        \item Choose $\text{CoT}_{\text{init}}$ to guide the model toward meaningful reasoning. 
+        \item For arithmetic: 
+        \begin{quote}
+            \small
+            ``You will be given an arithmetic problem, which you have [CoT length] tokens to work through step-by-step. Question:''
+        \end{quote}
+        \item For GSM8K:
+        \begin{quote}
+            \small
+            ``You will be given a reasoning problem, which you have [CoT length] tokens to work through step-by-step. Question:''
+        \end{quote}
+        \item For Wikipedia:
+        \begin{quote}
+            \small
+            ``You will need to predict the next [target length] tokens which follow the provided passage. You can write [CoT length] thinking tokens which will be your sole context for prediction. Feel free to be creative in your thinking strategy! Opening text:''
+        \end{quote}
+    \end{itemize}
 \end{enumerate}
-\textbf{Key Idea:} PPO discourages the new CoT distribution $u_\theta$ from diverging too sharply from $u'$, thus trading off exploration and stability.
+
+These measures greatly reduce the risk of catastrophic updates and keep the model's training on track.
+
 
 
 \section{Experiments}
 \label{sec:experiments}
-
 \begin{figure*}
-\centering
-    \includegraphics[width=\textwidth]{Figures/cot_performance_comparison.png}
-    \caption{Training performance on multi-step addition. The log probability $\ln \pi(\text{ans} \mid \text{CoT})$ of the answer given a CoT, where CoT is sampled from trained weights and $\text{CoT}'$ from unmodified weights. We train to produce CoTs sufficient to predict the correct answer without the original question. This plot shows training of Mistral 7B Instruct V0.2 on fifteen-term addition problems. Due to high variance, we plot the point-wise maximum over four runs for each training technique.}
-    \label{fig:arithmetic-results}
+    \centering
+    \includegraphics[width=\textwidth]{Figures/llama_combined_metrics_gsm8k.png}
+    \caption{GSM8K performance metrics over three separate training runs of Llama-3.1-8B-Instruct. The left plot shows the log probability that an untrained Llama assigns to the correct answer given the trained CoT --- $\ln \pi_\theta(\text{ans}|\text{CoT})$, and the right plot shows the proportion of CoTs in a batch which contain the answer verbatim. We use a smoothing window of size 100, explaining the multiplicity of possible y-values for ``Contains Answer''.}
+    \label{fig:gsm8k_performance}
 \end{figure*}
 
 \subsection{Multi-step Addition}
 \label{subsec:solving}
-We generate random addition problems, where each problem consists of fifteen terms and each term is a uniform random natural number less than 100. We fine-tune Mistral 7B Instruct V0.2 to produce CoT tokens such that a frozen copy of the pre-trained language model can predict the correct answer given that CoT, for each training technique. As shown in Figure~\ref{fig:arithmetic-results}, PPO, our preferred training method for arithmetic, can mention the correct answer in up to 90\% of CoTs and achieve an average natural log probability of around -0.7. 
+We generate random addition problems, where each problem consists of fifteen terms and each term is a uniform random natural number less than 100. We fine-tune Mistral 7B Instruct V0.2 to produce CoT tokens such that a frozen copy of the pre-trained language model can predict the correct answer given that CoT, for each training technique in Sec~\ref{sec:method}. We plot the mean negative log likelihood over the answer tokens as a function of training batch in Fig.~\ref{fig:loss}. Note that this is both training and testing loss, since we are always generating fresh arithmetic problems. PPO, our preferred training method for arithmetic, can mention the correct answer in up to 90\% of CoTs and achieve an average natural log probability of around -0.7. 
 
-Since the Mistral tokenizer allocates a separate token for each digit, a natural log probability of -0.7 corresponds to about 50\% probability per token. The seeming contradiction between 90\% verbatim answer likelihood and 50\% per-digit uncertainty stems from the predictor's format uncertainty—it distributes probability across the entire vocabulary when deciding what follows "Answer:", as we only train CoT production $u_\theta(s'|o,s)$, not the predictor $\pi(o|s)$.
-
-\begin{figure*}[ht]
-\centering
-    \includegraphics[width=\textwidth]{Figures/llama_combined_metrics_gsm8k.png}
-    \caption{GSM8K performance metrics over three separate training runs of Llama-3.1-8B-Instruct. The left plot shows the log probability that an untrained Llama assigns to the correct answer given the trained CoT ($\ln \pi(\text{ans}|\text{CoT})$), and the right plot shows the proportion of CoTs in a batch which contain the answer verbatim. We use a smoothing window of size 100.}
-    \label{fig:gsm8k-performance}
-\end{figure*}
+Since the Mistral tokenizer allocates a separate token for each digit, a natural log probability of -0.7 corresponds to about 50\% probability ($e^{-0.7} \approx 0.4966$) per token. The seeming contradiction between 90\% verbatim answer likelihood and 50\% per-digit uncertainty stems from the predictor's format uncertainty—it distributes probability across the entire vocabulary when deciding what follows "Answer:", as we only train CoT production $u_\theta(s'|o,s)$, not the predictor $\pi_\theta(o|s)$.
 
 \subsection{GSM8K}
 \label{subsec:gsm8k}
 To test our method on more complex reasoning tasks, we train Llama-3.1-8B-Instruct on GSM8K using policy gradient with expert iteration (threshold 2.2 standard deviations) and a KL penalty (0.1). We produce up to 150 CoT tokens and estimate the value function with an exponentially decaying average of previous rewards (decay 0.9).
 
-As shown in Figure~\ref{fig:gsm8k-performance}, we observe a dramatic increase in exact-match accuracy from 35.94\% baseline to 69.14\% in our best run—a 33.2\% absolute improvement. The other runs (58.23\% and 62.85\%) confirm consistent effectiveness on mathematical reasoning.
+In Figure~\ref{fig:gsm8k_performance}, we show CoT informativeness (left) and proportion of CoTs containing verbatim answers (right). We observe a dramatic increase in exact-match accuracy from 35.94\% baseline to 69.14\% in our best run—a 33.2\% absolute improvement. The other runs (58.23\% and 62.85\%) confirm consistent effectiveness on mathematical reasoning.
 
 \subsection{Wikipedia}
 \label{subsec:wikipedia}
 
-We also explored applying our approach to general language modeling using Wikipedia text. For each article, we condition on the first 200 tokens and task the model with predicting the following 100 tokens, allowing 50 tokens of CoT to aid prediction. Training parameters match those used in GSM8K.
+We also explored applying our approach to general language modeling using Wikipedia text. For each article, we condition on the first 200 tokens and task the model with predicting the following 100 tokens, allowing 50 tokens of CoT to aid prediction. Training parameters match those used in GSM8K (Sec~\ref{subsec:gsm8k}).
 
-Results showed modest improvements in next-token prediction accuracy from 8.2\% to 10.5\%. This should be contextualized against pre-trained Llama's typical 16.9\% accuracy (over 10,000 articles) on the 200th to 300th tokens without context. The lower baseline (8.2\%) likely stems from our setup with CoT followed by " Answer: " before prediction. Despite this, key findings about CoT reliability remain evident: perturbing trained CoTs degrades accuracy more than perturbing baseline CoTs, indicating genuine CoT reliance.
+Results showed modest improvements in next-token prediction accuracy from 8.2\% to 10.5\% (see Code and Data Appendix). This should be contextualized against pre-trained Llama's typical 16.9\% accuracy (over 10,000 articles) on the 200\textsuperscript{th} to 300\textsuperscript{th} tokens without context. The lower baseline (8.2\%) likely stems from our setup with CoT followed by `` Answer: '' before prediction. Despite this, key findings about CoT reliability remain evident: as Fig~\ref{fig:perturbation} shows, perturbing trained CoTs degrades accuracy more than perturbing baseline CoTs, indicating genuine CoT reliance.
+\textbf{See Code and Data Appendix for examples of CoT changes after training.}
 
 \begin{figure*}[ht]
   \centering
@@ -338,6 +454,7 @@ Results showed modest improvements in next-token prediction accuracy from 8.2\% 
   \caption{Impact of perturbations on CoT effectiveness with/without the original question. Three perturbation types shown: character deletion, front truncation, and random replacement. Higher values indicate stronger reliance on CoT when the question is absent, showing causal dependence rather than just improved accuracy.}
   \label{fig:perturbation}
 \end{figure*}
+
 
 \subsection{Measuring Fragility of CoT}\label{subsec:fragile}
 
@@ -349,21 +466,21 @@ m_2 &= [\ln P(\text{ans}|\text{CoT}) - \ln P(\text{ans}|\text{perturb}(\text{CoT
 &- [\ln P(\text{ans}|q, \text{CoT}) - \ln P(\text{ans}|q, \text{perturb}(\text{CoT}))]
 \end{align}
 
-As shown in Figure~\ref{fig:perturbation}, this metric directly measures how much the model relies on the CoT when the question is absent versus present. This difference increases significantly during training, confirming that our CoTs become genuinely more load-bearing rather than simply more accurate.
+This metric directly measures how much the model relies on the CoT when the question is absent versus present. As shown in Fig.~\ref{fig:perturbation}, this difference increases significantly during training, confirming that our CoTs become genuinely more load-bearing rather than simply more accurate.
+
+\subsection{Interpretability of CoT Generations}
+\label{subsec:interp}
 
 \begin{figure*}[ht]
   \centering
   \includegraphics[width=.9\textwidth]{Figures/wiki_multi_critic_comparison.png}
   \caption{Cross-model evaluation showing Llama-3.1-8B-Instruct's evaluation of Mistral's CoT quality throughout training on Wikipedia text prediction. The correlation between improvements in both models' evaluations suggests the learned reasoning patterns generalize across architectures rather than being model-specific artifacts. Each plot is averaged across 6 independent training runs.}
-  \label{fig:cross-eval}
+  \label{fig:cross_eval}
 \end{figure*}
 
-\subsection{Interpretability of CoT Generations}
-\label{subsec:interp}
+To probe how well the reasoning generalizes, we plot the informativeness of Llama's trained CoTs with respect to various other LMs on the Wikipedia dataset in Fig.~\ref{fig:cross_eval}. In both plots the normalized log probabilities increase simultaneously, demonstrating that Llama is learning to produce generic CoTs which do not over-fit to the peculiarities of a Llama answer-predictor. 
 
-To probe how well the reasoning generalizes, we evaluate CoT informativeness across different language models on the Wikipedia dataset. As shown in Figure~\ref{fig:cross-eval}, we test across three distinct model families (Phi, Mistral, and GPT2), including GPT2, a significantly smaller model that shouldn't be able to decode sophisticated steganography. The fact that trained CoTs transfer effectively across this diverse set confirms they contain generalizable reasoning patterns rather than model-specific artifacts.
-
-This cross-model transferability addresses a key question: ``interpretable to whom?'' The improvements in both models' evaluations suggest the learned reasoning patterns generalize across architectures rather than being model-specific artifacts.
+This cross-model transferability addresses a key question: ``interpretable to whom?'' We test across three distinct model families (Phi \citep{abdin2024phi3technicalreporthighly}, Mistral, and GPT2), including GPT2, a significantly smaller model that shouldn't be able to decode sophisticated steganography. The fact that trained CoTs transfer effectively across this diverse set confirms they contain generalizable reasoning patterns rather than model-specific artifacts.
 
 \section{Discussion and Limitations}
 \label{sec:disc}
@@ -372,15 +489,21 @@ Experiments across arithmetic, GSM8K, and Wikipedia show that it is possible to 
 
 However, our interpretability technique is currently only verified in myopic question-answer datasets, as opposed to multi-turn trajectories where trained CoTs might provide a lens into longer-term future behavior. In principle, the Markovian design naturally extends to multi-turn or multi-step settings by treating the CoT as recurrent state; we have not explored such tasks here for scope reasons.
 
-Moreover, we have only evaluated interpretability by measuring \emph{model}-centric proxies (like CoT fragility and cross-model transfer). A more direct human evaluation would have people read the generated CoTs and attempt to predict the final answer, giving an explicit measure of whether these CoTs are genuinely human-interpretable.
+Moreover, we have only evaluated interpretability by measuring \emph{model}-centric proxies (like CoT fragility and cross-model transfer). A more direct human evaluation would have people read the generated CoTs and attempt to predict the final answer, giving an explicit measure of whether these CoTs are genuinely human-interpretable. Such a setup could be incorporated into the training objective, where human correctness in predicting the answer provides an additional signal for optimizing CoT generation.
 
-Our findings indicate that Markovian training yields substantial gains in CoT fragility and cross-model transfer, suggesting practical opportunities for improved interpretability. While human studies could further validate interpretability, we rely on cross-model transfer as a proxy and leave comprehensive trials to future work.
+Markovian training is language modeling with an intermediate memory-producing action, similar to R1 recurrence and ``thinking'' models. This approach blurs the line between RL and unsupervised learning, though its expensive serial token generation requires justification through gains in interpretability or perplexity.
+
+Our findings indicate that Markovian training yields substantial gains in CoT fragility (Sec~\ref{subsec:fragile}) and cross-model transfer (Sec~\ref{subsec:interp}), suggesting practical opportunities for improved interpretability. While human studies could further validate interpretability, we rely on cross-model transfer as a proxy and leave comprehensive trials to future work.
+
+\paragraph{Future Work.}
+Although we focus on single question–answer pairs, the Markovian framework extends to multi-turn dialogue. After each user message $o_t$, we produce the next CoT $s_{t+1}$ via $u_\theta(s_{t+1}\mid s_t,o_t)$, then generate the system's reply from that CoT alone. This process treats the CoT as a recurrent state, which could scale to conversation rounds.
+
+
+\bibliography{aaai2026}
 
 \section*{Reproducibility Checklist}
 
 \def\isChecklistMainFile{}
 \input{ReproducibilityChecklist/ReproducibilityChecklist}
-
-\bibliography{aaai2026}
 
 \end{document}
