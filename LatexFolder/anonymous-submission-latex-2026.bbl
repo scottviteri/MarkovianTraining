@@ -1,19 +1,42 @@
-\begin{thebibliography}{7}
+\begin{thebibliography}{34}
 \providecommand{\natexlab}[1]{#1}
 
-\bibitem[{Brown et~al.(2020)Brown, Mann, Ryder, Subbiah, Kaplan, Dhariwal,
-  Neelakantan, Shyam, Sastry, Askell, Agarwal, Herbert-Voss, Krueger, Henighan,
-  Child, Ramesh, Ziegler, Wu, Winter, Hesse, Chen, Sigler, Litwin, Gray, Chess,
-  Clark, Berner, McCandlish, Radford, Sutskever, and
-  Amodei}]{NEURIPS2020_1457c0d6}
-Brown, T.~B.; Mann, B.; Ryder, N.; Subbiah, M.; Kaplan, J.; Dhariwal, P.;
-  Neelakantan, A.; Shyam, P.; Sastry, G.; Askell, A.; Agarwal, S.;
-  Herbert-Voss, A.; Krueger, G.; Henighan, T.; Child, R.; Ramesh, A.; Ziegler,
-  D.~M.; Wu, J.; Winter, C.; Hesse, C.; Chen, M.; Sigler, E.; Litwin, M.; Gray,
-  S.; Chess, B.; Clark, J.; Berner, C.; McCandlish, S.; Radford, A.; Sutskever,
-  I.; and Amodei, D. 2020.
+\bibitem[{\AA~str\"{o}m(1965)}]{proto_pomdp1965}
+\AA~str\"{o}m, K.~J. 1965.
+\newblock Optimal Control of Markov Processes with Incomplete State Information
+  I.
+
+\bibitem[{Abdin et~al.(2024)Abdin, Aneja, Awadalla, Awadallah, Awan, Bach,
+  Bahree, Bakhtiari, Bao et~al.}]{abdin2024phi3technicalreporthighly}
+Abdin, M.; Aneja, J.; Awadalla, H.; Awadallah, A.; Awan, A.~A.; Bach, N.;
+  Bahree, A.; Bakhtiari, A.; Bao, J.; et~al. 2024.
+\newblock Phi-3 Technical Report: A Highly Capable Language Model Locally on
+  Your Phone.
+\newblock arXiv:2404.14219.
+
+\bibitem[{Brown et~al.(2020)Brown, Mann, Ryder, Subbiah, Kaplan, Dhariwal
+  et~al.}]{NEURIPS2020_1457c0d6}
+Brown, T.; Mann, B.; Ryder, N.; Subbiah, M.; Kaplan, J.~D.; Dhariwal, P.;
+  et~al. 2020.
 \newblock Language Models are Few-Shot Learners.
-\newblock arXiv:2005.14165.
+
+\bibitem[{Burns et~al.(2023)Burns, Ye, Klein, and
+  Steinhardt}]{burns2024discovering}
+Burns, C.; Ye, H.; Klein, D.; and Steinhardt, J. 2023.
+\newblock Discovering Latent Knowledge in Language Models Without Supervision.
+
+\bibitem[{Casper et~al.(2023)Casper, Rauker, Ho, and
+  Hadfield-Menell}]{raukur2022toward}
+Casper, S.; Rauker, T.; Ho, A.; and Hadfield-Menell, D. 2023.
+\newblock SoK: Toward Transparent AI: A Survey on Interpreting the Inner
+  Structures of Deep Neural Networks.
+
+\bibitem[{Chung et~al.(2015)Chung, Kastner, Dinh, Goel, Courville, and
+  Bengio}]{DBLP:journals/corr/ChungKDGCB15}
+Chung, J.; Kastner, K.; Dinh, L.; Goel, K.; Courville, A.~C.; and Bengio, Y.
+  2015.
+\newblock A Recurrent Latent Variable Model for Sequential Data.
+\newblock arXiv:1506.02216.
 
 \bibitem[{Cobbe et~al.(2021)Cobbe, Kosaraju, Bavarian, Chen, Jun, Kaiser,
   Plappert, Tworek, Hilton, Nakano, Hesse, and Schulman}]{cobbe2021gsm8k}
@@ -22,17 +45,85 @@ Cobbe, K.; Kosaraju, V.; Bavarian, M.; Chen, M.; Jun, H.; Kaiser, L.; Plappert,
 \newblock Training Verifiers to Solve Math Word Problems.
 \newblock arXiv:2110.14168.
 
+\bibitem[{DeepSeek-AI et~al.(2025)DeepSeek-AI, Guo, Yang, Zhang, Song, Zhang,
+  Xu et~al.}]{deepseekai2025}
+DeepSeek-AI; Guo, D.; Yang, D.; Zhang, H.; Song, J.; Zhang, R.; Xu, R.; et~al.
+  2025.
+\newblock DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via
+  Reinforcement Learning.
+\newblock arXiv:2501.12948.
+
+\bibitem[{Geiger et~al.(2022)Geiger, Wu, Lu, Rozner, Kreiss, Icard, Goodman,
+  and Potts}]{geiger2022inducing}
+Geiger, A.; Wu, Z.; Lu, H.; Rozner, J.; Kreiss, E.; Icard, T.; Goodman, N.; and
+  Potts, C. 2022.
+\newblock Inducing causal structure for interpretable neural networks.
+
+\bibitem[{Geva et~al.(2022)Geva, Caciularu, Wang, and
+  Goldberg}]{geva2022transformer}
+Geva, M.; Caciularu, A.; Wang, K.~R.; and Goldberg, Y. 2022.
+\newblock Transformer Feed-Forward Layers Build Predictions by Promoting
+  Concepts in the Vocabulary Space.
+
+\bibitem[{Grabb, Lamparth, and Vasan(2024)}]{Grabb2024.04.07.24305462}
+Grabb, D.; Lamparth, M.; and Vasan, N. 2024.
+\newblock Risks from Language Models for Automated Mental Healthcare: Ethics
+  and Structure for Implementation.
+
+\bibitem[{Gu and Dao(2024)}]{gu2024mamba}
+Gu, A.; and Dao, T. 2024.
+\newblock Mamba: Linear-Time Sequence Modeling with Selective State Spaces.
+
+\bibitem[{Gu, Goel, and Ré(2022)}]{gu2022efficientlymodelinglongsequences}
+Gu, A.; Goel, K.; and Ré, C. 2022.
+\newblock Efficiently Modeling Long Sequences with Structured State Spaces.
+\newblock arXiv:2111.00396.
+
+\bibitem[{Gurnee and Tegmark(2024)}]{gurnee2024language}
+Gurnee, W.; and Tegmark, M. 2024.
+\newblock Language Models Represent Space and Time.
+
+\bibitem[{Hu et~al.(2022)Hu, Shen, Wallis, Allen-Zhu, Li, Wang, Wang, and
+  Chen}]{hu2022lora}
+Hu, E.~J.; Shen, Y.; Wallis, P.; Allen-Zhu, Z.; Li, Y.; Wang, S.; Wang, L.; and
+  Chen, W. 2022.
+\newblock LoRA: Low-Rank Adaptation of Large Language Models.
+
+\bibitem[{Karl et~al.(2017)Karl, Soelch, Bayer, and van~der
+  Smagt}]{karl2017deepvariationalbayesfilters}
+Karl, M.; Soelch, M.; Bayer, J.; and van~der Smagt, P. 2017.
+\newblock Deep Variational Bayes Filters: Unsupervised Learning of State Space
+  Models from Raw Data.
+\newblock arXiv:1605.06432.
+
+\bibitem[{Krishnan, Shalit, and Sontag(2015)}]{krishnan2015deepkalmanfilters}
+Krishnan, R.~G.; Shalit, U.; and Sontag, D. 2015.
+\newblock Deep Kalman Filters.
+\newblock arXiv:1511.05121.
+
+\bibitem[{Lamparth et~al.(2024)Lamparth, Corso, Ganz, Mastro, Schneider, and
+  Trinkunas}]{lamparth2024human}
+Lamparth, M.; Corso, A.; Ganz, J.; Mastro, O.~S.; Schneider, J.; and Trinkunas,
+  H. 2024.
+\newblock Human vs. Machine: Language Models and Wargames.
+\newblock arXiv:2403.03407.
+
+\bibitem[{Lamparth and Reuel(2023)}]{lamparth2023analyzing}
+Lamparth, M.; and Reuel, A. 2023.
+\newblock Analyzing And Editing Inner Mechanisms Of Backdoored Language Models.
+\newblock arXiv:2302.12461.
+
 \bibitem[{Lanham et~al.(2023)Lanham, Chen, Radhakrishnan, Steiner, Denison,
   Hernandez, Li, Durmus, Hubinger, Kernion, Lukošiūtė, Nguyen, Cheng,
   Joseph, Schiefer, Rausch, Larson, McCandlish, Kundu, Kadavath, Yang,
-  Henighan, Maxwell, Telleen-Lawton, Hume, Hatfield-Dodds, Kaplan, Leike,
-  Perez, Bowman, and Brown}]{lanham2023measuring}
+  Henighan, Maxwell, Telleen-Lawton, Hume, Hatfield-Dodds, Kaplan, Brauner,
+  Bowman, and Perez}]{lanham2023measuring}
 Lanham, T.; Chen, A.; Radhakrishnan, A.; Steiner, B.; Denison, C.; Hernandez,
   D.; Li, D.; Durmus, E.; Hubinger, E.; Kernion, J.; Lukošiūtė, K.; Nguyen,
   K.; Cheng, N.; Joseph, N.; Schiefer, N.; Rausch, O.; Larson, R.; McCandlish,
   S.; Kundu, S.; Kadavath, S.; Yang, S.; Henighan, T.; Maxwell, T.;
-  Telleen-Lawton, T.; Hume, T.; Hatfield-Dodds, Z.; Kaplan, J.; Leike, J.;
-  Perez, E.; Bowman, S.~R.; and Brown, T. 2023.
+  Telleen-Lawton, T.; Hume, T.; Hatfield-Dodds, Z.; Kaplan, J.; Brauner, J.;
+  Bowman, S.~R.; and Perez, E. 2023.
 \newblock Measuring Faithfulness in Chain-of-Thought Reasoning.
 \newblock arXiv:2307.13702.
 
@@ -43,23 +134,84 @@ Lyu, Q.; Havaldar, S.; Stein, A.; Zhang, L.; Rao, D.; Wong, E.; Apidianaki, M.;
 \newblock Faithful Chain-of-Thought Reasoning.
 \newblock arXiv:2301.13379.
 
+\bibitem[{Meng et~al.(2022)Meng, Bau, Andonian, and
+  Belinkov}]{meng2022locating}
+Meng, K.; Bau, D.; Andonian, A.~J.; and Belinkov, Y. 2022.
+\newblock Locating and Editing Factual Associations in GPT.
+
+\bibitem[{Nanda et~al.(2023)Nanda, Chan, Lieberum, Smith, and
+  Steinhardt}]{nanda2023progress}
+Nanda, N.; Chan, L.; Lieberum, T.; Smith, J.; and Steinhardt, J. 2023.
+\newblock Progress measures for grokking via mechanistic interpretability.
+
+\bibitem[{Nye et~al.(2022)Nye, Andreassen, Gur-Ari, Michalewski, Austin,
+  Bieber, Dohan, Lewkowycz, Bosma, Luan, Sutton, and Odena}]{nye2022show}
+Nye, M.; Andreassen, A.~J.; Gur-Ari, G.; Michalewski, H.; Austin, J.; Bieber,
+  D.; Dohan, D.; Lewkowycz, A.; Bosma, M.; Luan, D.; Sutton, C.; and Odena, A.
+  2022.
+\newblock Show Your Work: Scratchpads for Intermediate Computation with
+  Language Models.
+
+\bibitem[{Rivera et~al.(2024)Rivera, Mukobi, Reuel, Lamparth, Smith, and
+  Schneider}]{rivera2024escalation}
+Rivera, J.-P.; Mukobi, G.; Reuel, A.; Lamparth, M.; Smith, C.; and Schneider,
+  J. 2024.
+\newblock Escalation Risks from Language Models in Military and Diplomatic
+  Decision-Making.
+\newblock arXiv:2401.03408.
+
 \bibitem[{Rumelhart, Hinton, and Williams(1986)}]{rumelhart1986learning}
 Rumelhart, D.~E.; Hinton, G.~E.; and Williams, R.~J. 1986.
-\newblock Learning Representations by Back-propagating Errors.
+\newblock Learning representations by back-propagating errors.
+
+\bibitem[{Shao et~al.(2024)Shao, Wang, Zhu, Xu, Song, Bi, Zhang, Zhang, Li, Wu,
+  and Guo}]{shao2024deepseekmath}
+Shao, Z.; Wang, P.; Zhu, Q.; Xu, R.; Song, J.; Bi, X.; Zhang, H.; Zhang, M.;
+  Li, Y.; Wu, Y.; and Guo, D. 2024.
+\newblock DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open
+  Language Models.
+\newblock arXiv:2402.03300.
+
+\bibitem[{Sutton et~al.(1999)Sutton, McAllester, Singh, and
+  Mansour}]{policy_gradient}
+Sutton, R.~S.; McAllester, D.; Singh, S.; and Mansour, Y. 1999.
+\newblock Policy gradient methods for reinforcement learning with function
+  approximation.
 
 \bibitem[{Turpin et~al.(2023)Turpin, Michael, Perez, and
   Bowman}]{turpin2023language}
 Turpin, M.; Michael, J.; Perez, E.; and Bowman, S.~R. 2023.
 \newblock Language Models Don't Always Say What They Think: Unfaithful
   Explanations in Chain-of-Thought Prompting.
-\newblock arXiv:2305.04388.
 
-\bibitem[{Wei et~al.(2022)Wei, Wang, Schuurmans, Bosma, Chi, Le, and
-  Zhou}]{wei2022chain}
-Wei, J.; Wang, X.; Schuurmans, D.; Bosma, M.; Chi, E.; Le, Q.; and Zhou, D.
-  2022.
-\newblock Chain-of-Thought Prompting Elicits Reasoning in Large Language
+\bibitem[{Wang et~al.(2022)Wang, Variengien, Conmy, Shlegeris, and
+  Steinhardt}]{wang2022interpretability}
+Wang, K.~R.; Variengien, A.; Conmy, A.; Shlegeris, B.; and Steinhardt, J. 2022.
+\newblock Interpretability in the Wild: a Circuit for Indirect Object
+  Identification in GPT-2 Small.
+
+\bibitem[{Wei et~al.(2022)Wei, Wang, Schuurmans, Bosma, brian ichter, Xia, Chi,
+  Le, and Zhou}]{wei2022chain}
+Wei, J.; Wang, X.; Schuurmans, D.; Bosma, M.; brian ichter; Xia, F.; Chi,
+  E.~H.; Le, Q.~V.; and Zhou, D. 2022.
+\newblock Chain of Thought Prompting Elicits Reasoning in Large Language
   Models.
-\newblock arXiv:2201.11903.
+
+\bibitem[{Zelikman et~al.(2024)Zelikman, Harik, Shao, Jayasiri, Haber, and
+  Goodman}]{zelikman2024quietstar}
+Zelikman, E.; Harik, G.; Shao, Y.; Jayasiri, V.; Haber, N.; and Goodman, N.~D.
+  2024.
+\newblock Quiet-STaR: Language Models Can Teach Themselves to Think Before
+  Speaking.
+\newblock arXiv:2403.09629.
+
+\bibitem[{Zelikman et~al.(2022)Zelikman, Wu, Mu, and Goodman}]{eric_star2022}
+Zelikman, E.; Wu, Y.; Mu, J.; and Goodman, N. 2022.
+\newblock STaR: Bootstrapping Reasoning With Reasoning.
+
+\bibitem[{Zhou et~al.(2023)Zhou, Zhou, Han, and
+  Kambadur}]{zhou2023understanding}
+Zhou, D.; Zhou, E.; Han, K.; and Kambadur, P. 2023.
+\newblock Understanding Chain-of-Thought in LLMs through Information Theory.
 
 \end{thebibliography}

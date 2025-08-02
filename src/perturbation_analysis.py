@@ -1070,7 +1070,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
     print(f"Markovian comparison analysis complete. Processed {len(comparison_data)} entries.")
     print(f"Results saved to {output_path}")
     
-    return comparison_data
+    return comparison_data, markovian_hyperparams, non_markovian_hyperparams
 
 
 def combine_all_markovian_comparison_plots(base_directory, font_size=12, include_perturbations=None, exclude_perturbations=None, legend_font_size=None):
@@ -1179,7 +1179,7 @@ def combine_all_markovian_comparison_plots(base_directory, font_size=12, include
     plt.close()
 
 
-def plot_markovian_comparison_results(results, output_dir, perturb_type, window_size=40, font_size=12, legend_font_size=10):
+def plot_markovian_comparison_results(results, output_dir, perturb_type, window_size=40, font_size=12, legend_font_size=10, markovian_hyperparams=None, non_markovian_hyperparams=None):
     """
     Plot the Markovian vs Non-Markovian comparison results.
     
@@ -1246,7 +1246,17 @@ def plot_markovian_comparison_results(results, output_dir, perturb_type, window_
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.legend(fontsize=legend_font_size, loc="best")
     
-    plt.xlabel("Training Batch", fontsize=legend_font_size)
+    # Create x-axis label with batch size information if available
+    xlabel = "Training Batch"
+    if markovian_hyperparams and non_markovian_hyperparams:
+        m_batch_size = markovian_hyperparams.get('batch_size', 'unknown')
+        nm_batch_size = non_markovian_hyperparams.get('batch_size', 'unknown')
+        if m_batch_size == nm_batch_size:
+            xlabel += f" (batch size={m_batch_size})"
+        else:
+            xlabel += f" (Markovian: {m_batch_size}, Non-Markovian: {nm_batch_size})"
+    
+    plt.xlabel(xlabel, fontsize=legend_font_size)
     plt.ylabel("Perturbation Effect Difference\n(Markovian Effect - Non-Markovian Effect)", fontsize=legend_font_size)
     
     title = f"Markovian vs Non-Markovian Comparison: {perturb_type.replace('_', ' ').title()}"
@@ -1456,7 +1466,7 @@ def main():
         
         for perturb_type in args.perturb:
             print(f"Running Markovian vs Non-Markovian comparison for {perturb_type}...")
-            comparison_data = run_markovian_comparison(
+            comparison_data, markovian_hyperparams, non_markovian_hyperparams = run_markovian_comparison(
                 markovian_log_file=args.markovian_log,
                 non_markovian_log_file=args.non_markovian_log,
                 perturb_type=perturb_type,
@@ -1474,7 +1484,9 @@ def main():
                 perturb_type=perturb_type,
                 window_size=args.window_size,
                 font_size=args.font_size,
-                legend_font_size=args.legend_font_size
+                legend_font_size=args.legend_font_size,
+                markovian_hyperparams=markovian_hyperparams,
+                non_markovian_hyperparams=non_markovian_hyperparams
             )
             
             # Print summary analysis
