@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import argparse
+import glob
+import re
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 
@@ -129,21 +131,68 @@ def load_and_plot_experiment(file_path, label, color, window_size=30, gaussian_s
     
     return None, None, None, None
 
+def find_latest_experiment(task_type, machine_pattern):
+    """Find the most recent experiment for a given machine pattern."""
+    
+    # Look for directories matching the pattern
+    pattern = f"results/{task_type}/*_{machine_pattern}/log.jsonl"
+    matching_files = glob.glob(pattern)
+    
+    if not matching_files:
+        # Try without machine suffix (for exact matches)
+        pattern = f"results/{task_type}/*{machine_pattern}*/log.jsonl"
+        matching_files = glob.glob(pattern)
+    
+    if not matching_files:
+        return None
+        
+    # Extract timestamps and sort by them
+    timestamped_files = []
+    for file_path in matching_files:
+        dir_name = os.path.basename(os.path.dirname(file_path))
+        # Extract timestamp from directory name (YYYYMMDD_HHMMSS format)
+        timestamp_match = re.match(r'^(\d{8}_\d{6})', dir_name)
+        if timestamp_match:
+            timestamp = timestamp_match.group(1)
+            timestamped_files.append((timestamp, file_path))
+    
+    if timestamped_files:
+        # Sort by timestamp (newest first) and return the most recent
+        timestamped_files.sort(reverse=True)
+        return timestamped_files[0][1]
+    
+    return None
+
 def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Create Gaussian process-style smoothed plot of normalized rewards")
     parser.add_argument("--window_size", type=int, default=30, help="Moving average window size (default: 30)")
     parser.add_argument("--gaussian_sigma", type=float, default=30.0, help="Gaussian smoothing sigma (default: 30.0)")
     parser.add_argument("--output", type=str, default="results/figures/combined_normalized_reward_gp_smoothed.png", help="Output filename")
+    parser.add_argument("--task_type", type=str, default="wiki_continuation", help="Task type to plot (default: wiki_continuation)")
     args = parser.parse_args()
     
-    # Define the log files and their labels
-    experiments = [
-        ("results/wiki_continuation/20250801_194419_left/log.jsonl", "left1", "#1f77b4"),
-        ("results/wiki_continuation/20250801_194437_mid2/log.jsonl", "mid2", "#ff7f0e"), 
-        ("results/wiki_continuation/20250801_194450_right2/log.jsonl", "right2", "#2ca02c"),
-        ("results/wiki_continuation/20250801_194514_riight2/log.jsonl", "riight2", "#d62728")
+    # Define the machine patterns and their labels/colors
+    machine_configs = [
+        ("left", "left1", "#1f77b4"),
+        ("mid2", "mid2", "#ff7f0e"), 
+        ("right2", "right2", "#2ca02c"),
+        ("riight2", "riight2", "#d62728")
     ]
+    
+    # Find the latest experiments for each machine
+    experiments = []
+    for machine_pattern, label, color in machine_configs:
+        latest_file = find_latest_experiment(args.task_type, machine_pattern)
+        if latest_file:
+            experiments.append((latest_file, label, color))
+            print(f"Found latest {machine_pattern}: {latest_file}")
+        else:
+            print(f"Warning: No experiments found for {machine_pattern}")
+    
+    if not experiments:
+        print("Error: No experiments found for any of the target machines")
+        return
     
     window_size = args.window_size
     gaussian_sigma = args.gaussian_sigma

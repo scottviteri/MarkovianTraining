@@ -167,34 +167,60 @@ for machine in "${target_machines[@]}"; do
         recent_folders=\$(find '$base_path/results' -mindepth 2 -maxdepth 2 -type d -name '[0-9]*' 2>/dev/null | 
         while read dir; do
             if [ -d \"\$dir\" ] && [ -f \"\$dir/log.jsonl\" ]; then
-                echo \"\$dir|\$(stat -c %Y \"\$dir\" 2>/dev/null || echo 0)\"
+                # Extract timestamp from folder name (format: YYYYMMDD_HHMMSS)
+                folder_name=\$(basename \"\$dir\")
+                timestamp=\$(echo \"\$folder_name\" | grep -o '^[0-9]\{8\}_[0-9]\{6\}' | head -1)
+                if [ -n \"\$timestamp\" ]; then
+                    # Convert to sortable format and output with path
+                    echo \"\$dir|\$timestamp\"
+                fi
             fi
-        done | sort -t'|' -k2 -nr | head -1 | cut -d'|' -f1)
+        done | sort -t'|' -k2 -r | head -1 | cut -d'|' -f1)
         
         # Also look for standalone log files
         recent_files=\$(find '$base_path/results' -name '*.jsonl' -not -path '*/Official/*' 2>/dev/null | 
         while read file; do
             if [ -f \"\$file\" ]; then
-                echo \"\$file|\$(stat -c %Y \"\$file\" 2>/dev/null || echo 0)\"
+                # Extract timestamp from filename
+                filename=\$(basename \"\$file\")
+                timestamp=\$(echo \"\$filename\" | grep -o '[0-9]\{8\}_[0-9]\{6\}' | head -1)
+                if [ -n \"\$timestamp\" ]; then
+                    echo \"\$file|\$timestamp\"
+                else
+                    # Fallback to file modification time if no timestamp in name
+                    echo \"\$file|\$(stat -c %Y \"\$file\" 2>/dev/null || echo 0)\"
+                fi
             fi
-        done | sort -t'|' -k2 -nr | head -1 | cut -d'|' -f1)
+        done | sort -t'|' -k2 -r | head -1 | cut -d'|' -f1)
         
-        # Get modification times to compare
-        folder_time=0
-        file_time=0
+        # Get timestamps to compare (folder timestamps are in YYYYMMDD_HHMMSS format)
+        folder_timestamp=\"\"
+        file_timestamp=\"\"
         
         if [ -n \"\$recent_folders\" ]; then
-            folder_time=\$(stat -c %Y \"\$recent_folders\" 2>/dev/null || echo 0)
+            folder_name=\$(basename \"\$recent_folders\")
+            folder_timestamp=\$(echo \"\$folder_name\" | grep -o '^[0-9]\{8\}_[0-9]\{6\}' | head -1)
         fi
         
         if [ -n \"\$recent_files\" ]; then
-            file_time=\$(stat -c %Y \"\$recent_files\" 2>/dev/null || echo 0)
+            filename=\$(basename \"\$recent_files\")
+            file_timestamp=\$(echo \"\$filename\" | grep -o '[0-9]\{8\}_[0-9]\{6\}' | head -1)
+            # If no timestamp in filename, use modification time (less reliable)
+            if [ -z \"\$file_timestamp\" ]; then
+                file_timestamp=\$(stat -c %Y \"\$recent_files\" 2>/dev/null || echo 0)
+            fi
         fi
         
-        # Return the most recent between folder and file
-        if [ \$folder_time -gt \$file_time ]; then
+        # Return the most recent between folder and file (comparing timestamps)
+        if [ -n \"\$folder_timestamp\" ] && [ -n \"\$file_timestamp\" ]; then
+            if [[ \"\$folder_timestamp\" > \"\$file_timestamp\" ]]; then
+                echo \"folder|\$recent_folders\"
+            else
+                echo \"file|\$recent_files\"
+            fi
+        elif [ -n \"\$folder_timestamp\" ]; then
             echo \"folder|\$recent_folders\"
-        elif [ \$file_time -gt 0 ]; then
+        elif [ -n \"\$file_timestamp\" ]; then
             echo \"file|\$recent_files\"
         fi
     " 2>/dev/null || echo "")
