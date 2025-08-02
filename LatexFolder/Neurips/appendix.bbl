@@ -1,0 +1,76 @@
+\begin{thebibliography}{12}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Bai et~al.(2022)Bai, Kadavath, Kundu, Askell, Kernion, Jones, Chen, Goldie, Mirhoseini, McKinnon, Chen, Olsson, Olah, Hernandez, Drain, Ganguli, Li, Tran-Johnson, Perez, Kerr, Mueller, Ladish, Landau, Ndousse, Lukosuite, Lovitt, Sellitto, Elhage, Schiefer, Mercado, DasSarma, Lasenby, Larson, Ringer, Johnston, Kravec, Showk, Fort, Lanham, Telleen-Lawton, Conerly, Henighan, Hume, Bowman, Hatfield-Dodds, Mann, Amodei, Joseph, McCandlish, Brown, and Kaplan]{bai2022constitutional}
+Yuntao Bai, Saurav Kadavath, Sandipan Kundu, Amanda Askell, Jackson Kernion, Andy Jones, Anna Chen, Anna Goldie, Azalia Mirhoseini, Cameron McKinnon, Carol Chen, Catherine Olsson, Christopher Olah, Danny Hernandez, Dawn Drain, Deep Ganguli, Dustin Li, Eli Tran-Johnson, Ethan Perez, Jamie Kerr, Jared Mueller, Jeffrey Ladish, Joshua Landau, Kamal Ndousse, Kamile Lukosuite, Liane Lovitt, Michael Sellitto, Nelson Elhage, Nicholas Schiefer, Noemi Mercado, Nova DasSarma, Robert Lasenby, Robin Larson, Sam Ringer, Scott Johnston, Shauna Kravec, Sheer~El Showk, Stanislav Fort, Tamera Lanham, Timothy Telleen-Lawton, Tom Conerly, Tom Henighan, Tristan Hume, Samuel~R. Bowman, Zac Hatfield-Dodds, Ben Mann, Dario Amodei, Nicholas Joseph, Sam McCandlish, Tom Brown, and Jared Kaplan.
+\newblock Constitutional {AI}: Harmlessness from {AI} {F}eedback, 2022.
+\newblock URL \url{https://arxiv.org/abs/2212.08073}.
+
+\bibitem[Burns et~al.(2023)Burns, Ye, Klein, and Steinhardt]{burns2024discovering}
+Collin Burns, Haotian Ye, Dan Klein, and Jacob Steinhardt.
+\newblock Discovering latent knowledge in language models without supervision.
+\newblock In \emph{The Eleventh International Conference on Learning Representations}, 2023.
+\newblock URL \url{https://openreview.net/forum?id=ETKGuby0hcs}.
+
+\bibitem[Christiano et~al.(2021)Christiano, Cotra, and Xu]{christiano2021eliciting}
+Paul Christiano, Ajeya Cotra, and Mark Xu.
+\newblock Eliciting latent knowledge: How to tell if your eyes deceive you, December 2021.
+\newblock URL \url{https://docs.google.com/document/d/1WwsnJQstPq91_Yh-Ch2XRL8H_EpsnjrC1dwZXR37PC8/edit}.
+
+\bibitem[Christiano et~al.(2023)Christiano, Leike, Brown, Martic, Legg, and Amodei]{christiano2023deepreinforcementlearninghuman}
+Paul Christiano, Jan Leike, Tom~B. Brown, Miljan Martic, Shane Legg, and Dario Amodei.
+\newblock Deep reinforcement learning from human preferences, 2023.
+\newblock URL \url{https://arxiv.org/abs/1706.03741}.
+
+\bibitem[DeepSeek-AI et~al.(2025)DeepSeek-AI, Guo, Yang, Zhang, Song, Zhang, Xu, et~al.]{deepseekai2025}
+DeepSeek-AI, Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, et~al.
+\newblock Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning, 2025.
+\newblock URL \url{https://arxiv.org/abs/2501.12948}.
+
+\bibitem[Joshi et~al.(2024)Joshi, Rando, Saparov, Kim, and He]{Joshi2024}
+Nitish Joshi, Javier Rando, Abulhair Saparov, Najoung Kim, and He~He.
+\newblock Personas as a way to model truthfulness in language models, 2024.
+\newblock URL \url{https://doi.org/10.48550/arXiv.2310.18168}.
+\newblock arXiv:2310.18168v5 [cs.CL].
+
+\bibitem[Lin et~al.(2022)Lin, Hilton, and Evans]{lin_truthfulqa2022}
+Stephanie Lin, Jacob Hilton, and Owain Evans.
+\newblock Truthful{QA}: Measuring how models mimic human falsehoods.
+\newblock In \emph{Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics}, 2022.
+\newblock URL \url{https://arxiv.org/abs/2109.07958}.
+\newblock ACL 2022 (main conference).
+
+\bibitem[Lyu et~al.(2023)Lyu, Havaldar, Stein, Zhang, Rao, Wong, Apidianaki, and Callison-Burch]{lyu2023faithful}
+Qing Lyu, Shreya Havaldar, Adam Stein, Li~Zhang, Delip Rao, Eric Wong, Marianna Apidianaki, and Chris Callison-Burch.
+\newblock Faithful chain-of-thought reasoning, 2023.
+\newblock URL \url{https://arxiv.org/abs/2301.13379}.
+
+\bibitem[Silver et~al.(2016)Silver, Huang, Maddison, et~al.]{Silver2016}
+D.~Silver, A.~Huang, C.~Maddison, et~al.
+\newblock Mastering the game of go with deep neural networks and tree search.
+\newblock \emph{Nature}, 529:\penalty0 484--489, 2016.
+
+\bibitem[Silver et~al.(2017)Silver, Hubert, Schrittwieser, Antonoglou, Lai, Guez, Lanctot, Sifre, Kumaran, Graepel, Lillicrap, Simonyan, and Hassabis]{Silver2017}
+David Silver, Thomas Hubert, Julian Schrittwieser, Ioannis Antonoglou, Matthew Lai, Arthur Guez, Marc Lanctot, Laurent Sifre, Dharshan Kumaran, Thore Graepel, Timothy Lillicrap, Karen Simonyan, and Demis Hassabis.
+\newblock Mastering chess and shogi by self-play with a general reinforcement learning algorithm, 2017.
+\newblock URL \url{https://doi.org/10.48550/arXiv.1712.01815}.
+\newblock arXiv:1712.01815 [cs.AI].
+
+\bibitem[Tian et~al.(2023)Tian, Mitchell, Yao, Manning, and Finn]{Tian2023}
+Katherine Tian, Eric Mitchell, Huaxiu Yao, Christopher~D. Manning, and Chelsea Finn.
+\newblock Fine-tuning language models for factuality, 2023.
+\newblock URL \url{https://doi.org/10.48550/arXiv.2311.08401}.
+\newblock arXiv:2311.08401 [cs.CL].
+
+\bibitem[Yang et~al.(2017)Yang, Blunsom, Dyer, and Ling]{yang-etal-2017-reference}
+Zichao Yang, Phil Blunsom, Chris Dyer, and Wang Ling.
+\newblock Reference-aware language models.
+\newblock In Martha Palmer, Rebecca Hwa, and Sebastian Riedel, editors, \emph{Proceedings of the 2017 Conference on Empirical Methods in Natural Language Processing}, pages 1850--1859, Copenhagen, Denmark, September 2017. Association for Computational Linguistics.
+\newblock \doi{10.18653/v1/D17-1197}.
+\newblock URL \url{https://aclanthology.org/D17-1197}.
+
+\end{thebibliography}
