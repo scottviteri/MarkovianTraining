@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2026/dev/Arch Linux) (preloaded format=pdflatex 2025.5.14)  2 AUG 2025 02:16
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2026/dev/Arch Linux) (preloaded format=pdflatex 2025.5.14)  2 AUG 2025 02:19
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -784,13 +784,7 @@ Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 [7 <./Figures/wiki_multi_critic_comparison.png>])
-(./anonymous-submission-latex-2026.bbl
-Underfull \hbox (badness 1292) in paragraph at lines 15--19
-\OT1/ptm/m/n/10 i-fiers to Solve Math Word Prob-lems.  \OT1/ptm/m/it/10 arXiv p
-reprint
- []
-
-)
+(./anonymous-submission-latex-2026.bbl)
 
 
 
@@ -801,15 +795,11 @@ reprint
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
  ***********
-
-
-LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
-
  ) 
 Here is how much of TeX's memory you used:
  18161 strings out of 475171
  348019 string characters out of 5767095
- 732903 words of memory out of 5000000
+ 733097 words of memory out of 5000000
  40848 multiletter control sequences out of 15000+600000
  579098 words of font info for 70 fonts, out of 8000000 for 9000
  14 hyphenation exceptions out of 8191
@@ -826,7 +816,7 @@ ymbols/msbm10.pfb></usr/share/texmf-dist/fonts/type1/urw/courier/ucrr8a.pfb></u
 sr/share/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texmf-dist/fon
 ts/type1/urw/times/utmr8a.pfb></usr/share/texmf-dist/fonts/type1/urw/times/utmr
 i8a.pfb>
-Output written on anonymous-submission-latex-2026.pdf (8 pages, 3223889 bytes).
+Output written on anonymous-submission-latex-2026.pdf (8 pages, 3221566 bytes).
 
 PDF statistics:
  114 PDF objects out of 1000 (max. 8388607)

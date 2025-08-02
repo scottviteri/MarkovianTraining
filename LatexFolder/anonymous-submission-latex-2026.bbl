@@ -1,33 +1,38 @@
 \begin{thebibliography}{7}
 \providecommand{\natexlab}[1]{#1}
 
-\bibitem[{Brown et~al.(2020)Brown, Mann, Ryder, Subbiah, Kaplan, Dhariwal
-  et~al.}]{NEURIPS2020_1457c0d6}
-Brown, T.; Mann, B.; Ryder, N.; Subbiah, M.; Kaplan, J.~D.; Dhariwal, P.;
-  et~al. 2020.
+\bibitem[{Brown et~al.(2020)Brown, Mann, Ryder, Subbiah, Kaplan, Dhariwal,
+  Neelakantan, Shyam, Sastry, Askell, Agarwal, Herbert-Voss, Krueger, Henighan,
+  Child, Ramesh, Ziegler, Wu, Winter, Hesse, Chen, Sigler, Litwin, Gray, Chess,
+  Clark, Berner, McCandlish, Radford, Sutskever, and
+  Amodei}]{NEURIPS2020_1457c0d6}
+Brown, T.~B.; Mann, B.; Ryder, N.; Subbiah, M.; Kaplan, J.; Dhariwal, P.;
+  Neelakantan, A.; Shyam, P.; Sastry, G.; Askell, A.; Agarwal, S.;
+  Herbert-Voss, A.; Krueger, G.; Henighan, T.; Child, R.; Ramesh, A.; Ziegler,
+  D.~M.; Wu, J.; Winter, C.; Hesse, C.; Chen, M.; Sigler, E.; Litwin, M.; Gray,
+  S.; Chess, B.; Clark, J.; Berner, C.; McCandlish, S.; Radford, A.; Sutskever,
+  I.; and Amodei, D. 2020.
 \newblock Language Models are Few-Shot Learners.
-\newblock In Larochelle, H.; Ranzato, M.; Hadsell, R.; Balcan, M.; and Lin, H.,
-  eds., \emph{Advances in Neural Information Processing Systems}, volume~33,
-  1877--1901. Curran Associates, Inc.
+\newblock arXiv:2005.14165.
 
 \bibitem[{Cobbe et~al.(2021)Cobbe, Kosaraju, Bavarian, Chen, Jun, Kaiser,
   Plappert, Tworek, Hilton, Nakano, Hesse, and Schulman}]{cobbe2021gsm8k}
 Cobbe, K.; Kosaraju, V.; Bavarian, M.; Chen, M.; Jun, H.; Kaiser, L.; Plappert,
   M.; Tworek, J.; Hilton, J.; Nakano, R.; Hesse, C.; and Schulman, J. 2021.
 \newblock Training Verifiers to Solve Math Word Problems.
-\newblock \emph{arXiv preprint arXiv:2110.14168}.
+\newblock arXiv:2110.14168.
 
 \bibitem[{Lanham et~al.(2023)Lanham, Chen, Radhakrishnan, Steiner, Denison,
   Hernandez, Li, Durmus, Hubinger, Kernion, Lukošiūtė, Nguyen, Cheng,
   Joseph, Schiefer, Rausch, Larson, McCandlish, Kundu, Kadavath, Yang,
-  Henighan, Maxwell, Telleen-Lawton, Hume, Hatfield-Dodds, Kaplan, Brauner,
-  Bowman, and Perez}]{lanham2023measuring}
+  Henighan, Maxwell, Telleen-Lawton, Hume, Hatfield-Dodds, Kaplan, Leike,
+  Perez, Bowman, and Brown}]{lanham2023measuring}
 Lanham, T.; Chen, A.; Radhakrishnan, A.; Steiner, B.; Denison, C.; Hernandez,
   D.; Li, D.; Durmus, E.; Hubinger, E.; Kernion, J.; Lukošiūtė, K.; Nguyen,
   K.; Cheng, N.; Joseph, N.; Schiefer, N.; Rausch, O.; Larson, R.; McCandlish,
   S.; Kundu, S.; Kadavath, S.; Yang, S.; Henighan, T.; Maxwell, T.;
-  Telleen-Lawton, T.; Hume, T.; Hatfield-Dodds, Z.; Kaplan, J.; Brauner, J.;
-  Bowman, S.~R.; and Perez, E. 2023.
+  Telleen-Lawton, T.; Hume, T.; Hatfield-Dodds, Z.; Kaplan, J.; Leike, J.;
+  Perez, E.; Bowman, S.~R.; and Brown, T. 2023.
 \newblock Measuring Faithfulness in Chain-of-Thought Reasoning.
 \newblock arXiv:2307.13702.
 
@@ -40,24 +45,21 @@ Lyu, Q.; Havaldar, S.; Stein, A.; Zhang, L.; Rao, D.; Wong, E.; Apidianaki, M.;
 
 \bibitem[{Rumelhart, Hinton, and Williams(1986)}]{rumelhart1986learning}
 Rumelhart, D.~E.; Hinton, G.~E.; and Williams, R.~J. 1986.
-\newblock Learning representations by back-propagating errors.
-\newblock \emph{Nature}, 323(6088): 533--536.
+\newblock Learning Representations by Back-propagating Errors.
 
 \bibitem[{Turpin et~al.(2023)Turpin, Michael, Perez, and
   Bowman}]{turpin2023language}
 Turpin, M.; Michael, J.; Perez, E.; and Bowman, S.~R. 2023.
 \newblock Language Models Don't Always Say What They Think: Unfaithful
   Explanations in Chain-of-Thought Prompting.
-\newblock In \emph{Thirty-seventh Conference on Neural Information Processing
-  Systems}.
+\newblock arXiv:2305.04388.
 
-\bibitem[{Wei et~al.(2022)Wei, Wang, Schuurmans, Bosma, brian ichter, Xia, Chi,
-  Le, and Zhou}]{wei2022chain}
-Wei, J.; Wang, X.; Schuurmans, D.; Bosma, M.; brian ichter; Xia, F.; Chi,
-  E.~H.; Le, Q.~V.; and Zhou, D. 2022.
-\newblock Chain of Thought Prompting Elicits Reasoning in Large Language
+\bibitem[{Wei et~al.(2022)Wei, Wang, Schuurmans, Bosma, Chi, Le, and
+  Zhou}]{wei2022chain}
+Wei, J.; Wang, X.; Schuurmans, D.; Bosma, M.; Chi, E.; Le, Q.; and Zhou, D.
+  2022.
+\newblock Chain-of-Thought Prompting Elicits Reasoning in Large Language
   Models.
-\newblock In Oh, A.~H.; Agarwal, A.; Belgrave, D.; and Cho, K., eds.,
-  \emph{Advances in Neural Information Processing Systems}.
+\newblock arXiv:2201.11903.
 
 \end{thebibliography}
