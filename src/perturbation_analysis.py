@@ -1073,13 +1073,15 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
     return comparison_data
 
 
-def combine_all_markovian_comparison_plots(base_directory, font_size=12):
+def combine_all_markovian_comparison_plots(base_directory, font_size=12, include_perturbations=None, exclude_perturbations=None):
     """
     Combine all markovian comparison plots from a directory into a single comprehensive figure.
     
     Args:
         base_directory: Base directory containing markovian_comparison subdirectories
         font_size: Font size for plot elements
+        include_perturbations: List of perturbation types to include (if None, include all)
+        exclude_perturbations: List of perturbation types to exclude (if None, exclude none)
     """
     import matplotlib.pyplot as plt
     import matplotlib.image as mpimg
@@ -1094,9 +1096,16 @@ def combine_all_markovian_comparison_plots(base_directory, font_size=12):
     if os.path.exists(markovian_dir):
         for filename in os.listdir(markovian_dir):
             if filename.startswith("markovian_comparison_") and filename.endswith("_plot.png"):
-                plot_files.append(os.path.join(markovian_dir, filename))
                 # Extract perturbation type from filename
                 perturb_type = filename.replace("markovian_comparison_", "").replace("_plot.png", "")
+                
+                # Apply include/exclude filters
+                if include_perturbations is not None and perturb_type not in include_perturbations:
+                    continue
+                if exclude_perturbations is not None and perturb_type in exclude_perturbations:
+                    continue
+                
+                plot_files.append(os.path.join(markovian_dir, filename))
                 perturbation_types.append(perturb_type)
     
     if not plot_files:
@@ -1157,10 +1166,9 @@ def combine_all_markovian_comparison_plots(base_directory, font_size=12):
     # Save combined plot
     output_path = os.path.join(markovian_dir, "combined_markovian_comparison_plots.png")
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    plt.close()
-    
     print(f"Combined plot saved to: {output_path}")
-    print(f"Included {n_plots} perturbation types: {', '.join(perturbation_types)}")
+    print(f"Included {n_plots} perturbation types: {', '.join(sorted(perturbation_types))}")
+    plt.close()
 
 
 def plot_markovian_comparison_results(results, output_dir, perturb_type, window_size=40, font_size=12, legend_font_size=10):
@@ -1412,6 +1420,23 @@ def main():
         action="store_true",
         help="Combine all existing markovian comparison plots into a single comprehensive figure"
     )
+    parser.add_argument(
+        "--include_perturbations",
+        nargs="+",
+        choices=list(PERTURBATION_SETS.keys()),
+        help="Include only specified perturbation types in combined plot (for --combine_all_plots)"
+    )
+    parser.add_argument(
+        "--exclude_perturbations",
+        nargs="+",
+        choices=list(PERTURBATION_SETS.keys()),
+        help="Exclude specified perturbation types from combined plot (for --combine_all_plots)"
+    )
+    parser.add_argument(
+        "--regenerate_before_combine",
+        action="store_true",
+        help="Regenerate individual markovian comparison plots with new parameters before combining (for --combine_all_plots)"
+    )
 
     args = parser.parse_args()
 
@@ -1463,13 +1488,54 @@ def main():
             print("Error: --combine_all_plots requires --log_file argument to specify the base directory")
             return
         
+        # Validate include/exclude arguments
+        if args.include_perturbations and args.exclude_perturbations:
+            print("Error: Cannot specify both --include_perturbations and --exclude_perturbations")
+            return
+        
         # If log_file points to a file, get its directory; if it's a directory, use it directly
         if os.path.isfile(args.log_file):
             base_dir = os.path.dirname(args.log_file)
         else:
             base_dir = args.log_file
             
-        combine_all_markovian_comparison_plots(base_dir, font_size=args.font_size)
+        # Regenerate individual plots if requested
+        if args.regenerate_before_combine:
+            # Determine which perturbations to regenerate
+            if args.include_perturbations:
+                perturb_types_to_regenerate = args.include_perturbations
+            else:
+                # Use all available perturbation types, minus excluded ones
+                perturb_types_to_regenerate = list(PERTURBATION_SETS.keys())
+                if args.exclude_perturbations:
+                    perturb_types_to_regenerate = [p for p in perturb_types_to_regenerate if p not in args.exclude_perturbations]
+            
+            print(f"Regenerating individual plots for: {perturb_types_to_regenerate}")
+            markovian_dir = os.path.join(base_dir, "markovian_comparison")
+            
+            for perturb_type in perturb_types_to_regenerate:
+                json_file = os.path.join(markovian_dir, f"comparison_results_{perturb_type}.json")
+                if os.path.exists(json_file):
+                    print(f"Regenerating plot for {perturb_type}...")
+                    with open(json_file, 'r') as f:
+                        results = json.load(f)
+                    plot_markovian_comparison_results(
+                        results=results,
+                        output_dir=markovian_dir,
+                        perturb_type=perturb_type,
+                        window_size=args.window_size,
+                        font_size=args.font_size,
+                        legend_font_size=args.legend_font_size
+                    )
+                else:
+                    print(f"Warning: {json_file} not found, skipping {perturb_type}")
+        
+        combine_all_markovian_comparison_plots(
+            base_dir, 
+            font_size=args.font_size,
+            include_perturbations=args.include_perturbations,
+            exclude_perturbations=args.exclude_perturbations
+        )
         return
 
     if args.collate:
