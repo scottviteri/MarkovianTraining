@@ -1,0 +1,46 @@
+This is BibTeX, Version 0.99d (TeX Live 2026/dev/Arch Linux)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: anonymous-submission-latex-2026.aux
+The style file: aaai2026.bst
+Database file #1: neurips_2025.bib
+You've used 7 entries,
+            2840 wiz_defined-function locations,
+            625 strings with 6789 characters,
+and the built_in function-call counts, 7411 in all, are:
+= -- 461
+> -- 680
+< -- 1
++ -- 250
+- -- 244
+* -- 649
+:= -- 1247
+add.period$ -- 29
+call.type$ -- 7
+change.case$ -- 107
+chr.to.int$ -- 8
+cite$ -- 7
+duplicate$ -- 422
+empty$ -- 344
+format.name$ -- 266
+if$ -- 1345
+int.to.chr$ -- 1
+int.to.str$ -- 1
+missing$ -- 123
+newline$ -- 39
+num.names$ -- 32
+pop$ -- 263
+preamble$ -- 1
+purify$ -- 101
+quote$ -- 0
+skip$ -- 183
+stack$ -- 0
+substring$ -- 142
+swap$ -- 268
+text.length$ -- 1
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 63
+warning$ -- 0
+while$ -- 35
+width$ -- 0
+write$ -- 91
