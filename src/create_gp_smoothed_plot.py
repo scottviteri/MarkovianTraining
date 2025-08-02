@@ -4,6 +4,7 @@ import json
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import argparse
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
 
@@ -71,7 +72,7 @@ def gp_smooth_with_confidence(x, y, sigma=30.0, confidence_scale=0.05):
     
     return smoothed_y, confidence_bands
 
-def load_and_plot_experiment(file_path, label, color, window_size=30):
+def load_and_plot_experiment(file_path, label, color, window_size=30, gaussian_sigma=30.0):
     """Load experiment data and return x, y data for plotting"""
     print(f"Loading {file_path}...")
     
@@ -79,6 +80,9 @@ def load_and_plot_experiment(file_path, label, color, window_size=30):
         file_contents = f.readlines()
         hyperparameters = json.loads(file_contents[0].strip())
         entries = [json.loads(line) for line in file_contents[1:]]
+    
+    # Extract model type for legend
+    model_type = hyperparameters.get('model_type', 'unknown')
     
     # Extract normalized reward data
     raw_data = [
@@ -117,15 +121,22 @@ def load_and_plot_experiment(file_path, label, color, window_size=30):
             
             # Apply Gaussian process-like smoothing with confidence bands
             if len(clean_y) > 50:  # Only apply GP smoothing if we have enough points
-                gp_smooth, confidence = gp_smooth_with_confidence(clean_x, clean_y)
-                return clean_x, gp_smooth, confidence, hyperparameters
+                gp_smooth, confidence = gp_smooth_with_confidence(clean_x, clean_y, sigma=gaussian_sigma)
+                return clean_x, gp_smooth, confidence, model_type
             else:
                 # Fallback for short series
-                return clean_x, clean_y, np.ones_like(clean_y) * 0.01, hyperparameters
+                return clean_x, clean_y, np.ones_like(clean_y) * 0.01, model_type
     
     return None, None, None, None
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Create Gaussian process-style smoothed plot of normalized rewards")
+    parser.add_argument("--window_size", type=int, default=30, help="Moving average window size (default: 30)")
+    parser.add_argument("--gaussian_sigma", type=float, default=30.0, help="Gaussian smoothing sigma (default: 30.0)")
+    parser.add_argument("--output", type=str, default="combined_normalized_reward_gp_smoothed.png", help="Output filename")
+    args = parser.parse_args()
+    
     # Define the log files and their labels
     experiments = [
         ("results/wiki_continuation/20250801_194419_left/log.jsonl", "left1", "#1f77b4"),
@@ -134,7 +145,8 @@ def main():
         ("results/wiki_continuation/20250801_194514_riight2/log.jsonl", "riight2", "#d62728")
     ]
     
-    window_size = 30  # Increased for more smoothing
+    window_size = args.window_size
+    gaussian_sigma = args.gaussian_sigma
     
     # Create the plot
     plt.figure(figsize=(12, 8))
@@ -145,10 +157,10 @@ def main():
     # Process each experiment
     for file_path, label, color in experiments:
         if os.path.exists(file_path):
-            x_coords, y_smooth, confidence, hyperparams = load_and_plot_experiment(file_path, label, color, window_size)
+            x_coords, y_smooth, confidence, model_type = load_and_plot_experiment(file_path, label, color, window_size, gaussian_sigma)
             if x_coords is not None and y_smooth is not None:
                 # Plot the main smoothed line
-                plt.plot(x_coords, y_smooth, label=label, color=color, linewidth=3, alpha=0.9)
+                plt.plot(x_coords, y_smooth, label=model_type, color=color, linewidth=3, alpha=0.9)
                 
                 # Plot confidence bands (Gaussian process-like blur)
                 plt.fill_between(x_coords, 
@@ -160,8 +172,8 @@ def main():
                 plt.plot(x_coords, y_smooth, color=color, linewidth=6, alpha=0.2)
                 
                 max_x = max(max_x, np.max(x_coords))
-                valid_experiments.append((label, hyperparams))
-                print(f"Successfully plotted {label} with {len(x_coords)} points")
+                valid_experiments.append((model_type, label))
+                print(f"Successfully plotted {model_type} ({label}) with {len(x_coords)} points")
             else:
                 print(f"Warning: No valid data found for {label}")
         else:
@@ -181,7 +193,7 @@ def main():
     # Add smoothing info
     plt.text(
         0.95, 0.05,
-        f"Moving avg window = {window_size}\nGaussian process-style smoothing",
+        f"Moving avg window = {window_size}\nGaussian sigma = {gaussian_sigma:.1f}",
         transform=plt.gca().transAxes,
         horizontalalignment='right',
         verticalalignment='bottom',
@@ -200,17 +212,14 @@ def main():
     
     # Tight layout and save
     plt.tight_layout()
-    output_file = "combined_normalized_reward_gp_smoothed.png"
+    output_file = args.output
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"\nPlot saved to {output_file}")
     
     # Print experiment info
     print(f"\nSuccessfully plotted {len(valid_experiments)} experiments:")
-    for label, hyperparams in valid_experiments:
-        cot_length = hyperparams.get('cot_length', 'N/A')
-        temperature = hyperparams.get('temperature', 'N/A')
-        model_type = hyperparams.get('model_type', 'N/A')
-        print(f"  {label}: model={model_type}, cot_length={cot_length}, temp={temperature}")
+    for model_type, label in valid_experiments:
+        print(f"  {model_type} ({label})")
 
 if __name__ == "__main__":
     main()
