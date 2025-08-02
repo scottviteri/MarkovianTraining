@@ -596,13 +596,15 @@ def calculate_advantages(
     
     # Calculate advantages - simplified for both modes
     if parallel_mode:
-        # Parallel mode: use simple batch mean baseline
+        # Parallel mode: use standardized batch baseline (mean-centered, unit variance)
         if state.hyperparameters.get("r") is not None:
             colored_print("Warning", f"r parameter ({state.hyperparameters['r']}) is ignored in parallel mode", Colors.YELLOW)
-            colored_print("Info", "Parallel mode uses batch mean as baseline instead of exponential moving average", Colors.CYAN)
+            colored_print("Info", "Parallel mode uses standardized batch baseline (mean=0, std=1)", Colors.CYAN)
         
         batch_mean = normalized_rewards.mean()
-        advantages = normalized_rewards - batch_mean
+        batch_std = normalized_rewards.std()
+        # Add small epsilon to prevent division by zero
+        advantages = (normalized_rewards - batch_mean) / (batch_std + 1e-8)
     else:
         # Standard mode: use exponential moving average baseline
         r = state.hyperparameters.get("r", None)
