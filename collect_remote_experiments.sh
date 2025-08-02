@@ -10,6 +10,9 @@
 #   ./collect_remote_experiments.sh 3                  # Collect from tier 3: left3, mid3, right3, riight3
 #   ./collect_remote_experiments.sh 1 left             # Collect only from left (tier 1)
 #   ./collect_remote_experiments.sh 2 mid2             # Collect only from mid2 (tier 2)
+#
+# Optional flags:
+#   --adapters                                          # Also collect adapter directories (not just log files)
 
 set -e
 
@@ -30,8 +33,59 @@ declare -A MACHINES=(
 )
 
 # Parse arguments
-tier="$1"
-specific_machine="$2"
+collect_adapters=false
+tier=""
+specific_machine=""
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --help|-h)
+            echo "Script to collect ONLY the most recent experiment from each machine"
+            echo "Automatically removes previous experiments from the same machine"
+            echo ""
+            echo "Usage:"
+            echo "  ./collect_remote_experiments.sh                    # Collect from all machines"
+            echo "  ./collect_remote_experiments.sh 1                  # Collect from tier 1: left, mid, right, riight"
+            echo "  ./collect_remote_experiments.sh 2                  # Collect from tier 2: left2, mid2, right2, riight2"
+            echo "  ./collect_remote_experiments.sh 3                  # Collect from tier 3: left3, mid3, right3, riight3"
+            echo "  ./collect_remote_experiments.sh 1 left             # Collect only from left (tier 1)"
+            echo "  ./collect_remote_experiments.sh 2 mid2             # Collect only from mid2 (tier 2)"
+            echo ""
+            echo "Optional flags:"
+            echo "  --adapters                                          # Also collect adapter directories (not just log files)"
+            echo "  --help, -h                                          # Show this help message"
+            exit 0
+            ;;
+        --adapters)
+            collect_adapters=true
+            shift
+            ;;
+        [1-3])
+            tier="$1"
+            shift
+            ;;
+        *)
+            # If it's not a flag and we don't have a tier yet, it's the tier
+            if [ -z "$tier" ] && [[ "$1" =~ ^[1-3]$ ]]; then
+                tier="$1"
+            # If we have a tier but no specific machine, it's the machine
+            elif [ -n "$tier" ] && [ -z "$specific_machine" ]; then
+                specific_machine="$1"
+            # If no tier is specified, the first non-flag argument is either tier or machine
+            elif [ -z "$tier" ] && [ -z "$specific_machine" ]; then
+                # Check if it's a valid tier number
+                if [[ "$1" =~ ^[1-3]$ ]]; then
+                    tier="$1"
+                else
+                    # Assume it's a specific machine name
+                    specific_machine="$1"
+                fi
+            fi
+            shift
+            ;;
+    esac
+done
 
 # Function to get machines for a specific tier
 get_tier_machines() {
@@ -77,6 +131,13 @@ else
     echo "🚀 Collecting from ALL machines: ${target_machines[*]}"
 fi
 
+# Show adapter collection status
+if [ "$collect_adapters" = true ]; then
+    echo "📦 Adapter collection: ENABLED"
+else
+    echo "📦 Adapter collection: DISABLED (use --adapters to enable)"
+fi
+
 echo "==============================================================="
 
 # Function to remove previous experiments from the same machine
@@ -109,15 +170,27 @@ place_experiment() {
     local source_file="$1"
     local machine="$2"
     local original_timestamp="$3"
+    local source_folder="$4"  # Optional: source folder for adapters
+    local remote_path="$5"    # Full remote path to extract task type from
     
     if [ ! -f "$source_file" ]; then
         echo "      ❌ Source file not found: $source_file"
         return
     fi
     
-    # Get task type from the log file
-    first_line=$(head -n 1 "$source_file" 2>/dev/null || echo "")
-    task_type=$(echo "$first_line" | jq -r '.task_type // empty' 2>/dev/null || echo "")
+    # Get task type from the remote folder path structure
+    # Expected structure: /path/to/MarkovianTraining/results/task_type/timestamp_folder
+    task_type=""
+    if [ -n "$remote_path" ]; then
+        # Extract task type from path: get the parent directory name of the experiment folder
+        task_type=$(echo "$remote_path" | sed 's|.*/results/\([^/]*\)/.*|\1|')
+    fi
+    
+    # Fallback: try to get task type from the log file if path extraction failed
+    if [ -z "$task_type" ]; then
+        first_line=$(head -n 1 "$source_file" 2>/dev/null || echo "")
+        task_type=$(echo "$first_line" | jq -r '.task_type // empty' 2>/dev/null || echo "")
+    fi
     
     if [ -z "$task_type" ]; then
         echo "      ⚠️  Could not determine task type for $(basename "$source_file")"
@@ -133,6 +206,24 @@ place_experiment() {
     
     # Copy the log file
     cp "$source_file" "$target_dir/log.jsonl"
+    
+    # Copy adapters if requested and source folder is provided
+    if [ "$collect_adapters" = true ] && [ -n "$source_folder" ] && [ -d "$source_folder" ]; then
+        adapter_count=0
+        for adapter_dir in "$source_folder"/adapter_*; do
+            if [ -d "$adapter_dir" ]; then
+                adapter_name=$(basename "$adapter_dir")
+                echo "        📦 Copying adapter: $adapter_name"
+                cp -r "$adapter_dir" "$target_dir/"
+                adapter_count=$((adapter_count + 1))
+            fi
+        done
+        if [ $adapter_count -gt 0 ]; then
+            echo "        ✅ Copied $adapter_count adapter(s)"
+        else
+            echo "        ⚠️  No adapter directories found"
+        fi
+    fi
     
     # Get log stats
     lines=$(wc -l < "$target_dir/log.jsonl" 2>/dev/null || echo 0)
@@ -151,8 +242,8 @@ for machine in "${target_machines[@]}"; do
     echo ""
     echo "📡 Connecting to $machine (path: $base_path)..."
     
-    # Test connection first
-    if ! ssh -o ConnectTimeout=10 -o BatchMode=yes "$machine" "echo 'Connection successful'" >/dev/null 2>&1; then
+    # Test connection first (try with agent forwarding and without strict host checking)
+    if ! ssh -o ConnectTimeout=10 -o BatchMode=yes -o StrictHostKeyChecking=no "$machine" "echo 'Connection successful'" >/dev/null 2>&1; then
         echo "❌ Failed to connect to $machine (skipping)"
         continue
     fi
@@ -239,7 +330,7 @@ for machine in "${target_machines[@]}"; do
                 
                 # Process the log file
                 if [ -f "$temp_folder/log.jsonl" ]; then
-                    place_experiment "$temp_folder/log.jsonl" "$machine" "$folder_name"
+                    place_experiment "$temp_folder/log.jsonl" "$machine" "$folder_name" "$temp_folder" "$path"
                 fi
                 
                 # Clean up temp folder
@@ -263,8 +354,8 @@ for machine in "${target_machines[@]}"; do
             if scp -q "$machine:$path" "$temp_file" 2>/dev/null; then
                 echo "      📥 Downloaded log file"
                 
-                # Process the log file
-                place_experiment "$temp_file" "$machine" "$timestamp"
+                # Process the log file (no source folder for standalone files)
+                place_experiment "$temp_file" "$machine" "$timestamp" "" "$path"
                 
                 # Clean up temp file
                 rm -f "$temp_file"
@@ -318,3 +409,5 @@ echo "   ./collect_remote_experiments.sh           # Collect from all machines"
 echo "   ./collect_remote_experiments.sh 1         # Collect from tier 1 (left, mid, right, riight)"
 echo "   ./collect_remote_experiments.sh 2         # Collect from tier 2 (left2, mid2, right2, riight2)"
 echo "   ./collect_remote_experiments.sh 1 left    # Collect only from left machine"
+echo "   ./collect_remote_experiments.sh --adapters 1  # Collect from tier 1 with adapters"
+echo "   ./collect_remote_experiments.sh --adapters    # Collect from all machines with adapters"
