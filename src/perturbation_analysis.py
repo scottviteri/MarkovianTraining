@@ -672,7 +672,7 @@ def plot_perturbation_results(
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.legend(fontsize=legend_font_size, loc="best")
     
-    plt.xlabel("Example Index", fontsize=font_size)
+    plt.xlabel("Training Batch", fontsize=font_size)
     
     # Update y-label based on what we're comparing
     if include_question:
@@ -770,7 +770,7 @@ def plot_multiple_perturbation_results(
                     ax.set_ylabel("Difference in Perturbation Effect\n(Actor - Critic)", fontsize=font_size)
             
             if ax.get_subplotspec().is_last_row():
-                ax.set_xlabel("Example Index", fontsize=font_size)
+                ax.set_xlabel("Training Batch", fontsize=font_size)
             
             ax.tick_params(axis='both', which='major', labelsize=font_size-2)
             
@@ -1073,20 +1073,26 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
     return comparison_data
 
 
-def combine_all_markovian_comparison_plots(base_directory, font_size=12, include_perturbations=None, exclude_perturbations=None):
+def combine_all_markovian_comparison_plots(base_directory, font_size=12, include_perturbations=None, exclude_perturbations=None, legend_font_size=None):
     """
     Combine all markovian comparison plots from a directory into a single comprehensive figure.
     
     Args:
         base_directory: Base directory containing markovian_comparison subdirectories
-        font_size: Font size for plot elements
+        font_size: Base font size for plot elements (deprecated, use legend_font_size)
         include_perturbations: List of perturbation types to include (if None, include all)
         exclude_perturbations: List of perturbation types to exclude (if None, exclude none)
+        legend_font_size: Font size for all text elements (if None, uses font_size for backward compatibility)
     """
     import matplotlib.pyplot as plt
     import matplotlib.image as mpimg
     from pathlib import Path
     import os
+    import numpy as np
+    
+    # Use legend_font_size if provided, otherwise fall back to font_size for backward compatibility
+    if legend_font_size is None:
+        legend_font_size = font_size
     
     # Find all markovian comparison plot files
     plot_files = []
@@ -1119,7 +1125,9 @@ def combine_all_markovian_comparison_plots(base_directory, font_size=12, include
     n_plots = len(plot_files)
     
     # Create subplot layout - try to make it roughly square
-    if n_plots <= 4:
+    if n_plots == 1:
+        rows, cols = 1, 1
+    elif n_plots <= 4:
         rows, cols = 2, 2
     elif n_plots <= 6:
         rows, cols = 2, 3
@@ -1131,14 +1139,14 @@ def combine_all_markovian_comparison_plots(base_directory, font_size=12, include
     # Create figure with subplots
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 4))
     fig.suptitle('Comprehensive Markovian vs Non-Markovian Perturbation Analysis', 
-                fontsize=font_size + 4, fontweight='bold')
+                fontsize=legend_font_size + 4, fontweight='bold')
     
     # Flatten axes array for easier indexing
     if n_plots == 1:
+        # For single plot, axes is a single matplotlib axis object
         axes = [axes]
-    elif rows == 1 or cols == 1:
-        axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
     else:
+        # For multiple plots, axes is a numpy array
         axes = axes.flatten()
     
     # Load and display each plot
@@ -1147,12 +1155,12 @@ def combine_all_markovian_comparison_plots(base_directory, font_size=12, include
             img = mpimg.imread(plot_file)
             axes[i].imshow(img)
             axes[i].set_title(f'{perturb_type.replace("_", " ").title()}', 
-                            fontsize=font_size + 2, fontweight='bold')
+                            fontsize=legend_font_size + 2, fontweight='bold')
             axes[i].axis('off')
         except Exception as e:
             print(f"Error loading {plot_file}: {e}")
             axes[i].text(0.5, 0.5, f'Error loading\n{perturb_type}', 
-                        ha='center', va='center', fontsize=font_size)
+                        ha='center', va='center', fontsize=legend_font_size)
             axes[i].axis('off')
     
     # Hide any unused subplots
@@ -1238,8 +1246,8 @@ def plot_markovian_comparison_results(results, output_dir, perturb_type, window_
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.legend(fontsize=legend_font_size, loc="best")
     
-    plt.xlabel("Example Index", fontsize=font_size)
-    plt.ylabel("Perturbation Effect Difference\n(Markovian Effect - Non-Markovian Effect)", fontsize=font_size)
+    plt.xlabel("Training Batch", fontsize=legend_font_size)
+    plt.ylabel("Perturbation Effect Difference\n(Markovian Effect - Non-Markovian Effect)", fontsize=legend_font_size)
     
     title = f"Markovian vs Non-Markovian Comparison: {perturb_type.replace('_', ' ').title()}"
     if window_size > 1:
@@ -1247,17 +1255,11 @@ def plot_markovian_comparison_results(results, output_dir, perturb_type, window_
     else:
         title += " (Raw Data)"
     
-    plt.title(title, fontsize=font_size + 2)
-    plt.tick_params(axis="both", which="major", labelsize=font_size)
+    plt.title(title, fontsize=legend_font_size + 2)
+    plt.tick_params(axis="both", which="major", labelsize=legend_font_size)
     
     # Add a horizontal line at y=0 for reference
     plt.axhline(y=0, color='black', linestyle='-', alpha=0.3, linewidth=1)
-    
-    # Add interpretation text
-    plt.figtext(0.02, 0.02, 
-                "Positive values: Markovian model more sensitive to perturbations\n"
-                "Negative values: Non-Markovian model more sensitive to perturbations",
-                fontsize=font_size-2, style='italic')
     
     plt.tight_layout()
     
@@ -1534,7 +1536,8 @@ def main():
             base_dir, 
             font_size=args.font_size,
             include_perturbations=args.include_perturbations,
-            exclude_perturbations=args.exclude_perturbations
+            exclude_perturbations=args.exclude_perturbations,
+            legend_font_size=args.legend_font_size
         )
         return
 
