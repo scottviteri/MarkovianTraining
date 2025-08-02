@@ -1073,6 +1073,96 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
     return comparison_data
 
 
+def combine_all_markovian_comparison_plots(base_directory, font_size=12):
+    """
+    Combine all markovian comparison plots from a directory into a single comprehensive figure.
+    
+    Args:
+        base_directory: Base directory containing markovian_comparison subdirectories
+        font_size: Font size for plot elements
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.image as mpimg
+    from pathlib import Path
+    import os
+    
+    # Find all markovian comparison plot files
+    plot_files = []
+    perturbation_types = []
+    
+    markovian_dir = os.path.join(base_directory, "markovian_comparison")
+    if os.path.exists(markovian_dir):
+        for filename in os.listdir(markovian_dir):
+            if filename.startswith("markovian_comparison_") and filename.endswith("_plot.png"):
+                plot_files.append(os.path.join(markovian_dir, filename))
+                # Extract perturbation type from filename
+                perturb_type = filename.replace("markovian_comparison_", "").replace("_plot.png", "")
+                perturbation_types.append(perturb_type)
+    
+    if not plot_files:
+        print(f"No markovian comparison plots found in {markovian_dir}")
+        return
+    
+    # Sort by perturbation type for consistent ordering
+    sorted_pairs = sorted(zip(plot_files, perturbation_types), key=lambda x: x[1])
+    plot_files, perturbation_types = zip(*sorted_pairs)
+    
+    n_plots = len(plot_files)
+    
+    # Create subplot layout - try to make it roughly square
+    if n_plots <= 4:
+        rows, cols = 2, 2
+    elif n_plots <= 6:
+        rows, cols = 2, 3
+    elif n_plots <= 9:
+        rows, cols = 3, 3
+    else:
+        rows, cols = 4, 3
+    
+    # Create figure with subplots
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 4))
+    fig.suptitle('Comprehensive Markovian vs Non-Markovian Perturbation Analysis', 
+                fontsize=font_size + 4, fontweight='bold')
+    
+    # Flatten axes array for easier indexing
+    if n_plots == 1:
+        axes = [axes]
+    elif rows == 1 or cols == 1:
+        axes = axes.flatten() if hasattr(axes, 'flatten') else [axes]
+    else:
+        axes = axes.flatten()
+    
+    # Load and display each plot
+    for i, (plot_file, perturb_type) in enumerate(zip(plot_files, perturbation_types)):
+        try:
+            img = mpimg.imread(plot_file)
+            axes[i].imshow(img)
+            axes[i].set_title(f'{perturb_type.replace("_", " ").title()}', 
+                            fontsize=font_size + 2, fontweight='bold')
+            axes[i].axis('off')
+        except Exception as e:
+            print(f"Error loading {plot_file}: {e}")
+            axes[i].text(0.5, 0.5, f'Error loading\n{perturb_type}', 
+                        ha='center', va='center', fontsize=font_size)
+            axes[i].axis('off')
+    
+    # Hide any unused subplots
+    for i in range(n_plots, len(axes)):
+        axes[i].axis('off')
+    
+    # Adjust layout
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.93)  # Make room for suptitle
+    
+    # Save combined plot
+    output_path = os.path.join(markovian_dir, "combined_markovian_comparison_plots.png")
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"Combined plot saved to: {output_path}")
+    print(f"Included {n_plots} perturbation types: {', '.join(perturbation_types)}")
+
+
 def plot_markovian_comparison_results(results, output_dir, perturb_type, window_size=40, font_size=12, legend_font_size=10):
     """
     Plot the Markovian vs Non-Markovian comparison results.
@@ -1317,6 +1407,11 @@ def main():
         action="store_true",
         help="Generate a combined plot for multiple perturbation types"
     )
+    parser.add_argument(
+        "--combine_all_plots",
+        action="store_true",
+        help="Combine all existing markovian comparison plots into a single comprehensive figure"
+    )
 
     args = parser.parse_args()
 
@@ -1361,6 +1456,21 @@ def main():
             print(f"Markovian comparison for {perturb_type} completed.")
         
         return  # Exit after comparison analysis
+
+    # Handle combine all plots mode
+    if args.combine_all_plots:
+        if not args.log_file:
+            print("Error: --combine_all_plots requires --log_file argument to specify the base directory")
+            return
+        
+        # If log_file points to a file, get its directory; if it's a directory, use it directly
+        if os.path.isfile(args.log_file):
+            base_dir = os.path.dirname(args.log_file)
+        else:
+            base_dir = args.log_file
+            
+        combine_all_markovian_comparison_plots(base_dir, font_size=args.font_size)
+        return
 
     if args.collate:
         if not args.output_dir:
