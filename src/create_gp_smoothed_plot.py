@@ -134,7 +134,7 @@ def main():
     parser = argparse.ArgumentParser(description="Create Gaussian process-style smoothed plot of normalized rewards")
     parser.add_argument("--window_size", type=int, default=30, help="Moving average window size (default: 30)")
     parser.add_argument("--gaussian_sigma", type=float, default=30.0, help="Gaussian smoothing sigma (default: 30.0)")
-    parser.add_argument("--output", type=str, default="combined_normalized_reward_gp_smoothed.png", help="Output filename")
+    parser.add_argument("--output", type=str, default="results/figures/combined_normalized_reward_gp_smoothed.png", help="Output filename")
     args = parser.parse_args()
     
     # Define the log files and their labels
@@ -213,6 +213,10 @@ def main():
     # Tight layout and save
     plt.tight_layout()
     output_file = args.output
+    
+    # Ensure the output directory exists
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+    
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"\nPlot saved to {output_file}")
     
