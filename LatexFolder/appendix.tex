@@ -32,8 +32,6 @@
 \section{Additional Performance Analysis}
 This section presents additional performance metrics and analysis across our experimental settings. Fig~\ref{fig:wikiloss} shows training progress on the Wikipedia continuation task, Fig~\ref{fig:faith_mistral} demonstrates perturbation effects on arithmetic reasoning, and Fig~\ref{fig:original_vs_llama} illustrates cross-model transfer on GSM8K.
 
-An interesting feature of the arithmetic perturbation analysis in Fig~\ref{fig:faith_mistral} is that at the start of training, when Mistral 7B has not yet learned to use the CoT effectively, the various perturbations are actually mildly helpful for prediction. As training progresses, however, these same perturbations increasingly degrade performance compared to the trained CoT, demonstrating that the model develops a systematic reliance on its reasoning trace. Notably, truncating just 10\% from the end of the CoT becomes significantly impactful relatively early in training, suggesting that the predictor learns to place crucial reasoning steps or intermediate conclusions in the final tokens of its chain of thought.
-
 \begin{figure}[ht]
     \centering
     \begin{subfigure}[b]{0.49\textwidth}
@@ -86,15 +84,15 @@ This idea is based on the following three insights:
 \section{Training Algorithm Implementation and Comparison}
 \label{app:training_algorithms}
 
-This section provides detailed descriptions of the reinforcement learning algorithms implemented in our codebase for Markovian chain-of-thought training. While the main paper focuses on our novel GRPO (Group Relative Policy Optimization) method, our implementation supports multiple optimization approaches, enabling comprehensive algorithmic comparison and providing researchers with a unified framework for Markovian training experiments.
+This section provides detailed descriptions of the reinforcement learning algorithms implemented in our codebase for Markovian chain-of-thought training. Our core contribution is the Markovian training paradigm that optimizes P(answer | CoT) rather than P(answer | question, CoT), creating a text bottleneck where the chain-of-thought must be causally load-bearing. We implement multiple optimization approaches to support this paradigm, enabling comprehensive algorithmic comparison.
 
 \subsection{Implemented Training Algorithms}
 
 Our codebase implements four distinct reinforcement learning algorithms, each designed to optimize the informativeness objective for Markovian chain-of-thought generation:
 
-\textbf{Group Relative Policy Optimization (GRPO):} Our main contribution, which performs gradient updates using group-wise advantage estimates without explicit reward mixing. This approach enables stable training with large batch sizes and improved sample efficiency.
+\textbf{Parallel Sampling with Batch Baseline:} Our main algorithmic approach, which uses standardized batch-wise advantage estimates (mean=0, std=1) without explicit reward mixing. This differs from standard GRPO by incorporating the Markovian reward constraint where the same model parameters $\theta$ are used for both policy and reward calculation, eliminating the need for iterative reward model updates.
 
-Besides GRPO, we implement three additional training objectives for algorithmic comparison:
+We also implement three additional training objectives for algorithmic comparison:
 
 \textbf{Policy Gradient (PG):} Uses the standard REINFORCE gradient with GRPO-style baseline:
 \begin{align}
@@ -115,11 +113,11 @@ where $r_t(\theta) = \frac{\pi_\theta(\text{CoT}_t)}{\pi_{\theta_{\text{old}}}(\
 where $\tau_t$ is computed as $\mu + k\sigma$ from the running history of rewards, with $k = 2.2$ standard deviations in our experiments.
 
 \subsection{Algorithmic Performance Evaluation on Arithmetic Tasks}
-Figure~\ref{fig:cot_arithmetic_performance} compares the performance of our four training algorithms on arithmetic reasoning tasks. This evaluation demonstrates how different optimization techniques affect the log probability $\ln \pi(\text{ans} | \text{CoT})$ progression during training, providing insight into how each approach enforces reliance on the chain-of-thought for arithmetic reasoning.
+Figure~\ref{fig:cot_arithmetic_performance} compares the performance of our four training algorithms on arithmetic reasoning tasks. This evaluation demonstrates how different optimization techniques affect the Markovian reward $R_\theta = \ln \pi_\theta(\text{ans} | \text{CoT}) - \ln \pi_\theta(\text{ans} | \text{CoT}')$ progression during training, where $\text{CoT} \sim u_\theta$ is sampled from the trained policy and $\text{CoT}' \sim u_0$ is sampled from the base model. The comparison shows how each algorithm enforces the text bottleneck constraint that makes the chain-of-thought causally load-bearing for prediction.
 
 \begin{figure}[ht]
     \centering
-    \includegraphics[width=0.8\textwidth]{Figures/cot_performance_comparison.png}
+    \includegraphics[width=0.98\textwidth]{Figures/cot_performance_comparison.png}
     \caption{Algorithmic comparison on arithmetic tasks: The log probability $\ln \pi(\text{ans} | \text{CoT})$ of the answer \textit{ans} given a CoT, where the CoT is sampled from the trained weights $\text{CoT} \sim u_\theta(\text{CoT} | q, \text{CoT}_{\text{init}})$ and $\text{CoT}'$ is sampled from the unmodified weights $\text{CoT}' \sim u(\text{CoT} | q, \text{CoT}_{\text{init}})$. We train to produce CoTs which are sufficient to predict the correct answer even without the original question, enforcing a text bottleneck in the language model's information flow. This plot depicts the training of Mistral 7B Instruct V0.2 on fifteen-term addition problems, comparing GRPO, PPO, Policy Gradient, and Expert Iteration approaches. Because of high variance, we plot the point-wise maximum over four runs for each training technique.}
     \label{fig:cot_arithmetic_performance}
 \end{figure}
