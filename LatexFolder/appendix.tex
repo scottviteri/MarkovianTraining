@@ -83,10 +83,10 @@ This idea is based on the following three insights:
 \item We can use reinforcement learning to push past the imitation learning regime, by continuing to train for this relative informativeness objective even when the AI is already the expert next-frame predictor.
 \end{itemize}
 
-\section{Additional Experimental Figures}
+\section{Comprehensive Training Algorithm Comparison and Cross-Model Analysis}
 \label{app:additional_figures}
 
-This section includes additional experimental results that were omitted from the main paper due to space constraints.
+This section presents detailed experimental analyses that provide deeper insights into our Markovian training framework. These results showcase algorithmic comparisons across different optimization techniques and demonstrate the generalizability of our approach through cross-model evaluation studies. While the main paper focuses on our novel GRPO method, these experiments establish the broader landscape of reinforcement learning approaches for Markovian CoT training and validate the interpretability claims through rigorous cross-architecture analysis.
 
 \subsection{Chain-of-Thought Performance on Arithmetic Tasks}
 Figure~\ref{fig:cot_arithmetic_performance} compares three reinforcement learning algorithms for training Markovian chain-of-thought reasoning on arithmetic tasks, in addition to our main GRPO (Group Relative Policy Optimization) approach presented in the paper. This figure demonstrates how different optimization techniques affect the log probability $\ln \pi(\text{ans} | \text{CoT})$ progression during training, providing insight into how Markovian training enforces reliance on the chain-of-thought for arithmetic reasoning.
@@ -119,7 +119,7 @@ where $\tau_t$ is computed as $\mu + k\sigma$ from the running history of reward
 \end{figure}
 
 \subsection{Cross-Model Interpretability Analysis}
-Figure~\ref{fig:wiki_cross_model} presents the cross-model evaluation analysis that demonstrates the interpretability of CoT generations across different model architectures. This analysis was referenced in Section~\ref{subsec:interp} but omitted from the main paper.
+Figure~\ref{fig:wiki_cross_model} presents the cross-model evaluation analysis that demonstrates the interpretability of CoT generations across different model architectures. This analysis supports the interpretability claims in the main paper by showing that learned reasoning patterns generalize across different language model architectures rather than being model-specific artifacts.
 
 \begin{figure}[ht]
     \centering
