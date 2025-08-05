@@ -2,5 +2,22 @@
 *__pycache__/
 *.egg*
 *.pt
+
+# Experiment results and logs (keep local only)
 results/*
 !results/Official/
+
+# Temporary collection folders
+temp_collection/
+paper_data/
+
+# Large model files
+*.safetensors
+*.bin
+
+# Large plots (keep only essential ones)
+*_plot.png
+test_*.png
+
+# Log files
+*.jsonl

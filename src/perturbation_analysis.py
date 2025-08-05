@@ -15,6 +15,53 @@ from tqdm import tqdm
 import string
 from pathlib import Path
 from utils import load_model
+from peft import PeftModel
+import glob
+
+
+def load_model_with_adapters(log_file_path, model_type, hyperparameters):
+    """
+    Load a model with its trained adapters if they exist.
+    
+    Args:
+        log_file_path: Path to the log file
+        model_type: Type of model to load
+        hyperparameters: Hyperparameters for the model
+        
+    Returns:
+        tuple: (actor_model, frozen_model, tokenizer, device)
+    """
+    # Load base models first
+    actor_model, frozen_model, tokenizer, device = load_model(model_type, hyperparameters)
+    
+    # Look for adapter directories in the same directory as the log file
+    log_dir = os.path.dirname(log_file_path)
+    adapter_pattern = os.path.join(log_dir, "adapter_*")
+    adapter_dirs = glob.glob(adapter_pattern)
+    
+    if adapter_dirs:
+        # Sort by batch number to get the latest adapter
+        def get_batch_number(adapter_path):
+            try:
+                return int(os.path.basename(adapter_path).split('_')[-1])
+            except (ValueError, IndexError):
+                return 0
+        
+        adapter_dirs_sorted = sorted(adapter_dirs, key=get_batch_number)
+        latest_adapter = adapter_dirs_sorted[-1]
+        print(f"Loading trained adapter from: {latest_adapter}")
+        
+        # Load the adapter using PEFT
+        actor_model = PeftModel.from_pretrained(
+            actor_model,  # Base model with LoRA config
+            latest_adapter,  # Adapter path
+            is_trainable=False  # Set to inference mode
+        )
+        print(f"Successfully loaded adapter from batch {os.path.basename(latest_adapter)}")
+    else:
+        print(f"No trained adapters found in {log_dir}, using base model")
+    
+    return actor_model, frozen_model, tokenizer, device
 
 
 def perturb_CoT(CoT, config):
@@ -160,7 +207,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
     # Extract hyperparameters from the first line
     hyperparameters = log_data[0]
     task_type = hyperparameters.get("task_type", "gsm8k")
-    frozen_model, tokenizer, device = load_model(hyperparameters["model_type"])
+    _, frozen_model, tokenizer, device = load_model_with_adapters(log_file, hyperparameters["model_type"], hyperparameters)
 
     # Filter log data by batch index if max_index is provided
     if max_index is not None:
@@ -338,7 +385,7 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
     # Extract hyperparameters from the first line
     hyperparameters = log_data[0]
     task_type = hyperparameters.get("task_type", "gsm8k")
-    frozen_model, tokenizer, device = load_model(hyperparameters["model_type"])
+    _, frozen_model, tokenizer, device = load_model_with_adapters(log_file, hyperparameters["model_type"], hyperparameters)
 
     # Filter log data by batch index if max_index is provided
     if max_index is not None:
@@ -625,7 +672,7 @@ def plot_perturbation_results(
     plt.grid(True, linestyle="--", alpha=0.7)
     plt.legend(fontsize=legend_font_size, loc="best")
     
-    plt.xlabel("Example Index", fontsize=font_size)
+    plt.xlabel("Training Batch", fontsize=font_size)
     
     # Update y-label based on what we're comparing
     if include_question:
@@ -723,7 +770,7 @@ def plot_multiple_perturbation_results(
                     ax.set_ylabel("Difference in Perturbation Effect\n(Actor - Critic)", fontsize=font_size)
             
             if ax.get_subplotspec().is_last_row():
-                ax.set_xlabel("Example Index", fontsize=font_size)
+                ax.set_xlabel("Training Batch", fontsize=font_size)
             
             ax.tick_params(axis='both', which='major', labelsize=font_size-2)
             
@@ -829,6 +876,460 @@ def collate_perturbation_results(perturbation_files, output_dir, perturb_type, i
     print(f"Averaged results for {perturb_type} saved to {output_file}")
 
 
+def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb_type, stride=1, max_index=None, save_interval=10, batch_size=8):
+    """
+    Compare perturbation sensitivity between Markovian and Non-Markovian models.
+    
+    Args:
+        markovian_log_file: Path to the Markovian model's log file
+        non_markovian_log_file: Path to the Non-Markovian model's log file
+        perturb_type: Type of perturbation to apply
+        stride: Process every nth entry of the log file
+        max_index: If provided, only process entries with batch_index <= max_index
+        save_interval: Save intermediate results every this many examples
+        batch_size: Number of examples to process in each batch
+        
+    Returns:
+        List of comparison results
+    """
+    if perturb_type not in PERTURBATION_SETS:
+        raise ValueError(f"Unknown perturbation type: {perturb_type}")
+
+    perturbations = PERTURBATION_SETS[perturb_type]["perturbations"]
+
+    # Load both log files
+    print("Loading Markovian model log file...")
+    with open(markovian_log_file, "r") as f:
+        markovian_log_data = [json.loads(line) for line in f]
+    
+    print("Loading Non-Markovian model log file...")
+    with open(non_markovian_log_file, "r") as f:
+        non_markovian_log_data = [json.loads(line) for line in f]
+
+    # Extract hyperparameters from both files
+    markovian_hyperparams = markovian_log_data[0]
+    non_markovian_hyperparams = non_markovian_log_data[0]
+    
+    # Verify they have the expected markovian settings
+    markovian_flag = markovian_hyperparams.get("markovian", True)
+    non_markovian_flag = non_markovian_hyperparams.get("markovian", True)
+    
+    print(f"Markovian log file markovian setting: {markovian_flag}")
+    print(f"Non-Markovian log file markovian setting: {non_markovian_flag}")
+    
+    if markovian_flag == non_markovian_flag:
+        print("WARNING: Both log files have the same markovian setting!")
+    
+    # Load both models with their respective adapters
+    print("Loading Markovian model...")
+    _, markovian_model, tokenizer, device = load_model_with_adapters(markovian_log_file, markovian_hyperparams["model_type"], markovian_hyperparams)
+    
+    print("Loading Non-Markovian model...")
+    _, non_markovian_model, _, _ = load_model_with_adapters(non_markovian_log_file, non_markovian_hyperparams["model_type"], non_markovian_hyperparams)
+
+    # Filter log data by batch index if max_index is provided
+    if max_index is not None:
+        markovian_log_data = [entry for entry in markovian_log_data if entry.get("Batch Index", float('inf')) <= max_index]
+        non_markovian_log_data = [entry for entry in non_markovian_log_data if entry.get("Batch Index", float('inf')) <= max_index]
+        print(f"Processing entries up to batch index {max_index}")
+
+    # Create output directory
+    output_dir = os.path.join(os.path.dirname(markovian_log_file), "markovian_comparison")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"comparison_results_{perturb_type}.json")
+    
+    # Extract entries to process from both models
+    markovian_entries = []
+    non_markovian_entries = []
+    
+    for entry in markovian_log_data[1:]:
+        if "Example" in entry:
+            markovian_entries.append(entry)
+    
+    for entry in non_markovian_log_data[1:]:
+        if "Example" in entry:
+            non_markovian_entries.append(entry)
+    
+    # Apply stride and ensure we have matching data
+    markovian_entries = markovian_entries[::stride]
+    non_markovian_entries = non_markovian_entries[::stride]
+    
+    # Use the minimum length to ensure we have paired data
+    min_length = min(len(markovian_entries), len(non_markovian_entries))
+    markovian_entries = markovian_entries[:min_length]
+    non_markovian_entries = non_markovian_entries[:min_length]
+    
+    print(f"Processing {min_length} paired entries from both models")
+    
+    comparison_data = []
+    
+    # Process in batches
+    for batch_idx in tqdm(range(0, min_length, batch_size), desc="Processing comparison batches"):
+        batch_markovian = markovian_entries[batch_idx:batch_idx + batch_size]
+        batch_non_markovian = non_markovian_entries[batch_idx:batch_idx + batch_size]
+        batch_size_actual = len(batch_markovian)
+        
+        # Extract data for current batch
+        questions = [entry["Example"].get("Question", "") for entry in batch_markovian]
+        actor_cots_markovian = [entry["Example"]["Actor Reasoning"] for entry in batch_markovian]
+        actor_cots_non_markovian = [entry["Example"]["Actor Reasoning"] for entry in batch_non_markovian]
+        answers = [entry["Example"]["Answer"] for entry in batch_markovian]
+        
+        # Initialize batch results
+        batch_results = []
+        for i in range(batch_size_actual):
+            batch_results.append({
+                "Batch Index": batch_markovian[i].get("Batch Index", None),
+                "Markovian Effects": {},
+                "Non_Markovian Effects": {},
+                "Effect Difference": {}  # Will be Markovian - Non_Markovian
+            })
+        
+        # Calculate original log probs for both models
+        # Markovian: without question, using trained Markovian model
+        markovian_original_logprobs, _ = calculate_answer_log_probs(
+            frozen_model=markovian_model,
+            tokenizer=tokenizer,
+            device=device,
+            questions=questions,
+            reasoning=actor_cots_markovian,
+            answers=answers,
+            hyperparameters=markovian_hyperparams,
+            include_question=False,  # Markovian doesn't use question
+        )
+        
+        # Non-Markovian: with question, using trained Non-Markovian model
+        non_markovian_original_logprobs, _ = calculate_answer_log_probs(
+            frozen_model=non_markovian_model,
+            tokenizer=tokenizer,
+            device=device,
+            questions=questions,
+            reasoning=actor_cots_non_markovian,
+            answers=answers,
+            hyperparameters=non_markovian_hyperparams,
+            include_question=True,  # Non-Markovian uses question
+        )
+        
+        # Process each perturbation
+        for pert_name, pert_config in perturbations.items():
+            if pert_name == "Original":
+                continue
+            
+            # Perturb reasoning for both models
+            perturbed_markovian_cots = [perturb_CoT(cot, pert_config) for cot in actor_cots_markovian]
+            perturbed_non_markovian_cots = [perturb_CoT(cot, pert_config) for cot in actor_cots_non_markovian]
+            
+            # Calculate perturbed log probs
+            # Markovian: without question, using trained Markovian model
+            markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
+                frozen_model=markovian_model,
+                tokenizer=tokenizer,
+                device=device,
+                questions=questions,
+                reasoning=perturbed_markovian_cots,
+                answers=answers,
+                hyperparameters=markovian_hyperparams,
+                include_question=False,
+            )
+            
+            # Non-Markovian: with question, using trained Non-Markovian model
+            non_markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
+                frozen_model=non_markovian_model,
+                tokenizer=tokenizer,
+                device=device,
+                questions=questions,
+                reasoning=perturbed_non_markovian_cots,
+                answers=answers,
+                hyperparameters=non_markovian_hyperparams,
+                include_question=True,
+            )
+            
+            # Calculate perturbation effects for this batch
+            for i in range(batch_size_actual):
+                markovian_effect = markovian_original_logprobs[i].item() - markovian_perturbed_logprobs[i].item()
+                non_markovian_effect = non_markovian_original_logprobs[i].item() - non_markovian_perturbed_logprobs[i].item()
+                effect_difference = markovian_effect - non_markovian_effect
+                
+                batch_results[i]["Markovian Effects"][pert_name] = markovian_effect
+                batch_results[i]["Non_Markovian Effects"][pert_name] = non_markovian_effect
+                batch_results[i]["Effect Difference"][pert_name] = effect_difference
+        
+        # Add batch results to overall results
+        comparison_data.extend(batch_results)
+        
+        # Periodically save intermediate results
+        if save_interval > 0 and (batch_idx + batch_size_actual) % save_interval == 0:
+            with open(output_path, "w") as f:
+                json.dump(comparison_data, f)
+            print(f"\nSaved {len(comparison_data)} comparison results to {output_path}")
+    
+    # Save final results
+    with open(output_path, "w") as f:
+        json.dump(comparison_data, f)
+    
+    print(f"Markovian comparison analysis complete. Processed {len(comparison_data)} entries.")
+    print(f"Results saved to {output_path}")
+    
+    return comparison_data, markovian_hyperparams, non_markovian_hyperparams
+
+
+def combine_all_markovian_comparison_plots(base_directory, font_size=12, include_perturbations=None, exclude_perturbations=None, legend_font_size=None):
+    """
+    Combine all markovian comparison plots from a directory into a single comprehensive figure.
+    
+    Args:
+        base_directory: Base directory containing markovian_comparison subdirectories
+        font_size: Base font size for plot elements (deprecated, use legend_font_size)
+        include_perturbations: List of perturbation types to include (if None, include all)
+        exclude_perturbations: List of perturbation types to exclude (if None, exclude none)
+        legend_font_size: Font size for all text elements (if None, uses font_size for backward compatibility)
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.image as mpimg
+    from pathlib import Path
+    import os
+    import numpy as np
+    
+    # Use legend_font_size if provided, otherwise fall back to font_size for backward compatibility
+    if legend_font_size is None:
+        legend_font_size = font_size
+    
+    # Find all markovian comparison plot files
+    plot_files = []
+    perturbation_types = []
+    
+    markovian_dir = os.path.join(base_directory, "markovian_comparison")
+    if os.path.exists(markovian_dir):
+        for filename in os.listdir(markovian_dir):
+            if filename.startswith("markovian_comparison_") and filename.endswith("_plot.png"):
+                # Extract perturbation type from filename
+                perturb_type = filename.replace("markovian_comparison_", "").replace("_plot.png", "")
+                
+                # Apply include/exclude filters
+                if include_perturbations is not None and perturb_type not in include_perturbations:
+                    continue
+                if exclude_perturbations is not None and perturb_type in exclude_perturbations:
+                    continue
+                
+                plot_files.append(os.path.join(markovian_dir, filename))
+                perturbation_types.append(perturb_type)
+    
+    if not plot_files:
+        print(f"No markovian comparison plots found in {markovian_dir}")
+        return
+    
+    # Sort by perturbation type for consistent ordering
+    sorted_pairs = sorted(zip(plot_files, perturbation_types), key=lambda x: x[1])
+    plot_files, perturbation_types = zip(*sorted_pairs)
+    
+    n_plots = len(plot_files)
+    
+    # Create subplot layout - try to make it roughly square
+    if n_plots == 1:
+        rows, cols = 1, 1
+    elif n_plots <= 4:
+        rows, cols = 2, 2
+    elif n_plots <= 6:
+        rows, cols = 2, 3
+    elif n_plots <= 9:
+        rows, cols = 3, 3
+    else:
+        rows, cols = 4, 3
+    
+    # Create figure with subplots
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 6, rows * 4))
+    fig.suptitle('Comprehensive Markovian vs Non-Markovian Perturbation Analysis', 
+                fontsize=legend_font_size + 4, fontweight='bold')
+    
+    # Flatten axes array for easier indexing
+    if n_plots == 1:
+        # For single plot, axes is a single matplotlib axis object
+        axes = [axes]
+    else:
+        # For multiple plots, axes is a numpy array
+        axes = axes.flatten()
+    
+    # Load and display each plot
+    for i, (plot_file, perturb_type) in enumerate(zip(plot_files, perturbation_types)):
+        try:
+            img = mpimg.imread(plot_file)
+            axes[i].imshow(img)
+            axes[i].set_title(f'{perturb_type.replace("_", " ").title()}', 
+                            fontsize=legend_font_size + 2, fontweight='bold')
+            axes[i].axis('off')
+        except Exception as e:
+            print(f"Error loading {plot_file}: {e}")
+            axes[i].text(0.5, 0.5, f'Error loading\n{perturb_type}', 
+                        ha='center', va='center', fontsize=legend_font_size)
+            axes[i].axis('off')
+    
+    # Hide any unused subplots
+    for i in range(n_plots, len(axes)):
+        axes[i].axis('off')
+    
+    # Adjust layout
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.93)  # Make room for suptitle
+    
+    # Save combined plot
+    output_path = os.path.join(markovian_dir, "combined_markovian_comparison_plots.png")
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Combined plot saved to: {output_path}")
+    print(f"Included {n_plots} perturbation types: {', '.join(sorted(perturbation_types))}")
+    plt.close()
+
+
+def plot_markovian_comparison_results(results, output_dir, perturb_type, window_size=40, font_size=12, legend_font_size=10, markovian_hyperparams=None, non_markovian_hyperparams=None):
+    """
+    Plot the Markovian vs Non-Markovian comparison results.
+    
+    Args:
+        results: The comparison results data
+        output_dir: Directory to save the plot
+        perturb_type: The type of perturbation being analyzed
+        window_size: Smoothing window size
+        font_size: Base font size for plot text elements
+        legend_font_size: Font size for the legend
+    """
+    if not results:
+        print("No results to plot.")
+        return
+    
+    # Get all perturbation degrees from the first entry
+    perturbation_degrees = list(results[0]["Effect Difference"].keys())
+    print(f"Found perturbation degrees: {perturbation_degrees}")
+    
+    # Only plot non-zero perturbation degrees
+    baseline_name = f"{perturb_type.title().replace('_', '')}0%"
+    plot_degrees = [deg for deg in perturbation_degrees if deg != baseline_name]
+    print(f"Plotting degrees: {plot_degrees}")
+    
+    if not plot_degrees:
+        print("No non-zero perturbation degrees found to plot.")
+        return
+    
+    # Extract batch indices
+    batch_indices = [entry["Batch Index"] for entry in results]
+    
+    # Create the plot
+    plt.figure(figsize=(14, 8))
+    colors = plt.cm.tab10(np.linspace(0, 1, len(plot_degrees)))
+    
+    for i, degree in enumerate(plot_degrees):
+        # Extract effect differences for this perturbation degree
+        effect_differences = [entry["Effect Difference"][degree] for entry in results]
+        
+        # Smoothing
+        if window_size > 1 and len(effect_differences) > window_size:
+            try:
+                smoothed_effects = savgol_filter(effect_differences, window_size, 3)
+                padding = window_size // 2
+                x_values = range(padding, len(effect_differences) - padding)
+                smoothed_effects = smoothed_effects[padding:-padding]
+            except ValueError as e:
+                print(f"Smoothing error: {e}. Using raw data.")
+                x_values = range(len(effect_differences))
+                smoothed_effects = effect_differences
+        else:
+            x_values = range(len(effect_differences))
+            smoothed_effects = effect_differences
+        
+        # Plot this perturbation degree
+        plt.plot(
+            x_values,
+            smoothed_effects,
+            label=f"{degree}",
+            color=colors[i],
+            linewidth=2,
+        )
+    
+    plt.grid(True, linestyle="--", alpha=0.7)
+    plt.legend(fontsize=legend_font_size, loc="best")
+    
+    # Create x-axis label with batch size information if available
+    xlabel = "Training Batch"
+    if markovian_hyperparams and non_markovian_hyperparams:
+        m_batch_size = markovian_hyperparams.get('batch_size', 'unknown')
+        nm_batch_size = non_markovian_hyperparams.get('batch_size', 'unknown')
+        if m_batch_size == nm_batch_size:
+            xlabel += f" (batch size={m_batch_size})"
+        else:
+            xlabel += f" (Markovian: {m_batch_size}, Non-Markovian: {nm_batch_size})"
+    
+    plt.xlabel(xlabel, fontsize=legend_font_size)
+    plt.ylabel("Perturbation Effect Difference\n(Markovian Effect - Non-Markovian Effect)", fontsize=legend_font_size)
+    
+    title = f"Markovian vs Non-Markovian Comparison: {perturb_type.replace('_', ' ').title()}"
+    if window_size > 1:
+        title += f" (Smoothing: {window_size})"
+    else:
+        title += " (Raw Data)"
+    
+    plt.title(title, fontsize=legend_font_size + 2)
+    plt.tick_params(axis="both", which="major", labelsize=legend_font_size)
+    
+    # Add a horizontal line at y=0 for reference
+    plt.axhline(y=0, color='black', linestyle='-', alpha=0.3, linewidth=1)
+    
+    plt.tight_layout()
+    
+    # Save the plot
+    output_file = os.path.join(output_dir, f"markovian_comparison_{perturb_type}_plot.png")
+    plt.savefig(output_file, dpi=300, bbox_inches="tight")
+    print(f"Markovian comparison plot saved to {output_file}")
+    plt.close()
+
+
+def analyze_markovian_comparison_summary(results, perturb_type):
+    """
+    Print a summary analysis of the Markovian comparison results.
+    
+    Args:
+        results: The comparison results data
+        perturb_type: The type of perturbation being analyzed
+    """
+    if not results:
+        print("No results to analyze.")
+        return
+    
+    print(f"\n=== MARKOVIAN COMPARISON SUMMARY: {perturb_type.upper()} ===")
+    
+    perturbation_degrees = list(results[0]["Effect Difference"].keys())
+    baseline_name = f"{perturb_type.title().replace('_', '')}0%"
+    analysis_degrees = [deg for deg in perturbation_degrees if deg != baseline_name]
+    
+    for degree in analysis_degrees:
+        markovian_effects = [entry["Markovian Effects"][degree] for entry in results]
+        non_markovian_effects = [entry["Non_Markovian Effects"][degree] for entry in results]
+        effect_differences = [entry["Effect Difference"][degree] for entry in results]
+        
+        # Calculate statistics
+        mean_markovian = np.mean(markovian_effects)
+        mean_non_markovian = np.mean(non_markovian_effects)
+        mean_difference = np.mean(effect_differences)
+        std_difference = np.std(effect_differences)
+        
+        # Count how often each model is more sensitive
+        markovian_more_sensitive = sum(1 for diff in effect_differences if diff > 0)
+        non_markovian_more_sensitive = sum(1 for diff in effect_differences if diff < 0)
+        
+        print(f"\n{degree}:")
+        print(f"  Mean Markovian Effect: {mean_markovian:.4f}")
+        print(f"  Mean Non-Markovian Effect: {mean_non_markovian:.4f}")
+        print(f"  Mean Difference (M - NM): {mean_difference:.4f} ± {std_difference:.4f}")
+        print(f"  Markovian more sensitive: {markovian_more_sensitive}/{len(results)} cases")
+        print(f"  Non-Markovian more sensitive: {non_markovian_more_sensitive}/{len(results)} cases")
+        
+        if mean_difference > 0:
+            print(f"  → Overall: Markovian model is MORE sensitive to {degree} perturbations")
+        elif mean_difference < 0:
+            print(f"  → Overall: Non-Markovian model is MORE sensitive to {degree} perturbations")
+        else:
+            print(f"  → Overall: Similar sensitivity to {degree} perturbations")
+    
+    print("\n" + "="*60)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Perturbation Analysis Tool")
     parser.add_argument("--log_file", help="Log file to analyze or directory containing perturbation results")
@@ -866,6 +1367,23 @@ def main():
         type=int,
         default=8,
         help="Number of examples to process in each batch (0 for non-batched processing)",
+    )
+    
+    # New arguments for Markovian comparison
+    parser.add_argument(
+        "--markovian_comparison",
+        action="store_true",
+        help="Run Markovian vs Non-Markovian comparison analysis",
+    )
+    parser.add_argument(
+        "--markovian_log",
+        type=str,
+        help="Path to Markovian model log file (for comparison mode)",
+    )
+    parser.add_argument(
+        "--non_markovian_log", 
+        type=str,
+        help="Path to Non-Markovian model log file (for comparison mode)",
     )
 
     # Adjusted to not require --perturb when using --collate
@@ -909,11 +1427,131 @@ def main():
         action="store_true",
         help="Generate a combined plot for multiple perturbation types"
     )
+    parser.add_argument(
+        "--combine_all_plots",
+        action="store_true",
+        help="Combine all existing markovian comparison plots into a single comprehensive figure"
+    )
+    parser.add_argument(
+        "--include_perturbations",
+        nargs="+",
+        choices=list(PERTURBATION_SETS.keys()),
+        help="Include only specified perturbation types in combined plot (for --combine_all_plots)"
+    )
+    parser.add_argument(
+        "--exclude_perturbations",
+        nargs="+",
+        choices=list(PERTURBATION_SETS.keys()),
+        help="Exclude specified perturbation types from combined plot (for --combine_all_plots)"
+    )
+    parser.add_argument(
+        "--regenerate_before_combine",
+        action="store_true",
+        help="Regenerate individual markovian comparison plots with new parameters before combining (for --combine_all_plots)"
+    )
 
     args = parser.parse_args()
 
     if args.all:
         args.perturb = list(PERTURBATION_SETS.keys())
+
+    # Handle markovian comparison mode
+    if args.markovian_comparison:
+        if not args.markovian_log or not args.non_markovian_log:
+            print("Error: --markovian_comparison requires both --markovian_log and --non_markovian_log arguments")
+            return
+        if not args.perturb:
+            print("Error: --markovian_comparison requires --perturb argument")
+            return
+        
+        for perturb_type in args.perturb:
+            print(f"Running Markovian vs Non-Markovian comparison for {perturb_type}...")
+            comparison_data, markovian_hyperparams, non_markovian_hyperparams = run_markovian_comparison(
+                markovian_log_file=args.markovian_log,
+                non_markovian_log_file=args.non_markovian_log,
+                perturb_type=perturb_type,
+                stride=args.stride,
+                max_index=args.max_index,
+                save_interval=args.save_interval,
+                batch_size=args.batch_size
+            )
+            
+            # Generate plots and analysis
+            output_dir = os.path.join(os.path.dirname(args.markovian_log), "markovian_comparison")
+            plot_markovian_comparison_results(
+                results=comparison_data,
+                output_dir=output_dir,
+                perturb_type=perturb_type,
+                window_size=args.window_size,
+                font_size=args.font_size,
+                legend_font_size=args.legend_font_size,
+                markovian_hyperparams=markovian_hyperparams,
+                non_markovian_hyperparams=non_markovian_hyperparams
+            )
+            
+            # Print summary analysis
+            analyze_markovian_comparison_summary(comparison_data, perturb_type)
+            
+            print(f"Markovian comparison for {perturb_type} completed.")
+        
+        return  # Exit after comparison analysis
+
+    # Handle combine all plots mode
+    if args.combine_all_plots:
+        if not args.log_file:
+            print("Error: --combine_all_plots requires --log_file argument to specify the base directory")
+            return
+        
+        # Validate include/exclude arguments
+        if args.include_perturbations and args.exclude_perturbations:
+            print("Error: Cannot specify both --include_perturbations and --exclude_perturbations")
+            return
+        
+        # If log_file points to a file, get its directory; if it's a directory, use it directly
+        if os.path.isfile(args.log_file):
+            base_dir = os.path.dirname(args.log_file)
+        else:
+            base_dir = args.log_file
+            
+        # Regenerate individual plots if requested
+        if args.regenerate_before_combine:
+            # Determine which perturbations to regenerate
+            if args.include_perturbations:
+                perturb_types_to_regenerate = args.include_perturbations
+            else:
+                # Use all available perturbation types, minus excluded ones
+                perturb_types_to_regenerate = list(PERTURBATION_SETS.keys())
+                if args.exclude_perturbations:
+                    perturb_types_to_regenerate = [p for p in perturb_types_to_regenerate if p not in args.exclude_perturbations]
+            
+            print(f"Regenerating individual plots for: {perturb_types_to_regenerate}")
+            markovian_dir = os.path.join(base_dir, "markovian_comparison")
+            
+            for perturb_type in perturb_types_to_regenerate:
+                json_file = os.path.join(markovian_dir, f"comparison_results_{perturb_type}.json")
+                if os.path.exists(json_file):
+                    print(f"Regenerating plot for {perturb_type}...")
+                    with open(json_file, 'r') as f:
+                        results = json.load(f)
+                    plot_markovian_comparison_results(
+                        results=results,
+                        output_dir=markovian_dir,
+                        perturb_type=perturb_type,
+                        window_size=args.window_size,
+                        font_size=args.font_size,
+                        legend_font_size=args.legend_font_size
+                    )
+                else:
+                    print(f"Warning: {json_file} not found, skipping {perturb_type}")
+        
+        combine_all_markovian_comparison_plots(
+            base_dir, 
+            font_size=args.font_size,
+            include_perturbations=args.include_perturbations,
+            exclude_perturbations=args.exclude_perturbations,
+            legend_font_size=args.legend_font_size
+        )
+        return
 
     if args.collate:
         if not args.output_dir:
