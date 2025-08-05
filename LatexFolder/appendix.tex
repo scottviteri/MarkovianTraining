@@ -90,15 +90,15 @@ This section provides detailed descriptions of the reinforcement learning algori
 
 Our codebase implements four distinct reinforcement learning algorithms, each designed to optimize the informativeness objective for Markovian chain-of-thought generation:
 
-\textbf{Parallel Sampling with Batch Baseline:} Our main algorithmic approach, which uses standardized batch-wise advantage estimates (mean=0, std=1) without explicit reward mixing. This differs from standard GRPO by incorporating the Markovian reward constraint where the same model parameters $\theta$ are used for both policy and reward calculation, eliminating the need for iterative reward model updates.
+\textbf{Parallel Sampling with Batch Baseline:} Our main algorithmic approach, which uses standardized batch-wise advantage estimates (mean=0, std=1) without exponential moving average baseline mixing. This differs from standard GRPO by incorporating the Markovian reward constraint where the same model parameters $\theta$ are used for both policy and reward calculation, eliminating the need for iterative reward model updates.
 
 We also implement three additional training objectives for algorithmic comparison:
 
-\textbf{Policy Gradient (PG):} Uses the standard REINFORCE gradient with GRPO-style baseline:
+\textbf{Policy Gradient (PG):} Uses the standard REINFORCE gradient with exponential moving average baseline:
 \begin{align}
 \mathcal{L}_{\text{PG}} &= -\ln u_\theta(\text{CoT} \mid q, \text{CoT}_{\text{init}}) \cdot A^{\text{detach}}
 \end{align}
-where $A$ is the standardized advantage computed from the informativeness reward $R_\theta = \ln \pi_\theta(\text{ans} \mid \text{CoT}) - \ln \pi_\theta(\text{ans} \mid \text{CoT}')$.
+where $A$ is the advantage computed from the informativeness reward $R_\theta = \ln \pi_\theta(\text{ans} \mid \text{CoT}) - \ln \pi_\theta(\text{ans} \mid \text{CoT}')$ and an exponential moving average baseline $V_t = \sum_{i=1}^{t-1} w_i R_i$ with weights $w_i = r^{t-1-i} / \sum_{j=1}^{t-1} r^{t-1-j}$ (parameter $r = 0.9$).
 
 \textbf{Proximal Policy Optimization (PPO):} Adds ratio clipping to prevent large policy updates:
 \begin{align}
@@ -242,11 +242,11 @@ The experimental design explored several key dimensions:
 
 \textbf{Training Duration:} We used two training regimes - shorter runs (10,000 batches) for initial exploration and longer runs (100,000 batches) for comprehensive evaluation. The shorter runs allowed rapid iteration during hyperparameter search, while longer runs provided robust performance estimates.
 
-The reward mixing parameter r (0.9) is only used in non-parallel mode; parallel (GRPO) mode uses a different optimization approach. The CoT length was fixed at 75 tokens to ensure consistent computational overhead across experiments. Detailed model and dataset specifications are provided in the Reproducibility Statement below.
+The exponential moving average parameter r (0.9) is only used in non-parallel mode for computing historical baseline values; parallel (GRPO) mode uses batch-wise standardization instead. The CoT length was fixed at 75 tokens to ensure consistent computational overhead across experiments. Detailed model and dataset specifications are provided in the Reproducibility Statement below.
 
 \begin{table}[ht]
     \centering
-    \caption{Hyperparameter configurations for Wikipedia continuation experiments with actual training duration. Experiments use either GRPO optimization (Parallel=Y) or standard policy gradient (Parallel=N) with LoRA fine-tuning. The reward mixing parameter $r$ is only used in non-parallel mode. 'Actual Lines' shows the number of log entries, indicating actual training progress.}
+    \caption{Hyperparameter configurations for Wikipedia continuation experiments with actual training duration. Experiments use either GRPO optimization (Parallel=Y) or standard policy gradient (Parallel=N) with LoRA fine-tuning. The exponential moving average parameter $r$ is only used in non-parallel mode for baseline computation. 'Actual Lines' shows the number of log entries, indicating actual training progress.}
     \label{tab:wiki_hyperparams}
     \resizebox{\textwidth}{!}{%
     \begin{tabular}{llllllllllll}
