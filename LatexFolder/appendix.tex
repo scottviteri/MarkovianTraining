@@ -83,15 +83,18 @@ This idea is based on the following three insights:
 \item We can use reinforcement learning to push past the imitation learning regime, by continuing to train for this relative informativeness objective even when the AI is already the expert next-frame predictor.
 \end{itemize}
 
-\section{Comprehensive Training Algorithm Comparison and Cross-Model Analysis}
-\label{app:additional_figures}
+\section{Training Algorithm Implementation and Comparison}
+\label{app:training_algorithms}
 
-This section presents detailed experimental analyses that provide deeper insights into our Markovian training framework. These results showcase algorithmic comparisons across different optimization techniques and demonstrate the generalizability of our approach through cross-model evaluation studies. While the main paper focuses on our novel GRPO method, these experiments establish the broader landscape of reinforcement learning approaches for Markovian CoT training and validate the interpretability claims through rigorous cross-architecture analysis.
+This section provides detailed descriptions of the reinforcement learning algorithms implemented in our codebase for Markovian chain-of-thought training. While the main paper focuses on our novel GRPO (Group Relative Policy Optimization) method, our implementation supports multiple optimization approaches, enabling comprehensive algorithmic comparison and providing researchers with a unified framework for Markovian training experiments.
 
-\subsection{Chain-of-Thought Performance on Arithmetic Tasks}
-Figure~\ref{fig:cot_arithmetic_performance} compares three reinforcement learning algorithms for training Markovian chain-of-thought reasoning on arithmetic tasks, in addition to our main GRPO (Group Relative Policy Optimization) approach presented in the paper. This figure demonstrates how different optimization techniques affect the log probability $\ln \pi(\text{ans} | \text{CoT})$ progression during training, providing insight into how Markovian training enforces reliance on the chain-of-thought for arithmetic reasoning.
+\subsection{Implemented Training Algorithms}
 
-Besides GRPO, we implement three additional training objectives for comparison:
+Our codebase implements four distinct reinforcement learning algorithms, each designed to optimize the informativeness objective for Markovian chain-of-thought generation:
+
+\textbf{Group Relative Policy Optimization (GRPO):} Our main contribution, which performs gradient updates using group-wise advantage estimates without explicit reward mixing. This approach enables stable training with large batch sizes and improved sample efficiency.
+
+Besides GRPO, we implement three additional training objectives for algorithmic comparison:
 
 \textbf{Policy Gradient (PG):} Uses the standard REINFORCE gradient with GRPO-style baseline:
 \begin{align}
@@ -111,10 +114,13 @@ where $r_t(\theta) = \frac{\pi_\theta(\text{CoT}_t)}{\pi_{\theta_{\text{old}}}(\
 \end{align}
 where $\tau_t$ is computed as $\mu + k\sigma$ from the running history of rewards, with $k = 2.2$ standard deviations in our experiments.
 
+\subsection{Algorithmic Performance Evaluation on Arithmetic Tasks}
+Figure~\ref{fig:cot_arithmetic_performance} compares the performance of our four training algorithms on arithmetic reasoning tasks. This evaluation demonstrates how different optimization techniques affect the log probability $\ln \pi(\text{ans} | \text{CoT})$ progression during training, providing insight into how each approach enforces reliance on the chain-of-thought for arithmetic reasoning.
+
 \begin{figure}[ht]
     \centering
     \includegraphics[width=0.8\textwidth]{Figures/cot_performance_comparison.png}
-    \caption{The log probability $\ln \pi(\text{ans} | \text{CoT})$ of the answer \textit{ans} given a CoT, where the CoT is sampled from the trained weights $\text{CoT} \sim u_\theta(\text{CoT} | q, \text{CoT}_{\text{init}})$ and $\text{CoT}'$ is sampled from the unmodified weights $\text{CoT}' \sim u(\text{CoT} | q, \text{CoT}_{\text{init}})$. We train to produce CoTs which are sufficient to predict the correct answer even without the original question, enforcing a text bottleneck in the language model's information flow, forcing the CoT to be causally load-bearing to production of the answer. This plot specifically depicts the training of Mistral 7B Instruct V0.2 on fifteen-term addition problems and their solutions. Because of high variance, we plot the point-wise maximum over four runs for each training technique.}
+    \caption{Algorithmic comparison on arithmetic tasks: The log probability $\ln \pi(\text{ans} | \text{CoT})$ of the answer \textit{ans} given a CoT, where the CoT is sampled from the trained weights $\text{CoT} \sim u_\theta(\text{CoT} | q, \text{CoT}_{\text{init}})$ and $\text{CoT}'$ is sampled from the unmodified weights $\text{CoT}' \sim u(\text{CoT} | q, \text{CoT}_{\text{init}})$. We train to produce CoTs which are sufficient to predict the correct answer even without the original question, enforcing a text bottleneck in the language model's information flow. This plot depicts the training of Mistral 7B Instruct V0.2 on fifteen-term addition problems, comparing GRPO, PPO, Policy Gradient, and Expert Iteration approaches. Because of high variance, we plot the point-wise maximum over four runs for each training technique.}
     \label{fig:cot_arithmetic_performance}
 \end{figure}
 
@@ -232,7 +238,13 @@ The experimental design explored several key dimensions:
 
 \textbf{Temperature Scaling:} We systematically varied the sampling temperature (1.2, 1.3, 1.4) to study the effect of generation diversity on Markovian training effectiveness. Higher temperatures encourage more diverse CoT generation, potentially leading to more robust reasoning patterns.
 
-\textbf{Markovian vs Non-Markovian Training:} For each model and temperature combination, we conducted paired experiments with Markovian training enabled and disabled. This allows direct comparison of our approach against standard fine-tuning baselines.
+\textbf{Markovian vs Non-Markovian Training:} This represents the core methodological distinction of our work. For each model and temperature combination, we conducted paired experiments comparing two training paradigms:
+
+\textit{Markovian Training (Markov=Y):} The model is trained to maximize the informativeness of its CoT for predicting the target answer, enforcing a text bottleneck where the CoT must contain sufficient information for accurate prediction even without access to the original question. This creates causal dependency on the reasoning trace.
+
+\textit{Non-Markovian Training (Markov=N):} Standard fine-tuning where the model has access to both the original question and its generated CoT when predicting the answer. This serves as our baseline, representing conventional chain-of-thought training without the informativeness constraint.
+
+The systematic comparison between these modes allows us to isolate the effects of our Markovian training approach and demonstrate its impact on reasoning quality and interpretability.
 
 \textbf{Batch Size Optimization:} Batch sizes were tailored to each model's memory requirements and computational efficiency, ranging from 6 (Mistral, Llama) to 16 (Phi) based on GPU memory constraints and convergence characteristics.
 
