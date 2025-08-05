@@ -113,12 +113,12 @@ where $r_t(\theta) = \frac{\pi_\theta(\text{CoT}_t)}{\pi_{\theta_{\text{old}}}(\
 where $\tau_t$ is computed as $\mu + k\sigma$ from the running history of rewards, with $k = 2.2$ standard deviations in our experiments.
 
 \subsection{Algorithmic Performance Evaluation on Arithmetic Tasks}
-Figure~\ref{fig:cot_arithmetic_performance} compares the performance of our four training algorithms on arithmetic reasoning tasks. This evaluation demonstrates how different optimization techniques affect the Markovian reward $R_\theta = \ln \pi_\theta(\text{ans} | \text{CoT}) - \ln \pi_\theta(\text{ans} | \text{CoT}')$ progression during training, where $\text{CoT} \sim u_\theta$ is sampled from the trained policy and $\text{CoT}' \sim u_0$ is sampled from the base model. The comparison shows how each algorithm enforces the text bottleneck constraint that makes the chain-of-thought causally load-bearing for prediction.
+Figure~\ref{fig:cot_arithmetic_performance} compares the performance of three training algorithms on arithmetic reasoning tasks. This evaluation demonstrates how different optimization techniques affect the Markovian reward $R_\theta = \ln \pi_\theta(\text{ans} | \text{CoT}) - \ln \pi_\theta(\text{ans} | \text{CoT}')$ progression during training, where $\text{CoT} \sim u_\theta$ is sampled from the trained policy and $\text{CoT}' \sim u_0$ is sampled from the base model. The comparison shows how each algorithm enforces the text bottleneck constraint that makes the chain-of-thought causally load-bearing for prediction.
 
 \begin{figure}[ht]
     \centering
     \includegraphics[width=0.98\textwidth]{Figures/cot_performance_comparison.png}
-    \caption{Algorithmic comparison on arithmetic tasks: The log probability $\ln \pi(\text{ans} | \text{CoT})$ of the answer \textit{ans} given a CoT, where the CoT is sampled from the trained weights $\text{CoT} \sim u_\theta(\text{CoT} | q, \text{CoT}_{\text{init}})$ and $\text{CoT}'$ is sampled from the unmodified weights $\text{CoT}' \sim u(\text{CoT} | q, \text{CoT}_{\text{init}})$. We train to produce CoTs which are sufficient to predict the correct answer even without the original question, enforcing a text bottleneck in the language model's information flow. This plot depicts the training of Mistral 7B Instruct V0.2 on fifteen-term addition problems, comparing GRPO, PPO, Policy Gradient, and Expert Iteration approaches. Because of high variance, we plot the point-wise maximum over four runs for each training technique.}
+    \caption{Algorithmic comparison on arithmetic tasks: The log probability $\ln \pi(\text{ans} | \text{CoT})$ of the answer \textit{ans} given a CoT, where the CoT is sampled from the trained weights $\text{CoT} \sim u_\theta(\text{CoT} | q, \text{CoT}_{\text{init}})$ and $\text{CoT}'$ is sampled from the unmodified weights $\text{CoT}' \sim u(\text{CoT} | q, \text{CoT}_{\text{init}})$. We train to produce CoTs which are sufficient to predict the correct answer even without the original question, enforcing a text bottleneck in the language model's information flow. This plot depicts the training of Mistral 7B Instruct V0.2 on fifteen-term addition problems, comparing PPO, Policy Gradient, and Expert Iteration approaches. Because of high variance, we plot the point-wise maximum over four runs for each training technique.}
     \label{fig:cot_arithmetic_performance}
 \end{figure}
 
@@ -127,7 +127,7 @@ Figure~\ref{fig:wiki_cross_model} presents the cross-model evaluation analysis t
 
 \begin{figure}[ht]
     \centering
-    \includegraphics[width=0.8\textwidth]{Figures/wiki_multi_critic_comparison.png}
+    \includegraphics[width=0.98\textwidth]{Figures/wiki_multi_critic_comparison.png}
     \caption{Cross-model evaluation showing Llama-3.1-8B-Instruct's evaluation of Mistral's CoT quality throughout training on Wikipedia text prediction. The correlation between improvements in both models' evaluations suggests the learned reasoning patterns generalize across architectures rather than being model-specific artifacts. Each plot is averaged across 6 independent training runs.}
     \label{fig:wiki_cross_model}
 \end{figure}
@@ -236,19 +236,13 @@ The experimental design explored several key dimensions:
 
 \textbf{Temperature Scaling:} We systematically varied the sampling temperature (1.2, 1.3, 1.4) to study the effect of generation diversity on Markovian training effectiveness. Higher temperatures encourage more diverse CoT generation, potentially leading to more robust reasoning patterns.
 
-\textbf{Markovian vs Non-Markovian Training:} This represents the core methodological distinction of our work. For each model and temperature combination, we conducted paired experiments comparing two training paradigms:
-
-\textit{Markovian Training (Markov=Y):} The model is trained to maximize the informativeness of its CoT for predicting the target answer, enforcing a text bottleneck where the CoT must contain sufficient information for accurate prediction even without access to the original question. This creates causal dependency on the reasoning trace.
-
-\textit{Non-Markovian Training (Markov=N):} Standard fine-tuning where the model has access to both the original question and its generated CoT when predicting the answer. This serves as our baseline, representing conventional chain-of-thought training without the informativeness constraint.
-
-The systematic comparison between these modes allows us to isolate the effects of our Markovian training approach and demonstrate its impact on reasoning quality and interpretability.
+\textbf{Markovian vs Non-Markovian Training:} For each model and temperature combination, we conducted paired experiments comparing Markovian training (Markov=Y) versus Non-Markovian training (Markov=N) to isolate the effects of our approach.
 
 \textbf{Batch Size Optimization:} Batch sizes were tailored to each model's memory requirements and computational efficiency, ranging from 6 (Mistral, Llama) to 16 (Phi) based on GPU memory constraints and convergence characteristics.
 
 \textbf{Training Duration:} We used two training regimes - shorter runs (10,000 batches) for initial exploration and longer runs (100,000 batches) for comprehensive evaluation. The shorter runs allowed rapid iteration during hyperparameter search, while longer runs provided robust performance estimates.
 
-All experiments maintained consistent core hyperparameters: learning rate (1e-4), KL penalty (0.1), and LoRA configuration (rank 8, alpha 16). The reward mixing parameter r (0.9) is only used in non-parallel mode; parallel (GRPO) mode uses a different optimization approach. The CoT length was fixed at 75 tokens to ensure consistent computational overhead across experiments. Detailed model and dataset specifications are provided in the Reproducibility Statement below.
+The reward mixing parameter r (0.9) is only used in non-parallel mode; parallel (GRPO) mode uses a different optimization approach. The CoT length was fixed at 75 tokens to ensure consistent computational overhead across experiments. Detailed model and dataset specifications are provided in the Reproducibility Statement below.
 
 \begin{table}[ht]
     \centering
