@@ -8,8 +8,8 @@ setup(
     name="markovian_training",
     version="0.1.0",
     description="Markovian Training with Vector Quantization",
-    author="Scott Viteri",
-    author_email="scottviteri@gmail.com",
+    author="Anonymous",
+    author_email="anonymous@gmail.com",
     # Use py_modules instead of packages for top-level modules
     py_modules=[
         "utils", "train", "evaluate_gsm8k", "constants", 
