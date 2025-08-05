@@ -89,9 +89,9 @@ This idea is based on the following three insights:
 This section includes additional experimental results that were omitted from the main paper due to space constraints.
 
 \subsection{Chain-of-Thought Performance on Arithmetic Tasks}
-Figure~\ref{fig:cot_arithmetic_performance} compares three reinforcement learning algorithms for training Markovian chain-of-thought reasoning on arithmetic tasks. This figure demonstrates how different optimization techniques affect the log probability $\ln \pi(\text{ans} | \text{CoT})$ progression during training, providing insight into how Markovian training enforces reliance on the chain-of-thought for arithmetic reasoning.
+Figure~\ref{fig:cot_arithmetic_performance} compares three reinforcement learning algorithms for training Markovian chain-of-thought reasoning on arithmetic tasks, in addition to our main GRPO (Group Relative Policy Optimization) approach presented in the paper. This figure demonstrates how different optimization techniques affect the log probability $\ln \pi(\text{ans} | \text{CoT})$ progression during training, providing insight into how Markovian training enforces reliance on the chain-of-thought for arithmetic reasoning.
 
-We implement three distinct training objectives:
+Besides GRPO, we implement three additional training objectives for comparison:
 
 \textbf{Policy Gradient (PG):} Uses the standard REINFORCE gradient with GRPO-style baseline:
 \begin{align}
