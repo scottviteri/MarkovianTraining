@@ -245,11 +245,27 @@ results/
 │       ├── adapter_1000/
 │       ├── log.jsonl          # Training metrics
 │       └── evaluations/       # Evaluation results
+├── samples/                   # Example log files for reference
+│   ├── sample_llama_gsm8k_log.jsonl
+│   └── sample_llama_wiki_log.jsonl
 ├── perturbation_analysis/     # Perturbation analysis results
 │   ├── delete_results.json
 │   ├── truncate_results.json
 │   └── comparison_plots/
 └── cross_model_evaluation/    # Cross-model comparison results
+
+LatexFolder/                   # Paper and official figures
+├── Figures/                   # All publication-ready figures
+│   ├── combined_markovian_comparison_plots.png
+│   ├── average_perturbation_results_plot_smooth40.png
+│   ├── gsm8k_multiple_critics_comparison.png
+│   ├── cross_model_evaluation.png
+│   ├── legacy_cross_model/   # Legacy analysis figures
+│   └── ...                    # Additional paper figures
+├── anonymous-submission-latex-2026.tex  # Main paper
+├── appendix.tex              # Supplementary material
+├── ReproducibilityChecklist/ # AAAI reproducibility requirements
+└── *.pdf                     # Compiled papers
 ```
 
 ### Training Log Structure
