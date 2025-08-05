@@ -13,6 +13,19 @@
 .git/
 .gitignore
 
+# Large training artifacts (keep samples/ but exclude heavy checkpoint data)
+# Adapter checkpoints are ~73MB each and not needed for paper submission
+results/wiki_continuation/
+results/gsm8k/
+results/arithmetic/
+results/mmlu/
+results/wiki_compression/
+
+# Keep smaller essential files:
+# - results/samples/ (example log files for reproducibility)
+# - results/evaluations/ (evaluation results)
+# - results/figures/ (generated figures)
+
 # Python cache files
 __pycache__/
 *.pyc
