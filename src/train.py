@@ -2029,7 +2029,7 @@ if __name__ == "__main__":
         default="wiki_continuation",
         choices=[
             "arithmetic",
-            "arithmetic_negative",
+            "arithmetic-negative",
             "gsm8k",
             "mmlu",
             "wiki_compression",

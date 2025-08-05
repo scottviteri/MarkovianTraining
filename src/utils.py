@@ -459,10 +459,29 @@ def load_gsm8k_dataset(chunk_size: int = 1000, split: str = "train"):
 
 
 def extract_answer(answer):
-    """Extract answer from GSM8k-style answer string."""
+    """Extract numerical answer from various text formats."""
+    import re
+    
+    # Handle GSM8K format with ####
     if "####" in answer:
-        return answer[answer.index("####") + 5:].strip()
-    return answer.strip()
+        answer = answer[answer.index("####") + 5:].strip()
+    
+    # Handle answers with = sign
+    if "=" in answer:
+        answer = answer.split("=")[-1].strip()
+    
+    # Remove commas from numbers
+    answer = answer.replace(",", "")
+    
+    try:
+        # Find the first number (including negative numbers)
+        matches = re.findall(r"-?\d+", answer.strip())
+        if matches:
+            return int(matches[0])
+        else:
+            return "[invalid]"
+    except:
+        return "[invalid]"
 
 
 def get_text_with_token_length(
@@ -618,7 +637,7 @@ def generate_question_answer_batches(
         colored_print("Parallel Mode", "Generating batches with whole-batch repetition", Colors.BOLD)
         
         # Generate unique examples for each batch
-        if task_type in ["arithmetic", "arithmetic_negative"]:
+        if task_type in ["arithmetic", "arithmetic-negative"]:
             # Generate num_batches unique arithmetic problems
             unique_pairs = list(generate_arithmetic_pairs(task_type, num_examples=num_batches))
             for unique_qa in unique_pairs:
@@ -743,7 +762,7 @@ def generate_question_answer_batches(
         # Generate a single batch based on task type
         debug_batch = None
         
-        if task_type in ["arithmetic", "arithmetic_negative"]:
+        if task_type in ["arithmetic", "arithmetic-negative"]:
             debug_batch = generate_arithmetic_pairs(task_type, num_examples=batch_size)
         elif task_type == "gsm8k":
             dataset_iter = load_gsm8k_dataset(chunk_size=chunk_size)
@@ -888,7 +907,7 @@ def generate_question_answer_batches(
         return
     
     # Regular (non-debug) data generation continues below
-    if task_type in ["arithmetic", "arithmetic_negative"]:
+    if task_type in ["arithmetic", "arithmetic-negative"]:
         # For arithmetic, generate chunks of data as needed
         for batch_idx in range(num_batches):
             # Generate a new batch of arithmetic problems

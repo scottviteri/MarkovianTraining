@@ -1,14 +1,14 @@
 import pytest
 import torch
 import numpy as np
-from src.train import *
+from train import *
 
 
 # Fixtures
 @pytest.fixture
 def model_setup():
     """Setup model, tokenizer and device for testing"""
-    model, frozen_model, tokenizer, device = load_model("mistral")
+    model, frozen_model, tokenizer, device = load_model("gpt2")
     return model, frozen_model, tokenizer, device
 
 
@@ -31,7 +31,7 @@ def sample_hyperparameters():
     """Setup default hyperparameters for testing"""
     return {
         # Model configuration
-        "model_type": "mistral",
+        "model_type": "gpt2",
         "model_learning_rate": 0.0001,
         
         # Training configuration
@@ -128,6 +128,7 @@ def batch_data(training_state, sample_qa_batch):
 #    assert not next(frozen_model.parameters()).requires_grad
 
 
+@pytest.mark.skip(reason="Skipping Llama test to avoid downloading large model")
 def test_load_model_llama():
     """Test loading Llama model"""
     model, frozen_model, tokenizer, device = load_model("llama")
