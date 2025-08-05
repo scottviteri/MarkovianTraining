@@ -23,21 +23,29 @@
 \citation{christiano2021eliciting}
 \@writefile{toc}{\contentsline {section}{\numberline {B}Truthfulness and Eliciting Latent Knowledge}{2}{appendix.B}\protected@file@percent }
 \newlabel{app:truth}{{B}{2}{Truthfulness and Eliciting Latent Knowledge}{appendix.B}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {C}Qualitative Analysis of Generated CoTs}{3}{appendix.C}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {C.1}After Training}{3}{subsection.C.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {C.2}Before Training}{3}{subsection.C.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {D}Case Study of Wikipedia Prediction}{4}{appendix.D}\protected@file@percent }
-\newlabel{app:case}{{D}{4}{Case Study of Wikipedia Prediction}{appendix.D}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {C}Additional Experimental Figures}{3}{appendix.C}\protected@file@percent }
+\newlabel{app:additional_figures}{{C}{3}{Additional Experimental Figures}{appendix.C}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {C.1}Chain-of-Thought Performance on Arithmetic Tasks}{3}{subsection.C.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces The log probability $\ln \pi (\text  {ans} | \text  {CoT})$ of the answer \textit  {ans} given a CoT, where the CoT is sampled from the trained weights $\text  {CoT} \sim u_\theta (\text  {CoT} | q, \text  {CoT}_{\text  {init}})$ and $\text  {CoT}'$ is sampled from the unmodified weights $\text  {CoT}' \sim u(\text  {CoT} | q, \text  {CoT}_{\text  {init}})$. We train to produce CoTs which are sufficient to predict the correct answer even without the original question, enforcing a text bottleneck in the language model's information flow, forcing the CoT to be causally load-bearing to production of the answer. This plot specifically depicts the training of Mistral 7B Instruct V0.2 on fifteen-term addition problems and their solutions. Because of high variance, we plot the point-wise maximum over four runs for each training technique.}}{3}{figure.caption.2}\protected@file@percent }
+\newlabel{fig:cot_arithmetic_performance}{{2}{3}{The log probability $\ln \pi (\text {ans} | \text {CoT})$ of the answer \textit {ans} given a CoT, where the CoT is sampled from the trained weights $\text {CoT} \sim u_\theta (\text {CoT} | q, \text {CoT}_{\text {init}})$ and $\text {CoT}'$ is sampled from the unmodified weights $\text {CoT}' \sim u(\text {CoT} | q, \text {CoT}_{\text {init}})$. We train to produce CoTs which are sufficient to predict the correct answer even without the original question, enforcing a text bottleneck in the language model's information flow, forcing the CoT to be causally load-bearing to production of the answer. This plot specifically depicts the training of Mistral 7B Instruct V0.2 on fifteen-term addition problems and their solutions. Because of high variance, we plot the point-wise maximum over four runs for each training technique}{figure.caption.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {C.2}Cross-Model Interpretability Analysis}{3}{subsection.C.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {D}Qualitative Analysis of Generated CoTs}{3}{appendix.D}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Cross-model evaluation showing Llama-3.1-8B-Instruct's evaluation of Mistral's CoT quality throughout training on Wikipedia text prediction. The correlation between improvements in both models' evaluations suggests the learned reasoning patterns generalize across architectures rather than being model-specific artifacts. Each plot is averaged across 6 independent training runs.}}{4}{figure.caption.3}\protected@file@percent }
+\newlabel{fig:wiki_cross_model}{{3}{4}{Cross-model evaluation showing Llama-3.1-8B-Instruct's evaluation of Mistral's CoT quality throughout training on Wikipedia text prediction. The correlation between improvements in both models' evaluations suggests the learned reasoning patterns generalize across architectures rather than being model-specific artifacts. Each plot is averaged across 6 independent training runs}{figure.caption.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {D.1}After Training}{4}{subsection.D.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {D.2}Before Training}{5}{subsection.D.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {E}Case Study of Wikipedia Prediction}{5}{appendix.E}\protected@file@percent }
+\newlabel{app:case}{{E}{5}{Case Study of Wikipedia Prediction}{appendix.E}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {E.1}CoT after Training:}{6}{subsection.E.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {E.2}CoT before Training:}{6}{subsection.E.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {E.3}Actual Continuation:}{6}{subsection.E.3}\protected@file@percent }
 \citation{christiano2023deepreinforcementlearninghuman}
 \citation{bai2022constitutional}
-\@writefile{toc}{\contentsline {subsection}{\numberline {D.1}CoT after Training:}{5}{subsection.D.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {D.2}CoT before Training:}{5}{subsection.D.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {D.3}Actual Continuation:}{5}{subsection.D.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {E}Impact Statement}{5}{appendix.E}\protected@file@percent }
-\newlabel{sec:ethics}{{E}{5}{Impact Statement}{appendix.E}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {F}Impact Statement}{7}{appendix.F}\protected@file@percent }
+\newlabel{sec:ethics}{{F}{7}{Impact Statement}{appendix.F}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {G}Reproducibility Statement}{7}{appendix.G}\protected@file@percent }
 \bibdata{aaai2026}
 \bibcite{bai2022constitutional}{{1}{2022}{{Bai et~al.}}{{Bai, Kadavath, Kundu, Askell, Kernion, Jones, Chen, Goldie, Mirhoseini, McKinnon, Chen, Olsson, Olah, Hernandez, Drain, Ganguli, Li, Tran-Johnson, Perez, Kerr, Mueller, Ladish, Landau, Ndousse, Lukosuite, Lovitt, Sellitto, Elhage, Schiefer, Mercado, DasSarma, Lasenby, Larson, Ringer, Johnston, Kravec, Showk, Fort, Lanham, Telleen-Lawton, Conerly, Henighan, Hume, Bowman, Hatfield-Dodds, Mann, Amodei, Joseph, McCandlish, Brown, and Kaplan}}}
-\@writefile{toc}{\contentsline {section}{\numberline {F}Reproducibility Statement}{6}{appendix.F}\protected@file@percent }
 \bibcite{burns2024discovering}{{2}{2023}{{Burns et~al.}}{{Burns, Ye, Klein, and Steinhardt}}}
 \bibcite{christiano2021eliciting}{{3}{2021}{{Christiano et~al.}}{{Christiano, Cotra, and Xu}}}
 \bibcite{christiano2023deepreinforcementlearninghuman}{{4}{2023}{{Christiano et~al.}}{{Christiano, Leike, Brown, Martic, Legg, and Amodei}}}
@@ -49,4 +57,4 @@
 \bibcite{Tian2023}{{10}{2023}{{Tian et~al.}}{{Tian, Mitchell, Yao, Manning, and Finn}}}
 \bibcite{yang-etal-2017-reference}{{11}{2017}{{Yang et~al.}}{{Yang, Blunsom, Dyer, and Ling}}}
 \bibstyle{plainnat}
-\gdef \@abspage@last{7}
+\gdef \@abspage@last{9}
