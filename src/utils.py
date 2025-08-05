@@ -183,6 +183,9 @@ def construct_prompts(
     elif task_type == "gsm8k":
         base_prompt = f"You will be given a reasoning problem, which you have {hyperparameters['cot_length']} tokens to work through step-by-step. Question:"
         prompt_type = "Reasoning:"
+    elif task_type == "mmlu":
+        base_prompt = f"You will be given a multiple choice question. Use {hyperparameters['cot_length']} tokens to think through the problem step-by-step, then select the correct answer. Question:"
+        prompt_type = "Reasoning:"
     else:
         raise ValueError(f"Unknown task type: {task_type}")
         
