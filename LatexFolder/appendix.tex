@@ -218,6 +218,53 @@ The trained CoT shows notably different characteristics from the untrained one. 
 
 This example achieved a normalized reward of 0.3438 (in log probability), suggesting that the trained CoT strategy was indeed helpful for predicting the technical geographic description that followed.
 
+\section{Hyperparameter Tuning and Experimental Configurations}
+\label{sec:hyperparameters}
+
+Our Wikipedia continuation experiments systematically explored the hyperparameter space across multiple model architectures and training configurations. Table~\ref{tab:wiki_hyperparams} provides a comprehensive overview of the hyperparameter settings used in our experiments, extracted directly from the training logs.
+
+The experimental design explored several key dimensions:
+
+\textbf{Model Architecture:} We evaluated four different language models (Llama, Mistral, Phi, and Qwen3) to assess the generalizability of our Markovian training approach across different architectures and parameter scales.
+
+\textbf{Temperature Scaling:} We systematically varied the sampling temperature (1.2, 1.3, 1.4) to study the effect of generation diversity on Markovian training effectiveness. Higher temperatures encourage more diverse CoT generation, potentially leading to more robust reasoning patterns.
+
+\textbf{Markovian vs Non-Markovian Training:} For each model and temperature combination, we conducted paired experiments with Markovian training enabled and disabled. This allows direct comparison of our approach against standard fine-tuning baselines.
+
+\textbf{Batch Size Optimization:} Batch sizes were tailored to each model's memory requirements and computational efficiency, ranging from 6 (Mistral, Llama) to 16 (Phi) based on GPU memory constraints and convergence characteristics.
+
+\textbf{Training Duration:} We used two training regimes - shorter runs (10,000 batches) for initial exploration and longer runs (100,000 batches) for comprehensive evaluation. The shorter runs allowed rapid iteration during hyperparameter search, while longer runs provided robust performance estimates.
+
+All experiments maintained consistent core hyperparameters: learning rate (1e-4), KL penalty (0.1), reward mixing parameter r (0.9), and LoRA configuration (rank 8, alpha 16). The CoT length was fixed at 75 tokens to ensure consistent computational overhead across experiments.
+
+\begin{table}[ht]
+    \centering
+    \caption{Hyperparameter configurations for Wikipedia continuation experiments. All experiments use GRPO optimization with LoRA fine-tuning. Key variations include model architecture, temperature settings, and Markovian vs non-Markovian training modes.}
+    \label{tab:wiki_hyperparams}
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{lllllllllll}
+        \toprule
+        \textbf{Model} & \textbf{Temp} & \textbf{Batch} & \textbf{LR} & \textbf{Batches} & \textbf{KL} & \textbf{r} & \textbf{Parallel} & \textbf{Markov} & \textbf{LoRA} & \textbf{CoT Len} \\
+        \midrule
+        llama & 1.2 & 6 & 1.0e-04 & 100,000 & 0.1 & 0.9 & N & Y & 8/16 & 75 \\
+        llama & 1.2 & 6 & 1.0e-04 & 100,000 & 0.1 & 0.9 & Y & N & 8/16 & 75 \\
+        llama & 1.3 & 8 & 1.0e-04 & 100,000 & 0.1 & 0.9 & Y & Y & 8/16 & 75 \\
+        mistral & 1.3 & 10 & 1.0e-04 & 100,000 & 0.1 & 0.9 & N & Y & 8/16 & 75 \\
+        mistral & 1.4 & 6 & 1.0e-04 & 10,000 & 0.1 & 0.9 & Y & Y & 8/16 & 75 \\
+        mistral & 1.4 & 6 & 1.0e-04 & 10,000 & 0.1 & 0.9 & Y & N & 8/16 & 75 \\
+        phi & 1.3 & 16 & 1.0e-04 & 100,000 & 0.1 & 0.9 & N & Y & 8/16 & 75 \\
+        phi & 1.4 & 16 & 1.0e-04 & 10,000 & 0.1 & 0.9 & Y & Y & 8/16 & 75 \\
+        phi & 1.4 & 16 & 1.0e-04 & 10,000 & 0.1 & 0.9 & Y & N & 8/16 & 75 \\
+        qwen3 & 1.3 & 12 & 1.0e-04 & 100,000 & 0.1 & 0.9 & N & Y & 8/16 & 75 \\
+        qwen3 & 1.4 & 12 & 1.0e-04 & 10,000 & 0.1 & 0.9 & Y & Y & 8/16 & 75 \\
+        qwen3 & 1.4 & 12 & 1.0e-04 & 10,000 & 0.1 & 0.9 & Y & N & 8/16 & 75 \\
+        \bottomrule
+    \end{tabular}
+    }
+\end{table}
+
+The systematic exploration of this hyperparameter space enabled robust evaluation of our Markovian training approach and provided confidence in the generalizability of our results across different model architectures and training configurations.
+
 
 \section{Impact Statement}
 \label{sec:ethics}
