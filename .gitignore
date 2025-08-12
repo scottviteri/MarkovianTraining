@@ -21,3 +21,13 @@ test_*.png
 
 # Log files
 *.jsonl
+
+# Appendix LaTeX build artifacts (keep source and final PDF)
+LatexFolder/appendix.aux
+LatexFolder/appendix.log
+LatexFolder/appendix.fls
+LatexFolder/appendix.fdb_latexmk
+LatexFolder/appendix.synctex.gz
+LatexFolder/appendix.out
+LatexFolder/appendix.bbl
+LatexFolder/appendix.blg
