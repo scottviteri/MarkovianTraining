@@ -1826,10 +1826,10 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     # Get dataset size for tracking full passes
     if task_type == "gsm8k":
         dataset_size = len(load_dataset("openai/gsm8k", "main")["train"])
-        default_checkpoint_frequency = 50
     else:
         dataset_size = float('inf')  # For generated datasets
-        default_checkpoint_frequency = 1000
+    # Use a uniform default checkpoint frequency for all tasks
+    default_checkpoint_frequency = 100
     
     # Use configured frequency if provided, otherwise use default
     checkpoint_frequency = hyperparameters.get("checkpoint_frequency") or default_checkpoint_frequency
@@ -2116,7 +2116,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint_frequency",
         type=int,
-        help="Override default checkpoint frequency (default: 500 for GSM8K, 1000 for others)",
+        help="Override default checkpoint frequency (default: 100 for all tasks)",
     )
     # Add weight verification frequency parameter
     parser.add_argument(
