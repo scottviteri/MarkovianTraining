@@ -1509,6 +1509,7 @@ def save_checkpoint(state: TrainingState):
         colored_print("Critic Verification", f"Critic hash before saving: {critic_hash_before[:16]}...", Colors.BLUE)
     
     # Create checkpoint path with batch index to avoid overwriting
+    # Keep legacy checkpoint directory at task level, but store eval outputs in run dir
     checkpoint_dir = os.path.dirname(state.model_save_path)
     checkpoint_filename = f"model_batch_{state.batch_index}.pt"
     checkpoint_path = os.path.join(checkpoint_dir, checkpoint_filename)
@@ -1599,15 +1600,16 @@ def save_checkpoint(state: TrainingState):
             )
             state.actor_model.train()
         
-        # Save results
-        model_dir = os.path.dirname(state.model_save_path)
+        # Save results into the run directory (e.g., results/gsm8k/<timestamp>)
+        model_dir = state.model_save_path
         results_file = save_results(
             model_dir,
-            checkpoint_path,  # Use the new checkpoint path here
+            checkpoint_path,  # Still pass for metadata, but override batch index explicitly
             state.hyperparameters["model_type"],
             accuracy,
             results,
-            len(test_data)
+            len(test_data),
+            batch_index_override=state.batch_index,
         )
         
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
@@ -1822,6 +1824,37 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     
     # Display parallel overview if parallel sampling is enabled
     print_parallel_overview(state.hyperparameters)
+    
+    # Baseline evaluation at timestep 0 for GSM8K (before any training updates)
+    if task_type == "gsm8k" and not resume and state.batch_index == 0:
+        try:
+            colored_print("Baseline Eval", "Running GSM8K evaluation at timestep 0", Colors.BOLD)
+            test_data = list(load_gsm8k_dataset(split="test"))
+            with torch.no_grad():
+                state.actor_model.eval()
+                accuracy, results = evaluate_model(
+                    state.actor_model,
+                    state.critic_model,
+                    state.tokenizer,
+                    state.device,
+                    test_data,
+                    state.hyperparameters,
+                    batch_size=state.hyperparameters["batch_size"] * 2,
+                )
+                state.actor_model.train()
+            # Save into the run directory with explicit batch index 0
+            save_results(
+                state.model_save_path,
+                None,
+                state.hyperparameters["model_type"],
+                accuracy,
+                results,
+                len(test_data),
+                batch_index_override=0,
+            )
+            colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        except Exception as e:
+            colored_print("Baseline Eval", f"Failed: {str(e)}", Colors.YELLOW)
     
     # Get dataset size for tracking full passes
     if task_type == "gsm8k":

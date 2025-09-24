@@ -359,8 +359,53 @@ def plot_evaluation_results(results: List[Dict], save_path: str):
     plt.close()
 
 
-def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_samples):
-    """Save results to file and generate plots."""
+def plot_accuracy_over_batches(results_jsonl_path: str, save_path: str):
+    """Plot accuracy vs. batch index from accumulated JSONL results and save one combined image.
+    
+    This generates a single plot across all recorded evaluations without smoothing.
+    """
+    if not os.path.exists(results_jsonl_path):
+        return
+    batch_to_entry = {}
+    with open(results_jsonl_path, "r") as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+            except Exception:
+                continue
+            batch_idx = entry.get("batch_index")
+            acc = entry.get("accuracy")
+            if batch_idx is None or acc is None:
+                continue
+            # Keep the latest entry per batch index
+            batch_to_entry[batch_idx] = acc
+    if not batch_to_entry:
+        return
+    batch_indices = sorted(batch_to_entry.keys())
+    accuracies = [batch_to_entry[i] for i in batch_indices]
+    plt.figure(figsize=(10, 5))
+    plt.plot(batch_indices, accuracies, marker='o', linestyle='-', color='tab:blue')
+    plt.title('GSM8K Accuracy vs Training Batch')
+    plt.xlabel('Training Batch')
+    plt.ylabel('Accuracy')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+
+def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_samples, batch_index_override=None):
+    """Save results to file and generate plots.
+    
+    Args:
+        model_dir: Directory where outputs should be written. Prefer a run directory (e.g., results/gsm8k/<timestamp>).
+        checkpoint_path: Optional path to checkpoint file for inferring batch index.
+        model_type: Model type string used in filenames.
+        accuracy: Final accuracy value.
+        results: Per-example evaluation results.
+        num_samples: Optional number of evaluated samples.
+        batch_index_override: If provided, force batch index in filenames/metadata (e.g., 0 for baseline).
+    """
     # Create results entry
     entry = {
         "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
@@ -372,8 +417,10 @@ def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_
         "detailed_results": results
     }
     
-    # Extract batch index if available
-    if checkpoint_path:
+    # Determine batch index: prefer explicit override, then infer from checkpoint path
+    if batch_index_override is not None:
+        entry["batch_index"] = int(batch_index_override)
+    elif checkpoint_path:
         basename = os.path.basename(checkpoint_path)
         # Support both new and old filename formats
         match = re.search(r'model_batch_(\d+)\.pt$', basename)
@@ -391,15 +438,10 @@ def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_
         json.dump(entry, f)
         f.write("\n")
     
-    # Save plots with model type in filename
-    if checkpoint_path:
-        plot_name = f"eval_results{model_type_suffix}_{entry['batch_index']}.png"
-    else:
-        plot_name = f"eval_results{model_type_suffix}_{entry['timestamp']}.png"
-    plot_path = os.path.join(model_dir, plot_name)
-    
-    plot_evaluation_results(results, plot_path)
-    print(f"Results visualization saved to {plot_path}")
+    # Update one combined accuracy-over-batches plot in the run directory
+    combined_plot_path = os.path.join(model_dir, "combined_metrics_gsm8k.png")
+    plot_accuracy_over_batches(results_file, combined_plot_path)
+    print(f"Updated combined GSM8K accuracy plot at {combined_plot_path}")
     
     return results_file
 
