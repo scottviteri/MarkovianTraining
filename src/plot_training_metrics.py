@@ -143,9 +143,9 @@ def format_hyperparameters_text(hyperparameters):
     # Categorize parameters
     for key, value in hyperparameters.items():
         if key in ['lr', 'batch_size', 'num_batches', 'use_ppo', 'use_ei', 'normalize_loss', 
-                   'parallel', 'kl_penalty', 'temperature', 'entropy_bonus']:
+                   'parallel', 'kl_penalty', 'temperature', 'entropy_bonus', 'cot_length']:
             training_params[key] = value
-        elif key in ['model_type', 'model_name', 'cot_length', 'lora_rank', 'lora_alpha']:
+        elif key in ['model_type', 'model_name', 'lora_rank', 'lora_alpha']:
             model_params[key] = value
         elif key in ['task_type', 'num_examples_per_task', 'r']:
             task_params[key] = value
