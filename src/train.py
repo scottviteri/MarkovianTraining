@@ -2078,6 +2078,7 @@ if __name__ == "__main__":
             "gsm8k",
             "mmlu",
             "math",
+            "svamp",
             "wiki_compression",
             "wiki_continuation",
         ],

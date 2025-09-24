@@ -495,9 +495,15 @@ def load_math_dataset(chunk_size: int = 1000, split: str = "train"):
     
     Returns (problem, answer) where answer is extracted from solution.
     """
-    ds = load_dataset("hendrycks/competition_math")
-    problems = ds[split]["problem"]
-    solutions = ds[split]["solution"]
+    # Use official HF dataset; pass auth token if provided to handle gated access
+    hf_token = os.getenv("HUGGINGFACE_HUB_TOKEN") or os.getenv("HF_TOKEN")
+    try:
+        ds = load_dataset("hendrycks/competition_math", token=hf_token)
+        problems = ds[split]["problem"]
+        solutions = ds[split]["solution"]
+    except Exception as e:
+        colored_print("MATH Load Error", f"Failed to load hendrycks/competition_math ({e}). If this is a 403, set HUGGINGFACE_HUB_TOKEN or run huggingface-cli login.", Colors.RED)
+        raise
     qa_pairs = []
     for problem, solution in zip(problems, solutions):
         ans = extract_math_answer(solution)
@@ -644,6 +650,73 @@ def load_mmlu_dataset(chunk_size: int = 1000, split: str = "validation", subject
         yield from formatted_data[i:i+chunk_size]
 
 
+def load_svamp_dataset(chunk_size: int = 1000, split: str = "train"):
+    """Load SVAMP dataset with flexible source handling.
+    Tries common HF repo ids, then falls back to a local JSON/JSONL file if SVAMP_PATH is provided or data/svamp.json exists.
+    Returns iterator of (question, answer) pairs.
+    """
+    candidate_ids = [
+        "ChilleD/SVAMP",
+        "svamp",
+        "MADE/SVAMP"
+    ]
+    ds = None
+    for ds_id in candidate_ids:
+        try:
+            ds = load_dataset(ds_id)
+            break
+        except Exception:
+            continue
+    qa_pairs = []
+    if ds is not None:
+        data = ds[split]
+        # Try multiple common schemas
+        for item in data:
+            if "Body" in item and "Answer" in item:
+                q = item["Body"]
+                a = str(item["Answer"]).strip()
+            elif "question" in item and "answer" in item:
+                q = item["question"]
+                a = str(item["answer"]).strip()
+            else:
+                # Skip if schema unknown
+                continue
+            qa_pairs.append((q, a))
+    else:
+        # Local fallback
+        import json
+        local_path = os.getenv("SVAMP_PATH") or os.path.join("data", "svamp.json")
+        if os.path.exists(local_path):
+            with open(local_path, "r") as f:
+                try:
+                    records = json.load(f)
+                    if isinstance(records, dict) and "data" in records:
+                        records = records["data"]
+                except Exception:
+                    # Maybe JSONL
+                    f.seek(0)
+                    records = [json.loads(line) for line in f if line.strip()]
+            for item in records:
+                if "Body" in item and "Answer" in item:
+                    q = item["Body"]
+                    a = str(item["Answer"]).strip()
+                elif "question" in item and "answer" in item:
+                    q = item["question"]
+                    a = str(item["answer"]).strip()
+                else:
+                    continue
+                qa_pairs.append((q, a))
+        else:
+            colored_print("SVAMP Load", "Could not load SVAMP from HF or local path. Set SVAMP_PATH to a JSON/JSONL file.", Colors.RED)
+            qa_pairs = []
+    # Yield lazily in chunks
+    for i in range(0, len(qa_pairs), chunk_size):
+        chunk = qa_pairs[i:i+chunk_size]
+        if split == "train":
+            random.shuffle(chunk)
+        yield from chunk
+
+
 def generate_arithmetic_pairs(task_type: str, num_examples: int = 1000):
     """Lazily generate arithmetic QA pairs with shuffling within chunks."""
     qa_pairs = []
@@ -736,6 +809,17 @@ def generate_question_answer_batches(
                 repeated_batch = [unique_qa] * batch_size
                 yield repeated_batch
                 
+        elif task_type == "svamp":
+            dataset_iter = load_svamp_dataset(chunk_size=chunk_size, split=split)
+            for batch_idx in range(num_batches):
+                try:
+                    unique_qa = next(dataset_iter)
+                except StopIteration:
+                    dataset_iter = load_svamp_dataset(chunk_size=chunk_size, split=split)
+                    unique_qa = next(dataset_iter)
+                repeated_batch = [unique_qa] * batch_size
+                yield repeated_batch
+
         elif task_type in ["wiki_compression", "wiki_continuation"]:
             # For wiki tasks, generate unique examples and repeat each
             colored_print("Wiki Parallel", "Loading Wikipedia dataset for parallel mode...", Colors.CYAN)
@@ -1029,6 +1113,20 @@ def generate_question_answer_batches(
                     batch.append(qa_pair)
             yield batch
             
+    elif task_type == "svamp":
+        dataset_iter = load_svamp_dataset(chunk_size=chunk_size, split="train")
+        for batch_start in range(0, num_batches * batch_size, batch_size):
+            batch = []
+            for _ in range(batch_size):
+                try:
+                    qa_pair = next(dataset_iter)
+                    batch.append(qa_pair)
+                except StopIteration:
+                    dataset_iter = load_svamp_dataset(chunk_size=chunk_size, split="train")
+                    qa_pair = next(dataset_iter)
+                    batch.append(qa_pair)
+            yield batch
+
     elif task_type in ["wiki_compression", "wiki_continuation"]:
         print("Loading Wikipedia dataset...")
         wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
