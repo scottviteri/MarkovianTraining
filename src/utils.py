@@ -183,6 +183,9 @@ def construct_prompts(
     elif task_type == "gsm8k":
         base_prompt = f"You will be given a reasoning problem, which you have {hyperparameters['cot_length']} tokens to work through step-by-step. Question:"
         prompt_type = "Reasoning:"
+    elif task_type == "math":
+        base_prompt = f"You will be given a competition math problem. Use {hyperparameters['cot_length']} tokens to reason step-by-step and compute the final answer. Problem:"
+        prompt_type = "Reasoning:"
     elif task_type == "mmlu":
         base_prompt = f"You will be given a multiple choice question. Use {hyperparameters['cot_length']} tokens to think through the problem step-by-step, then select the correct answer. Question:"
         prompt_type = "Reasoning:"
@@ -458,6 +461,55 @@ def load_gsm8k_dataset(chunk_size: int = 1000, split: str = "train"):
         yield from chunk
 
 
+def extract_math_answer(solution_text: str) -> str:
+    """Extract final answer from MATH solution text.
+    
+    Heuristics:
+    - Prefer the last \boxed{...} content if present
+    - Fallback to last fraction or integer found
+    - Else use the last non-empty line
+    """
+    try:
+        # Normalize whitespace
+        text = solution_text.strip()
+        # 1) Last \boxed{...}
+        boxed = re.findall(r"\\boxed\{([^}]*)\}", text)
+        if boxed:
+            return boxed[-1].strip()
+        # 2) Fraction a/b or integer, take last occurrence
+        frac_or_int = re.findall(r"-?\d+\/\d+|-?\d+", text)
+        if frac_or_int:
+            return frac_or_int[-1].strip()
+        # 3) Last non-empty line
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if line:
+                return line
+        return text
+    except Exception:
+        return solution_text
+
+
+def load_math_dataset(chunk_size: int = 1000, split: str = "train"):
+    """Lazily load Hendrycks MATH (competition_math) dataset in chunks.
+    
+    Returns (problem, answer) where answer is extracted from solution.
+    """
+    ds = load_dataset("hendrycks/competition_math")
+    problems = ds[split]["problem"]
+    solutions = ds[split]["solution"]
+    qa_pairs = []
+    for problem, solution in zip(problems, solutions):
+        ans = extract_math_answer(solution)
+        qa_pairs.append((problem, ans))
+    
+    for i in range(0, len(qa_pairs), chunk_size):
+        chunk = qa_pairs[i : i + chunk_size]
+        if split == "train":
+            random.shuffle(chunk)
+        yield from chunk
+
+
 def extract_answer(answer):
     """Extract numerical answer from various text formats."""
     import re
@@ -668,6 +720,18 @@ def generate_question_answer_batches(
                 except StopIteration:
                     # Reset iterator if we run out of data
                     dataset_iter = load_mmlu_dataset(chunk_size=chunk_size, split=split, subject=subject)
+                    unique_qa = next(dataset_iter)
+                repeated_batch = [unique_qa] * batch_size
+                yield repeated_batch
+
+        elif task_type == "math":
+            # Use MATH dataset iterator for unique examples
+            dataset_iter = load_math_dataset(chunk_size=chunk_size, split="train")
+            for batch_idx in range(num_batches):
+                try:
+                    unique_qa = next(dataset_iter)
+                except StopIteration:
+                    dataset_iter = load_math_dataset(chunk_size=chunk_size, split="train")
                     unique_qa = next(dataset_iter)
                 repeated_batch = [unique_qa] * batch_size
                 yield repeated_batch
@@ -947,6 +1011,20 @@ def generate_question_answer_batches(
                 except StopIteration:
                     # Reset iterator if we run out of data
                     dataset_iter = load_mmlu_dataset(chunk_size=chunk_size, split=split, subject=subject)
+                    qa_pair = next(dataset_iter)
+                    batch.append(qa_pair)
+            yield batch
+            
+    elif task_type == "math":
+        dataset_iter = load_math_dataset(chunk_size=chunk_size, split="train")
+        for batch_start in range(0, num_batches * batch_size, batch_size):
+            batch = []
+            for _ in range(batch_size):
+                try:
+                    qa_pair = next(dataset_iter)
+                    batch.append(qa_pair)
+                except StopIteration:
+                    dataset_iter = load_math_dataset(chunk_size=chunk_size, split="train")
                     qa_pair = next(dataset_iter)
                     batch.append(qa_pair)
             yield batch

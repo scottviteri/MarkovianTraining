@@ -2015,7 +2015,7 @@ class TrainingConfig:
             "gsm8k": 100,
             "arithmetic": 150,
             "arithmetic-negative": 150,
-            "mmlu": 100,
+            "mmlu": 150,
         }
         final_cot_length = (
             args.cot_length if args.cot_length is not None else cot_defaults.get(args.task_type, 50)
@@ -2077,6 +2077,7 @@ if __name__ == "__main__":
             "arithmetic-negative",
             "gsm8k",
             "mmlu",
+            "math",
             "wiki_compression",
             "wiki_continuation",
         ],
