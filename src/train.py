@@ -9,6 +9,8 @@ from torch.nn.utils import clip_grad_norm_
 import argparse
 import re
 import os
+import subprocess
+import sys
 from typing import Union, List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass, asdict
 from tqdm import tqdm
@@ -1815,7 +1817,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     # Get dataset size for tracking full passes
     if task_type == "gsm8k":
         dataset_size = len(load_dataset("openai/gsm8k", "main")["train"])
-        default_checkpoint_frequency = 500
+        default_checkpoint_frequency = 50
     else:
         dataset_size = float('inf')  # For generated datasets
         default_checkpoint_frequency = 1000
@@ -1896,6 +1898,23 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             )
             log_batch_results(state, batch_data, metrics)
 
+            # Periodic plotting via subprocess (non-blocking)
+            try:
+                plot_every = state.hyperparameters.get("plot_every", 15)
+                if plot_every and plot_every > 0 and batch_index > 0 and (batch_index % plot_every == 0):
+                    plotter_path = os.path.join(os.path.dirname(__file__), "plot_training_metrics.py")
+                    window = str(state.hyperparameters.get("plot_window_size", 10))
+                    cmd = [
+                        sys.executable,
+                        plotter_path,
+                        "--window_size", window,
+                        "--plot_summary",
+                        "--files", state.log_file,
+                    ]
+                    subprocess.Popen(cmd)
+            except Exception as e:
+                colored_print("Plotting Error", f"Failed to spawn plotter: {str(e)}", Colors.YELLOW)
+
             # Save checkpoint and evaluate periodically using configured frequency
             if batch_index % checkpoint_frequency == 0 and batch_index > 0:
                 save_checkpoint(state)
@@ -1971,6 +1990,9 @@ class TrainingConfig:
     markovian: bool = True
     # Actor reward gradients
     actor_reward_weight: float = 0.0
+    # Plotting controls
+    plot_every: int = 15
+    plot_window_size: int = 10
 
     @classmethod
     def from_args(cls, args):
@@ -2006,6 +2028,8 @@ class TrainingConfig:
             parallel=args.parallel,
             markovian=markovian_mode,
             actor_reward_weight=args.actor_reward_weight,
+            plot_every=args.plot_every,
+            plot_window_size=args.plot_window_size,
         )
 
 
@@ -2137,6 +2161,19 @@ if __name__ == "__main__":
         type=float,
         default=0.0,
         help="Weight for actor reward gradients. If > 0, use actor model for rewards with this weight (default: 0.0, uses critic)",
+    )
+    # Plotting controls
+    parser.add_argument(
+        "--plot_every",
+        type=int,
+        default=15,
+        help="How often (in batches) to spawn plotting process (0 disables). Default: 15",
+    )
+    parser.add_argument(
+        "--plot_window_size",
+        type=int,
+        default=10,
+        help="Smoothing window size passed to plot_training_metrics.py (default: 10)",
     )
 
     args = parser.parse_args()

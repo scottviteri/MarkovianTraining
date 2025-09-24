@@ -243,7 +243,13 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
     metrics_dict = None if has_critic_probs else {"derive_critic": True}
     
     if output_file is None:
-        output_file = f"combined_metrics_{task_type}.png"
+        # Default to saving alongside the first provided log file
+        try:
+            first_dir = os.path.dirname(os.path.abspath(file_paths[0]))
+            output_file = os.path.join(first_dir, f"combined_metrics_{task_type}.png")
+        except Exception:
+            # Fallback to CWD if something goes wrong
+            output_file = f"combined_metrics_{task_type}.png"
     
     if plot_summary:
         # For arithmetic tasks or gsm8k
