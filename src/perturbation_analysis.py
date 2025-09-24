@@ -188,7 +188,7 @@ def load_perturbation_results(log_file, perturb_type, include_question=False):
         return json.load(f)
 
 
-def run_perturbations(log_file, perturb_type, include_question=False, stride=1, max_index=None, save_interval=10):
+def run_perturbations(log_file, perturb_type, include_question=False, stride=1, max_index=None, save_interval=10, evaluator="actor"):
     """
     Run perturbation analysis on the given log file.
     max_index: if provided, only process entries with batch_index <= max_index
@@ -207,7 +207,8 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
     # Extract hyperparameters from the first line
     hyperparameters = log_data[0]
     task_type = hyperparameters.get("task_type", "gsm8k")
-    _, frozen_model, tokenizer, device = load_model_with_adapters(log_file, hyperparameters["model_type"], hyperparameters)
+    actor_model, frozen_model, tokenizer, device = load_model_with_adapters(log_file, hyperparameters["model_type"], hyperparameters)
+    eval_model = actor_model if evaluator == "actor" else frozen_model
 
     # Filter log data by batch index if max_index is provided
     if max_index is not None:
@@ -282,7 +283,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
 
         # Calculate Original log probs for Actor
         actor_log_prob, _ = calculate_answer_log_probs(
-            frozen_model=frozen_model,
+            frozen_model=eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=[question],
@@ -297,7 +298,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
         # 1. Critic (if include_question=False)
         # 2. Actor with question (if include_question=True)
         comparison_log_prob, _ = calculate_answer_log_probs(
-            frozen_model=frozen_model,
+            frozen_model=eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=[question],
@@ -316,7 +317,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
             # Perturb Actor CoT (always without question)
             perturbed_actor_CoT = perturb_CoT(actor_CoT, pert_config)
             actor_perturbed_log_prob, _ = calculate_answer_log_probs(
-                frozen_model=frozen_model,
+                frozen_model=eval_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=[question],
@@ -330,7 +331,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
             # Perturb comparison CoT (either critic or actor-with-question)
             perturbed_critic_CoT = perturb_CoT(critic_CoT, pert_config) if not include_question else None
             comparison_perturbed_log_prob, _ = calculate_answer_log_probs(
-                frozen_model=frozen_model,
+                frozen_model=eval_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=[question],
@@ -357,7 +358,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
     return perturbation_data
 
 
-def run_perturbations_batched(log_file, perturb_type, include_question=False, stride=1, max_index=None, save_interval=10, batch_size=8):
+def run_perturbations_batched(log_file, perturb_type, include_question=False, stride=1, max_index=None, save_interval=10, batch_size=8, evaluator="actor"):
     """
     Run perturbation analysis on the given log file using batched processing for improved performance.
     
@@ -385,7 +386,8 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
     # Extract hyperparameters from the first line
     hyperparameters = log_data[0]
     task_type = hyperparameters.get("task_type", "gsm8k")
-    _, frozen_model, tokenizer, device = load_model_with_adapters(log_file, hyperparameters["model_type"], hyperparameters)
+    actor_model, frozen_model, tokenizer, device = load_model_with_adapters(log_file, hyperparameters["model_type"], hyperparameters)
+    eval_model = actor_model if evaluator == "actor" else frozen_model
 
     # Filter log data by batch index if max_index is provided
     if max_index is not None:
@@ -476,7 +478,7 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
         
         # Calculate Original log probs for Actor (all without question)
         actor_log_probs, _ = calculate_answer_log_probs(
-            frozen_model=frozen_model,
+            frozen_model=eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=batch_questions,
@@ -493,7 +495,7 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
         # Calculate log probs for comparison (either critic or actor with question)
         comparison_reasoning = batch_actor_CoTs if include_question else batch_critic_CoTs
         comparison_log_probs, _ = calculate_answer_log_probs(
-            frozen_model=frozen_model,
+            frozen_model=eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=batch_questions,
@@ -876,7 +878,7 @@ def collate_perturbation_results(perturbation_files, output_dir, perturb_type, i
     print(f"Averaged results for {perturb_type} saved to {output_file}")
 
 
-def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb_type, stride=1, max_index=None, save_interval=10, batch_size=8):
+def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb_type, stride=1, max_index=None, save_interval=10, batch_size=8, evaluator="actor"):
     """
     Compare perturbation sensitivity between Markovian and Non-Markovian models.
     
@@ -922,10 +924,14 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
     
     # Load both models with their respective adapters
     print("Loading Markovian model...")
-    _, markovian_model, tokenizer, device = load_model_with_adapters(markovian_log_file, markovian_hyperparams["model_type"], markovian_hyperparams)
+    actor_markovian, frozen_markovian, tokenizer, device = load_model_with_adapters(markovian_log_file, markovian_hyperparams["model_type"], markovian_hyperparams)
     
     print("Loading Non-Markovian model...")
-    _, non_markovian_model, _, _ = load_model_with_adapters(non_markovian_log_file, non_markovian_hyperparams["model_type"], non_markovian_hyperparams)
+    actor_non_markovian, frozen_non_markovian, _, _ = load_model_with_adapters(non_markovian_log_file, non_markovian_hyperparams["model_type"], non_markovian_hyperparams)
+
+    # Select evaluator per flag (default actor): use adapter-loaded actor, or frozen baseline
+    markovian_eval_model = actor_markovian if evaluator == "actor" else frozen_markovian
+    non_markovian_eval_model = actor_non_markovian if evaluator == "actor" else frozen_non_markovian
 
     # Filter log data by batch index if max_index is provided
     if max_index is not None:
@@ -988,7 +994,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
         # Calculate original log probs for both models
         # Markovian: without question, using trained Markovian model
         markovian_original_logprobs, _ = calculate_answer_log_probs(
-            frozen_model=markovian_model,
+            frozen_model=markovian_eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=questions,
@@ -1000,7 +1006,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
         
         # Non-Markovian: with question, using trained Non-Markovian model
         non_markovian_original_logprobs, _ = calculate_answer_log_probs(
-            frozen_model=non_markovian_model,
+            frozen_model=non_markovian_eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=questions,
@@ -1022,7 +1028,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
             # Calculate perturbed log probs
             # Markovian: without question, using trained Markovian model
             markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
-                frozen_model=markovian_model,
+                frozen_model=markovian_eval_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=questions,
@@ -1034,7 +1040,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
             
             # Non-Markovian: with question, using trained Non-Markovian model
             non_markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
-                frozen_model=non_markovian_model,
+                frozen_model=non_markovian_eval_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=questions,
@@ -1368,6 +1374,13 @@ def main():
         default=8,
         help="Number of examples to process in each batch (0 for non-batched processing)",
     )
+    parser.add_argument(
+        "--evaluator",
+        type=str,
+        choices=["actor", "frozen"],
+        default="actor",
+        help="Which model to use for evaluation: adapter-loaded actor (actor) or frozen baseline (frozen). Default: actor",
+    )
     
     # New arguments for Markovian comparison
     parser.add_argument(
@@ -1473,7 +1486,8 @@ def main():
                 stride=args.stride,
                 max_index=args.max_index,
                 save_interval=args.save_interval,
-                batch_size=args.batch_size
+                batch_size=args.batch_size,
+                evaluator=args.evaluator,
             )
             
             # Generate plots and analysis
@@ -1615,7 +1629,8 @@ def main():
                     stride=args.stride, 
                     max_index=args.max_index,
                     save_interval=args.save_interval,
-                    batch_size=args.batch_size
+                    batch_size=args.batch_size,
+                    evaluator=args.evaluator,
                 )
             else:
                 print("Using non-batched processing")
@@ -1625,7 +1640,8 @@ def main():
                     include_question=args.include_question,
                     stride=args.stride, 
                     max_index=args.max_index,
-                    save_interval=args.save_interval
+                    save_interval=args.save_interval,
+                    evaluator=args.evaluator,
                 )
             
             save_perturbation_results(
