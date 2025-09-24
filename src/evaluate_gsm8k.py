@@ -124,8 +124,8 @@ def get_hyperparameters_from_log(model_dir):
 
 
 def evaluate_model(
-    actor_model,  # Non-frozen model for generating reasoning
-    critic_model, # Frozen model for generating answers
+    actor_model,  
+    critic_model, 
     tokenizer,
     device,
     test_data,
@@ -189,11 +189,14 @@ def evaluate_model(
         )
         
         # 2. Generate answers using critic model (deterministic)
+        # Honor Markovian flag: include question context when markovian=False
+        include_question_in_eval = not hyperparameters.get("markovian", True)
         answer_prompts = [
             construct_prompts(
                 question=q,
                 hyperparameters=hyperparameters,
                 reasoning=r,
+                include_question=include_question_in_eval,
             )
             for q, r in zip(questions, cot_texts)
         ]

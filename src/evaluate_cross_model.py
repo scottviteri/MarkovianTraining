@@ -98,6 +98,8 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
                 answer = example["Answer"]
 
                 # Calculate log probabilities for both reasonings using eval model's hyperparameters
+                include_question = not hyperparameters.get("markovian", True)
+
                 actor_log_probs, _ = calculate_answer_log_probs(
                     frozen_model,
                     tokenizer,
@@ -106,6 +108,7 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
                     [actor_reasoning],
                     [answer],
                     hyperparameters,
+                    include_question=include_question,
                 )
 
                 critic_log_probs, _ = calculate_answer_log_probs(
@@ -116,6 +119,7 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
                     [critic_reasoning],
                     [answer],
                     hyperparameters,
+                    include_question=include_question,
                 )
 
                 # Print debug info periodically
