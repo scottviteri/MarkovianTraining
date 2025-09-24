@@ -313,8 +313,8 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 ("Training Metrics.Critic Answer Log Probs", "Critic Answer Log Probs", "Training Batch No. []", "ln π'(ans|cot)")
                 )
         
-        # Add Contains Answer metric for GSM8K
-        if task_type == "gsm8k":
+        # Add Contains Answer metric for relevant QA tasks
+        if task_type in ["gsm8k", "arithmetic", "arithmetic-negative"]:
             base_metrics.append(
                 ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
             )
@@ -376,14 +376,11 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 elif isinstance(d, str) and "NaN" in d:
                     valid_data.append(np.nan)  # Handle "NaN" strings
                 else:
-                    # Handle special cases for certain metrics
-                    if metric_path == "Example.Contains Answer":
-                        valid_data.append(1 if d else 0)
-                    else:
-                        try:
-                            valid_data.append(float(d))
-                        except (ValueError, TypeError):
-                            valid_data.append(np.nan)
+                    # Use numeric value directly; "Contains Answer" is logged as a fraction
+                    try:
+                        valid_data.append(float(d))
+                    except (ValueError, TypeError):
+                        valid_data.append(np.nan)
             
             # Only proceed if we have valid data
             if valid_data and not all(np.isnan(d) for d in valid_data):

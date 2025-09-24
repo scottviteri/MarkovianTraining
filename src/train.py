@@ -1999,6 +1999,19 @@ class TrainingConfig:
         # Handle markovian flag logic: default True unless --no-markovian is specified
         markovian_mode = not args.no_markovian
         
+        # Determine task-specific default CoT length if not explicitly provided
+        cot_defaults = {
+            "wiki_continuation": 50,
+            "wiki_compression": 50,
+            "gsm8k": 100,
+            "arithmetic": 150,
+            "arithmetic-negative": 150,
+            "mmlu": 100,
+        }
+        final_cot_length = (
+            args.cot_length if args.cot_length is not None else cot_defaults.get(args.task_type, 50)
+        )
+        
         # Create config with all arguments
         return cls(
             task_type=args.task_type,
@@ -2006,7 +2019,7 @@ class TrainingConfig:
             resume=args.resume,
             use_ei=args.use_ei,
             use_ppo=args.use_ppo,
-            cot_length=args.cot_length,
+            cot_length=final_cot_length,
             r=args.r,
             temperature=args.temperature,
             question_length=args.question_length,
@@ -2075,7 +2088,7 @@ if __name__ == "__main__":
         help="Use Expert Iteration with specified number of standard deviations (default: None, which disables thresholding)",
     )
     parser.add_argument("--use_ppo", action="store_true")
-    parser.add_argument("--cot_length", type=int, default=50)
+    parser.add_argument("--cot_length", type=int, default=None)
     parser.add_argument("--r", type=float, default=0.9)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--question_length", type=int, default=50)
