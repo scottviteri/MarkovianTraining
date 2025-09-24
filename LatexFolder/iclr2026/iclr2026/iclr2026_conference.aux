@@ -1,0 +1,52 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{NEURIPS2020_1457c0d6}
+\citation{lamparth2023analyzing,burns2024discovering,gurnee2024language}
+\citation{Grabb2024.04.07.24305462,lamparth2024human,rivera2024escalation}
+\citation{geiger2022inducing,geva2022transformer,meng2022locating,raukur2022toward,wang2022interpretability,lamparth2023analyzing,nanda2023progress}
+\citation{nye2022show,wei2022chain}
+\citation{turpin2023language}
+\citation{lanham2023measuring}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
+\citation{cobbe2021gsm8k}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Markovian training as a reasoning autoencoder. Left: Single time-step process from Question to CoT to Answer, creating a text-based bottleneck where the CoT must capture all information needed for answer prediction. Right: Causal structure showing the generation of states from observations and previous states using the state update function $u_\theta (s'|o,s)$, and the prediction of observations from states using the policy $\pi _\theta (o|s)$. This architecture forces reasoning through an interpretable text bottleneck, but prevents direct backpropagation, necessitating RL-based gradient estimation. In experiments, both $u_\theta $ and $\pi _\theta $ are implemented using the same transformer (Mistral 7B or Llama 3.1 8B), with only $u_\theta $'s weights updated during training.}}{2}{figure.caption.3}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:training-method-causal-final}{{1}{2}{Markovian training as a reasoning autoencoder. Left: Single time-step process from Question to CoT to Answer, creating a text-based bottleneck where the CoT must capture all information needed for answer prediction. Right: Causal structure showing the generation of states from observations and previous states using the state update function $u_\theta (s'|o,s)$, and the prediction of observations from states using the policy $\pi _\theta (o|s)$. This architecture forces reasoning through an interpretable text bottleneck, but prevents direct backpropagation, necessitating RL-based gradient estimation. In experiments, both $u_\theta $ and $\pi _\theta $ are implemented using the same transformer (Mistral 7B or Llama 3.1 8B), with only $u_\theta $'s weights updated during training}{figure.caption.3}{}}
+\@writefile{toc}{\contentsline {paragraph}{Recipient-Specific Compression.}{2}{section*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Contributions.}{2}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}Style}{2}{subsection.1.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Normalized reward progression during Wikipedia continuation training across four model architectures. The normalized reward $\ln \pi _\theta (\text  {ans} \mid \text  {CoT}) - \ln \pi _\theta (\text  {ans} \mid \text  {CoT}')$ measures how much more informative the trained CoT becomes compared to baseline reasoning from the unmodified model. Each curve represents a different model architecture: Llama 3.1 8B (blue), Phi-3.5 Mini (orange), Qwen3 4B (green), and Mistral 7B (red). The plot uses Gaussian Process-style smoothing with confidence bands to highlight training trends. All models show consistent improvement in CoT informativeness, demonstrating the generalizability of the Markovian training approach across diverse architectures.}}{3}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:loss}{{2}{3}{Normalized reward progression during Wikipedia continuation training across four model architectures. The normalized reward $\ln \pi _\theta (\text {ans} \mid \text {CoT}) - \ln \pi _\theta (\text {ans} \mid \text {CoT}')$ measures how much more informative the trained CoT becomes compared to baseline reasoning from the unmodified model. Each curve represents a different model architecture: Llama 3.1 8B (blue), Phi-3.5 Mini (orange), Qwen3 4B (green), and Mistral 7B (red). The plot uses Gaussian Process-style smoothing with confidence bands to highlight training trends. All models show consistent improvement in CoT informativeness, demonstrating the generalizability of the Markovian training approach across diverse architectures}{figure.caption.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.2}Retrieval of style files}{3}{subsection.1.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}General formatting instructions}{3}{section.2}\protected@file@percent }
+\newlabel{gen_inst}{{2}{3}{General formatting instructions}{section.2}{}}
+\citation{Hinton06}
+\citation{Bengio+chapter2007}
+\citation{goodfellow2016deep}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Headings: first level}{4}{section.3}\protected@file@percent }
+\newlabel{headings}{{3}{4}{Headings: first level}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Headings: second level}{4}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {3.1.1}Headings: third level}{4}{subsubsection.3.1.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Citations, figures, tables, references}{4}{section.4}\protected@file@percent }
+\newlabel{others}{{4}{4}{Citations, figures, tables, references}{section.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Citations within the text}{4}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Footnotes}{4}{subsection.4.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Figures}{4}{subsection.4.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Tables}{4}{subsection.4.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Sample figure caption.}}{5}{figure.caption.5}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Sample table title}}{5}{table.caption.6}\protected@file@percent }
+\newlabel{sample-table}{{1}{5}{Sample table title}{table.caption.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Default Notation}{5}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {6}Final instructions}{7}{section.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Preparing PostScript or PDF files}{7}{section.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Margins in LaTeX}{7}{subsection.7.1}\protected@file@percent }
+\bibdata{iclr2026_conference}
+\bibcite{Bengio+chapter2007}{{1}{2007}{{Bengio \& LeCun}}{{Bengio and LeCun}}}
+\bibcite{goodfellow2016deep}{{2}{2016}{{Goodfellow et~al.}}{{Goodfellow, Bengio, Courville, and Bengio}}}
+\bibcite{Hinton06}{{3}{2006}{{Hinton et~al.}}{{Hinton, Osindero, and Teh}}}
+\bibstyle{iclr2026_conference}
+\@writefile{toc}{\contentsline {section}{\numberline {A}Appendix}{8}{appendix.A}\protected@file@percent }
+\gdef \@abspage@last{8}

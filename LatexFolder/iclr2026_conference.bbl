@@ -1,0 +1,180 @@
+\begin{thebibliography}{43}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[\AA~str\"{o}m(1965)]{proto_pomdp1965}
+Karl~Johan \AA~str\"{o}m.
+\newblock Optimal control of markov processes with incomplete state information i, 1965.
+
+\bibitem[Abdin et~al.(2024)Abdin, Aneja, Awadalla, Awadallah, Awan, Bach, Bahree, Bakhtiari, Bao, et~al.]{abdin2024phi3technicalreporthighly}
+Marah Abdin, Jyoti Aneja, Hany Awadalla, Ahmed Awadallah, Ammar~Ahmad Awan, Nguyen Bach, Amit Bahree, Arash Bakhtiari, Jianmin Bao, et~al.
+\newblock Phi-3 technical report: A highly capable language model locally on your phone, 2024.
+
+\bibitem[Bai et~al.(2022)Bai, Kadavath, Kundu, Askell, Kernion, Jones, Chen, Goldie, Mirhoseini, McKinnon, Chen, Olsson, Olah, Hernandez, Drain, Ganguli, Li, Tran-Johnson, Perez, Kerr, Mueller, Ladish, Landau, Ndousse, Lukosuite, Lovitt, Sellitto, Elhage, Schiefer, Mercado, DasSarma, Lasenby, Larson, Ringer, Johnston, Kravec, Showk, Fort, Lanham, Telleen-Lawton, Conerly, Henighan, Hume, Bowman, Hatfield-Dodds, Mann, Amodei, Joseph, McCandlish, Brown, and Kaplan]{bai2022constitutional}
+Yuntao Bai, Saurav Kadavath, Sandipan Kundu, Amanda Askell, Jackson Kernion, Andy Jones, Anna Chen, Anna Goldie, Azalia Mirhoseini, Cameron McKinnon, Carol Chen, Catherine Olsson, Christopher Olah, Danny Hernandez, Dawn Drain, Deep Ganguli, Dustin Li, Eli Tran-Johnson, Ethan Perez, Jamie Kerr, Jared Mueller, Jeffrey Ladish, Joshua Landau, Kamal Ndousse, Kamile Lukosuite, Liane Lovitt, Michael Sellitto, Nelson Elhage, Nicholas Schiefer, Noemi Mercado, Nova DasSarma, Robert Lasenby, Robin Larson, Sam Ringer, Scott Johnston, Shauna Kravec, Sheer~El Showk, Stanislav Fort, Tamera Lanham, Timothy Telleen-Lawton, Tom Conerly, Tom Henighan, Tristan Hume, Samuel~R. Bowman, Zac Hatfield-Dodds, Ben Mann, Dario Amodei, Nicholas Joseph, Sam McCandlish, Tom Brown, and Jared Kaplan.
+\newblock Constitutional ai: Harmlessness from ai feedback, 2022.
+
+\bibitem[Brown et~al.(2020)Brown, Mann, Ryder, Subbiah, Kaplan, Dhariwal, et~al.]{NEURIPS2020_1457c0d6}
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared~D Kaplan, Prafulla Dhariwal, et~al.
+\newblock Language models are few-shot learners, 2020.
+
+\bibitem[Burns et~al.(2023)Burns, Ye, Klein, and Steinhardt]{burns2024discovering}
+Collin Burns, Haotian Ye, Dan Klein, and Jacob Steinhardt.
+\newblock Discovering latent knowledge in language models without supervision, 2023.
+
+\bibitem[Casper et~al.(2023)Casper, Rauker, Ho, and Hadfield-Menell]{raukur2022toward}
+Stephen Casper, Tilman Rauker, Anson Ho, and Dylan Hadfield-Menell.
+\newblock Sok: Toward transparent ai: A survey on interpreting the inner structures of deep neural networks, 2023.
+
+\bibitem[Christiano et~al.(2021)Christiano, Cotra, and Xu]{christiano2021eliciting}
+Paul Christiano, Ajeya Cotra, and Mark Xu.
+\newblock Eliciting latent knowledge: How to tell if your eyes deceive you, 2021.
+
+\bibitem[Christiano et~al.(2023)Christiano, Leike, Brown, Martic, Legg, and Amodei]{christiano2023deepreinforcementlearninghuman}
+Paul Christiano, Jan Leike, Tom~B. Brown, Miljan Martic, Shane Legg, and Dario Amodei.
+\newblock Deep reinforcement learning from human preferences, 2023.
+
+\bibitem[Chung et~al.(2015)Chung, Kastner, Dinh, Goel, Courville, and Bengio]{DBLP:journals/corr/ChungKDGCB15}
+Junyoung Chung, Kyle Kastner, Laurent Dinh, Kratarth Goel, Aaron~C. Courville, and Yoshua Bengio.
+\newblock A recurrent latent variable model for sequential data, 2015.
+
+\bibitem[Cobbe et~al.(2021)Cobbe, Kosaraju, Bavarian, Chen, Jun, Kaiser, Plappert, Tworek, Hilton, Nakano, Hesse, and Schulman]{cobbe2021gsm8k}
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher Hesse, and John Schulman.
+\newblock Training verifiers to solve math word problems, 2021.
+
+\bibitem[DeepSeek-AI et~al.(2025)DeepSeek-AI, Guo, Yang, Zhang, Song, Zhang, Xu, et~al.]{deepseekai2025}
+DeepSeek-AI, Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, et~al.
+\newblock Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning, 2025.
+
+\bibitem[Geiger et~al.(2022)Geiger, Wu, Lu, Rozner, Kreiss, Icard, Goodman, and Potts]{geiger2022inducing}
+Atticus Geiger, Zhengxuan Wu, Hanson Lu, Josh Rozner, Elisa Kreiss, Thomas Icard, Noah Goodman, and Christopher Potts.
+\newblock Inducing causal structure for interpretable neural networks, 2022.
+
+\bibitem[Geva et~al.(2022)Geva, Caciularu, Wang, and Goldberg]{geva2022transformer}
+Mor Geva, Avi Caciularu, Kevin~Ro Wang, and Yoav Goldberg.
+\newblock Transformer feed-forward layers build predictions by promoting concepts in the vocabulary space, 2022.
+
+\bibitem[Grabb et~al.(2024)Grabb, Lamparth, and Vasan]{Grabb2024.04.07.24305462}
+Declan Grabb, Max Lamparth, and Nina Vasan.
+\newblock Risks from language models for automated mental healthcare: Ethics and structure for implementation, 2024.
+
+\bibitem[Gu \& Dao(2024)Gu and Dao]{gu2024mamba}
+Albert Gu and Tri Dao.
+\newblock Mamba: Linear-time sequence modeling with selective state spaces, 2024.
+
+\bibitem[Gu et~al.(2022)Gu, Goel, and Ré]{gu2022efficientlymodelinglongsequences}
+Albert Gu, Karan Goel, and Christopher Ré.
+\newblock Efficiently modeling long sequences with structured state spaces, 2022.
+
+\bibitem[Gurnee \& Tegmark(2024)Gurnee and Tegmark]{gurnee2024language}
+Wes Gurnee and Max Tegmark.
+\newblock Language models represent space and time, 2024.
+
+\bibitem[Hu et~al.(2022)Hu, Shen, Wallis, Allen-Zhu, Li, Wang, Wang, and Chen]{hu2022lora}
+Edward~J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu~Wang, and Weizhu Chen.
+\newblock Lora: Low-rank adaptation of large language models, 2022.
+
+\bibitem[Joshi et~al.(2024)Joshi, Rando, Saparov, Kim, and He]{Joshi2024}
+Nitish Joshi, Javier Rando, Abulhair Saparov, Najoung Kim, and He~He.
+\newblock Personas as a way to model truthfulness in language models, 2024.
+
+\bibitem[Karl et~al.(2017)Karl, Soelch, Bayer, and van~der Smagt]{karl2017deepvariationalbayesfilters}
+Maximilian Karl, Maximilian Soelch, Justin Bayer, and Patrick van~der Smagt.
+\newblock Deep variational bayes filters: Unsupervised learning of state space models from raw data, 2017.
+
+\bibitem[Krishnan et~al.(2015)Krishnan, Shalit, and Sontag]{krishnan2015deepkalmanfilters}
+Rahul~G. Krishnan, Uri Shalit, and David Sontag.
+\newblock Deep kalman filters, 2015.
+
+\bibitem[Lamparth \& Reuel(2023)Lamparth and Reuel]{lamparth2023analyzing}
+Max Lamparth and Anka Reuel.
+\newblock Analyzing and editing inner mechanisms of backdoored language models, 2023.
+
+\bibitem[Lamparth et~al.(2024)Lamparth, Corso, Ganz, Mastro, Schneider, and Trinkunas]{lamparth2024human}
+Max Lamparth, Anthony Corso, Jacob Ganz, Oriana~Skylar Mastro, Jacquelyn Schneider, and Harold Trinkunas.
+\newblock Human vs. machine: Language models and wargames, 2024.
+
+\bibitem[Lanham et~al.(2023)Lanham, Chen, Radhakrishnan, Steiner, Denison, Hernandez, Li, Durmus, Hubinger, Kernion, Lukošiūtė, Nguyen, Cheng, Joseph, Schiefer, Rausch, Larson, McCandlish, Kundu, Kadavath, Yang, Henighan, Maxwell, Telleen-Lawton, Hume, Hatfield-Dodds, Kaplan, Brauner, Bowman, and Perez]{lanham2023measuring}
+Tamera Lanham, Anna Chen, Ansh Radhakrishnan, Benoit Steiner, Carson Denison, Danny Hernandez, Dustin Li, Esin Durmus, Evan Hubinger, Jackson Kernion, Kamilė Lukošiūtė, Karina Nguyen, Newton Cheng, Nicholas Joseph, Nicholas Schiefer, Oliver Rausch, Robin Larson, Sam McCandlish, Sandipan Kundu, Saurav Kadavath, Shannon Yang, Thomas Henighan, Timothy Maxwell, Timothy Telleen-Lawton, Tristan Hume, Zac Hatfield-Dodds, Jared Kaplan, Jan Brauner, Samuel~R. Bowman, and Ethan Perez.
+\newblock Measuring faithfulness in chain-of-thought reasoning, 2023.
+
+\bibitem[Lin et~al.(2022)Lin, Hilton, and Evans]{lin_truthfulqa2022}
+Stephanie Lin, Jacob Hilton, and Owain Evans.
+\newblock Truthfulqa: Measuring how models mimic human falsehoods, 2022.
+
+\bibitem[Lyu et~al.(2023)Lyu, Havaldar, Stein, Zhang, Rao, Wong, Apidianaki, and Callison-Burch]{lyu2023faithful}
+Qing Lyu, Shreya Havaldar, Adam Stein, Li~Zhang, Delip Rao, Eric Wong, Marianna Apidianaki, and Chris Callison-Burch.
+\newblock Faithful chain-of-thought reasoning, 2023.
+
+\bibitem[Meng et~al.(2022)Meng, Bau, Andonian, and Belinkov]{meng2022locating}
+Kevin Meng, David Bau, Alex~J Andonian, and Yonatan Belinkov.
+\newblock Locating and editing factual associations in gpt, 2022.
+
+\bibitem[Nanda et~al.(2023)Nanda, Chan, Lieberum, Smith, and Steinhardt]{nanda2023progress}
+Neel Nanda, Lawrence Chan, Tom Lieberum, Jess Smith, and Jacob Steinhardt.
+\newblock Progress measures for grokking via mechanistic interpretability, 2023.
+
+\bibitem[Nye et~al.(2022)Nye, Andreassen, Gur-Ari, Michalewski, Austin, Bieber, Dohan, Lewkowycz, Bosma, Luan, Sutton, and Odena]{nye2022show}
+Maxwell Nye, Anders~Johan Andreassen, Guy Gur-Ari, Henryk Michalewski, Jacob Austin, David Bieber, David Dohan, Aitor Lewkowycz, Maarten Bosma, David Luan, Charles Sutton, and Augustus Odena.
+\newblock Show your work: Scratchpads for intermediate computation with language models, 2022.
+
+\bibitem[Rivera et~al.(2024)Rivera, Mukobi, Reuel, Lamparth, Smith, and Schneider]{rivera2024escalation}
+Juan-Pablo Rivera, Gabriel Mukobi, Anka Reuel, Max Lamparth, Chandler Smith, and Jacquelyn Schneider.
+\newblock Escalation risks from language models in military and diplomatic decision-making, 2024.
+
+\bibitem[Rumelhart et~al.(1986)Rumelhart, Hinton, and Williams]{rumelhart1986learning}
+David~E. Rumelhart, Geoffrey~E. Hinton, and Ronald~J. Williams.
+\newblock Learning representations by back-propagating errors, 1986.
+
+\bibitem[Shao et~al.(2024)Shao, Wang, Zhu, Xu, Song, Bi, Zhang, Zhang, Li, Wu, and Guo]{shao2024deepseekmath}
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y.K. Li, Y.~Wu, and Daya Guo.
+\newblock Deepseekmath: Pushing the limits of mathematical reasoning in open language models, 2024.
+
+\bibitem[Silver et~al.(2016)Silver, Huang, Maddison, et~al.]{Silver2016}
+D.~Silver, A.~Huang, C.~Maddison, et~al.
+\newblock Mastering the game of go with deep neural networks and tree search, 2016.
+
+\bibitem[Silver et~al.(2017)Silver, Hubert, Schrittwieser, Antonoglou, Lai, Guez, Lanctot, Sifre, Kumaran, Graepel, Lillicrap, Simonyan, and Hassabis]{Silver2017}
+David Silver, Thomas Hubert, Julian Schrittwieser, Ioannis Antonoglou, Matthew Lai, Arthur Guez, Marc Lanctot, Laurent Sifre, Dharshan Kumaran, Thore Graepel, Timothy Lillicrap, Karen Simonyan, and Demis Hassabis.
+\newblock Mastering chess and shogi by self-play with a general reinforcement learning algorithm, 2017.
+
+\bibitem[Sutton et~al.(1999)Sutton, McAllester, Singh, and Mansour]{policy_gradient}
+Richard~S. Sutton, David McAllester, Satinder Singh, and Yishay Mansour.
+\newblock Policy gradient methods for reinforcement learning with function approximation, 1999.
+
+\bibitem[Tian et~al.(2023)Tian, Mitchell, Yao, Manning, and Finn]{Tian2023}
+Katherine Tian, Eric Mitchell, Huaxiu Yao, Christopher~D. Manning, and Chelsea Finn.
+\newblock Fine-tuning language models for factuality, 2023.
+
+\bibitem[Turpin et~al.(2023)Turpin, Michael, Perez, and Bowman]{turpin2023language}
+Miles Turpin, Julian Michael, Ethan Perez, and Samuel~R. Bowman.
+\newblock Language models don't always say what they think: Unfaithful explanations in chain-of-thought prompting, 2023.
+
+\bibitem[Wang et~al.(2022)Wang, Variengien, Conmy, Shlegeris, and Steinhardt]{wang2022interpretability}
+Kevin~Ro Wang, Alexandre Variengien, Arthur Conmy, Buck Shlegeris, and Jacob Steinhardt.
+\newblock Interpretability in the wild: a circuit for indirect object identification in gpt-2 small, 2022.
+
+\bibitem[Wei et~al.(2022)Wei, Wang, Schuurmans, Bosma, brian ichter, Xia, Chi, Le, and Zhou]{wei2022chain}
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, brian ichter, Fei Xia, Ed~H. Chi, Quoc~V Le, and Denny Zhou.
+\newblock Chain of thought prompting elicits reasoning in large language models, 2022.
+
+\bibitem[Yang et~al.(2017)Yang, Blunsom, Dyer, and Ling]{yang-etal-2017-reference}
+Zichao Yang, Phil Blunsom, Chris Dyer, and Wang Ling.
+\newblock Reference-aware language models, 2017.
+
+\bibitem[Zelikman et~al.(2022)Zelikman, Wu, Mu, and Goodman]{eric_star2022}
+Eric Zelikman, Yuhuai Wu, Jesse Mu, and Noah Goodman.
+\newblock Star: Bootstrapping reasoning with reasoning, 2022.
+
+\bibitem[Zelikman et~al.(2024)Zelikman, Harik, Shao, Jayasiri, Haber, and Goodman]{zelikman2024quietstar}
+Eric Zelikman, Georges Harik, Yijia Shao, Varuna Jayasiri, Nick Haber, and Noah~D. Goodman.
+\newblock Quiet-star: Language models can teach themselves to think before speaking, 2024.
+
+\bibitem[Zhou et~al.(2023)Zhou, Zhou, Han, and Kambadur]{zhou2023understanding}
+Dani Zhou, Enyu Zhou, Kevin Han, and Prashant Kambadur.
+\newblock Understanding chain-of-thought in llms through information theory, 2023.
+
+\end{thebibliography}
