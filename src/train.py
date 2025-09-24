@@ -2079,6 +2079,7 @@ if __name__ == "__main__":
             "mmlu",
             "math",
             "svamp",
+            "aqua",
             "wiki_compression",
             "wiki_continuation",
         ],
