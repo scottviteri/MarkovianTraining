@@ -1908,7 +1908,6 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         sys.executable,
                         plotter_path,
                         "--window_size", window,
-                        "--plot_summary",
                         "--files", state.log_file,
                     ]
                     subprocess.Popen(cmd)
