@@ -371,7 +371,11 @@ def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_
     
     # Extract batch index if available
     if checkpoint_path:
-        match = re.search(r'model_(\d+)_', os.path.basename(checkpoint_path))
+        basename = os.path.basename(checkpoint_path)
+        # Support both new and old filename formats
+        match = re.search(r'model_batch_(\d+)\.pt$', basename)
+        if not match:
+            match = re.search(r'model_(\d+)_', basename)
         if match:
             entry["batch_index"] = int(match.group(1))
     
