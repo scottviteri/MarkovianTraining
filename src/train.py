@@ -1410,6 +1410,7 @@ def evaluate_model_on_mmlu(
         reasoning_outputs = actor_model.generate(
             **inputs,
             max_new_tokens=hyperparameters.get("cot_length", 50),
+            min_new_tokens=hyperparameters.get("cot_length", 50),
             do_sample=True,
             temperature=hyperparameters.get("temperature", 1.0),
             top_k=None,
@@ -1459,29 +1460,37 @@ def evaluate_model_on_mmlu(
 
 
 def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, total, subject=None):
-    """Save MMLU evaluation results to a file"""
-    # Create output filename with timestamp
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    subject_str = f"_{subject}" if subject else ""
-    outfile = os.path.join(output_dir, f"mmlu_results{subject_str}_{timestamp}.json")
-    
-    # Compile results data
-    data = {
+    """Append MMLU evaluation results to a JSONL file (mirrors GSM8K pipeline)."""
+    # Determine batch index from checkpoint filename if available
+    batch_index = None
+    if model_path:
+        basename = os.path.basename(model_path)
+        match = re.search(r"model_batch_(\d+)\.pt$", basename)
+        if not match:
+            match = re.search(r"model_(\d+)_", basename)
+        if match:
+            batch_index = int(match.group(1))
+
+    # Prepare entry
+    entry = {
+        "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+        "batch_index": batch_index,
+        "accuracy": accuracy,
         "model_path": model_path,
         "model_type": model_type,
-        "accuracy": accuracy,
         "total_examples": total,
-        "timestamp": timestamp,
         "subject": subject,
-        "results": results
+        "results": results,
     }
-    
-    # Save to file
-    with open(outfile, "w") as f:
-        json.dump(data, f, indent=2)
-    
-    print(f"Saved evaluation results to {outfile}")
-    return outfile
+
+    # Append to a task-level JSONL file (same as GSM8K style)
+    results_file = os.path.join(output_dir, f"mmlu_results_{model_type}.jsonl")
+    with open(results_file, "a") as f:
+        json.dump(entry, f)
+        f.write("\n")
+
+    print(f"Results appended to {results_file}")
+    return results_file
 
 
 def save_checkpoint(state: TrainingState):
