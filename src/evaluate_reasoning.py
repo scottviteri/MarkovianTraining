@@ -6,7 +6,7 @@ import argparse
 import json
 from tqdm import tqdm
 import os
-from peft import LoraConfig, get_peft_model
+from peft import LoraConfig, get_peft_model, PeftModel
 import datetime
 import glob
 import matplotlib.pyplot as plt
@@ -24,18 +24,41 @@ import copy
 
 
 def extract_numeric_answer(answer: str):
-    if "=" in answer:
-        answer = answer.split("=")[-1].strip()
-    answer = answer.replace(",", "")
+    """Extract the intended numeric answer from a generated string.
+
+    Heuristics (in order):
+    1) If an 'Answer' anchor exists (e.g., 'Answer:' or 'answer'), extract the first integer after it.
+    2) Else if an equals sign exists, extract the first integer after '='.
+    3) Else extract the first integer in the text.
+    """
     try:
-        matches = re.findall(r"-?\d+", answer.strip())
-        if matches:
-            answer = int(matches[0])
-        else:
-            answer = "[invalid]"
+        text = (answer or "").strip()
+        # Normalize
+        text = text.replace(",", "")
+
+        # 1) Anchor on 'Answer' label (case-insensitive), optional colon
+        m = re.search(r"(?i)answer\s*:?[\s\-]*", text)
+        if m:
+            after = text[m.end():]
+            m_num = re.search(r"-?\d+", after)
+            if m_num:
+                return int(m_num.group(0))
+
+        # 2) After equals sign
+        if "=" in text:
+            after_eq = text.split("=", 1)[1]
+            m_num = re.search(r"-?\d+", after_eq)
+            if m_num:
+                return int(m_num.group(0))
+
+        # 3) First integer anywhere
+        m_num = re.search(r"-?\d+", text)
+        if m_num:
+            return int(m_num.group(0))
+
+        return "[invalid]"
     except Exception:
-        answer = "[invalid]"
-    return answer
+        return "[invalid]"
 
 
 def extract_choice_letter(text: str) -> str:
@@ -94,18 +117,31 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
     if use_base_model or model_path is None:
         actor_model = critic_model = base_model
     else:
-        peft_config = LoraConfig(
-            task_type="CAUSAL_LM",
-            inference_mode=True,
-            r=8,
-            lora_alpha=16,
-            lora_dropout=0.1,
-            target_modules="all-linear",
-        )
-        actor_model = get_peft_model(base_model, peft_config)
-        checkpoint = torch.load(model_path)
-        actor_model.load_state_dict(checkpoint["model_state_dict"])
-        critic_model = copy.deepcopy(actor_model)
+        # Support two formats:
+        # 1) Legacy checkpoint file with model_state_dict
+        # 2) PEFT adapter directory saved via save_pretrained
+        if os.path.isdir(model_path):
+            # Adapter directory
+            actor_model = PeftModel.from_pretrained(
+                base_model,
+                model_path,
+                is_trainable=False,
+            )
+            critic_model = copy.deepcopy(actor_model)
+        else:
+            # Legacy checkpoint
+            peft_config = LoraConfig(
+                task_type="CAUSAL_LM",
+                inference_mode=True,
+                r=8,
+                lora_alpha=16,
+                lora_dropout=0.1,
+                target_modules="all-linear",
+            )
+            actor_model = get_peft_model(base_model, peft_config)
+            checkpoint = torch.load(model_path)
+            actor_model.load_state_dict(checkpoint["model_state_dict"])
+            critic_model = copy.deepcopy(actor_model)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return actor_model, critic_model, tokenizer, device
@@ -156,6 +192,32 @@ def get_model_paths_and_type(provided_path=None, all_checkpoints=False) -> Tuple
         model_type = "mistral"
 
     return model_paths, model_type
+
+
+def get_run_dir_from_path(path_hint: str = None) -> str:
+    """Resolve a run directory from a file or directory hint.
+    If None, uses the latest result directory.
+    """
+    if path_hint is None:
+        run_dir = find_latest_result()
+        if not run_dir:
+            raise FileNotFoundError("No results directory found")
+        return run_dir
+    if os.path.isdir(path_hint):
+        return path_hint
+    return os.path.dirname(path_hint)
+
+
+def list_adapter_dirs(run_dir: str) -> List[str]:
+    """List adapter_* directories in a run directory, sorted by batch index."""
+    adapters = glob.glob(os.path.join(run_dir, "adapter_*"))
+    def batch_num(p):
+        try:
+            return int(os.path.basename(p).split("_")[-1])
+        except Exception:
+            return -1
+    adapters = [a for a in adapters if os.path.isdir(a)]
+    return sorted(adapters, key=batch_num)
 
 
 def load_task_data(task_type: str, num_samples: int = None) -> List[Tuple[str, str]]:
@@ -401,24 +463,57 @@ def main(
     baseline=False,
     baseline_thinking_tokens=None,
     baseline_temperature=None,
+    run_dir=None,
+    all_adapters=False,
 ):
     supported = ["arithmetic", "arithmetic-negative", "svamp", "aqua"]
     if task_type not in supported:
         raise ValueError(f"task_type must be one of {supported}")
 
-    if not use_base_model:
-        model_paths, inferred_model_type = get_model_paths_and_type(model_path, all_checkpoints=False)
+    # Determine evaluation targets: single model_path, or all adapters in a run_dir
+    targets: List[Tuple[str, int]] = []  # (path, batch_index_override)
+    if all_adapters:
+        rd = get_run_dir_from_path(run_dir or model_path)
+        adapter_dirs = list_adapter_dirs(rd)
+        if not adapter_dirs:
+            print(f"No adapters found in {rd}")
+            return
+        for ad in adapter_dirs:
+            try:
+                bn = int(os.path.basename(ad).split("_")[-1])
+            except Exception:
+                bn = None
+            targets.append((ad, bn))
+        # Infer model_type from run_dir log
+        try:
+            with open(os.path.join(rd, "log.jsonl"), 'r') as f:
+                hp = json.loads(f.readline().strip())
+                inferred_model_type = hp.get("model_type", "mistral")
+        except Exception:
+            inferred_model_type = "mistral"
         if model_type is None:
             model_type = inferred_model_type
             print(f"Inferred model type: {model_type}")
     else:
-        model_paths = [None]
-        model_type = model_type or "mistral"
+        if not use_base_model:
+            model_paths, inferred_model_type = get_model_paths_and_type(model_path, all_checkpoints=False)
+            if model_type is None:
+                model_type = inferred_model_type
+                print(f"Inferred model type: {model_type}")
+        else:
+            model_paths = [None]
+            model_type = model_type or "mistral"
+        for p in model_paths:
+            targets.append((p, None))
 
-    for checkpoint_path in model_paths:
+    for checkpoint_path, batch_override in targets:
         if checkpoint_path:
             print(f"\nEvaluating checkpoint: {checkpoint_path}")
-            hyperparameters = get_hyperparameters_from_log(os.path.dirname(checkpoint_path), default_task=task_type)
+            run_base_dir = os.path.dirname(checkpoint_path) if os.path.isfile(checkpoint_path) else checkpoint_path
+            # If adapter dir, its parent is the run directory
+            if os.path.basename(run_base_dir).startswith("adapter_"):
+                run_base_dir = os.path.dirname(run_base_dir)
+            hyperparameters = get_hyperparameters_from_log(run_base_dir, default_task=task_type)
             hyperparameters["task_type"] = task_type
             if cot_length is not None:
                 hyperparameters["cot_length"] = cot_length
@@ -464,6 +559,9 @@ def main(
         print(f"Accuracy: {accuracy:.2%}")
 
         base_results_dir = os.path.dirname(checkpoint_path) if checkpoint_path else f"results/{task_type}"
+        if checkpoint_path and os.path.isdir(checkpoint_path):
+            # adapter dir -> save in its parent (run directory)
+            base_results_dir = os.path.dirname(checkpoint_path)
         os.makedirs(base_results_dir, exist_ok=True)
         results_file = save_results(
             base_results_dir,
@@ -473,7 +571,7 @@ def main(
             accuracy,
             results,
             num_samples,
-            batch_index_override=(0 if baseline else None),
+            batch_index_override=(0 if baseline else batch_override),
         )
         print(f"Results appended to {results_file}")
 
@@ -492,6 +590,8 @@ if __name__ == "__main__":
     parser.add_argument("--baseline", action="store_true", help="Use standard baseline prompting")
     parser.add_argument("--baseline_thinking_tokens", type=int, default=None, help="Max tokens for baseline thinking stage")
     parser.add_argument("--baseline_temperature", type=float, default=None, help="Temperature for baseline thinking stage")
+    parser.add_argument("--run_dir", type=str, default=None, help="Run directory containing adapter_* folders to evaluate")
+    parser.add_argument("--all_adapters", action="store_true", help="Evaluate all adapters in the specified run directory (or latest if not provided)")
     args = parser.parse_args()
 
     try:
@@ -508,6 +608,8 @@ if __name__ == "__main__":
             args.baseline,
             args.baseline_thinking_tokens,
             args.baseline_temperature,
+            args.run_dir,
+            args.all_adapters,
         )
     except FileNotFoundError as e:
         print(f"Error: {e}")
