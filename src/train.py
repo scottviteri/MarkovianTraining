@@ -2607,7 +2607,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--actor_reward_weight",
         type=float,
-        default=0.0,
+        default=1.0,
         help="Weight for actor reward gradients. If > 0, use actor model for rewards with this weight (default: 0.0, uses critic)",
     )
     # Plotting controls
