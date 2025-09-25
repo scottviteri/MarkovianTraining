@@ -43,16 +43,9 @@ from datasets import load_dataset
 
 
 
-def get_default_eval_batch_size(task_type: str) -> int:
-    """Default evaluation batch size by task type in one place.
-    - wiki_compression/wiki_continuation, gsm8k: 16
-    - arithmetic/arithmetic-negative, mmlu, and others: 12
-    """
-    if task_type in ("wiki_compression", "wiki_continuation", "gsm8k"):
-        return 16
-    if task_type in ("arithmetic", "arithmetic-negative", "mmlu"):
-        return 12
-    return 12
+def get_default_eval_batch_size(train_batch_size: int) -> int:
+    """Default evaluation batch size: floor(1.5x train batch size)."""
+    return max(1, int(train_batch_size * 1.5))
 
 
 def get_default_train_batch_size(task_type: str) -> int:
@@ -1764,7 +1757,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=get_default_eval_batch_size("gsm8k")
+                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"])
             )
             state.actor_model.train()
         
@@ -1802,7 +1795,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=get_default_eval_batch_size("mmlu")
+                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"])
             )
             state.actor_model.train()
         
@@ -1820,7 +1813,7 @@ def save_checkpoint(state: TrainingState):
         )
         
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
-    
+
     # If AQuA, evaluate using multiple choice
     elif state.hyperparameters["task_type"] == "aqua":
         colored_print("Evaluation", "Running AQuA evaluation...", Colors.BOLD)
@@ -1833,7 +1826,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=get_default_eval_batch_size("aqua"),
+                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
             )
             state.actor_model.train()
         model_dir = state.model_save_path
@@ -1867,7 +1860,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=get_default_eval_batch_size("svamp"),
+                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
             )
             state.actor_model.train()
         model_dir = state.model_save_path
@@ -1904,7 +1897,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=get_default_eval_batch_size("math")
+                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"])
             )
             state.actor_model.train()
         model_dir = state.model_save_path
@@ -2113,7 +2106,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=get_default_eval_batch_size("gsm8k"),
+                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
                     )
                     state.actor_model.train()
                 save_results(
@@ -2139,7 +2132,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=get_default_eval_batch_size("mmlu"),
+                        batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
                     )
                     state.actor_model.train()
                 save_results_mmlu(
@@ -2164,7 +2157,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=get_default_eval_batch_size("aqua"),
+                        batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
                     )
                     state.actor_model.train()
                 # Save JSONL and combined plot
@@ -2196,7 +2189,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=get_default_eval_batch_size("svamp"),
+                        batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
                     )
                     state.actor_model.train()
                 results_file = os.path.join(state.model_save_path, f"svamp_results_{state.hyperparameters['model_type']}.jsonl")
@@ -2232,7 +2225,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=get_default_eval_batch_size("math"),
+                        batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
                     )
                     state.actor_model.train()
                 results_file = os.path.join(state.model_save_path, f"math_results_{state.hyperparameters['model_type']}.jsonl")
