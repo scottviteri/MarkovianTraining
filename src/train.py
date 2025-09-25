@@ -43,6 +43,18 @@ from datasets import load_dataset
 
 
 
+def get_default_eval_batch_size(task_type: str) -> int:
+    """Default evaluation batch size by task type in one place.
+    - wiki_compression/wiki_continuation, gsm8k: 16
+    - arithmetic/arithmetic-negative, mmlu, and others: 12
+    """
+    if task_type in ("wiki_compression", "wiki_continuation", "gsm8k"):
+        return 16
+    if task_type in ("arithmetic", "arithmetic-negative", "mmlu"):
+        return 12
+    return 12
+
+
 def find_answer_start_position(input_ids, model_type):
     """Find the starting position of the answer in the input_ids based on model type."""
     if model_type == "mistral":
@@ -1740,7 +1752,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=16
+                batch_size=get_default_eval_batch_size("gsm8k")
             )
             state.actor_model.train()
         
@@ -1778,7 +1790,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=12
+                batch_size=get_default_eval_batch_size("mmlu")
             )
             state.actor_model.train()
         
@@ -1809,7 +1821,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=12,
+                batch_size=get_default_eval_batch_size("aqua"),
             )
             state.actor_model.train()
         model_dir = state.model_save_path
@@ -1843,7 +1855,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=12,
+                batch_size=get_default_eval_batch_size("svamp"),
             )
             state.actor_model.train()
         model_dir = state.model_save_path
@@ -1880,7 +1892,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=12
+                batch_size=get_default_eval_batch_size("math")
             )
             state.actor_model.train()
         model_dir = state.model_save_path
@@ -2089,7 +2101,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=16,
+                        batch_size=get_default_eval_batch_size("gsm8k"),
                     )
                     state.actor_model.train()
                 save_results(
@@ -2115,7 +2127,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=12,
+                        batch_size=get_default_eval_batch_size("mmlu"),
                     )
                     state.actor_model.train()
                 save_results_mmlu(
@@ -2140,7 +2152,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=12,
+                        batch_size=get_default_eval_batch_size("aqua"),
                     )
                     state.actor_model.train()
                 # Save JSONL and combined plot
@@ -2172,7 +2184,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=12,
+                        batch_size=get_default_eval_batch_size("svamp"),
                     )
                     state.actor_model.train()
                 results_file = os.path.join(state.model_save_path, f"svamp_results_{state.hyperparameters['model_type']}.jsonl")
@@ -2208,7 +2220,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=12,
+                        batch_size=get_default_eval_batch_size("math"),
                     )
                     state.actor_model.train()
                 results_file = os.path.join(state.model_save_path, f"math_results_{state.hyperparameters['model_type']}.jsonl")
