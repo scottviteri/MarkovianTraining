@@ -11,6 +11,7 @@ from utils import (
     load_svamp_dataset,
     load_aqua_dataset,
     load_math_dataset,
+    load_mathqa_dataset,
 )
 
 # Reuse evaluators' evaluate_model functions to ensure identical prompting behavior
@@ -28,6 +29,10 @@ def default_task_specs() -> Dict[str, Dict]:
         "svamp": {"cot_length": 150, "temperature": 1.0},
         "aqua": {"cot_length": 150, "temperature": 1.0},
         "math": {"cot_length": 150, "temperature": 1.0},
+        "mathqa": {"cot_length": 150, "temperature": 1.0},
+        "arc": {"cot_length": 150, "temperature": 1.0},
+        "arc_easy": {"cot_length": 150, "temperature": 1.0},
+        "arc_challenge": {"cot_length": 150, "temperature": 1.0},
     }
 
 
@@ -96,6 +101,19 @@ def load_task_data(task: str, num_samples: int | None, stride: int | None) -> Li
             it = load_math_dataset(split="validation")
         for qa in it:
             data.append(qa)
+    elif task == "mathqa":
+        it = load_mathqa_dataset(split="validation")
+        for qa in it:
+            data.append(qa)
+    elif task in ("arc", "arc_easy", "arc_challenge"):
+        # Map to ARC subsets
+        subset = (
+            "ARC-Challenge" if task in ("arc", "arc_challenge") else "ARC-Easy"
+        )
+        from utils import load_arc_dataset
+        it = load_arc_dataset(split="validation", subset=subset)
+        for qa in it:
+            data.append(qa)
     else:
         raise ValueError(f"Unsupported task: {task}")
 
@@ -120,9 +138,10 @@ def run_baseline_for_task(
     specs.update({k: v for k, v in overrides.items() if v is not None})
 
     # Build hyperparameters dict expected by evaluators
+    canonical_task = "arc" if task.startswith("arc") else task
     h: Dict[str, object] = {
         "model_type": model_type,
-        "task_type": task,
+        "task_type": canonical_task,
         "cot_length": int(specs["cot_length"]),
         "temperature": float(specs["temperature"]),
         "batch_size": batch_size if batch_size is not None else 12,
@@ -186,7 +205,7 @@ def run_baseline_for_task(
             baseline_thinking_tokens=int(h["cot_length"]),
             baseline_temperature=float(h["temperature"]),
         )
-        out_dir = os.path.join("results", task)
+        out_dir = os.path.join("results", canonical_task)
         os.makedirs(out_dir, exist_ok=True)
         out_file = os.path.join(out_dir, f"{task}_results_{model_type}.jsonl")
 
@@ -213,8 +232,11 @@ def main():
     ])
     parser.add_argument("--use_base_model", action="store_true", help="Kept for API symmetry; models are loaded as base.")
     parser.add_argument("--tasks", type=str, nargs="*", default=[
-        "gsm8k", "mmlu", "arithmetic", "arithmetic-negative", "svamp", "aqua"
-    ], help="Which tasks to evaluate.")
+        "gsm8k", "mmlu", "arithmetic", "arithmetic-negative", "svamp", "aqua", "arc_easy", "arc_challenge"
+    ], help=(
+        "Which tasks to evaluate. Use arc_easy or arc_challenge to select ARC subsets; "
+        "you can pass any subset of tasks here."
+    ))
     parser.add_argument("--num_samples", type=int, default=None)
     parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument("--stride", type=int, default=None)
