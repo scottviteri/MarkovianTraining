@@ -395,16 +395,3 @@ python src/perturbation_analysis.py --log_file results/gsm8k/latest/log.jsonl --
 # 4. Cross-model evaluation
 python src/evaluate_cross_model.py --log_file results/gsm8k/latest/log.jsonl --critic_model mistral
 ```
-
-## 🤝 Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-@article{viteri2024markovian,
-  title={Markovian Transformers for Informative Language Modeling},
-  author={Viteri, Scott and others},
-  journal={arXiv preprint},
-  year={2024}
-}
-```
