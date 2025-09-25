@@ -1046,7 +1046,7 @@ def generate_question_answer_batches(
         elif task_type in ["wiki_compression", "wiki_continuation"]:
             # For wiki tasks, generate unique examples and repeat each
             colored_print("Wiki Parallel", "Loading Wikipedia dataset for parallel mode...", Colors.CYAN)
-            wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
+            wiki_dataset = load_dataset("wikimedia/wikipedia", "20231101.en", split="train")
             article_idx = 0
             
             # Define indices to skip (from 1900*8 to 2800*8)
@@ -1161,7 +1161,7 @@ def generate_question_answer_batches(
                     debug_batch.append(qa_pair)
         elif task_type in ["wiki_compression", "wiki_continuation"]:
             print("Loading Wikipedia dataset...")
-            wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
+            wiki_dataset = load_dataset("wikimedia/wikipedia", "20231101.en", split="train")
             article_idx = 0
             articles_examined = 0
             qa_pairs = []
@@ -1366,7 +1366,7 @@ def generate_question_answer_batches(
 
     elif task_type in ["wiki_compression", "wiki_continuation"]:
         print("Loading Wikipedia dataset...")
-        wiki_dataset = load_dataset("wikipedia", "20220301.en", split="train")
+        wiki_dataset = load_dataset("wikimedia/wikipedia", "20231101.en", split="train")
         article_idx = 0
         articles_examined = 0
         qa_pairs = []
