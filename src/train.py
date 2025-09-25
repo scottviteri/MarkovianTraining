@@ -55,7 +55,7 @@ def get_default_train_batch_size(task_type: str) -> int:
     """
     if task_type in ("wiki_compression", "wiki_continuation", "gsm8k"):
         return 16
-    if task_type in ("arithmetic", "arithmetic-negative", "mmlu"):
+    if task_type in ("arithmetic", "arithmetic-negative", "mmlu", "mathqa"):
         return 12
     return 12
 
@@ -2440,6 +2440,7 @@ class TrainingConfig:
             "arithmetic": 150,
             "arithmetic-negative": 150,
             "mmlu": 150,
+            "mathqa": 150,
         }
         final_cot_length = (
             args.cot_length if args.cot_length is not None else cot_defaults.get(args.task_type, 50)
@@ -2501,7 +2502,8 @@ if __name__ == "__main__":
             "arithmetic-negative",
             "gsm8k",
             "mmlu",
-            "arc",
+            "math",
+            "mathqa",
             "svamp",
             "aqua",
             "arc",

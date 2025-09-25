@@ -189,6 +189,9 @@ def construct_prompts(
     elif task_type == "aqua":
         base_prompt = f"You will be given a multiple choice algebra word problem. Use {hyperparameters['cot_length']} tokens to think step-by-step, then select the correct option. Question:"
         prompt_type = "Reasoning:"
+    elif task_type == "mathqa":
+        base_prompt = f"You will be given a multiple choice math word problem. Use {hyperparameters['cot_length']} tokens to think step-by-step, then select the correct option. Question:"
+        prompt_type = "Reasoning:"
     elif task_type == "mmlu":
         base_prompt = f"You will be given a multiple choice question. Use {hyperparameters['cot_length']} tokens to think through the problem step-by-step, then select the correct answer. Question:"
         prompt_type = "Reasoning:"
@@ -306,7 +309,7 @@ def construct_baseline_prompts(
             "Solve the following problem. " + thinking_hint + "\n\nProblem: " + question
         )
         answer_prefix = "Answer: "
-    elif task_type in ["mmlu", "aqua", "arc"]:
+    elif task_type in ["mmlu", "aqua", "arc", "mathqa"]:
         user_text = (
             "Answer the multiple choice question. "
             + thinking_hint
@@ -782,11 +785,19 @@ def load_svamp_dataset(chunk_size: int = 1000, split: str = "train"):
         "MADE/SVAMP"
     ]
     ds = None
+    hf_token = os.getenv("HUGGINGFACE_HUB_TOKEN") or os.getenv("HF_TOKEN")
+    last_error = None
     for ds_id in candidate_ids:
         try:
-            ds = load_dataset(ds_id)
+            ds = load_dataset(ds_id, token=hf_token)
+            # Basic split validation
+            try:
+                _ = ds.get("train") or ds["train"]
+            except Exception:
+                pass
             break
-        except Exception:
+        except Exception as e:
+            last_error = e
             continue
     qa_pairs = []
     if ds is not None:
@@ -927,6 +938,145 @@ def load_aqua_dataset(chunk_size: int = 1000, split: str = "train"):
                     records.append((prompt, letter))
         else:
             colored_print("AQuA Load", "Could not load AQuA from HF or local. Set AQUA_PATH to a JSON/JSONL file.", Colors.RED)
+    # Yield lazily
+    for i in range(0, len(records), chunk_size):
+        chunk = records[i:i+chunk_size]
+        if split == "train":
+            random.shuffle(chunk)
+        yield from chunk
+
+
+def load_mathqa_dataset(chunk_size: int = 1000, split: str = "train"):
+    """Load MathQA dataset (multiple-choice math word problems).
+    Tries common HF ids then local JSON/JSONL via MATHQA_PATH or data/mathqa.json.
+    Yields (question_with_choices, correct_option_letter).
+    """
+    candidate_ids = [
+        "allenai/math_qa",
+        "regisss/math_qa",
+        "nezumikozo/math_qa",
+        "RikoteMaster/math_qa_processed",
+        "math_qa",
+        "mathqa",
+    ]
+    ds = None
+    for ds_id in candidate_ids:
+        try:
+            ds = load_dataset(ds_id)
+            break
+        except Exception:
+            continue
+    records = []
+    def normalize_options(opts):
+        norm = []
+        for i, opt in enumerate(opts):
+            s = str(opt).strip()
+            s = re.sub(r"^[A-Ea-e][\)\.:\-]\s*", "", s)
+            norm.append(s)
+        return norm
+    
+    def parse_options_string(opt_str: str):
+        """Try to parse a labeled options string like 'A) foo B) bar ...'.
+        Returns list of (letter, text) or None if not matched.
+        """
+        text = str(opt_str)
+        pattern = r"([A-Ea-e])[\)\.:\-]\s*([\s\S]*?)(?=(?:\s*[A-Ea-e][\)\.:\-]\s)|$)"
+        pairs = re.findall(pattern, text)
+        if pairs:
+            # Clean and sort by letter
+            pairs = [(l.upper(), t.strip()) for (l, t) in pairs]
+            pairs.sort(key=lambda x: x[0])
+            return [t for (_, t) in pairs]
+        return None
+    if ds is not None:
+        data = ds[split]
+        # Quick diagnostic on expected length
+        try:
+            expected_len = len(data)
+            if expected_len == 0:
+                colored_print("MathQA Load", f"Split '{split}' has zero length for dataset '{getattr(ds, 'builder_name', 'unknown')}'", Colors.YELLOW)
+        except Exception:
+            pass
+        for item in data:
+            q = item.get("Problem") or item.get("problem") or item.get("Question") or item.get("question")
+            options = item.get("options") or item.get("Options") or item.get("choices")
+            correct = (
+                item.get("correct")
+                or item.get("label")
+                or item.get("Correct Option")
+                or item.get("correct_option")
+                or item.get("answer")
+                or item.get("answer_text")
+            )
+            # Support index-based answers if provided
+            if (correct is None) and (item.get("answer_index") is not None):
+                try:
+                    idx = int(item.get("answer_index"))
+                    if 0 <= idx <= 4:
+                        correct = chr(65 + idx)
+                except Exception:
+                    pass
+            if not q or not options or not correct:
+                continue
+            if isinstance(options, str):
+                # Prefer labeled parse; fallback to separators
+                parsed = parse_options_string(options)
+                if parsed is not None:
+                    parts = parsed
+                else:
+                    # Fallback: split on ';' or ','
+                    parts = [p.strip() for p in re.split(r"[;,]", options) if p.strip()]
+            else:
+                parts = list(options)
+            norm_opts = normalize_options(parts)
+            # Ensure at least 4 options; cap at 5 (A-E)
+            labeled = [f"{chr(65+i)}. {o}" for i, o in enumerate(norm_opts[:5])]
+            prompt = f"{q}\n\nChoices:\n" + "\n".join(labeled)
+            # Extract single letter A-E from correct
+            letter = str(correct).strip()
+            m = re.search(r"^[A-E]$", letter, flags=re.IGNORECASE)
+            if not m:
+                found = re.findall(r"[A-E]", letter, flags=re.IGNORECASE)
+                letter = found[-1] if found else letter[:1]
+            records.append((prompt, letter.upper()))
+    else:
+        # Local fallback
+        import json
+        local_path = os.getenv("MATHQA_PATH") or os.path.join("data", "mathqa.json")
+        if os.path.exists(local_path):
+            with open(local_path, "r") as f:
+                try:
+                    raw = json.load(f)
+                    if isinstance(raw, dict) and "data" in raw:
+                        raw = raw["data"]
+                except Exception:
+                    f.seek(0)
+                    raw = [json.loads(line) for line in f if line.strip()]
+            for item in raw:
+                q = item.get("Problem") or item.get("problem") or item.get("Question") or item.get("question")
+                options = item.get("options") or item.get("Options") or item.get("choices")
+                correct = item.get("correct") or item.get("label") or item.get("Correct Option") or item.get("correct_option") or item.get("answer")
+                if not q or not options or not correct:
+                    continue
+                if isinstance(options, str):
+                    parsed = parse_options_string(options)
+                    if parsed is not None:
+                        parts = parsed
+                    else:
+                        parts = [p.strip() for p in re.split(r"[;,]", options) if p.strip()]
+                else:
+                    parts = list(options)
+                norm_opts = [re.sub(r"^[A-Ea-e][\)\.:\-]\s*", "", str(o).strip()) for o in parts]
+                labeled = [f"{chr(65+i)}. {o}" for i, o in enumerate(norm_opts[:5])]
+                prompt = f"{q}\n\nChoices:\n" + "\n".join(labeled)
+                letter = str(correct).strip()
+                m = re.search(r"^[A-E]$", letter, flags=re.IGNORECASE)
+                if not m:
+                    found = re.findall(r"[A-E]", letter, flags=re.IGNORECASE)
+                    letter = found[-1] if found else letter[:1]
+                records.append((prompt, letter.upper()))
+        else:
+            colored_print("MathQA Load", "Could not load MathQA from HF (tried allenai/math_qa, regisss/math_qa, etc.) or local. Set MATHQA_PATH to a JSON/JSONL file.", Colors.RED)
     # Yield lazily
     for i in range(0, len(records), chunk_size):
         chunk = records[i:i+chunk_size]
@@ -1082,6 +1232,22 @@ def generate_question_answer_batches(
                 except StopIteration:
                     dataset_iter = load_aqua_dataset(chunk_size=chunk_size, split=aqua_split)
                     unique_qa = next(dataset_iter)
+                repeated_batch = [unique_qa] * batch_size
+                yield repeated_batch
+        
+        elif task_type == "mathqa":
+            dataset_iter = load_mathqa_dataset(chunk_size=chunk_size, split="train")
+            for batch_idx in range(num_batches):
+                try:
+                    unique_qa = next(dataset_iter)
+                except StopIteration:
+                    dataset_iter = load_mathqa_dataset(chunk_size=chunk_size, split="train")
+                    try:
+                        unique_qa = next(dataset_iter)
+                    except StopIteration:
+                        raise ValueError(
+                            "MathQA dataset appears empty. Set MATHQA_PATH to a JSON/JSONL file or install a HuggingFace dataset such as 'math_qa'."
+                        )
                 repeated_batch = [unique_qa] * batch_size
                 yield repeated_batch
                 
@@ -1402,6 +1568,24 @@ def generate_question_answer_batches(
                 except StopIteration:
                     dataset_iter = load_aqua_dataset(chunk_size=chunk_size, split="train")
                     qa_pair = next(dataset_iter)
+                batch.append(qa_pair)
+            yield batch
+            
+    elif task_type == "mathqa":
+        dataset_iter = load_mathqa_dataset(chunk_size=chunk_size, split="train")
+        for batch_start in range(0, num_batches * batch_size, batch_size):
+            batch = []
+            for _ in range(batch_size):
+                try:
+                    qa_pair = next(dataset_iter)
+                except StopIteration:
+                    dataset_iter = load_mathqa_dataset(chunk_size=chunk_size, split="train")
+                    try:
+                        qa_pair = next(dataset_iter)
+                    except StopIteration:
+                        raise ValueError(
+                            "MathQA dataset appears empty. Set MATHQA_PATH to a JSON/JSONL file or install a HuggingFace dataset such as 'math_qa'."
+                        )
                 batch.append(qa_pair)
             yield batch
             

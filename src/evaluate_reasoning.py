@@ -19,6 +19,7 @@ from utils import (
     load_svamp_dataset,
     load_aqua_dataset,
     load_arc_dataset,
+    load_mathqa_dataset,
     generate_question_answer_batches,
 )
 import copy
@@ -63,10 +64,10 @@ def extract_numeric_answer(answer: str):
 
 
 def extract_choice_letter(text: str) -> str:
-    match = re.search(r"\b([A-D])\b", text.strip())
+    match = re.search(r"\b([A-E])\b", text.strip())
     if match:
         return match.group(1)
-    match = re.search(r"\b([a-d])\b", text.strip())
+    match = re.search(r"\b([a-e])\b", text.strip())
     if match:
         return match.group(1).upper()
     return "[invalid]"
@@ -249,6 +250,12 @@ def load_task_data(task_type: str, num_samples: int = None) -> List[Tuple[str, s
             data.append(qa)
             if num_samples and len(data) >= num_samples:
                 break
+    elif task_type == "mathqa":
+        it = load_mathqa_dataset(split="test")
+        for i, qa in enumerate(it):
+            data.append(qa)
+            if num_samples and len(data) >= num_samples:
+                break
     else:
         raise ValueError(f"Unsupported task_type for reasoning eval: {task_type}")
     return data
@@ -279,7 +286,7 @@ def evaluate_model(
     correct = 0
     total = 0
 
-    is_mcq = hyperparameters.get("task_type") in ["aqua", "arc", "svamp"]
+    is_mcq = hyperparameters.get("task_type") in ["aqua", "arc", "svamp", "mathqa"]
 
     for i in tqdm(range(0, len(test_data), batch_size)):
         batch = test_data[i:i + batch_size]
@@ -468,7 +475,7 @@ def main(
     all_adapters=False,
     arc_subset=None,
 ):
-    supported = ["arithmetic", "arithmetic-negative", "svamp", "aqua", "arc"]
+    supported = ["arithmetic", "arithmetic-negative", "svamp", "aqua", "arc", "mathqa"]
     if task_type not in supported:
         raise ValueError(f"task_type must be one of {supported}")
 
@@ -547,6 +554,11 @@ def main(
             subset = arc_subset or os.getenv("ARC_SUBSET", "ARC-Challenge")
             it = load_arc_dataset(split="validation", subset=subset)
             test_data = list(it)
+        elif task_type == "mathqa":
+            it = load_mathqa_dataset(split="test")
+            test_data = list(it)
+            if not test_data:
+                raise FileNotFoundError("No MathQA test data found. Set MATHQA_PATH to a JSON/JSONL file or install a HuggingFace dataset such as 'math_qa'.")
         else:
             test_data = load_task_data(task_type, num_samples=None)
 
@@ -593,7 +605,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate baseline or actor-critic on reasoning tasks")
-    parser.add_argument("--task_type", type=str, required=True, choices=["arithmetic", "arithmetic-negative", "svamp", "aqua", "arc"], help="Task to evaluate")
+    parser.add_argument("--task_type", type=str, required=True, choices=["arithmetic", "arithmetic-negative", "math", "svamp", "aqua", "arc", "mathqa"], help="Task to evaluate")
     parser.add_argument("--model_path", type=str, default=None, help="Path to trained model weights (default: latest result)")
     parser.add_argument("--num_samples", type=int, default=None, help="Number of samples to evaluate (default: all)")
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size for evaluation")
