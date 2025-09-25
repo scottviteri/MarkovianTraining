@@ -11,6 +11,8 @@ import matplotlib.colors as mcolors
 from scipy.signal import savgol_filter
 from train import calculate_answer_log_probs
 from utils import find_latest_result, print_debug_info
+from utils import construct_prompts, get_text_with_token_length
+from datasets import load_dataset
 from tqdm import tqdm
 import string
 from pathlib import Path
@@ -1090,6 +1092,214 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
     return comparison_data, markovian_hyperparams, non_markovian_hyperparams
 
 
+def _generate_actor_cots_for_questions(model, tokenizer, device, questions, hyperparameters):
+    """Generate actor chain-of-thought texts for a batch of questions using model.generate."""
+    prompts = [
+        construct_prompts(
+            question=q,
+            hyperparameters=hyperparameters,
+        )
+        for q in questions
+    ]
+    tokenized_inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
+    with torch.no_grad():
+        outputs = model.generate(
+            input_ids=tokenized_inputs.input_ids,
+            attention_mask=tokenized_inputs.attention_mask,
+            max_new_tokens=int(hyperparameters.get("cot_length", 50)),
+            min_new_tokens=int(hyperparameters.get("cot_length", 50)),
+            do_sample=True,
+            temperature=float(hyperparameters.get("temperature", 0.7)),
+            top_k=None,
+            top_p=None,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+    cot_texts = tokenizer.batch_decode(
+        outputs[:, tokenized_inputs.input_ids.shape[1]:], skip_special_tokens=True
+    )
+    return cot_texts
+
+
+def _load_wiki_pairs(tokenizer, question_length, target_length, num_samples):
+    """Load fresh (question, answer) pairs from Wikipedia dataset for wiki tasks."""
+    wiki_dataset = load_dataset("wikimedia/wikipedia", "20231101.en", split="train")
+    qa_pairs = []
+    idx = 0
+    # Skip indices used during certain training ranges to diversify
+    skip_start, skip_end = 15200, 22400
+    while len(qa_pairs) < num_samples and idx < len(wiki_dataset):
+        if skip_start <= idx < skip_end:
+            idx = skip_end
+            continue
+        article = wiki_dataset[idx]
+        idx += 1
+        text = article.get("text", "")
+        if not text:
+            continue
+        # Ensure enough tokens
+        tokens = tokenizer(text, truncation=False, return_tensors="pt").input_ids[0]
+        if len(tokens) < question_length + target_length:
+            continue
+        # Extract segments
+        question_chunk, _ = get_text_with_token_length(text, question_length, tokenizer)
+        if question_chunk is None:
+            continue
+        remaining = text[len(question_chunk):]
+        target_chunk, _ = get_text_with_token_length(remaining, target_length, tokenizer)
+        if target_chunk is None:
+            continue
+        qa_pairs.append((question_chunk, target_chunk))
+    return qa_pairs[:num_samples]
+
+
+def run_markovian_comparison_fresh(
+    markovian_log_file,
+    non_markovian_log_file,
+    perturb_type,
+    num_samples=128,
+    task_type="wiki_continuation",
+    question_length=None,
+    target_length=None,
+    batch_size=8,
+    evaluator="actor",
+    adapter_index=None,
+):
+    """Run comparison using fixed checkpoints on fresh datapoints, not training logs."""
+    if perturb_type not in PERTURBATION_SETS:
+        raise ValueError(f"Unknown perturbation type: {perturb_type}")
+
+    perturbations = PERTURBATION_SETS[perturb_type]["perturbations"]
+
+    # Load hyperparameters from both logs
+    with open(markovian_log_file, "r") as f:
+        markovian_hyperparams = json.loads(next(f))
+    with open(non_markovian_log_file, "r") as f:
+        non_markovian_hyperparams = json.loads(next(f))
+
+    # Force desired task type for fresh comparison
+    markovian_hyperparams = {**markovian_hyperparams, "task_type": task_type}
+    non_markovian_hyperparams = {**non_markovian_hyperparams, "task_type": task_type}
+
+    # If lengths provided, override
+    if question_length is not None:
+        markovian_hyperparams["question_length"] = int(question_length)
+        non_markovian_hyperparams["question_length"] = int(question_length)
+    if target_length is not None:
+        markovian_hyperparams["target_length"] = int(target_length)
+        non_markovian_hyperparams["target_length"] = int(target_length)
+
+    # Load models with specified adapters
+    actor_markovian, frozen_markovian, tokenizer, device = load_model_with_adapters(
+        markovian_log_file, markovian_hyperparams["model_type"], markovian_hyperparams, adapter_index=adapter_index
+    )
+    actor_non_markovian, frozen_non_markovian, _, _ = load_model_with_adapters(
+        non_markovian_log_file, non_markovian_hyperparams["model_type"], non_markovian_hyperparams, adapter_index=adapter_index
+    )
+
+    markovian_eval_model = actor_markovian if evaluator == "actor" else frozen_markovian
+    non_markovian_eval_model = actor_non_markovian if evaluator == "actor" else frozen_non_markovian
+
+    # Prepare fresh dataset QA pairs
+    q_len = int(markovian_hyperparams.get("question_length", 512))
+    t_len = int(markovian_hyperparams.get("target_length", 128))
+    qa_pairs = _load_wiki_pairs(tokenizer, q_len, t_len, num_samples)
+    if not qa_pairs:
+        raise RuntimeError("No suitable wiki samples found for fresh comparison.")
+
+    # Process in batches
+    comparison_data = []
+    output_dir = os.path.join(os.path.dirname(markovian_log_file), "markovian_comparison")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"comparison_results_fresh_{perturb_type}.json")
+
+    for batch_start in tqdm(range(0, len(qa_pairs), batch_size), desc="Processing comparison batches (fresh)"):
+        batch = qa_pairs[batch_start: batch_start + batch_size]
+        questions, answers = zip(*batch)
+
+        # Generate actor CoTs for each model on same questions
+        actor_cots_markovian = _generate_actor_cots_for_questions(actor_markovian, tokenizer, device, questions, markovian_hyperparams)
+        actor_cots_non_markovian = _generate_actor_cots_for_questions(actor_non_markovian, tokenizer, device, questions, non_markovian_hyperparams)
+
+        # Initialize batch results (use sequential index as batch index)
+        batch_results = []
+        for i in range(len(questions)):
+            batch_results.append({
+                "Batch Index": batch_start + i,
+                "Markovian Effects": {},
+                "Non_Markovian Effects": {},
+                "Effect Difference": {}
+            })
+
+        # Original log probs
+        markovian_original_logprobs, _ = calculate_answer_log_probs(
+            frozen_model=markovian_eval_model,
+            tokenizer=tokenizer,
+            device=device,
+            questions=list(questions),
+            reasoning=actor_cots_markovian,
+            answers=list(answers),
+            hyperparameters=markovian_hyperparams,
+            include_question=False,
+        )
+        non_markovian_original_logprobs, _ = calculate_answer_log_probs(
+            frozen_model=non_markovian_eval_model,
+            tokenizer=tokenizer,
+            device=device,
+            questions=list(questions),
+            reasoning=actor_cots_non_markovian,
+            answers=list(answers),
+            hyperparameters=non_markovian_hyperparams,
+            include_question=True,
+        )
+
+        # Perturbations
+        for pert_name, pert_config in perturbations.items():
+            if pert_name == "Original":
+                continue
+            perturbed_markovian_cots = [perturb_CoT(cot, pert_config) for cot in actor_cots_markovian]
+            perturbed_non_markovian_cots = [perturb_CoT(cot, pert_config) for cot in actor_cots_non_markovian]
+
+            markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
+                frozen_model=markovian_eval_model,
+                tokenizer=tokenizer,
+                device=device,
+                questions=list(questions),
+                reasoning=perturbed_markovian_cots,
+                answers=list(answers),
+                hyperparameters=markovian_hyperparams,
+                include_question=False,
+            )
+            non_markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
+                frozen_model=non_markovian_eval_model,
+                tokenizer=tokenizer,
+                device=device,
+                questions=list(questions),
+                reasoning=perturbed_non_markovian_cots,
+                answers=list(answers),
+                hyperparameters=non_markovian_hyperparams,
+                include_question=True,
+            )
+
+            for i in range(len(questions)):
+                markovian_effect = markovian_original_logprobs[i].item() - markovian_perturbed_logprobs[i].item()
+                non_markovian_effect = non_markovian_original_logprobs[i].item() - non_markovian_perturbed_logprobs[i].item()
+                effect_difference = markovian_effect - non_markovian_effect
+                batch_results[i]["Markovian Effects"][pert_name] = markovian_effect
+                batch_results[i]["Non_Markovian Effects"][pert_name] = non_markovian_effect
+                batch_results[i]["Effect Difference"][pert_name] = effect_difference
+
+        comparison_data.extend(batch_results)
+
+        # Periodic save
+        with open(output_path, "w") as f:
+            json.dump(comparison_data, f)
+
+    print(f"Markovian fresh comparison analysis complete. Processed {len(comparison_data)} entries.")
+    print(f"Results saved to {output_path}")
+
+    return comparison_data, markovian_hyperparams, non_markovian_hyperparams
+
+
 def combine_all_markovian_comparison_plots(base_directory, font_size=12, include_perturbations=None, exclude_perturbations=None, legend_font_size=None):
     """
     Combine all markovian comparison plots from a directory into a single comprehensive figure.
@@ -1397,6 +1607,34 @@ def main():
         type=int,
         help="Force loading a specific adapter index (e.g., 400 will use adapter_400)",
     )
+    # Fresh datapoint comparison flags
+    parser.add_argument(
+        "--fresh_comparison",
+        action="store_true",
+        help="Run Markovian vs Non-Markovian comparison on fresh datapoints (not training logs)",
+    )
+    parser.add_argument(
+        "--fresh_task_type",
+        type=str,
+        default="wiki_continuation",
+        help="Task type for fresh comparison (e.g., wiki_continuation, wiki_compression)",
+    )
+    parser.add_argument(
+        "--fresh_num_samples",
+        type=int,
+        default=128,
+        help="Number of fresh samples to evaluate in fresh comparison",
+    )
+    parser.add_argument(
+        "--fresh_question_length",
+        type=int,
+        help="Question/context length (tokens) for fresh wiki tasks",
+    )
+    parser.add_argument(
+        "--fresh_target_length",
+        type=int,
+        help="Target/answer length (tokens) for fresh wiki tasks",
+    )
     
     # New arguments for Markovian comparison
     parser.add_argument(
@@ -1483,6 +1721,43 @@ def main():
 
     if args.all:
         args.perturb = list(PERTURBATION_SETS.keys())
+
+    # Handle fresh datapoint comparison mode
+    if args.fresh_comparison:
+        if not args.markovian_log or not args.non_markovian_log:
+            print("Error: --fresh_comparison requires both --markovian_log and --non_markovian_log")
+            return
+        if not args.perturb:
+            print("Error: --fresh_comparison requires --perturb argument")
+            return
+        for perturb_type in args.perturb:
+            print(f"Running Fresh Markovian vs Non-Markovian comparison for {perturb_type}...")
+            comparison_data, markovian_hyperparams, non_markovian_hyperparams = run_markovian_comparison_fresh(
+                markovian_log_file=args.markovian_log,
+                non_markovian_log_file=args.non_markovian_log,
+                perturb_type=perturb_type,
+                num_samples=args.fresh_num_samples,
+                task_type=args.fresh_task_type,
+                question_length=args.fresh_question_length,
+                target_length=args.fresh_target_length,
+                batch_size=args.batch_size,
+                evaluator=args.evaluator,
+                adapter_index=args.adapter_index,
+            )
+            output_dir = os.path.join(os.path.dirname(args.markovian_log), "markovian_comparison")
+            plot_markovian_comparison_results(
+                results=comparison_data,
+                output_dir=output_dir,
+                perturb_type=f"fresh_{perturb_type}",
+                window_size=args.window_size,
+                font_size=args.font_size,
+                legend_font_size=args.legend_font_size,
+                markovian_hyperparams=markovian_hyperparams,
+                non_markovian_hyperparams=non_markovian_hyperparams,
+            )
+            analyze_markovian_comparison_summary(comparison_data, f"fresh_{perturb_type}")
+            print(f"Fresh markovian comparison for {perturb_type} completed.")
+        return
 
     # Handle markovian comparison mode
     if args.markovian_comparison:
