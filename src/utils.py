@@ -183,6 +183,9 @@ def construct_prompts(
     elif task_type == "gsm8k":
         base_prompt = f"You will be given a reasoning problem, which you have {hyperparameters['cot_length']} tokens to work through step-by-step. Question:"
         prompt_type = "Reasoning:"
+    elif task_type == "svamp":
+        base_prompt = f"You will be given a reasoning problem, which you have {hyperparameters['cot_length']} tokens to work through step-by-step. Question:"
+        prompt_type = "Reasoning:"
     elif task_type == "math":
         base_prompt = f"You will be given a competition math problem. Use {hyperparameters['cot_length']} tokens to reason step-by-step and compute the final answer. Problem:"
         prompt_type = "Reasoning:"
@@ -295,7 +298,7 @@ def construct_baseline_prompts(
         else "Think step by step briefly, then provide the final answer."
     )
 
-    if task_type in ["arithmetic", "arithmetic-negative", "gsm8k"]:
+    if task_type in ["arithmetic", "arithmetic-negative", "gsm8k", "svamp"]:
         user_text = (
             "Solve the following problem. " + thinking_hint + "\n\nProblem: " + question
         )
