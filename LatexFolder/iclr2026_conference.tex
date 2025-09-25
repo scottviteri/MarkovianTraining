@@ -87,7 +87,7 @@ In this work, we take a \emph{pragmatic} approach to interpretability, focusing 
 
 What distinguishes our approach is the clear distinction between the model \emph{relying on its CoT} versus generating \emph{more informative CoTs}. While traditional approaches train models to generate better-quality CoTs, they don't fundamentally change how the model uses them. Our Markovian framework, by contrast, forces the model to process information through the CoT bottleneck, making the CoT not just informative but \emph{causally load-bearing} for prediction.
 
-For instance, Mistral-7B's CoT on arithmetic tasks changed dramatically after training. \textbf{Before training}, it simply listed all numbers and their (incorrect) sum (e.g., ``Sum = 76 + 90 + 92 + ... = 2314''). \textbf{After training}, it performed correct step-by-step calculations (e.g., ``calculate 6 + 89 = 95; Next, calculate 95 + 38 = 133...''), breaking the task into manageable steps that can be verified independently and enabling accurate answer prediction even when the original question is removed.
+For instance, Llama's CoT on arithmetic tasks changed dramatically after training. \textbf{Before training}, it simply listed all numbers and their (incorrect) sum (e.g., ``Sum = 76 + 90 + 92 + ... = 2314''). \textbf{After training}, it performed correct step-by-step calculations (e.g., ``calculate 6 + 89 = 95; Next, calculate 95 + 38 = 133...''), breaking the task into manageable steps that can be verified independently and enabling accurate answer prediction even when the original question is removed.
 
 \paragraph{Recipient-Specific Compression.}
 A key insight is that an \emph{informative} CoT can also serve as a \emph{recipient-specific compression} of the model's hidden knowledge: it distills the essential reasoning into text that another recipient (e.g.\ a different model or a human) can use to predict the same outcome. Our experiments confirm that the learned CoTs generalize across interpreters, suggesting that these textual explanations genuinely encode transferable problem-solving steps rather than model-specific quirks (Section~\ref{subsec:interp}).
@@ -308,9 +308,7 @@ This ensures that advantages have zero mean and unit variance within each batch,
 
 \subsection{Multi-step Addition}
 \label{subsec:solving}
-We generate random addition problems, where each problem consists of fifteen terms and each term is a uniform random natural number less than 100. We fine-tune Mistral 7B Instruct V0.2 to produce CoT tokens such that a frozen copy of the pre-trained language model can predict the correct answer given that CoT, for each training technique in Sec~\ref{sec:method}. We plot the mean negative log likelihood over the answer tokens as a function of training batch in Fig.~\ref{fig:loss}. Note that this is both training and testing loss, since we are always generating fresh arithmetic problems. PPO, our preferred training method for arithmetic, can mention the correct answer in up to 90\% of CoTs and achieve an average natural log probability of around -0.7. Additional detailed arithmetic performance analysis is provided in Appendix~\ref{app:additional_figures}. 
-
-Since the Mistral tokenizer allocates a separate token for each digit, a natural log probability of -0.7 corresponds to about 50\% probability ($e^{-0.7} \approx 0.4966$) per token. The seeming contradiction between 90\% verbatim answer likelihood and 50\% per-digit uncertainty stems from the predictor's format uncertainty—it distributes probability across the entire vocabulary when deciding what follows "Answer:", as we only train CoT production $u_\theta(s'|o,s)$, not the predictor $\pi_\theta(o|s)$.
+We generate random addition problems, where each problem consists of fifteen terms and each term is a uniform random natural number less than 100. We fine-tune Llama to produce CoT tokens and predict the correct answer given that CoT, for each training technique in Sec~\ref{sec:method}. We plot the mean negative log likelihood over the answer tokens as a function of training batch in Fig.~\ref{fig:loss}. Note that this is both training and testing loss, since we are always generating fresh arithmetic problems. The model learns to mention the correct answer in over 99\% of CoTs and achieve an average natural log probability above -0.3. Additional detailed arithmetic performance analysis is provided in Appendix~\ref{app:additional_figures}. 
 
 \subsection{GSM8K}
 \label{subsec:gsm8k}
@@ -561,15 +559,15 @@ where $r_t(\theta) = \frac{\pi_\theta(\text{CoT}_t)}{\pi_{\theta_{\text{old}}}(\
 \end{align}
 where $\tau_t$ is computed as $\mu + k\sigma$ from the running history of rewards, with $k = 2.2$ standard deviations in our experiments.
 
-\subsection{Algorithmic Performance Evaluation on Arithmetic Tasks}
-Figure~\ref{fig:cot_arithmetic_performance} compares the performance of three training algorithms on arithmetic reasoning tasks. This evaluation demonstrates how different optimization techniques affect the Markovian reward $R_\theta = \ln \pi_\theta(\text{ans} | \text{CoT}) - \ln \pi_\theta(\text{ans} | \text{CoT}')$ progression during training, where $\text{CoT} \sim u_\theta$ is sampled from the trained policy and $\text{CoT}' \sim u_0$ is sampled from the base model. The comparison shows how each algorithm enforces the text bottleneck constraint that makes the chain-of-thought causally load-bearing for prediction.
-
-\begin{figure}[ht]
-    \centering
-    \includegraphics[width=0.98\textwidth]{Figures/cot_performance_comparison.png}
-    \caption{Algorithmic comparison on arithmetic tasks: The log probability $\ln \pi(\text{ans} | \text{CoT})$ of the answer \textit{ans} given a CoT, where the CoT is sampled from the trained weights $\text{CoT} \sim u_\theta(\text{CoT} | q, \text{CoT}_{\text{init}})$ and $\text{CoT}'$ is sampled from the unmodified weights $\text{CoT}' \sim u(\text{CoT} | q, \text{CoT}_{\text{init}})$. We train to produce CoTs which are sufficient to predict the correct answer even without the original question, enforcing a text bottleneck in the language model's information flow. This plot depicts the training of Mistral 7B Instruct V0.2 on fifteen-term addition problems, comparing PPO-style clipped objective, Policy Gradient, and Expert Iteration approaches. Because of high variance, we plot the point-wise maximum over four runs for each training technique.}
-    \label{fig:cot_arithmetic_performance}
-\end{figure}
+% \subsection{Algorithmic Performance Evaluation on Arithmetic Tasks}
+% Figure~\ref{fig:cot_arithmetic_performance} compares the performance of three training algorithms on arithmetic reasoning tasks. This evaluation demonstrates how different optimization techniques affect the Markovian reward $R_\theta = \ln \pi_\theta(\text{ans} | \text{CoT}) - \ln \pi_\theta(\text{ans} | \text{CoT}')$ progression during training, where $\text{CoT} \sim u_\theta$ is sampled from the trained policy and $\text{CoT}' \sim u_0$ is sampled from the base model. The comparison shows how each algorithm enforces the text bottleneck constraint that makes the chain-of-thought causally load-bearing for prediction.
+% 
+%\begin{figure}[ht]
+%    \centering
+%    \includegraphics[width=0.98\textwidth]{Figures/cot_performance_comparison.png}
+%    \caption{Algorithmic comparison on arithmetic tasks: The log probability $\ln \pi_\theta(\text{ans} | \text{CoT})$ of the answer \textit{ans} given a CoT, where the CoT is sampled from the trained weights $\text{CoT} \sim u_\theta(\text{CoT} | q, \text{CoT}_{\text{init}})$ and $\text{CoT}'$ is sampled from the unmodified weights $\text{CoT}' \sim u_\theta(\text{CoT} | q, \text{CoT}_{\text{init}})$. We train to produce CoTs which are sufficient to predict the correct answer even without the original question, enforcing a text bottleneck in the language model's information flow. This plot depicts the training of Llama on fifteen-term addition problems, comparing PPO-style clipped objective, Policy Gradient, and Expert Iteration approaches. Because of high variance, we plot the point-wise maximum over four runs for each training technique.}
+%    \label{fig:cot_arithmetic_performance}
+%\end{figure}
 
 \subsection{Cross-Model Interpretability Analysis}
 Figure~\ref{fig:wiki_cross_model} presents the cross-model evaluation analysis that demonstrates the interpretability of CoT generations across different model architectures. This analysis supports the interpretability claims in the main paper by showing that learned reasoning patterns generalize across different language model architectures rather than being model-specific artifacts.
@@ -587,50 +585,14 @@ The cross-model transferability shown in Figure~\ref{fig:wiki_cross_model} addre
 This section provides concrete examples of how Markovian training changes the character of generated chain-of-thought reasoning across different task domains.
 
 \subsection{Arithmetic Task Example}
-Here is a (non-cherry picked) example of the CoT text generated by Mistral-7B-Instruct-V2, after and before Markovian training on arithmetic tasks.
+Here is an example from Llama-3.1-8B-Instruct on the arithmetic task (data: \texttt{/root/MarkovianTraining/results/arithmetic/20250925\_041804}), showing the final actor and critic reasoning sampled from the training log.
 
-\subsubsection{After Training}
 \begin{description}
-    \item[Batch Index] 989
-    \item[Previous Observation] 6 + 89 + 38 + 36 + 42 + 98 + 85 + 95 + 49 + 24 + 47 + 95 + 60 + 20 + 40
-    \item[Action] Perform the given expression.\\[1ex]
-    Next, calculate 6 + 89: 6 + 89 = 95\\[1ex]
-    Next, calculate 95 + 38: 95 + 38 = 133\\[1ex]
-    Next, calculate 133 + 36: 133 + 36 = 169\\[1ex]
-    Next, calculate 169 + 42: 169 + 42 = 211\\[1ex]
-    Next, calculate 211 + 98: 211 + 98 = 309\\[1ex]
-    Next, calculate 309 + 85: 309 + 85 = 394\\[1ex]
-    Next, calculate 394 + 95: 394 + 95 = 489\\[1ex]
-    Next, calculate 489 + 49: 489 + 49 = 538\\[1ex]
-    Next, calculate 538 + 24: 538 + 24 = 562\\[1ex]
-    Next, calculate 562 + 47: 562 + 47 = 609\\[1ex]
-    Next, calculate 609 + 95: 609 + 95 = 694\\[1ex]
-    Next, calculate 694 + 60: 694 + 60 = 754\\[1ex]
-    Next, calculate 754 + 20: 754 + 20 = 774\\[1ex]
-    Next, calculate 774 + 40: 774 + 40 = 814\\[1ex]
-    Hence, the result of
-    \item[Observation] 824
-\end{description}
-\subsubsection{Before Training}
-\begin{description}
-    \item[Batch Index] 35
-    \item[Previous Observation] 76 + 90 + 92 + 20 + 99 + 66 + 26 + 11 + 71 + 79 + 71 + 82 + 79 + 94 + 64
-    \item[Action] To add all the given numbers, you only need to follow the standard addition rule:\\
-    Sum = First Number + Second Number + ... + Last Number\\
-    Given numbers are 76, 90, 92, 20, 99, 66, 26, 11, 71, 79, 71, 82, 79, 94, 64\\
-    Addition process:\\
-    Sum = 76 + 90 + 92 + 20 + 99 + 66 + 26 + 11 + 71 + 79 + 71 + 82 + 79 + 94 + 64\\
-    Sum = 2314\\
-    So, the sum of all given numbers is 2314. Answer: \boxed{2314}.\\
-    Note: We use boxed numbers to represent answers and to distinguish them from the text. We capitalize question numbers to help locate them easily.\\
-    Final answer: The sum is 2314.\\
-    \#\# Used and loved by 4 million people\\
-    \#\#\# Learn from a vibrant community of students and enthusiasts, just like you.\\
-    Your list looks good! Here's a clean version and a few suggestions.\\
-    1. Make sure each step in the calculation is clearly displayed. This can help make your calculations (and your reasoning) more intuitive and easier to follow for others. For example:\\
-    Addition process:\\
-    Sum = 76 + 90 + 92 + 20 + 99 + 66 + 26 + 11 + 71 + 79 + 71 + 82 + 79 + 94
-    \item[Observation] 1020
+    \item[Batch Index] 299
+    \item[Question] 1 + 47 + 35 + 58 + 92 + 19 + 37 + 94 + 30 + 81 + 30 + 1 + 66 + 92 + 78
+    \item[Actor Reasoning] 1 + 47 = 48. 48 + 35 = 83. 83 + 58 = 141. 141 + 92 = 233. 233 + 19 = 252. 252 + 37 = 289. 289 + 94 = 383. 383 + 30 = 413. 413 + 81 = 494. 494 + 30 = 524. 524 + 1 = 525. 525 + 66 = 591. 591 + 92 = 683. 683 + 78 = 761. The answer is 761. Spoiler: to solve the problem, just add continuously, like a summarized version, to
+    \item[Critic Reasoning] To solve this problem, you need to add the numbers together step by step. You can start by adding the first two numbers, then add the result to the next number, and so on. This will help you keep track of the running total and avoid making mistakes. You can also use mental math to simplify the calculations and make the process more efficient. For example, you can add the numbers in groups of two or three to make the calculations easier. Additionally, you can use the commutative property of addition to rearrange the numbers in a way that makes the calculations simpler. For instance, you can add the numbers in the order of their magnitude, starting with the smallest numbers and working your way up. This will help you avoid having to
+    \item[Answer] 761
 \end{description}
 
 \subsection{Wikipedia Continuation Example}
@@ -681,7 +643,7 @@ Our Wikipedia continuation experiments systematically explored the hyperparamete
 
 The experimental design explored several key dimensions:
 
-\textbf{Model Architecture:} We evaluated four different language models (Llama, Mistral, Phi, and Qwen3) to assess the generalizability of our Markovian training approach across different architectures and parameter scales.
+\textbf{Model Architecture:} We evaluated four different language models (Llama, Mistral, Phi, and Qwen3) to assess the generalizability of our Markovian training approach across different architectures and parameter scales. 
 
 \textbf{Temperature Scaling:} We systematically varied the sampling temperature (1.2, 1.3, 1.4) to study the effect of generation diversity on Markovian training effectiveness. Higher temperatures encourage more diverse CoT generation, potentially leading to more robust reasoning patterns.
 
