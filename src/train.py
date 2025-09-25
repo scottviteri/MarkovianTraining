@@ -2504,6 +2504,7 @@ if __name__ == "__main__":
             "math",
             "svamp",
             "aqua",
+            "arc",
             "wiki_compression",
             "wiki_continuation",
         ],
