@@ -55,6 +55,18 @@ def get_default_eval_batch_size(task_type: str) -> int:
     return 12
 
 
+def get_default_train_batch_size(task_type: str) -> int:
+    """Default TRAINING batch size by task type in one place.
+    - wiki_compression/wiki_continuation, gsm8k: 16
+    - arithmetic/arithmetic-negative, mmlu, and others: 12
+    """
+    if task_type in ("wiki_compression", "wiki_continuation", "gsm8k"):
+        return 16
+    if task_type in ("arithmetic", "arithmetic-negative", "mmlu"):
+        return 12
+    return 12
+
+
 def find_answer_start_position(input_ids, model_type):
     """Find the starting position of the answer in the input_ids based on model type."""
     if model_type == "mistral":
@@ -2527,7 +2539,7 @@ if __name__ == "__main__":
     parser.add_argument("--kl_penalty", type=float, default=0.1)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, 
                        help="Number of batches to accumulate gradients before updating (default: 1)")
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--batch_size", type=int, default=None)
     parser.add_argument(
         "--normalize_loss", type=lambda x: x.lower() == "true", default=True
     )
@@ -2620,6 +2632,9 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    # Apply task-specific default training batch size if not provided
+    if args.batch_size is None:
+        args.batch_size = get_default_train_batch_size(args.task_type)
     config = TrainingConfig.from_args(args)
     main(config)
 
