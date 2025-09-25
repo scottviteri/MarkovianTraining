@@ -2600,6 +2600,8 @@ if __name__ == "__main__":
         action="store_true",
         help="Use parallel sampling: each batch contains batch_size copies of the same example",
     )
+    # Turn parallel mode on by default; user can still disable with --no-parallel if added later
+    parser.set_defaults(parallel=True)
     # Markovian vs Non-Markovian reward calculation
     parser.add_argument(
         "--no-markovian",
