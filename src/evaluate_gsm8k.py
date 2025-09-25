@@ -145,9 +145,12 @@ def evaluate_model(
         num_samples: Optional limit on number of samples to evaluate
         batch_size: Batch size for evaluation
     """
-    # Determine default eval batch size: 2x training batch size (defaults to 8 if absent)
+    # Determine default eval batch size: floor(1.5x) of training batch size (defaults to 8 if absent)
     if batch_size is None:
-        batch_size = 2 * int(hyperparameters.get("batch_size", 8))
+        try:
+            batch_size = max(1, int(hyperparameters.get("batch_size", 8) * 1.5))
+        except Exception:
+            batch_size = 12
     if num_samples:
         test_data = test_data[:num_samples]
     

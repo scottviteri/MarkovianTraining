@@ -1778,7 +1778,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=state.hyperparameters["batch_size"] * 2
+                batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5))
             )
             state.actor_model.train()
         
@@ -1809,7 +1809,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=state.hyperparameters["batch_size"] * 2,
+                batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
             )
             state.actor_model.train()
         model_dir = state.model_save_path
@@ -1843,7 +1843,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=state.hyperparameters["batch_size"] * 2,
+                batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
             )
             state.actor_model.train()
         model_dir = state.model_save_path
