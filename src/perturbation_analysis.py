@@ -19,7 +19,7 @@ from peft import PeftModel
 import glob
 
 
-def load_model_with_adapters(log_file_path, model_type, hyperparameters):
+def load_model_with_adapters(log_file_path, model_type, hyperparameters, adapter_index=None):
     """
     Load a model with its trained adapters if they exist.
     
@@ -40,6 +40,16 @@ def load_model_with_adapters(log_file_path, model_type, hyperparameters):
     adapter_dirs = glob.glob(adapter_pattern)
     
     if adapter_dirs:
+        # If a specific adapter index is requested, try to use it first
+        selected_adapter = None
+        if adapter_index is not None:
+            requested = os.path.join(log_dir, f"adapter_{adapter_index}")
+            if os.path.isdir(requested):
+                selected_adapter = requested
+                print(f"Loading requested adapter: {selected_adapter}")
+            else:
+                print(f"Requested adapter adapter_{adapter_index} not found in {log_dir}. Falling back to latest available.")
+        
         # Sort by batch number to get the latest adapter
         def get_batch_number(adapter_path):
             try:
@@ -49,15 +59,16 @@ def load_model_with_adapters(log_file_path, model_type, hyperparameters):
         
         adapter_dirs_sorted = sorted(adapter_dirs, key=get_batch_number)
         latest_adapter = adapter_dirs_sorted[-1]
-        print(f"Loading trained adapter from: {latest_adapter}")
+        adapter_to_load = selected_adapter or latest_adapter
+        print(f"Loading trained adapter from: {adapter_to_load}")
         
         # Load the adapter using PEFT
         actor_model = PeftModel.from_pretrained(
             actor_model,  # Base model with LoRA config
-            latest_adapter,  # Adapter path
+            adapter_to_load,  # Adapter path
             is_trainable=False  # Set to inference mode
         )
-        print(f"Successfully loaded adapter from batch {os.path.basename(latest_adapter)}")
+        print(f"Successfully loaded adapter from batch {os.path.basename(adapter_to_load)}")
     else:
         print(f"No trained adapters found in {log_dir}, using base model")
     
@@ -188,7 +199,7 @@ def load_perturbation_results(log_file, perturb_type, include_question=False):
         return json.load(f)
 
 
-def run_perturbations(log_file, perturb_type, include_question=False, stride=1, max_index=None, save_interval=10, evaluator="actor"):
+def run_perturbations(log_file, perturb_type, include_question=False, stride=1, max_index=None, save_interval=10, evaluator="actor", adapter_index=None):
     """
     Run perturbation analysis on the given log file.
     max_index: if provided, only process entries with batch_index <= max_index
@@ -207,7 +218,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
     # Extract hyperparameters from the first line
     hyperparameters = log_data[0]
     task_type = hyperparameters.get("task_type", "gsm8k")
-    actor_model, frozen_model, tokenizer, device = load_model_with_adapters(log_file, hyperparameters["model_type"], hyperparameters)
+    actor_model, frozen_model, tokenizer, device = load_model_with_adapters(log_file, hyperparameters["model_type"], hyperparameters, adapter_index=adapter_index)
     eval_model = actor_model if evaluator == "actor" else frozen_model
 
     # Filter log data by batch index if max_index is provided
@@ -358,7 +369,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
     return perturbation_data
 
 
-def run_perturbations_batched(log_file, perturb_type, include_question=False, stride=1, max_index=None, save_interval=10, batch_size=8, evaluator="actor"):
+def run_perturbations_batched(log_file, perturb_type, include_question=False, stride=1, max_index=None, save_interval=10, batch_size=8, evaluator="actor", adapter_index=None):
     """
     Run perturbation analysis on the given log file using batched processing for improved performance.
     
@@ -386,7 +397,7 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
     # Extract hyperparameters from the first line
     hyperparameters = log_data[0]
     task_type = hyperparameters.get("task_type", "gsm8k")
-    actor_model, frozen_model, tokenizer, device = load_model_with_adapters(log_file, hyperparameters["model_type"], hyperparameters)
+    actor_model, frozen_model, tokenizer, device = load_model_with_adapters(log_file, hyperparameters["model_type"], hyperparameters, adapter_index=adapter_index)
     eval_model = actor_model if evaluator == "actor" else frozen_model
 
     # Filter log data by batch index if max_index is provided
@@ -878,7 +889,7 @@ def collate_perturbation_results(perturbation_files, output_dir, perturb_type, i
     print(f"Averaged results for {perturb_type} saved to {output_file}")
 
 
-def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb_type, stride=1, max_index=None, save_interval=10, batch_size=8, evaluator="actor"):
+def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb_type, stride=1, max_index=None, save_interval=10, batch_size=8, evaluator="actor", adapter_index=None):
     """
     Compare perturbation sensitivity between Markovian and Non-Markovian models.
     
@@ -924,10 +935,10 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
     
     # Load both models with their respective adapters
     print("Loading Markovian model...")
-    actor_markovian, frozen_markovian, tokenizer, device = load_model_with_adapters(markovian_log_file, markovian_hyperparams["model_type"], markovian_hyperparams)
+    actor_markovian, frozen_markovian, tokenizer, device = load_model_with_adapters(markovian_log_file, markovian_hyperparams["model_type"], markovian_hyperparams, adapter_index=adapter_index)
     
     print("Loading Non-Markovian model...")
-    actor_non_markovian, frozen_non_markovian, _, _ = load_model_with_adapters(non_markovian_log_file, non_markovian_hyperparams["model_type"], non_markovian_hyperparams)
+    actor_non_markovian, frozen_non_markovian, _, _ = load_model_with_adapters(non_markovian_log_file, non_markovian_hyperparams["model_type"], non_markovian_hyperparams, adapter_index=adapter_index)
 
     # Select evaluator per flag (default actor): use adapter-loaded actor, or frozen baseline
     markovian_eval_model = actor_markovian if evaluator == "actor" else frozen_markovian
@@ -1381,6 +1392,11 @@ def main():
         default="actor",
         help="Which model to use for evaluation: adapter-loaded actor (actor) or frozen baseline (frozen). Default: actor",
     )
+    parser.add_argument(
+        "--adapter_index",
+        type=int,
+        help="Force loading a specific adapter index (e.g., 400 will use adapter_400)",
+    )
     
     # New arguments for Markovian comparison
     parser.add_argument(
@@ -1488,6 +1504,7 @@ def main():
                 save_interval=args.save_interval,
                 batch_size=args.batch_size,
                 evaluator=args.evaluator,
+                adapter_index=args.adapter_index,
             )
             
             # Generate plots and analysis
@@ -1631,6 +1648,7 @@ def main():
                     save_interval=args.save_interval,
                     batch_size=args.batch_size,
                     evaluator=args.evaluator,
+                    adapter_index=args.adapter_index,
                 )
             else:
                 print("Using non-batched processing")
@@ -1642,6 +1660,7 @@ def main():
                     max_index=args.max_index,
                     save_interval=args.save_interval,
                     evaluator=args.evaluator,
+                    adapter_index=args.adapter_index,
                 )
             
             save_perturbation_results(
