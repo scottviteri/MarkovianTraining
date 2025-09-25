@@ -43,25 +43,6 @@ from datasets import load_dataset
 
 
 
-def compute_eval_batch_size(hyperparameters: Dict[str, Any], task_type: str) -> int:
-    """Compute evaluation batch size as a function of reasoning tokens.
-
-    General rule: scale with 75/cot_length, clamped to [0.25x, 1.5x] of training batch size.
-    This lowers batch size for long CoT (e.g., MMLU) to avoid OOM and increases modestly for short CoT.
-    """
-    try:
-        train_bs = int(hyperparameters.get("batch_size", 8))
-        cot_len = int(hyperparameters.get("cot_length", 50))
-        # Base scaling factor inversely proportional to CoT length
-        scale = 75.0 / max(1.0, float(cot_len))
-        # Clamp between 0.25x and 1.5x
-        factor = min(1.5, max(0.25, scale))
-        eval_bs = max(1, int(train_bs * factor))
-        return eval_bs
-    except Exception:
-        return max(1, int(hyperparameters.get("batch_size", 8)))
-
-
 def find_answer_start_position(input_ids, model_type):
     """Find the starting position of the answer in the input_ids based on model type."""
     if model_type == "mistral":
@@ -1797,7 +1778,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=compute_eval_batch_size(state.hyperparameters, "mmlu")
+                batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5))
             )
             state.actor_model.train()
         
@@ -2108,7 +2089,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=compute_eval_batch_size(state.hyperparameters, "gsm8k"),
+                        batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
                     )
                     state.actor_model.train()
                 save_results(
@@ -2134,7 +2115,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=compute_eval_batch_size(state.hyperparameters, "mmlu"),
+                        batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
                     )
                     state.actor_model.train()
                 save_results_mmlu(
@@ -2159,7 +2140,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=compute_eval_batch_size(state.hyperparameters, "aqua"),
+                        batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
                     )
                     state.actor_model.train()
                 # Save JSONL and combined plot
@@ -2191,7 +2172,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=compute_eval_batch_size(state.hyperparameters, "svamp"),
+                        batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
                     )
                     state.actor_model.train()
                 results_file = os.path.join(state.model_save_path, f"svamp_results_{state.hyperparameters['model_type']}.jsonl")
@@ -2213,6 +2194,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             elif task_type == "math":
                 colored_print("Baseline Eval", "Running MATH evaluation at timestep 0", Colors.BOLD)
                 # Hendrycks MATH has no official test split on HF; often uses test for eval here
+                # We will use split="test" if present; otherwise default to validation
                 try:
                     test_data = list(load_math_dataset(split="test"))
                 except Exception:
@@ -2226,7 +2208,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=compute_eval_batch_size(state.hyperparameters, "math"),
+                        batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
                     )
                     state.actor_model.train()
                 results_file = os.path.join(state.model_save_path, f"math_results_{state.hyperparameters['model_type']}.jsonl")
