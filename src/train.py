@@ -1740,7 +1740,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=None  # default inside evaluate_model uses 2x training batch size
+                batch_size=16
             )
             state.actor_model.train()
         
@@ -1778,7 +1778,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5))
+                batch_size=12
             )
             state.actor_model.train()
         
@@ -1809,7 +1809,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
+                batch_size=12,
             )
             state.actor_model.train()
         model_dir = state.model_save_path
@@ -1843,7 +1843,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
+                batch_size=12,
             )
             state.actor_model.train()
         model_dir = state.model_save_path
@@ -1880,7 +1880,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5))
+                batch_size=12
             )
             state.actor_model.train()
         model_dir = state.model_save_path
@@ -2089,7 +2089,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
+                        batch_size=16,
                     )
                     state.actor_model.train()
                 save_results(
@@ -2115,7 +2115,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
+                        batch_size=12,
                     )
                     state.actor_model.train()
                 save_results_mmlu(
@@ -2140,7 +2140,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
+                        batch_size=12,
                     )
                     state.actor_model.train()
                 # Save JSONL and combined plot
@@ -2172,7 +2172,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
+                        batch_size=12,
                     )
                     state.actor_model.train()
                 results_file = os.path.join(state.model_save_path, f"svamp_results_{state.hyperparameters['model_type']}.jsonl")
@@ -2208,7 +2208,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=max(1, int(state.hyperparameters["batch_size"] * 1.5)),
+                        batch_size=12,
                     )
                     state.actor_model.train()
                 results_file = os.path.join(state.model_save_path, f"math_results_{state.hyperparameters['model_type']}.jsonl")
