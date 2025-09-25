@@ -1740,7 +1740,7 @@ def save_checkpoint(state: TrainingState):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=state.hyperparameters["batch_size"] * 2
+                batch_size=None  # default inside evaluate_model uses 2x training batch size
             )
             state.actor_model.train()
         
@@ -2089,7 +2089,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                         state.device,
                         test_data,
                         state.hyperparameters,
-                        batch_size=state.hyperparameters["batch_size"] * 2,
+                        batch_size=None,
                     )
                     state.actor_model.train()
                 save_results(
@@ -2515,7 +2515,7 @@ if __name__ == "__main__":
     parser.add_argument("--kl_penalty", type=float, default=0.1)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, 
                        help="Number of batches to accumulate gradients before updating (default: 1)")
-    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument(
         "--normalize_loss", type=lambda x: x.lower() == "true", default=True
     )

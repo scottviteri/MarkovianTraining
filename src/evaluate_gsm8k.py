@@ -131,7 +131,7 @@ def evaluate_model(
     test_data,
     hyperparameters,
     num_samples=None,
-    batch_size=16,
+    batch_size=None,
 ):
     """Evaluate model on GSM8K test set using actor-critic pattern.
     
@@ -145,6 +145,9 @@ def evaluate_model(
         num_samples: Optional limit on number of samples to evaluate
         batch_size: Batch size for evaluation
     """
+    # Determine default eval batch size: 2x training batch size (defaults to 8 if absent)
+    if batch_size is None:
+        batch_size = 2 * int(hyperparameters.get("batch_size", 8))
     if num_samples:
         test_data = test_data[:num_samples]
     
@@ -449,7 +452,7 @@ def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_
 def main(
     model_path=None,
     num_samples=None,
-    batch_size=16,
+    batch_size=None,
     use_base_model=False,
     model_type=None,
     stride=1,
@@ -484,6 +487,7 @@ def main(
                 "task_type": "gsm8k",
                 "cot_length": cot_length or 150,
                 "temperature": temperature or 1.0,
+                "batch_size": 8,  # default training batch size for eval scaling
             }
         
         actor_model, critic_model, tokenizer, device = load_model(
@@ -499,6 +503,8 @@ def main(
             test_data = test_data[::stride]
             print(f"Using stride={stride}, evaluating on {len(test_data)} examples")
 
+        # Determine eval batch size default: 2x training batch size unless explicitly provided
+        eval_bs = batch_size if batch_size is not None else 2 * int(hyperparameters.get("batch_size", 8))
         accuracy, results = evaluate_model(
             actor_model,  # For CoT generation
             critic_model,  # For answer generation
@@ -507,7 +513,7 @@ def main(
             test_data, 
             hyperparameters, 
             num_samples, 
-            batch_size
+            eval_bs
         )
 
         print(f"Accuracy: {accuracy:.2%}")
@@ -543,7 +549,7 @@ if __name__ == "__main__":
         help="Number of samples to evaluate (default: all)",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=16, help="Batch size for evaluation"
+        "--batch_size", type=int, default=None, help="Batch size for evaluation (default: 2x training batch size)"
     )
     parser.add_argument(
         "--use_base_model",
