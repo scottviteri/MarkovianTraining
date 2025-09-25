@@ -251,6 +251,15 @@ def construct_prompts(
             base_with_type = f"{tokens['inst_start']} {base_prompt} {question_placeholder} {tokens['inst_end']}\n{prompt_type}"
             # Add answer header to partial prompt
             return base_with_type + reasoning + f" Answer: "
+    else:  # standard format (no special tokens)
+        if reasoning is None:
+            return f"{base_prompt} {question}\n{prompt_type}"
+        else:
+            # Include the actual question or use <Redacted> placeholder
+            question_placeholder = question if include_question else "<Redacted>"
+            base_with_type = f"{base_prompt} {question_placeholder}\n{prompt_type}"
+            # Add answer header to partial prompt
+            return base_with_type + reasoning + f" Answer: "
 
 def construct_baseline_prompts(
     question: str,
