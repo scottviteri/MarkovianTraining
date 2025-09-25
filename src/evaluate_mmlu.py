@@ -399,7 +399,8 @@ def main(
 
         split = hyperparameters.get("mmlu_split", "validation")
         subject = hyperparameters.get("mmlu_subject", None)
-        ds = load_dataset("cais/mmlu", subject) if subject else load_dataset("cais/mmlu")
+        # Default to the aggregated 'all' config when no subject is specified
+        ds = load_dataset("cais/mmlu", subject if subject else "all")
         split_name = "test" if split == "test" else "validation"
         d = ds[split_name]
 
