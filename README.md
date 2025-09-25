@@ -50,6 +50,7 @@ python src/train.py [options]
                        # - arithmetic_negative: Math with negative numbers  
                        # - gsm8k: Grade school math dataset
                        # - mmlu: Massive multitask language understanding
+                       # - arc: AI2 ARC (Challenge/Easy) science MCQ
                        # - wiki_compression: Wikipedia compression tasks
                        # - wiki_continuation: Wikipedia continuation tasks
 ```
@@ -159,6 +160,15 @@ python src/train.py --task_type mmlu --model_type qwen3 --num_batches 1000
 
 # Evaluate specific MMLU subject
 python src/train.py --task_type mmlu --mmlu_subject mathematics --model_type llama
+```
+
+### ARC Evaluation
+```bash
+# Evaluate on ARC-Challenge (validation)
+python src/evaluate_reasoning.py --task_type arc --model_type llama --num_samples 500
+
+# Choose ARC subset explicitly
+ARC_SUBSET=ARC-Easy python src/evaluate_reasoning.py --task_type arc --model_type llama --num_samples 500
 ```
 
 ## 🔬 Perturbation Analysis

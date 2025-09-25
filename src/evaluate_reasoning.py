@@ -18,6 +18,7 @@ from utils import (
     find_latest_result,
     load_svamp_dataset,
     load_aqua_dataset,
+    load_arc_dataset,
     generate_question_answer_batches,
 )
 import copy
@@ -278,7 +279,7 @@ def evaluate_model(
     correct = 0
     total = 0
 
-    is_mcq = hyperparameters.get("task_type") in ["aqua"]
+    is_mcq = hyperparameters.get("task_type") in ["aqua", "arc", "svamp"]
 
     for i in tqdm(range(0, len(test_data), batch_size)):
         batch = test_data[i:i + batch_size]
@@ -465,8 +466,9 @@ def main(
     baseline_temperature=None,
     run_dir=None,
     all_adapters=False,
+    arc_subset=None,
 ):
-    supported = ["arithmetic", "arithmetic-negative", "svamp", "aqua"]
+    supported = ["arithmetic", "arithmetic-negative", "svamp", "aqua", "arc"]
     if task_type not in supported:
         raise ValueError(f"task_type must be one of {supported}")
 
@@ -534,7 +536,20 @@ def main(
             model_type
         )
 
-        test_data = load_task_data(task_type, num_samples=None)
+        # Build test set depending on task
+        if task_type == "svamp":
+            it = load_svamp_dataset(split="test")
+            test_data = list(it)
+        elif task_type == "aqua":
+            it = load_aqua_dataset(split="test")
+            test_data = list(it)
+        elif task_type == "arc":
+            subset = os.getenv("ARC_SUBSET", "ARC-Challenge")
+            it = load_arc_dataset(split="validation", subset=subset)
+            test_data = list(it)
+        else:
+            test_data = load_task_data(task_type, num_samples=None)
+
         if stride > 1:
             test_data = test_data[::stride]
             print(f"Using stride={stride}, evaluating on {len(test_data)} examples")
@@ -578,7 +593,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate baseline or actor-critic on reasoning tasks")
-    parser.add_argument("--task_type", type=str, required=True, choices=["arithmetic", "arithmetic-negative", "math", "svamp", "aqua"], help="Task to evaluate")
+    parser.add_argument("--task_type", type=str, required=True, choices=["arithmetic", "arithmetic-negative", "math", "svamp", "aqua", "arc"], help="Task to evaluate")
     parser.add_argument("--model_path", type=str, default=None, help="Path to trained model weights (default: latest result)")
     parser.add_argument("--num_samples", type=int, default=None, help="Number of samples to evaluate (default: all)")
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size for evaluation")
@@ -592,6 +607,7 @@ if __name__ == "__main__":
     parser.add_argument("--baseline_temperature", type=float, default=None, help="Temperature for baseline thinking stage")
     parser.add_argument("--run_dir", type=str, default=None, help="Run directory containing adapter_* folders to evaluate")
     parser.add_argument("--all_adapters", action="store_true", help="Evaluate all adapters in the specified run directory (or latest if not provided)")
+    parser.add_argument("--arc_subset", type=str, choices=["ARC-Challenge", "ARC-Easy"], default=None, help="ARC subset to use")
     args = parser.parse_args()
 
     try:
@@ -610,6 +626,7 @@ if __name__ == "__main__":
             args.baseline_temperature,
             args.run_dir,
             args.all_adapters,
+            args.arc_subset,
         )
     except FileNotFoundError as e:
         print(f"Error: {e}")

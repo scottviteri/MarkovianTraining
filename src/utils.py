@@ -195,6 +195,9 @@ def construct_prompts(
     elif task_type == "mmlu":
         base_prompt = f"You will be given a multiple choice question. Use {hyperparameters['cot_length']} tokens to think through the problem step-by-step, then select the correct answer. Question:"
         prompt_type = "Reasoning:"
+    elif task_type == "arc":
+        base_prompt = f"You will be given a multiple choice science question. Use {hyperparameters['cot_length']} tokens to think step-by-step, then select the correct answer. Question:"
+        prompt_type = "Reasoning:"
     else:
         raise ValueError(f"Unknown task type: {task_type}")
         
@@ -303,7 +306,7 @@ def construct_baseline_prompts(
             "Solve the following problem. " + thinking_hint + "\n\nProblem: " + question
         )
         answer_prefix = "Answer: "
-    elif task_type in ["mmlu", "aqua"]:
+    elif task_type in ["mmlu", "aqua", "arc"]:
         user_text = (
             "Answer the multiple choice question. "
             + thinking_hint
@@ -932,6 +935,52 @@ def load_aqua_dataset(chunk_size: int = 1000, split: str = "train"):
         yield from chunk
 
 
+def load_arc_dataset(chunk_size: int = 1000, split: str = "validation", subset: str | None = None):
+    """Load ARC dataset (AI2 ARC) as multiple-choice.
+    Returns (question_with_choices, correct_option_letter).
+    - subset: "ARC-Challenge" (default) or "ARC-Easy"
+    - Only keeps items with answers in A-D to match current MCQ extractor.
+    """
+    try:
+        if subset is None:
+            subset = os.getenv("ARC_SUBSET", "ARC-Challenge")
+        ds = load_dataset("ai2_arc", subset)
+    except Exception as e:
+        colored_print("ARC Load", f"Failed to load ai2_arc ({e})", Colors.RED)
+        return iter(())
+
+    records = []
+    data = ds[split]
+    for item in data:
+        question = item.get("question")
+        choices_obj = item.get("choices") or {}
+        labels = choices_obj.get("label") or []
+        texts = choices_obj.get("text") or []
+        answer_key = item.get("answerKey")
+        if not question or not labels or not texts or not answer_key:
+            continue
+        # Normalize to pairs and sort by label order A..E
+        pairs = [(str(l).strip(), str(t).strip()) for l, t in zip(labels, texts)]
+        # Filter to A-D to align with current evaluator's letter extraction
+        filtered = [(l, t) for l, t in pairs if l in ["A", "B", "C", "D"]]
+        if len(filtered) < 2:
+            continue
+        # If the correct answer is not in A-D after filtering, skip
+        if answer_key not in {l for l, _ in filtered}:
+            continue
+        # Sort by label to ensure A..D order
+        filtered.sort(key=lambda x: x[0])
+        labeled_lines = [f"{l}. {t}" for l, t in filtered]
+        prompt = f"{question}\n\nChoices:\n" + "\n".join(labeled_lines)
+        records.append((prompt, answer_key))
+
+    # Yield lazily
+    for i in range(0, len(records), chunk_size):
+        chunk = records[i:i+chunk_size]
+        if split == "train":
+            random.shuffle(chunk)
+        yield from chunk
+
 def generate_arithmetic_pairs(task_type: str, num_examples: int = 1000):
     """Lazily generate arithmetic QA pairs with shuffling within chunks."""
     qa_pairs = []
@@ -1042,6 +1091,20 @@ def generate_question_answer_batches(
                     unique_qa = next(dataset_iter)
                 except StopIteration:
                     dataset_iter = load_svamp_dataset(chunk_size=chunk_size, split=split)
+                    unique_qa = next(dataset_iter)
+                repeated_batch = [unique_qa] * batch_size
+                yield repeated_batch
+
+        elif task_type == "arc":
+            # ARC parallel mode: repeat a single unique ARC example per batch
+            arc_subset = hyperparameters.get("arc_subset", os.getenv("ARC_SUBSET", "ARC-Challenge"))
+            arc_split = hyperparameters.get("arc_split", "train")
+            dataset_iter = load_arc_dataset(chunk_size=chunk_size, split=arc_split, subset=arc_subset)
+            for batch_idx in range(num_batches):
+                try:
+                    unique_qa = next(dataset_iter)
+                except StopIteration:
+                    dataset_iter = load_arc_dataset(chunk_size=chunk_size, split=arc_split, subset=arc_subset)
                     unique_qa = next(dataset_iter)
                 repeated_batch = [unique_qa] * batch_size
                 yield repeated_batch
@@ -1346,11 +1409,10 @@ def generate_question_answer_batches(
             for _ in range(batch_size):
                 try:
                     qa_pair = next(dataset_iter)
-                    batch.append(qa_pair)
                 except StopIteration:
                     dataset_iter = load_aqua_dataset(chunk_size=chunk_size, split="train")
                     qa_pair = next(dataset_iter)
-                    batch.append(qa_pair)
+                batch.append(qa_pair)
             yield batch
             
     elif task_type == "svamp":
@@ -1366,6 +1428,21 @@ def generate_question_answer_batches(
                     qa_pair = next(dataset_iter)
                     batch.append(qa_pair)
             yield batch
+
+    elif task_type == "arc":
+        # ARC parallel mode: repeat a single unique ARC example per batch
+        arc_subset = hyperparameters.get("arc_subset", os.getenv("ARC_SUBSET", "ARC-Challenge"))
+        arc_split = hyperparameters.get("arc_split", "train")
+        dataset_iter = load_arc_dataset(chunk_size=chunk_size, split=arc_split, subset=arc_subset)
+        debug_batch = []
+        for _ in range(batch_size):
+            try:
+                qa_pair = next(dataset_iter)
+                debug_batch.append(qa_pair)
+            except StopIteration:
+                dataset_iter = load_arc_dataset(chunk_size=chunk_size, split=arc_split, subset=arc_subset)
+                qa_pair = next(dataset_iter)
+                debug_batch.append(qa_pair)
 
     elif task_type in ["wiki_compression", "wiki_continuation"]:
         print("Loading Wikipedia dataset...")
