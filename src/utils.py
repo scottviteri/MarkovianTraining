@@ -186,14 +186,14 @@ def construct_prompts(
     elif task_type == "svamp":
         base_prompt = f"You will be given a reasoning problem, which you have {hyperparameters['cot_length']} tokens to work through step-by-step. Question:"
         prompt_type = "Reasoning:"
-    elif task_type == "math":
-        base_prompt = f"You will be given a competition math problem. Use {hyperparameters['cot_length']} tokens to reason step-by-step and compute the final answer. Problem:"
-        prompt_type = "Reasoning:"
     elif task_type == "aqua":
         base_prompt = f"You will be given a multiple choice algebra word problem. Use {hyperparameters['cot_length']} tokens to think step-by-step, then select the correct option. Question:"
         prompt_type = "Reasoning:"
     elif task_type == "mmlu":
         base_prompt = f"You will be given a multiple choice question. Use {hyperparameters['cot_length']} tokens to think through the problem step-by-step, then select the correct answer. Question:"
+        prompt_type = "Reasoning:"
+    elif task_type == "arc":
+        base_prompt = f"You will be given a multiple choice science question. Use {hyperparameters['cot_length']} tokens to think step-by-step, then select the correct letter. Question:"
         prompt_type = "Reasoning:"
     elif task_type == "arc":
         base_prompt = f"You will be given a multiple choice science question. Use {hyperparameters['cot_length']} tokens to think step-by-step, then select the correct answer. Question:"
@@ -1074,23 +1074,25 @@ def generate_question_answer_batches(
                 yield repeated_batch
 
         elif task_type == "aqua":
-            dataset_iter = load_aqua_dataset(chunk_size=chunk_size, split=split)
+            aqua_split = hyperparameters.get("aqua_split", "train")
+            dataset_iter = load_aqua_dataset(chunk_size=chunk_size, split=aqua_split)
             for batch_idx in range(num_batches):
                 try:
                     unique_qa = next(dataset_iter)
                 except StopIteration:
-                    dataset_iter = load_aqua_dataset(chunk_size=chunk_size, split=split)
+                    dataset_iter = load_aqua_dataset(chunk_size=chunk_size, split=aqua_split)
                     unique_qa = next(dataset_iter)
                 repeated_batch = [unique_qa] * batch_size
                 yield repeated_batch
                 
         elif task_type == "svamp":
-            dataset_iter = load_svamp_dataset(chunk_size=chunk_size, split=split)
+            svamp_split = hyperparameters.get("svamp_split", "train")
+            dataset_iter = load_svamp_dataset(chunk_size=chunk_size, split=svamp_split)
             for batch_idx in range(num_batches):
                 try:
                     unique_qa = next(dataset_iter)
                 except StopIteration:
-                    dataset_iter = load_svamp_dataset(chunk_size=chunk_size, split=split)
+                    dataset_iter = load_svamp_dataset(chunk_size=chunk_size, split=svamp_split)
                     unique_qa = next(dataset_iter)
                 repeated_batch = [unique_qa] * batch_size
                 yield repeated_batch
@@ -1388,19 +1390,7 @@ def generate_question_answer_batches(
                     batch.append(qa_pair)
             yield batch
             
-    elif task_type == "math":
-        dataset_iter = load_math_dataset(chunk_size=chunk_size, split="train")
-        for batch_start in range(0, num_batches * batch_size, batch_size):
-            batch = []
-            for _ in range(batch_size):
-                try:
-                    qa_pair = next(dataset_iter)
-                    batch.append(qa_pair)
-                except StopIteration:
-                    dataset_iter = load_math_dataset(chunk_size=chunk_size, split="train")
-                    qa_pair = next(dataset_iter)
-                    batch.append(qa_pair)
-            yield batch
+    # Removed legacy 'math' loader in favor of stronger alternatives (e.g., ARC)
 
     elif task_type == "aqua":
         dataset_iter = load_aqua_dataset(chunk_size=chunk_size, split="train")
@@ -1430,19 +1420,21 @@ def generate_question_answer_batches(
             yield batch
 
     elif task_type == "arc":
-        # ARC parallel mode: repeat a single unique ARC example per batch
+        # Regular (non-parallel) ARC batches
         arc_subset = hyperparameters.get("arc_subset", os.getenv("ARC_SUBSET", "ARC-Challenge"))
         arc_split = hyperparameters.get("arc_split", "train")
         dataset_iter = load_arc_dataset(chunk_size=chunk_size, split=arc_split, subset=arc_subset)
-        debug_batch = []
-        for _ in range(batch_size):
-            try:
-                qa_pair = next(dataset_iter)
-                debug_batch.append(qa_pair)
-            except StopIteration:
-                dataset_iter = load_arc_dataset(chunk_size=chunk_size, split=arc_split, subset=arc_subset)
-                qa_pair = next(dataset_iter)
-                debug_batch.append(qa_pair)
+        for batch_start in range(0, num_batches * batch_size, batch_size):
+            batch = []
+            for _ in range(batch_size):
+                try:
+                    qa_pair = next(dataset_iter)
+                    batch.append(qa_pair)
+                except StopIteration:
+                    dataset_iter = load_arc_dataset(chunk_size=chunk_size, split=arc_split, subset=arc_subset)
+                    qa_pair = next(dataset_iter)
+                    batch.append(qa_pair)
+            yield batch
 
     elif task_type in ["wiki_compression", "wiki_continuation"]:
         print("Loading Wikipedia dataset...")

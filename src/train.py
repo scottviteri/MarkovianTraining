@@ -2501,7 +2501,7 @@ if __name__ == "__main__":
             "arithmetic-negative",
             "gsm8k",
             "mmlu",
-            "math",
+            "arc",
             "svamp",
             "aqua",
             "arc",

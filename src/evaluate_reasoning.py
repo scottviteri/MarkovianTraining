@@ -544,7 +544,7 @@ def main(
             it = load_aqua_dataset(split="test")
             test_data = list(it)
         elif task_type == "arc":
-            subset = os.getenv("ARC_SUBSET", "ARC-Challenge")
+            subset = arc_subset or os.getenv("ARC_SUBSET", "ARC-Challenge")
             it = load_arc_dataset(split="validation", subset=subset)
             test_data = list(it)
         else:
@@ -593,7 +593,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate baseline or actor-critic on reasoning tasks")
-    parser.add_argument("--task_type", type=str, required=True, choices=["arithmetic", "arithmetic-negative", "math", "svamp", "aqua", "arc"], help="Task to evaluate")
+    parser.add_argument("--task_type", type=str, required=True, choices=["arithmetic", "arithmetic-negative", "svamp", "aqua", "arc"], help="Task to evaluate")
     parser.add_argument("--model_path", type=str, default=None, help="Path to trained model weights (default: latest result)")
     parser.add_argument("--num_samples", type=int, default=None, help="Number of samples to evaluate (default: all)")
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size for evaluation")
