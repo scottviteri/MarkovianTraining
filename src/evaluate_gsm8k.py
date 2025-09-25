@@ -12,7 +12,7 @@ import glob
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Dict
-from utils import construct_prompts, find_latest_result
+from utils import construct_prompts, construct_baseline_prompts, find_latest_result
 import copy
 
 def extract_answer(answer):
@@ -132,11 +132,14 @@ def evaluate_model(
     hyperparameters,
     num_samples=None,
     batch_size=None,
+    baseline_mode=False,
+    baseline_thinking_tokens=None,
+    baseline_temperature=None,
 ):
-    """Evaluate model on GSM8K test set using actor-critic pattern.
+    """Evaluate model on GSM8K test set.
     
     Args:
-        actor_model: Model for generating reasoning (with temperature)
+        actor_model: Model for generating reasoning (with temperature) or baseline thinking
         critic_model: Frozen model for generating answers (deterministic)
         tokenizer: Tokenizer for both models
         device: torch device
@@ -144,6 +147,9 @@ def evaluate_model(
         hyperparameters: Configuration dictionary
         num_samples: Optional limit on number of samples to evaluate
         batch_size: Batch size for evaluation
+        baseline_mode: If True, use standard baseline prompting
+        baseline_thinking_tokens: Max thinking tokens for baseline (caps new tokens for stage 1)
+        baseline_temperature: Temperature for baseline thinking generation
     """
     # Determine default eval batch size: floor(1.5x) of training batch size (defaults to 8 if absent)
     if batch_size is None:
@@ -162,27 +168,36 @@ def evaluate_model(
         batch = test_data[i:i + batch_size]
         questions, answers = zip(*batch)
         
-        # Create prompts for CoT generation
-        prompts = [
-            construct_prompts(
-                question=q,
-                hyperparameters=hyperparameters,
-            )
-            for q in questions
-        ]
+        # Create prompts for stage 1 (reasoning/thinking)
+        if baseline_mode:
+            prompts = [
+                construct_baseline_prompts(
+                    question=q,
+                    hyperparameters=hyperparameters,
+                )
+                for q in questions
+            ]
+        else:
+            prompts = [
+                construct_prompts(
+                    question=q,
+                    hyperparameters=hyperparameters,
+                )
+                for q in questions
+            ]
         
         # Tokenize
         tokenized_inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
         
-        # 1. Generate CoT using actor model (with temperature)
+        # 1. Generate CoT/Thinking using actor model (with temperature)
         with torch.no_grad():
             cot_outputs = actor_model.generate(
                 input_ids=tokenized_inputs.input_ids,
                 attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=hyperparameters["cot_length"],
-                min_new_tokens=hyperparameters["cot_length"],
+                max_new_tokens=(baseline_thinking_tokens if baseline_mode and baseline_thinking_tokens is not None else hyperparameters["cot_length"]),
+                min_new_tokens=(baseline_thinking_tokens if baseline_mode and baseline_thinking_tokens is not None else hyperparameters["cot_length"]),
                 do_sample=True,
-                temperature=hyperparameters["temperature"],
+                temperature=(baseline_temperature if baseline_mode and baseline_temperature is not None else hyperparameters["temperature"]),
                 top_k=None,
                 top_p=None,
                 pad_token_id=tokenizer.pad_token_id,
@@ -197,15 +212,26 @@ def evaluate_model(
         # 2. Generate answers using critic model (deterministic)
         # Honor Markovian flag: include question context when markovian=False
         include_question_in_eval = not hyperparameters.get("markovian", True)
-        answer_prompts = [
-            construct_prompts(
-                question=q,
-                hyperparameters=hyperparameters,
-                reasoning=r,
-                include_question=include_question_in_eval,
-            )
-            for q, r in zip(questions, cot_texts)
-        ]
+        if baseline_mode:
+            answer_prompts = [
+                construct_baseline_prompts(
+                    question=q,
+                    hyperparameters=hyperparameters,
+                    reasoning=r,
+                    max_thinking_tokens=baseline_thinking_tokens,
+                )
+                for q, r in zip(questions, cot_texts)
+            ]
+        else:
+            answer_prompts = [
+                construct_prompts(
+                    question=q,
+                    hyperparameters=hyperparameters,
+                    reasoning=r,
+                    include_question=include_question_in_eval,
+                )
+                for q, r in zip(questions, cot_texts)
+            ]
         
         tokenized_answer_inputs = tokenizer(
             answer_prompts, 
@@ -463,6 +489,9 @@ def main(
     all_checkpoints=False,
     cot_length=None,
     temperature=None,
+    baseline=False,
+    baseline_thinking_tokens=None,
+    baseline_temperature=None,
 ):
     # Get model path(s) and type if not explicitly provided
     if not use_base_model:
@@ -516,7 +545,10 @@ def main(
             test_data, 
             hyperparameters, 
             num_samples, 
-            eval_bs
+            eval_bs,
+            baseline_mode=baseline,
+            baseline_thinking_tokens=baseline_thinking_tokens,
+            baseline_temperature=baseline_temperature,
         )
 
         print(f"Accuracy: {accuracy:.2%}")
@@ -530,7 +562,8 @@ def main(
             model_type,
             accuracy,
             results,
-            num_samples
+            num_samples,
+            batch_index_override=(0 if baseline else None)
         )
         print(f"Results appended to {results_file}")
 
@@ -594,6 +627,23 @@ if __name__ == "__main__":
         default=None,
         help="Override the temperature for generation (default: 1.0)",
     )
+    parser.add_argument(
+        "--baseline",
+        action="store_true",
+        help="Use standard baseline prompting (no specialized CoT phrasing)",
+    )
+    parser.add_argument(
+        "--baseline_thinking_tokens",
+        type=int,
+        default=None,
+        help="Max tokens for baseline thinking stage (caps new tokens before answer)",
+    )
+    parser.add_argument(
+        "--baseline_temperature",
+        type=float,
+        default=None,
+        help="Temperature used for baseline thinking generation",
+    )
     args = parser.parse_args()
 
     try:
@@ -608,6 +658,9 @@ if __name__ == "__main__":
             args.all_checkpoints,
             args.cot_length,
             args.temperature,
+            args.baseline,
+            args.baseline_thinking_tokens,
+            args.baseline_temperature,
         )
     except FileNotFoundError as e:
         print(f"Error: {e}")

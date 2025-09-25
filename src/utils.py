@@ -251,15 +251,118 @@ def construct_prompts(
             base_with_type = f"{tokens['inst_start']} {base_prompt} {question_placeholder} {tokens['inst_end']}\n{prompt_type}"
             # Add answer header to partial prompt
             return base_with_type + reasoning + f" Answer: "
-    else:  # standard format (no special tokens)
+
+def construct_baseline_prompts(
+    question: str,
+    hyperparameters: Dict[str, Any],
+    reasoning: Optional[str] = None,
+    max_thinking_tokens: Optional[int] = None,
+) -> str:
+    """
+    Construct a simpler, standard prompt for baseline evaluations.
+
+    This avoids the specialized CoT phrasing used in training prompts and
+    instead uses a plain instruction to think briefly before answering.
+
+    Args:
+        question: Input question/text
+        hyperparameters: Config with at least 'model_type' and 'task_type'
+        reasoning: Optional reasoning to include when constructing the answer prompt
+        max_thinking_tokens: Optional cap mentioned in the instruction text (display only)
+
+    Returns:
+        str: Formatted baseline prompt compatible with the model's chat format
+    """
+    model_type = hyperparameters["model_type"]
+    task_type = hyperparameters["task_type"]
+
+    tokens = get_model_specific_tokens(model_type)
+    format_type = tokens["format_type"]
+
+    # Create a concise baseline instruction per task
+    thinking_hint = (
+        f"Think step by step in up to {max_thinking_tokens} tokens, then provide the final answer."
+        if max_thinking_tokens is not None
+        else "Think step by step briefly, then provide the final answer."
+    )
+
+    if task_type in ["arithmetic", "arithmetic-negative", "gsm8k"]:
+        user_text = (
+            "Solve the following problem. " + thinking_hint + "\n\nProblem: " + question
+        )
+        answer_prefix = "Answer: "
+    elif task_type in ["mmlu", "aqua"]:
+        user_text = (
+            "Answer the multiple choice question. "
+            + thinking_hint
+            + " Respond with a single letter (A, B, C, or D).\n\nQuestion: "
+            + question
+        )
+        answer_prefix = "Answer: "
+    elif task_type == "wiki_compression":
+        user_text = (
+            "Summarize the following text as a brief compressed representation. "
+            + thinking_hint
+            + "\n\nText: "
+            + question
+        )
+        answer_prefix = "Compression: "
+    elif task_type == "wiki_continuation":
+        user_text = (
+            "Continue the text coherently. "
+            + thinking_hint
+            + "\n\nText: "
+            + question
+        )
+        answer_prefix = "Continuation: "
+    else:
+        user_text = "Answer the question. " + thinking_hint + "\n\nQuestion: " + question
+        answer_prefix = "Answer: "
+
+    # Build prompts per chat format
+    if format_type == "phi-4":
         if reasoning is None:
-            return f"{base_prompt} {question}\n{prompt_type}"
+            return (
+                f"{tokens['im_start']}user{tokens['im_sep']}\n{user_text}{tokens['im_end']}\n"
+                f"{tokens['im_start']}assistant{tokens['im_sep']}\n"
+            )
         else:
-            # Include the actual question or use <Redacted> placeholder
-            question_placeholder = question if include_question else "<Redacted>"
-            base_with_type = f"{base_prompt} {question_placeholder}\n{prompt_type}"
-            # Add answer header to partial prompt
-            return base_with_type + reasoning + f" Answer: "
+            return (
+                f"{tokens['im_start']}user{tokens['im_sep']}\n{user_text}{tokens['im_end']}\n"
+                f"{tokens['im_start']}assistant{tokens['im_sep']}\n{reasoning} {answer_prefix}"
+            )
+    elif format_type == "qwen3":
+        if reasoning is None:
+            return (
+                f"{tokens['im_start']}user\n{user_text}{tokens['im_end']}\n"
+                f"{tokens['im_start']}assistant\n"
+            )
+        else:
+            return (
+                f"{tokens['im_start']}user\n{user_text}{tokens['im_end']}\n"
+                f"{tokens['im_start']}assistant\n{reasoning} {answer_prefix}"
+            )
+    elif format_type == "gemma-3":
+        if reasoning is None:
+            return (
+                f"{tokens['bos']}{tokens['start_of_turn']}user\n{user_text}{tokens['end_of_turn']}\n"
+                f"{tokens['start_of_turn']}model\n"
+            )
+        else:
+            return (
+                f"{tokens['bos']}{tokens['start_of_turn']}user\n{user_text}{tokens['end_of_turn']}\n"
+                f"{tokens['start_of_turn']}model\n{reasoning} {answer_prefix}"
+            )
+    elif format_type == "mistral":
+        if reasoning is None:
+            return f"{tokens['inst_start']} {user_text} {tokens['inst_end']}\n"
+        else:
+            return f"{tokens['inst_start']} {user_text} {tokens['inst_end']}\n{reasoning} {answer_prefix}"
+    else:  # standard
+        if reasoning is None:
+            return f"{user_text}\n"
+        else:
+            return f"{user_text}\n{reasoning} {answer_prefix}"
 
 def load_model(model_type, hyperparameters=None):
     """Load either Mistral, Llama, GPT2, TinyStories, Phi, Phi-4, Qwen3, or Gemma 3 model based on parameter."""
