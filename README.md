@@ -81,7 +81,7 @@ python src/train.py [options]
 --use_ei <float>            # Expert Iteration with std deviations threshold
 --parallel                  # GRPO: parallel sampling with batch standardization
 --no-markovian             # Non-Markovian: P(answer|question,CoT) [default: Markovian]
---actor_reward_weight <float>  # Weight for actor reward gradients (default: 0.0)
+--actor_reward_weight <float>  # Weight for actor reward gradients (default: 1.0)
 ```
 
 #### Core Configuration
@@ -112,7 +112,7 @@ python src/train.py [options]
 python src/train.py --task_type gsm8k --model_type llama --parallel --use_ppo
 
 # Non-Markovian training with actor rewards
-python src/train.py --task_type gsm8k --no-markovian --actor_reward_weight 0.5
+python src/train.py --task_type gsm8k --no-markovian  # defaults to actor_reward_weight=1.0
 
 # Expert Iteration with Mistral
 python src/train.py --task_type arithmetic --model_type mistral --use_ei 1.0
@@ -333,7 +333,7 @@ python src/train.py --task_type gsm8k --parallel --batch_size 16
 ### Actor Reward Gradients
 ```bash
 # Use actor model for rewards with specified weight
-python src/train.py --task_type gsm8k --actor_reward_weight 0.5
+python src/train.py --task_type gsm8k --actor_reward_weight 1.0
 ```
 
 ### Expert Iteration with Dynamic Thresholding
