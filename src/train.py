@@ -33,6 +33,7 @@ from utils import (
     extract_answer,
     load_mmlu_dataset,
     load_aqua_dataset,
+    load_mathqa_dataset,
     load_svamp_dataset,
     load_math_dataset,
     load_model,
@@ -1916,6 +1917,41 @@ def save_checkpoint(state: TrainingState):
             json.dump(entry, f)
             f.write("\n")
         _plot_combined_accuracy(results_file, os.path.join(model_dir, "combined_metrics_math.png"))
+        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+
+    # If MathQA, evaluate multiple choice using evaluate_reasoning-like flow
+    elif state.hyperparameters["task_type"] == "mathqa":
+        colored_print("Evaluation", "Running MathQA evaluation...", Colors.BOLD)
+        test_data = list(load_mathqa_dataset(split="test"))
+        with torch.no_grad():
+            state.actor_model.eval()
+            # Reuse evaluate_reasoning-style function already imported as evaluate_model
+            accuracy, results = evaluate_model(
+                state.actor_model,
+                state.critic_model,
+                state.tokenizer,
+                state.device,
+                test_data,
+                state.hyperparameters,
+                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
+            )
+            state.actor_model.train()
+        model_dir = state.model_save_path
+        results_file = os.path.join(model_dir, f"mathqa_results_{state.hyperparameters['model_type']}.jsonl")
+        entry = {
+            "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "batch_index": state.batch_index,
+            "accuracy": accuracy,
+            "model_path": checkpoint_path,
+            "model_type": state.hyperparameters["model_type"],
+            "total_examples": len(test_data),
+            "results": results,
+        }
+        os.makedirs(model_dir, exist_ok=True)
+        with open(results_file, "a") as f:
+            json.dump(entry, f)
+            f.write("\n")
+        _plot_combined_accuracy(results_file, os.path.join(model_dir, "combined_metrics_mathqa.png"))
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
 
 
