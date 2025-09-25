@@ -32,6 +32,9 @@ from utils import (
     load_gsm8k_dataset,
     extract_answer,
     load_mmlu_dataset,
+    load_aqua_dataset,
+    load_svamp_dataset,
+    load_math_dataset,
     load_model,
     get_grad_norm,
 )
@@ -1459,11 +1462,46 @@ def evaluate_model_on_mmlu(
     return accuracy, results
 
 
-def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, total, subject=None):
+def _plot_combined_accuracy(results_jsonl_path: str, save_path: str):
+    """Plot accuracy vs batch index from a task's JSONL results."""
+    if not os.path.exists(results_jsonl_path):
+        return
+    batch_to_acc = {}
+    with open(results_jsonl_path, "r") as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+            except Exception:
+                continue
+            bi = entry.get("batch_index")
+            acc = entry.get("accuracy")
+            if bi is None or acc is None:
+                continue
+            batch_to_acc[bi] = acc
+    if not batch_to_acc:
+        return
+    import matplotlib.pyplot as plt
+    import numpy as np
+    xs = sorted(batch_to_acc.keys())
+    ys = [batch_to_acc[x] for x in xs]
+    plt.figure(figsize=(10, 5))
+    plt.plot(xs, ys, marker='o', linestyle='-', color='tab:blue')
+    plt.title('Accuracy vs Training Batch')
+    plt.xlabel('Training Batch')
+    plt.ylabel('Accuracy')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+
+def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, total, subject=None, batch_index_override=None):
     """Append MMLU evaluation results to a JSONL file (mirrors GSM8K pipeline)."""
     # Determine batch index from checkpoint filename if available
     batch_index = None
-    if model_path:
+    if batch_index_override is not None:
+        batch_index = int(batch_index_override)
+    elif model_path:
         basename = os.path.basename(model_path)
         match = re.search(r"model_batch_(\d+)\.pt$", basename)
         if not match:
@@ -1489,8 +1527,114 @@ def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, tot
         json.dump(entry, f)
         f.write("\n")
 
-    print(f"Results appended to {results_file}")
+    # Update combined plot
+    combined_plot_path = os.path.join(output_dir, "combined_metrics_mmlu.png")
+    _plot_combined_accuracy(results_file, combined_plot_path)
+    print(f"Updated combined MMLU accuracy plot at {combined_plot_path}")
     return results_file
+
+
+def evaluate_model_on_aqua(actor_model, tokenizer, device, test_data, hyperparameters, batch_size=16):
+    """Evaluate multiple-choice AQuA: infer letter A-E from actor reasoning."""
+    actor_model.eval()
+    correct = 0
+    results = []
+    for i in tqdm(range(0, len(test_data), batch_size), desc="Evaluating AQuA"):
+        batch = test_data[i:i+batch_size]
+        questions, answers = zip(*batch)
+        # Build reasoning prompts
+        reasoning_prompts = [
+            construct_prompts(question=q, hyperparameters=hyperparameters)
+            for q in questions
+        ]
+        inputs = tokenizer(reasoning_prompts, return_tensors="pt", padding=True, truncation=True,
+                           max_length=hyperparameters.get("question_length", 512)).to(device)
+        with torch.no_grad():
+            outputs = actor_model.generate(
+                **inputs,
+                max_new_tokens=hyperparameters.get("cot_length", 100),
+                min_new_tokens=hyperparameters.get("cot_length", 100),
+                do_sample=True,
+                temperature=hyperparameters.get("temperature", 1.0),
+                top_k=None,
+                top_p=None,
+            )
+        reasoning = tokenizer.batch_decode(outputs[:, inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        predicted_letters = []
+        for r in reasoning:
+            matches = re.findall(r"[A-E]", r)
+            predicted_letters.append(matches[-1] if matches else "X")
+        for q, r, p, a in zip(questions, reasoning, predicted_letters, answers):
+            ok = (p == a)
+            if ok:
+                correct += 1
+            results.append({"question": q, "reasoning": r, "predicted": p, "answer": a, "correct": ok})
+    accuracy = correct / len(test_data) if len(test_data) > 0 else 0.0
+    return accuracy, results
+
+
+def evaluate_model_on_numeric(actor_model, critic_model, tokenizer, device, test_data, hyperparameters, batch_size=16):
+    """Evaluate numeric-answer tasks (e.g., SVAMP, MATH) using actor CoT then critic answer."""
+    def normalize_numeric(text: str) -> str:
+        s = text.strip()
+        s = re.sub(r"\\boxed\{([^}]*)\}", r"\1", s)
+        s = s.replace("$", "").replace("\\", "")
+        s = re.sub(r"\s+", "", s)
+        return s
+
+    actor_model.eval()
+    correct = 0
+    results = []
+    for i in tqdm(range(0, len(test_data), batch_size), desc="Evaluating Numeric"):
+        batch = test_data[i:i+batch_size]
+        questions, answers = zip(*batch)
+        prompts = [construct_prompts(question=q, hyperparameters=hyperparameters) for q in questions]
+        tokenized_inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
+        with torch.no_grad():
+            cot_outputs = actor_model.generate(
+                input_ids=tokenized_inputs.input_ids,
+                attention_mask=tokenized_inputs.attention_mask,
+                max_new_tokens=hyperparameters.get("cot_length", 100),
+                min_new_tokens=hyperparameters.get("cot_length", 100),
+                do_sample=True,
+                temperature=hyperparameters.get("temperature", 1.0),
+                top_k=None,
+                top_p=None,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+        cot_texts = tokenizer.batch_decode(cot_outputs[:, tokenized_inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        include_question_in_eval = not hyperparameters.get("markovian", True)
+        answer_prompts = [
+            construct_prompts(question=q, hyperparameters=hyperparameters, reasoning=r, include_question=include_question_in_eval)
+            for q, r in zip(questions, cot_texts)
+        ]
+        answer_inputs = tokenizer(answer_prompts, padding=True, return_tensors="pt").to(device)
+        with torch.no_grad():
+            gen = critic_model.generate(
+                input_ids=answer_inputs.input_ids,
+                attention_mask=answer_inputs.attention_mask,
+                max_new_tokens=16,
+                do_sample=False,
+                top_k=None,
+                top_p=None,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+        gen_texts = tokenizer.batch_decode(gen[:, answer_inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        for q, a, r, g in zip(questions, answers, cot_texts, gen_texts):
+            pred_norm = normalize_numeric(g)
+            gold_norm = normalize_numeric(str(a))
+            ok = (pred_norm == gold_norm)
+            if ok:
+                correct += 1
+            results.append({
+                "question": q,
+                "reasoning": r,
+                "generated_answer": g,
+                "gold": a,
+                "is_correct": ok,
+            })
+    accuracy = correct / len(test_data) if len(test_data) > 0 else 0.0
+    return accuracy, results
 
 
 def save_checkpoint(state: TrainingState):
@@ -1638,18 +1782,123 @@ def save_checkpoint(state: TrainingState):
             )
             state.actor_model.train()
         
-        # Save results
-        model_dir = os.path.dirname(state.model_save_path)
+        # Save results in run directory and update combined plot
+        model_dir = state.model_save_path
         results_file = save_results_mmlu(
             model_dir,
-            checkpoint_path,  # Use the new checkpoint path here
+            checkpoint_path,
             state.hyperparameters["model_type"],
             accuracy,
             results,
             len(test_data),
-            subject=subject
+            subject=subject,
+            batch_index_override=state.batch_index,
         )
         
+        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+    
+    # If AQuA, evaluate using multiple choice
+    elif state.hyperparameters["task_type"] == "aqua":
+        colored_print("Evaluation", "Running AQuA evaluation...", Colors.BOLD)
+        test_data = list(load_aqua_dataset(split="test"))
+        with torch.no_grad():
+            state.actor_model.eval()
+            accuracy, results = evaluate_model_on_aqua(
+                state.actor_model,
+                state.tokenizer,
+                state.device,
+                test_data,
+                state.hyperparameters,
+                batch_size=state.hyperparameters["batch_size"] * 2,
+            )
+            state.actor_model.train()
+        model_dir = state.model_save_path
+        results_file = os.path.join(model_dir, f"aqua_results_{state.hyperparameters['model_type']}.jsonl")
+        entry = {
+            "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "batch_index": state.batch_index,
+            "accuracy": accuracy,
+            "model_path": checkpoint_path,
+            "model_type": state.hyperparameters["model_type"],
+            "total_examples": len(test_data),
+            "results": results,
+        }
+        os.makedirs(model_dir, exist_ok=True)
+        with open(results_file, "a") as f:
+            json.dump(entry, f)
+            f.write("\n")
+        _plot_combined_accuracy(results_file, os.path.join(model_dir, "combined_metrics_aqua.png"))
+        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+    
+    # If SVAMP, evaluate numeric QA
+    elif state.hyperparameters["task_type"] == "svamp":
+        colored_print("Evaluation", "Running SVAMP evaluation...", Colors.BOLD)
+        test_data = list(load_svamp_dataset(split="test"))
+        with torch.no_grad():
+            state.actor_model.eval()
+            accuracy, results = evaluate_model_on_numeric(
+                state.actor_model,
+                state.critic_model,
+                state.tokenizer,
+                state.device,
+                test_data,
+                state.hyperparameters,
+                batch_size=state.hyperparameters["batch_size"] * 2,
+            )
+            state.actor_model.train()
+        model_dir = state.model_save_path
+        results_file = os.path.join(model_dir, f"svamp_results_{state.hyperparameters['model_type']}.jsonl")
+        entry = {
+            "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "batch_index": state.batch_index,
+            "accuracy": accuracy,
+            "model_path": checkpoint_path,
+            "model_type": state.hyperparameters["model_type"],
+            "total_examples": len(test_data),
+            "results": results,
+        }
+        os.makedirs(model_dir, exist_ok=True)
+        with open(results_file, "a") as f:
+            json.dump(entry, f)
+            f.write("\n")
+        _plot_combined_accuracy(results_file, os.path.join(model_dir, "combined_metrics_svamp.png"))
+        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+    
+    # If MATH, evaluate numeric QA
+    elif state.hyperparameters["task_type"] == "math":
+        colored_print("Evaluation", "Running MATH evaluation...", Colors.BOLD)
+        try:
+            test_data = list(load_math_dataset(split="test"))
+        except Exception:
+            test_data = list(load_math_dataset(split="validation"))
+        with torch.no_grad():
+            state.actor_model.eval()
+            accuracy, results = evaluate_model_on_numeric(
+                state.actor_model,
+                state.critic_model,
+                state.tokenizer,
+                state.device,
+                test_data,
+                state.hyperparameters,
+                batch_size=state.hyperparameters["batch_size"] * 2,
+            )
+            state.actor_model.train()
+        model_dir = state.model_save_path
+        results_file = os.path.join(model_dir, f"math_results_{state.hyperparameters['model_type']}.jsonl")
+        entry = {
+            "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "batch_index": state.batch_index,
+            "accuracy": accuracy,
+            "model_path": checkpoint_path,
+            "model_type": state.hyperparameters["model_type"],
+            "total_examples": len(test_data),
+            "results": results,
+        }
+        os.makedirs(model_dir, exist_ok=True)
+        with open(results_file, "a") as f:
+            json.dump(entry, f)
+            f.write("\n")
+        _plot_combined_accuracy(results_file, os.path.join(model_dir, "combined_metrics_math.png"))
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
 
 
@@ -1825,34 +2074,159 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     # Display parallel overview if parallel sampling is enabled
     print_parallel_overview(state.hyperparameters)
     
-    # Baseline evaluation at timestep 0 for GSM8K (before any training updates)
-    if task_type == "gsm8k" and not resume and state.batch_index == 0:
+    # Baseline evaluation at timestep 0 (before any training updates)
+    if not resume and state.batch_index == 0:
         try:
-            colored_print("Baseline Eval", "Running GSM8K evaluation at timestep 0", Colors.BOLD)
-            test_data = list(load_gsm8k_dataset(split="test"))
-            with torch.no_grad():
-                state.actor_model.eval()
-                accuracy, results = evaluate_model(
-                    state.actor_model,
-                    state.critic_model,
-                    state.tokenizer,
-                    state.device,
-                    test_data,
-                    state.hyperparameters,
-                    batch_size=state.hyperparameters["batch_size"] * 2,
+            if task_type == "gsm8k":
+                colored_print("Baseline Eval", "Running GSM8K evaluation at timestep 0", Colors.BOLD)
+                test_data = list(load_gsm8k_dataset(split="test"))
+                with torch.no_grad():
+                    state.actor_model.eval()
+                    accuracy, results = evaluate_model(
+                        state.actor_model,
+                        state.critic_model,
+                        state.tokenizer,
+                        state.device,
+                        test_data,
+                        state.hyperparameters,
+                        batch_size=state.hyperparameters["batch_size"] * 2,
+                    )
+                    state.actor_model.train()
+                save_results(
+                    state.model_save_path,
+                    None,
+                    state.hyperparameters["model_type"],
+                    accuracy,
+                    results,
+                    len(test_data),
+                    batch_index_override=0,
                 )
-                state.actor_model.train()
-            # Save into the run directory with explicit batch index 0
-            save_results(
-                state.model_save_path,
-                None,
-                state.hyperparameters["model_type"],
-                accuracy,
-                results,
-                len(test_data),
-                batch_index_override=0,
-            )
-            colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+            elif task_type == "mmlu":
+                colored_print("Baseline Eval", "Running MMLU evaluation at timestep 0", Colors.BOLD)
+                subject = state.hyperparameters.get("mmlu_subject", None)
+                test_data = list(load_mmlu_dataset(split="test", subject=subject))
+                with torch.no_grad():
+                    state.actor_model.eval()
+                    accuracy, results = evaluate_model_on_mmlu(
+                        state.actor_model,
+                        state.critic_model,
+                        state.tokenizer,
+                        state.device,
+                        test_data,
+                        state.hyperparameters,
+                        batch_size=state.hyperparameters["batch_size"] * 2,
+                    )
+                    state.actor_model.train()
+                save_results_mmlu(
+                    os.path.dirname(state.model_save_path),
+                    None,
+                    state.hyperparameters["model_type"],
+                    accuracy,
+                    results,
+                    len(test_data),
+                    subject=subject,
+                    batch_index_override=0,
+                )
+                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+            elif task_type == "aqua":
+                colored_print("Baseline Eval", "Running AQuA evaluation at timestep 0", Colors.BOLD)
+                test_data = list(load_aqua_dataset(split="test"))
+                with torch.no_grad():
+                    state.actor_model.eval()
+                    accuracy, results = evaluate_model_on_aqua(
+                        state.actor_model,
+                        state.tokenizer,
+                        state.device,
+                        test_data,
+                        state.hyperparameters,
+                        batch_size=state.hyperparameters["batch_size"] * 2,
+                    )
+                    state.actor_model.train()
+                # Save JSONL and combined plot
+                results_file = os.path.join(state.model_save_path, f"aqua_results_{state.hyperparameters['model_type']}.jsonl")
+                entry = {
+                    "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+                    "batch_index": 0,
+                    "accuracy": accuracy,
+                    "model_path": None,
+                    "model_type": state.hyperparameters["model_type"],
+                    "total_examples": len(test_data),
+                    "results": results,
+                }
+                os.makedirs(state.model_save_path, exist_ok=True)
+                with open(results_file, "a") as f:
+                    json.dump(entry, f)
+                    f.write("\n")
+                _plot_combined_accuracy(results_file, os.path.join(state.model_save_path, "combined_metrics_aqua.png"))
+                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+            elif task_type == "svamp":
+                colored_print("Baseline Eval", "Running SVAMP evaluation at timestep 0", Colors.BOLD)
+                test_data = list(load_svamp_dataset(split="test"))
+                with torch.no_grad():
+                    state.actor_model.eval()
+                    accuracy, results = evaluate_model_on_numeric(
+                        state.actor_model,
+                        state.critic_model,
+                        state.tokenizer,
+                        state.device,
+                        test_data,
+                        state.hyperparameters,
+                        batch_size=state.hyperparameters["batch_size"] * 2,
+                    )
+                    state.actor_model.train()
+                results_file = os.path.join(state.model_save_path, f"svamp_results_{state.hyperparameters['model_type']}.jsonl")
+                entry = {
+                    "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+                    "batch_index": 0,
+                    "accuracy": accuracy,
+                    "model_path": None,
+                    "model_type": state.hyperparameters["model_type"],
+                    "total_examples": len(test_data),
+                    "results": results,
+                }
+                os.makedirs(state.model_save_path, exist_ok=True)
+                with open(results_file, "a") as f:
+                    json.dump(entry, f)
+                    f.write("\n")
+                _plot_combined_accuracy(results_file, os.path.join(state.model_save_path, "combined_metrics_svamp.png"))
+                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+            elif task_type == "math":
+                colored_print("Baseline Eval", "Running MATH evaluation at timestep 0", Colors.BOLD)
+                # Hendrycks MATH has no official test split on HF; often uses test for eval here
+                # We will use split="test" if present; otherwise default to validation
+                try:
+                    test_data = list(load_math_dataset(split="test"))
+                except Exception:
+                    test_data = list(load_math_dataset(split="validation"))
+                with torch.no_grad():
+                    state.actor_model.eval()
+                    accuracy, results = evaluate_model_on_numeric(
+                        state.actor_model,
+                        state.critic_model,
+                        state.tokenizer,
+                        state.device,
+                        test_data,
+                        state.hyperparameters,
+                        batch_size=state.hyperparameters["batch_size"] * 2,
+                    )
+                    state.actor_model.train()
+                results_file = os.path.join(state.model_save_path, f"math_results_{state.hyperparameters['model_type']}.jsonl")
+                entry = {
+                    "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+                    "batch_index": 0,
+                    "accuracy": accuracy,
+                    "model_path": None,
+                    "model_type": state.hyperparameters["model_type"],
+                    "total_examples": len(test_data),
+                    "results": results,
+                }
+                os.makedirs(state.model_save_path, exist_ok=True)
+                with open(results_file, "a") as f:
+                    json.dump(entry, f)
+                    f.write("\n")
+                _plot_combined_accuracy(results_file, os.path.join(state.model_save_path, "combined_metrics_math.png"))
+                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
         except Exception as e:
             colored_print("Baseline Eval", f"Failed: {str(e)}", Colors.YELLOW)
     
