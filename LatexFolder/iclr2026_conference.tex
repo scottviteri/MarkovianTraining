@@ -34,25 +34,12 @@
 % Authors must not appear in the submitted version. They should be hidden
 % as long as the \iclrfinalcopy macro remains commented out below.
 % Non-anonymous submissions will be rejected without review.
-
-\author{Antiquus S.~Hippocampus, Natalia Cerebro \& Amelie P. Amygdale \thanks{ Use footnote for providing further information
-about author (webpage, alternative address)---\emph{not} for acknowledging
-funding agencies.  Funding acknowledgements go at the end of the paper.} \\
+\iclrfinalcopy
+\author{Scott W. Viteri, Max Lamparth, Peter Chatain \& Clark Barrett \\
 Department of Computer Science\\
-Cranberry-Lemon University\\
-Pittsburgh, PA 15213, USA \\
-\texttt{\{hippo,brain,jen\}@cs.cranberry-lemon.edu} \\
-\And
-Ji Q. Ren \& Yevgeny LeNet \\
-Department of Computational Neuroscience \\
-University of the Witwatersrand \\
-Joburg, South Africa \\
-\texttt{\{robot,net\}@wits.ac.za} \\
-\AND
-Coauthor \\
-Affiliation \\
-Address \\
-\texttt{email}
+Stanford University\\
+Stanford, CA 94305, USA \\
+\texttt{\{sviteri,lamparth,pchatain,barrettc\}@stanford.edu}
 }
 
 % The \author macro works with any number of authors. There are two commands
@@ -71,7 +58,8 @@ Address \\
 
 
 \maketitle
-
+\thispagestyle{empty}   % no header/footer on the title page
+\pagestyle{empty}   
 \begin{abstract}
 Chain-of-Thought (CoT) reasoning often fails to faithfully reflect a language model's underlying decision process. We address this by introducing a \emph{Markovian} language model framework that can be understood as a reasoning autoencoder: it creates a text-based bottleneck where CoT serves as an intermediate representation, forcing the model to compress essential reasoning into interpretable text before making predictions. We train this system with a GRPO-style policy gradient algorithm using parallel sampling, a frozen baseline CoT$'$, within-batch standardized advantages, and actor-reward (chain-rule) gradients. Our approach yields large gains on QA tasks (e.g., GSM8K: 20.7\% $\to$ 54.5\%; +33.8 pp; ARC-Challenge: 47.5\% $\to$ 76.9\%; +29.4 pp). Perturbation analyses across types and severities show consistently higher sensitivity to CoT edits (typically 52\%--82\% of cases favor Markovian), indicating stronger causal reliance on the CoT. Cross-model evaluation confirms that learned CoTs generalize across architectures, suggesting they capture transferable reasoning patterns rather than model-specific artifacts.
 \end{abstract}
@@ -93,7 +81,7 @@ A key insight is that an \emph{informative} CoT can also serve as a \emph{recipi
 
 \paragraph{Contributions.}
 \begin{enumerate}
-    \item We introduce a Markovian language model framework that structurally enforces Chain-of-Thought (CoT) generation to be causally essential, ensuring reliance on the CoT for predictions.
+    \item We introduce a Markovian language model framework that structurally enforces CoT generation to be causally essential, ensuring reliance on the CoT for predictions.
     \item We apply this framework to arithmetic problems (Mistral 7B) and the GSM8K dataset~\citep{cobbe2021gsm8k} (Llama 3.1 8B), observing a 33.2\% absolute improvement on GSM8K.
     \item We show through systematic perturbation analysis across four model pairs that Markovian training produces significantly higher sensitivity to CoT perturbations compared to Non-Markovian approaches, with effect differences ranging from +0.0154 to +0.3276 in log-probability sensitivity.
     \item We demonstrate cross-model transfer: CoTs trained on one model remain informative for other models. This underscores the CoT's \emph{recipient-specific} interpretability and suggests it captures a shared reasoning strategy.
@@ -179,7 +167,7 @@ Section~\ref{sec:related_work} reviews related work, Section~\ref{sec:MLM} detai
             %MathQA & $7.13\%$ & $\;\;?$ & $\;\;?$ \\ \\
             \bottomrule
         \end{tabular}
-        \caption{Llama scores across datasets (provided by user). $\Delta$ reports absolute percentage-point (pp) gains.}
+        \caption{Llama scores across datasets (verbatim correct at T=0). $\Delta$ reports absolute percentage-point (pp) gains.}
     \end{subfigure}
     \hfill
     \begin{subfigure}[b]{0.52\textwidth}
@@ -222,7 +210,7 @@ A Markovian Language Model is a tuple $M=(\mathcal{O}, \mathcal{S}, \pi, u, s_1)
 \end{itemize}
 \end{definition}
 
-For example, in a math reasoning task, $o_1 \in \mathcal{O}$ might be a question, $s_1 \in \mathcal{S}$ is an initial CoT prompt like ``Let's solve this step-by-step:'', $s_2 \in \mathcal{S}$ is the generated reasoning chain, and $o_2 \in \mathcal{O}$ is the answer. The key idea is that $\pi$ can only see the CoT state $s_2$ when predicting $o_2$, forcing the CoT to contain all needed information. Intuitively, $\pi$ is the \emph{frozen} next-token predictor, and $u$ is the model's \emph{trainable} component that chooses how to produce the CoT from the latest observation and prior state. In our experiments, $\pi$ and $u$ share the same underlying transformer but we freeze the weights for $\pi$ while fine-tuning those used by $u$. 
+For example, in a math reasoning task, $o_1 \in \mathcal{O}$ might be a question, $s_1 \in \mathcal{S}$ is an initial CoT prompt like ``Let's solve this step-by-step:'', $s_2 \in \mathcal{S}$ is the generated reasoning chain, and $o_2 \in \mathcal{O}$ is the answer. The key idea is that $\pi$ can only see the CoT state $s_2$ when predicting $o_2$, forcing the CoT to contain all needed information. Intuitively, $\pi$ is the next-token predictor, and $u$ chooses how to produce the CoT from the latest observation and prior state. In our experiments, $\pi$ and $u$ are the same underlying transformer. 
 
 \subsection{Data-Generating Distribution and Reward}
 
@@ -311,7 +299,7 @@ Our implementation combines both gradient terms from the chain rule derivation a
 \mathcal{L}_{\text{AR}}=-A.\]
 where $A$ is the standardized advantage (after local baseline subtraction and GRPO-style batch averaging) and $A^{\text{detach}}$ blocks gradients to isolate the policy gradient term. 
 
-The first term $\mathcal{L}_{\text{PG}}$ corresponds to the standard REINFORCE gradient $R_\theta(\tau) \cdot \nabla_\theta \ln P_\theta(\tau)$, while the second term $\mathcal{L}_{\text{AR}}$ corresponds to the direct reward gradient $\nabla_\theta R_\theta(\tau)$. This enables simultaneous optimization of CoT generation and answer prediction.
+The first term $\mathcal{L}_{\text{PG}}$ corresponds to the standard REINFORCE gradient $A_\theta(\tau) \cdot \nabla_\theta \ln P_\theta(\tau)$, while the second term $\mathcal{L}_{\text{AR}}$ corresponds to the direct advantage gradient $\nabla_\theta A_\theta(\tau)$. This enables simultaneous optimization of CoT generation and answer prediction.
 
 \subsubsection{Within-Batch Advantage Standardization}
 Instead of historical exponential moving averages, we standardize advantages within each batch:
@@ -400,7 +388,7 @@ For Wikipedia continuation~\citep{wikipediadump}, we condition on the first 200 
 
 \subsection{Markovian vs Non-Markovian Perturbation Sensitivity}\label{subsec:markovian_sensitivity}
 
-To provide systematic evidence for the theoretical advantages of Markovian training, we conduct comprehensive perturbation sensitivity comparisons between Markovian and Non-Markovian model pairs. This analysis directly evaluates whether the structural constraints in Markovian training lead to measurably different robustness properties during training.
+To provide systematic evidence for the theoretical advantages of Markovian training, we conduct comprehensive perturbation sensitivity comparisons between Markovian and Non-Markovian model pairs. The Non-Markovian models are trained using the same hyperparameters, only differing in that the reward is $\pi_\theta(\text{ans}\mid q, \text{CoT})$ instead of $\pi_\theta(\text{ans} \mid \text{CoT})$. This analysis directly evaluates whether the structural constraints in Markovian training lead to measurably different robustness properties during training.
 
 \subsubsection{Experimental Design}
 We measure perturbation sensitivity by evaluating fixed Markovian and Non-Markovian checkpoints on newly sampled Wikipedia examples, regenerating actor CoTs for both models on the same inputs before computing effects. We test four perturbation types at five severities (20\%, 40\%, 60\%, 80\%, 100\%):
@@ -420,7 +408,7 @@ The sensitivity measure matches the implementation:
 Positive differences indicate greater Markovian sensitivity to CoT perturbations, reflecting stronger reliance on CoT integrity.
 
 \subsubsection{Results Summary}
-On 128 fresh Wikipedia examples per perturbation type, we find: Delete shows the strongest differences (mean +0.014 to +0.121 with 52\%--82\% consistency increasing with severity). Truncations start near zero or slightly negative at low severities and become positive with higher severities. Character replacement is consistently positive (+0.011 to +0.053; ~63\% consistency at higher severities). Digit replacement has near-zero effects in this setting, matching its minimal character-level impact on English prose.
+On 128 fresh Wikipedia examples per perturbation type, we find: Delete shows the strongest differences (mean +0.014 to +0.121 with 52\%--82\% consistency increasing with severity). Truncations start near zero or slightly negative at low severities and become positive with higher severities. Character replacement is consistently positive (+0.011 to +0.053; ~63\% consistency at higher severities). 
 
 \subsection{Interpretability of CoT Generations}
 \label{subsec:interp}
@@ -448,7 +436,7 @@ We currently verify interpretability on myopic QA and continuation settings. A d
 
 \clearpage
 \section{Reproducibility Statement}
-To ensure reproducibility, we provide comprehensive supplementary materials including all source code, training and evaluation scripts, and detailed instructions in the README. The main training loop (\texttt{src/train.py}) supports (i) GRPO, and alternate training methods such as EI, PG, and PPO-style clipped objective methods (see Section~\ref{sec:hyperparameters} for detailed algorithm descriptions) and (ii) all experimental datasets. We measure fragility of CoT via \texttt{src/perturbation\_analysis.py} and we estimate interpretability of CoT generations via \texttt{src/evaluate\_cross\_model.py}. 
+To ensure reproducibility, we provide comprehensive supplementary materials at \url{https://github.com/scottviteri/MarkovianTraining/} including all source code, training and evaluation scripts, and detailed instructions in the README. The main training loop (\texttt{src/train.py}) supports (i) GRPO, and alternate training methods such as EI, PG, and PPO-style clipped objective methods (see Section~\ref{sec:hyperparameters} for detailed algorithm descriptions) and (ii) all experimental datasets. We measure fragility of CoT via \texttt{src/perturbation\_analysis.py} and we estimate interpretability of CoT generations via \texttt{src/evaluate\_cross\_model.py}. 
 
 Complete hyperparameter configurations for all Wikipedia continuation experiments are provided in Table~\ref{tab:wiki_hyperparams}.
 
@@ -456,7 +444,7 @@ Complete hyperparameter configurations for all Wikipedia continuation experiment
 
 \textbf{Datasets:} We support the following task types: (1) \textit{arithmetic} - randomly generated 15-term addition problems, (2) \textit{arithmetic-negative} - addition with negative numbers, (3) \textit{GSM8K} \citep{cobbe2021gsm8k}, (4) \textit{MMLU} \citep{hendrycks2020mmlu}, (5) \textit{SVAMP} \citep{patel2021svamp}, (6) \textit{AQuA} \citep{ling2017aqua}, (7) \textit{ARC-Challenge} \citep{clark2018arc}, (8) \textit{wiki\_compression} - predicting repeated Wikipedia text, and (9) \textit{wiki\_continuation} - next-token prediction on Wikipedia articles. Environment setup instructions are provided in the README. 
 
-Our experiments were conducted on NVIDIA H100 GPUs through the RunPod cloud service. We trained and evaluated across multiple tasks and settings, including: QA datasets (GSM8K, MMLU, SVAMP, AQuA, ARC-Challenge; \S\ref{subsec:qa}), the non-standard multi-step addition task (\S\ref{subsec:qa}), and Wikipedia continuation (\S\ref{subsec:wikipedia}). We also ran systematic perturbation sensitivity studies (\S\ref{subsec:markovian_sensitivity}), cross-model evaluations (Fig.~\ref{fig:original_vs_llama}), and hyperparameter/model sweeps (Table~\ref{tab:wiki_hyperparams}) across Llama, Mistral, Phi, and Qwen3, and temperatures 1.2/1.3/1.4. We tried various other architectures including straight-through estimators through token sampling and the Decision Transformer~\citep{chen2021decisiontransformer}. Taken together, these experiments required substantial compute; the total compute for the reported experiments was approximately 10{,}000 GPU-hours. The broader research project, including preliminary runs and ablations not reported here, consumed approximately \$32{,}000 in cloud resources. We provide these figures to help researchers anticipate the resources needed to reproduce and extend our results.
+Our experiments were conducted on NVIDIA H100 and H200 GPUs through the RunPod cloud service. We trained and evaluated across multiple tasks and settings, including: QA datasets (GSM8K, MMLU, SVAMP, AQuA, ARC-Challenge; \S\ref{subsec:qa}), the non-standard multi-step addition task (\S\ref{subsec:qa}), and Wikipedia continuation (\S\ref{subsec:wikipedia}). We also ran systematic perturbation sensitivity studies (\S\ref{subsec:markovian_sensitivity}), cross-model evaluations (Fig.~\ref{fig:original_vs_llama}), and hyperparameter/model sweeps (Table~\ref{tab:wiki_hyperparams}) across Llama, Mistral, Phi, and Qwen3, and temperatures 1.2/1.3/1.4. We tried various other architectures including straight-through estimators through token sampling and the Decision Transformer~\citep{chen2021decisiontransformer}. Taken together, these experiments required substantial compute; the total compute for the reported experiments was approximately 10{,}000 GPU-hours. The broader research project, including preliminary runs and ablations not reported here, consumed approximately \$32{,}000 in cloud resources. We provide these figures to help researchers anticipate the resources needed to reproduce and extend our results.
 
 With these materials, researchers should be able to reproduce our work, including the performance boost on GSM8K and the perturbation analysis results demonstrating CoT reliance.
 
@@ -566,11 +554,11 @@ This idea is based on the following three insights:
 \section{Training Algorithm Implementation and Comparison}
 \label{app:training_algorithms}
 
-This section provides detailed descriptions of the reinforcement learning algorithms implemented in our codebase for Markovian chain-of-thought training. Our core contribution is the Markovian training paradigm that optimizes P(answer | CoT) rather than P(answer | question, CoT), creating a text bottleneck where the chain-of-thought must be causally load-bearing. We implement multiple optimization approaches to support this paradigm, enabling comprehensive algorithmic comparison.
+This section provides detailed descriptions of the reinforcement learning algorithms implemented in our codebase for Markovian CoT training. Our core contribution is the Markovian training paradigm that optimizes P(answer | CoT) rather than P(answer | question, CoT), creating a text bottleneck where the CoT must be causally load-bearing. We implement multiple optimization approaches to support this paradigm, enabling comprehensive algorithmic comparison.
 
 \subsection{Alternate Training Algorithms Tested}
 
-Our codebase implements four distinct reinforcement learning algorithms, each designed to optimize the informativeness objective for Markovian chain-of-thought generation:
+Our codebase implements four distinct reinforcement learning algorithms, each designed to optimize the informativeness objective for Markovian CoT generation:
 
 \textbf{Parallel Sampling with Batch Baseline:} Our main algorithmic approach, which uses standardized batch-wise advantage estimates (mean=0, std=1) without exponential moving average baseline mixing. This differs from standard GRPO by incorporating the Markovian reward constraint where the same model parameters $\theta$ are used for both policy and reward calculation, eliminating the need for iterative reward model updates.
 
@@ -595,7 +583,7 @@ where $r_t(\theta) = \frac{\pi_\theta(\text{CoT}_t)}{\pi_{\theta_{\text{old}}}(\
 where $\tau_t$ is computed as $\mu + k\sigma$ from the running history of rewards, with $k = 2.2$ standard deviations in our experiments.
 
 % \subsection{Algorithmic Performance Evaluation on Arithmetic Tasks}
-% Figure~\ref{fig:cot_arithmetic_performance} compares the performance of three training algorithms on arithmetic reasoning tasks. This evaluation demonstrates how different optimization techniques affect the Markovian reward $R_\theta = \ln \pi_\theta(\text{ans} | \text{CoT}) - \ln \pi_\theta(\text{ans} | \text{CoT}')$ progression during training, where $\text{CoT} \sim u_\theta$ is sampled from the trained policy and $\text{CoT}' \sim u_0$ is sampled from the base model. The comparison shows how each algorithm enforces the text bottleneck constraint that makes the chain-of-thought causally load-bearing for prediction.
+% Figure~\ref{fig:cot_arithmetic_performance} compares the performance of three training algorithms on arithmetic reasoning tasks. This evaluation demonstrates how different optimization techniques affect the Markovian reward $R_\theta = \ln \pi_\theta(\text{ans} | \text{CoT}) - \ln \pi_\theta(\text{ans} | \text{CoT}')$ progression during training, where $\text{CoT} \sim u_\theta$ is sampled from the trained policy and $\text{CoT}' \sim u_0$ is sampled from the base model. The comparison shows how each algorithm enforces the text bottleneck constraint that makes the CoT causally load-bearing for prediction.
 % 
 %\begin{figure}[ht]
 %    \centering
@@ -617,7 +605,7 @@ Figure~\ref{fig:wiki_cross_model} presents the cross-model evaluation analysis t
 The cross-model transferability shown in Figure~\ref{fig:wiki_cross_model} addresses the key question of ``interpretable to whom?'' by demonstrating that trained CoTs transfer effectively across diverse model families, confirming they contain generalizable reasoning patterns rather than model-specific artifacts.
 
 \section{Qualitative Analysis of Generated CoTs}
-This section provides concrete examples of how Markovian training changes the character of generated chain-of-thought reasoning across different task domains.
+This section provides concrete examples of how Markovian training changes the character of generated CoT reasoning across different task domains.
 
 \subsection{Arithmetic Task Example}
 Here is an example from Llama-3.1-8B-Instruct on the arithmetic task (data: \texttt{/root/MarkovianTraining/results/arithmetic/20250925\_041804}), showing the final actor and baseline reasoning sampled from the training log.
@@ -633,7 +621,7 @@ Here is an example from Llama-3.1-8B-Instruct on the arithmetic task (data: \tex
 \subsection{Wikipedia Continuation Example}
 \label{app:case}
 
-To better understand Llama-3.1-8B-Instruct's behavior after Markovian training to predict Wikipedia text, let's examine a its behavior on the (randomly selected near the end of training) batch number 12500. The model was given the following Wikipedia article excerpt:
+To better understand Llama-3.1-8B-Instruct's behavior after Markovian training to predict Wikipedia text, let's examine its behavior on the (randomly selected near the end of training) batch number 12500. The model was given the following Wikipedia article excerpt:
 
 \begin{quote}
 Boones Mill is a town in Franklin County, Virginia, United States. The population was 239 in 2018, down from 285 at the 2000 census. It is part of the Roanoke Metropolitan Statistical Area.
