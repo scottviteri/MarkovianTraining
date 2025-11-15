@@ -2631,12 +2631,13 @@ if __name__ == "__main__":
         help="Debug mode: train on the same datapoint repeatedly to test optimization",
     )
     # Parallel sampling (whole-batch repetition)
+    # Parallel mode is on by default; use --no-parallel to disable
     parser.add_argument(
-        "--parallel",
-        action="store_true",
-        help="Use parallel sampling: each batch contains batch_size copies of the same example",
+        "--no-parallel",
+        action="store_false",
+        dest="parallel",
+        help="Disable parallel sampling (process different examples in each batch)",
     )
-    # Turn parallel mode on by default; user can still disable with --no-parallel if added later
     parser.set_defaults(parallel=True)
     # Markovian vs Non-Markovian reward calculation
     parser.add_argument(
