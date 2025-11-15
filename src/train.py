@@ -54,10 +54,13 @@ def get_default_train_batch_size(task_type: str) -> int:
     """Default TRAINING batch size by task type in one place.
     - wiki_compression/wiki_continuation, gsm8k: 16
     - arithmetic/arithmetic-negative, mmlu, and others: 12
+    - mathqa: 8
     """
     if task_type in ("wiki_compression", "wiki_continuation", "gsm8k"):
         return 16
-    if task_type in ("arithmetic", "arithmetic-negative", "mmlu", "mathqa"):
+    if task_type == "mathqa":
+        return 8
+    if task_type in ("arithmetic", "arithmetic-negative", "mmlu"):
         return 12
     return 12
 
