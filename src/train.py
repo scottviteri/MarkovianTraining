@@ -1659,92 +1659,8 @@ def evaluate_model_on_numeric(actor_model, critic_model, tokenizer, device, test
     return accuracy, results
 
 
-def save_checkpoint(state: TrainingState):
-    """Save model checkpoint and evaluate if GSM8K or MMLU"""
-    colored_print(
-        "Checkpoint", f"Saving model at batch {state.batch_index}", Colors.BOLD
-    )
-    
-    # Only verify critic model weights if weight verification is enabled
-    critic_hash_before = None
-    enable_weight_verification = state.hyperparameters.get("enable_weight_verification", False)
-    
-    if enable_weight_verification:
-        # Take snapshot of critic model before saving to verify it doesn't change
-        critic_hash_before = get_model_hash(state.critic_model)
-        colored_print("Critic Verification", f"Critic hash before saving: {critic_hash_before[:16]}...", Colors.BLUE)
-    
-    # Create checkpoint path with batch index to avoid overwriting
-    # Keep legacy checkpoint directory at task level, but store eval outputs in run dir
-    checkpoint_dir = os.path.dirname(state.model_save_path)
-    checkpoint_filename = f"model_batch_{state.batch_index}.pt"
-    checkpoint_path = os.path.join(checkpoint_dir, checkpoint_filename)
-    
-    # Create adapter path as a subdirectory of the run folder, not at the task level
-    adapter_path = os.path.join(state.model_save_path, f"adapter_{state.batch_index}")
-    
-    # Save only LoRA adapter weights instead of full model
-    model_to_save = state.actor_model
-    
-    # Print diagnostics about the model before trying to save
-    colored_print("Model Diagnostics", "Checking model state before saving", Colors.BLUE)
-    
-    # Check if model is still a PEFT model
-    is_peft_model = isinstance(model_to_save, PeftModel)
-    colored_print("PEFT Check", f"Is PeftModel: {is_peft_model}", Colors.BLUE if is_peft_model else Colors.RED)
-    
-    # Check trainable parameters
-    total_params = sum(p.numel() for p in model_to_save.parameters())
-    trainable_params = sum(p.numel() for p in model_to_save.parameters() if p.requires_grad)
-    trainable_ratio = trainable_params / total_params if total_params > 0 else 0
-    colored_print("Params", f"Total: {total_params:,}, Trainable: {trainable_params:,} ({trainable_ratio:.4%})", 
-                Colors.BLUE if trainable_ratio > 0 else Colors.RED)
-    
-    try:
-        if is_peft_model:
-            # Get the active adapter
-            colored_print("Active Adapter", f"Current active adapter: {model_to_save.active_adapter}", Colors.GREEN)
-            
-            # Save the adapter using PEFT's built-in method
-            colored_print("Saving Adapter", f"Saving adapter to {adapter_path}", Colors.BLUE)
-            model_to_save.save_pretrained(adapter_path)
-            
-            # Also save optimizer state and batch index metadata
-            metadata_path = os.path.join(adapter_path, "training_metadata.pt")
-            torch.save(
-                {
-                    "optimizer_state_dict": state.actor_optimizer.state_dict(),
-                    "batch_index": state.batch_index,
-                    "hyperparameters": state.hyperparameters,
-                },
-                metadata_path
-            )
-            
-            colored_print("Save Success", f"Saved adapter at batch {state.batch_index} to {adapter_path}", Colors.GREEN)
-        else:
-            # If not a PEFT model, raise an error - we don't want to save full model
-            raise ValueError("Model is not a PEFT model with adapters. Cannot save checkpoint.")
-    except Exception as e:
-        colored_print("Error Saving Model", f"Error: {str(e)}", Colors.RED)
-        
-        # Print detailed traceback
-        import traceback
-        colored_print("Error Traceback", traceback.format_exc(), Colors.RED)
-        
-        # Don't fall back to saving full model - just report the error
-        colored_print("Checkpoint Failed", "Could not save adapter weights. Check model configuration.", Colors.RED)
-    
-    # Only verify critic model weights if weight verification is enabled
-    if enable_weight_verification and critic_hash_before is not None:
-        # Verify critic model hasn't changed due to saving process
-        critic_hash_after = get_model_hash(state.critic_model)
-        if critic_hash_before != critic_hash_after:
-            colored_print("WARNING", "Critic model changed during saving process!", Colors.RED)
-            colored_print("Hash Before", critic_hash_before, Colors.RED)
-            colored_print("Hash After", critic_hash_after, Colors.RED)
-        else:
-            colored_print("Critic Verification", "Critic model unchanged during saving", Colors.GREEN)
-    
+def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
+    """Run periodic evaluation on test set for supported tasks."""
     # If GSM8K, evaluate the model
     if state.hyperparameters["task_type"] == "gsm8k":
         colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
@@ -1994,8 +1910,98 @@ def save_checkpoint(state: TrainingState):
         with open(results_file, "a") as f:
             json.dump(entry, f)
             f.write("\n")
-         _plot_combined_accuracy(results_file, os.path.join(model_dir, "arc_accuracy_over_batches.png"))
-         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        _plot_combined_accuracy(results_file, os.path.join(model_dir, "arc_accuracy_over_batches.png"))
+        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+
+
+
+
+def save_checkpoint(state: TrainingState):
+    """Save model checkpoint and evaluate if GSM8K or MMLU"""
+    colored_print(
+        "Checkpoint", f"Saving model at batch {state.batch_index}", Colors.BOLD
+    )
+    
+    # Only verify critic model weights if weight verification is enabled
+    critic_hash_before = None
+    enable_weight_verification = state.hyperparameters.get("enable_weight_verification", False)
+    
+    if enable_weight_verification:
+        # Take snapshot of critic model before saving to verify it doesn't change
+        critic_hash_before = get_model_hash(state.critic_model)
+        colored_print("Critic Verification", f"Critic hash before saving: {critic_hash_before[:16]}...", Colors.BLUE)
+    
+    # Create checkpoint path with batch index to avoid overwriting
+    # Keep legacy checkpoint directory at task level, but store eval outputs in run dir
+    checkpoint_dir = os.path.dirname(state.model_save_path)
+    checkpoint_filename = f"model_batch_{state.batch_index}.pt"
+    checkpoint_path = os.path.join(checkpoint_dir, checkpoint_filename)
+    
+    # Create adapter path as a subdirectory of the run folder, not at the task level
+    adapter_path = os.path.join(state.model_save_path, f"adapter_{state.batch_index}")
+    
+    # Save only LoRA adapter weights instead of full model
+    model_to_save = state.actor_model
+    
+    # Print diagnostics about the model before trying to save
+    colored_print("Model Diagnostics", "Checking model state before saving", Colors.BLUE)
+    
+    # Check if model is still a PEFT model
+    is_peft_model = isinstance(model_to_save, PeftModel)
+    colored_print("PEFT Check", f"Is PeftModel: {is_peft_model}", Colors.BLUE if is_peft_model else Colors.RED)
+    
+    # Check trainable parameters
+    total_params = sum(p.numel() for p in model_to_save.parameters())
+    trainable_params = sum(p.numel() for p in model_to_save.parameters() if p.requires_grad)
+    trainable_ratio = trainable_params / total_params if total_params > 0 else 0
+    colored_print("Params", f"Total: {total_params:,}, Trainable: {trainable_params:,} ({trainable_ratio:.4%})", 
+                Colors.BLUE if trainable_ratio > 0 else Colors.RED)
+    
+    try:
+        if is_peft_model:
+            # Get the active adapter
+            colored_print("Active Adapter", f"Current active adapter: {model_to_save.active_adapter}", Colors.GREEN)
+            
+            # Save the adapter using PEFT's built-in method
+            colored_print("Saving Adapter", f"Saving adapter to {adapter_path}", Colors.BLUE)
+            model_to_save.save_pretrained(adapter_path)
+            
+            # Also save optimizer state and batch index metadata
+            metadata_path = os.path.join(adapter_path, "training_metadata.pt")
+            torch.save(
+                {
+                    "optimizer_state_dict": state.actor_optimizer.state_dict(),
+                    "batch_index": state.batch_index,
+                    "hyperparameters": state.hyperparameters,
+                },
+                metadata_path
+            )
+            
+            colored_print("Save Success", f"Saved adapter at batch {state.batch_index} to {adapter_path}", Colors.GREEN)
+        else:
+            # If not a PEFT model, raise an error - we don't want to save full model
+            raise ValueError("Model is not a PEFT model with adapters. Cannot save checkpoint.")
+    except Exception as e:
+        colored_print("Error Saving Model", f"Error: {str(e)}", Colors.RED)
+        
+        # Print detailed traceback
+        import traceback
+        colored_print("Error Traceback", traceback.format_exc(), Colors.RED)
+        
+        # Don't fall back to saving full model - just report the error
+        colored_print("Checkpoint Failed", "Could not save adapter weights. Check model configuration.", Colors.RED)
+    
+    # Only verify critic model weights if weight verification is enabled
+    if enable_weight_verification and critic_hash_before is not None:
+        # Verify critic model hasn't changed due to saving process
+        critic_hash_after = get_model_hash(state.critic_model)
+        if critic_hash_before != critic_hash_after:
+            colored_print("WARNING", "Critic model changed during saving process!", Colors.RED)
+            colored_print("Hash Before", critic_hash_before, Colors.RED)
+            colored_print("Hash After", critic_hash_after, Colors.RED)
+        else:
+            colored_print("Critic Verification", "Critic model unchanged during saving", Colors.GREEN)
+    
 
 
 def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> BatchData:
@@ -2355,8 +2361,8 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 with open(results_file, "a") as f:
                     json.dump(entry, f)
                     f.write("\n")
-                 _plot_combined_accuracy(results_file, os.path.join(state.model_save_path, "arc_accuracy_over_batches.png"))
-                 colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+                _plot_combined_accuracy(results_file, os.path.join(state.model_save_path, "arc_accuracy_over_batches.png"))
+                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
         except Exception as e:
             colored_print("Baseline Eval", f"Failed: {str(e)}", Colors.YELLOW)
     
@@ -2367,9 +2373,12 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
         dataset_size = float('inf')  # For generated datasets
     # Use a uniform default checkpoint frequency for all tasks
     default_checkpoint_frequency = 1000
+    default_eval_frequency = 200  # Evaluate more often than checkpointing
     
     # Use configured frequency if provided, otherwise use default
     checkpoint_frequency = hyperparameters.get("checkpoint_frequency") or default_checkpoint_frequency
+    # If eval_frequency not specified, use checkpoint_frequency (backwards compatible)
+    eval_frequency = hyperparameters.get("eval_frequency") or hyperparameters.get("checkpoint_frequency") or default_eval_frequency
     
     batches_per_epoch = dataset_size // hyperparameters["batch_size"]
     completed_epochs = 0
@@ -2460,9 +2469,14 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             except Exception as e:
                 colored_print("Plotting Error", f"Failed to spawn plotter: {str(e)}", Colors.YELLOW)
 
-            # Save checkpoint and evaluate periodically using configured frequency
+            # Save checkpoint periodically
             if batch_index % checkpoint_frequency == 0 and batch_index > 0:
                 save_checkpoint(state)
+            
+            # Run evaluation periodically (independent of checkpointing)
+            if batch_index % eval_frequency == 0 and batch_index > 0:
+                checkpoint_path = os.path.join(os.path.dirname(state.model_save_path), f"model_batch_{batch_index}.pt")
+                run_periodic_evaluation(state, checkpoint_path)
 
             # Every X batches, verify model weights are behaving as expected if verification is enabled
             if enable_weight_verification and batch_index % state.hyperparameters.get("weight_verification_freq", 10) == 0 and batch_index > 0:
@@ -2522,6 +2536,7 @@ class TrainingConfig:
     num_batches: int
     ppo_epsilon: float
     checkpoint_frequency: Optional[int]
+    eval_frequency: Optional[int]
     weight_verification_freq: int
     enable_weight_verification: bool
     # LoRA parameters
@@ -2579,6 +2594,7 @@ class TrainingConfig:
             num_batches=args.num_batches,
             ppo_epsilon=args.ppo_epsilon,
             checkpoint_frequency=args.checkpoint_frequency,
+            eval_frequency=args.eval_frequency,
             weight_verification_freq=args.weight_verification_freq,
             enable_weight_verification=args.enable_weight_verification,
             lora_rank=args.lora_rank,
@@ -2658,7 +2674,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint_frequency",
         type=int,
-        help="Override default checkpoint frequency (default: 100 for all tasks)",
+        help="How often to save model checkpoints in batches (default: 1000)",
+    )
+    parser.add_argument(
+        "--eval_frequency",
+        type=int,
+        help="How often to run evaluation on test set in batches (default: same as checkpoint_frequency)",
     )
     # Add weight verification frequency parameter
     parser.add_argument(
