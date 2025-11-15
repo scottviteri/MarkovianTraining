@@ -1994,8 +1994,8 @@ def save_checkpoint(state: TrainingState):
         with open(results_file, "a") as f:
             json.dump(entry, f)
             f.write("\n")
-        _plot_combined_accuracy(results_file, os.path.join(model_dir, "combined_metrics_arc.png"))
-        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+         _plot_combined_accuracy(results_file, os.path.join(model_dir, "arc_accuracy_over_batches.png"))
+         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
 
 
 def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> BatchData:
@@ -2355,8 +2355,8 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 with open(results_file, "a") as f:
                     json.dump(entry, f)
                     f.write("\n")
-                _plot_combined_accuracy(results_file, os.path.join(state.model_save_path, "combined_metrics_arc.png"))
-                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+                 _plot_combined_accuracy(results_file, os.path.join(state.model_save_path, "arc_accuracy_over_batches.png"))
+                 colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
         except Exception as e:
             colored_print("Baseline Eval", f"Failed: {str(e)}", Colors.YELLOW)
     
