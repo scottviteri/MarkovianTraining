@@ -1917,7 +1917,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
 
 
 def save_checkpoint(state: TrainingState):
-    """Save model checkpoint and evaluate if GSM8K or MMLU"""
+    """Save model checkpoint (weights only)."""
     colored_print(
         "Checkpoint", f"Saving model at batch {state.batch_index}", Colors.BOLD
     )
