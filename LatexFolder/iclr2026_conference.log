@@ -1,10 +1,10 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2026/dev/Arch Linux) (preloaded format=pdflatex 2025.8.30)  24 SEP 2025 09:22
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2026/dev/Arch Linux) (preloaded format=pdflatex 2025.8.30)  15 NOV 2025 14:51
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
  %&-line parsing enabled.
-**/home/scottviteri/Projects/MarkovianTraining/MarkovianTraining/LatexFolder/iclr2026_conference.tex
-(/home/scottviteri/Projects/MarkovianTraining/MarkovianTraining/LatexFolder/iclr2026_conference.tex
+**/home/scottviteri/Projects/MarkovianTraining/ICLR2026Rebuttals/LatexFolder/iclr2026_conference.tex
+(/home/scottviteri/Projects/MarkovianTraining/ICLR2026Rebuttals/LatexFolder/iclr2026_conference.tex
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
 (/usr/share/texmf-dist/tex/latex/base/article.cls
@@ -581,7 +581,7 @@ Package: booktabs 2020/01/12 v1.61803398 Publication quality tables
 \@lastruleclass=\count342
 \@thisrulewidth=\dimen300
 )
-LaTeX Font Info:    Trying to load font information for OT1+ptm on input line 71.
+LaTeX Font Info:    Trying to load font information for OT1+ptm on input line 57.
  (/usr/share/texmf-dist/tex/latex/psnfss/ot1ptm.fd
 File: ot1ptm.fd 2001/06/04 font definitions for OT1/ptm.
 ) (/usr/share/texmf-dist/tex/latex/l3backend/l3backend-pdftex.def
@@ -591,24 +591,24 @@ File: l3backend-pdftex.def 2024-05-08 L3 backend support: PDF output (pdfTeX)
 ) (./iclr2026_conference.aux)
 \openout1 = `iclr2026_conference.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 71.
-LaTeX Font Info:    ... okay on input line 71.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 71.
-LaTeX Font Info:    ... okay on input line 71.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 71.
-LaTeX Font Info:    ... okay on input line 71.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 71.
-LaTeX Font Info:    ... okay on input line 71.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 71.
-LaTeX Font Info:    ... okay on input line 71.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 71.
-LaTeX Font Info:    ... okay on input line 71.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 71.
-LaTeX Font Info:    ... okay on input line 71.
-LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 71.
-LaTeX Font Info:    ... okay on input line 71.
-LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 71.
-LaTeX Font Info:    ... okay on input line 71.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 57.
+LaTeX Font Info:    ... okay on input line 57.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 57.
+LaTeX Font Info:    ... okay on input line 57.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 57.
+LaTeX Font Info:    ... okay on input line 57.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 57.
+LaTeX Font Info:    ... okay on input line 57.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 57.
+LaTeX Font Info:    ... okay on input line 57.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 57.
+LaTeX Font Info:    ... okay on input line 57.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 57.
+LaTeX Font Info:    ... okay on input line 57.
+LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 57.
+LaTeX Font Info:    ... okay on input line 57.
+LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 57.
+LaTeX Font Info:    ... okay on input line 57.
  (/usr/share/texmf-dist/tex/context/base/mkii/supp-pdf.mkii
 [Loading MPS to PDF converter (version 2006.09.02).]
 \scratchcounter=\count344
@@ -628,7 +628,7 @@ Package epstopdf-base Info: Redefining graphics rule for `.eps' on input line 48
  (/usr/share/texmf-dist/tex/latex/latexconfig/epstopdf-sys.cfg
 File: epstopdf-sys.cfg 2010/07/13 v1.3 Configuration of (r)epstopdf for TeX Live
 ))
-Package hyperref Info: Link coloring OFF on input line 71.
+Package hyperref Info: Link coloring OFF on input line 57.
  (./iclr2026_conference.out) (./iclr2026_conference.out)
 \@outlinefile=\write4
 \openout4 = `iclr2026_conference.out'.
@@ -636,15 +636,15 @@ Package hyperref Info: Link coloring OFF on input line 71.
 Package caption Info: Begin \AtBeginDocument code.
 Package caption Info: End \AtBeginDocument code.
 
-Underfull \hbox (badness 7613) in paragraph at lines 75--75
+Underfull \hbox (badness 7613) in paragraph at lines 61--61
 []\OT1/ptm/m/sc/17.28 Markovian Trans-form-ers for In-for-ma-tive
  []
 
-LaTeX Font Info:    Trying to load font information for U+msa on input line 75.
+LaTeX Font Info:    Trying to load font information for U+msa on input line 61.
 (/usr/share/texmf-dist/tex/latex/amsfonts/umsa.fd
 File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 )
-LaTeX Font Info:    Trying to load font information for U+msb on input line 75.
+LaTeX Font Info:    Trying to load font information for U+msb on input line 61.
  (/usr/share/texmf-dist/tex/latex/amsfonts/umsb.fd
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 )
@@ -652,24 +652,29 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 [1{/home/scottviteri/.texlive/texmf-var/fonts/map/pdftex/updmap/pdftex.map}{/usr/share/texmf-dist/fonts/enc/dvips/base/8r.enc}
 
 ]
-Underfull \hbox (badness 2368) in paragraph at lines 98--99
+Underfull \hbox (badness 2368) in paragraph at lines 83--84
 []\OT1/ptm/m/n/10 We ap-ply this frame-work to arith-metic prob-lems (Mis-tral 7B) and the GSM8K
  []
 
-<Figures/combined_normalized_reward_gp_smoothed.png, id=243, 859.5312pt x 570.933pt>
+
+Overfull \hbox (11.74036pt too wide) in paragraph at lines 155--168
+ [][] 
+ []
+
+<Figures/combined_normalized_reward_gp_smoothed.png, id=228, 859.5312pt x 570.933pt>
 File: Figures/combined_normalized_reward_gp_smoothed.png Graphic file (type png)
 <use Figures/combined_normalized_reward_gp_smoothed.png>
-Package pdftex.def Info: Figures/combined_normalized_reward_gp_smoothed.png  used on input line 167.
-(pdftex.def)             Requested size: 170.91562pt x 113.52248pt.
+Package pdftex.def Info: Figures/combined_normalized_reward_gp_smoothed.png  used on input line 173.
+(pdftex.def)             Requested size: 206.69388pt x 137.28807pt.
 
 
 [2]
-Underfull \vbox (badness 6808) has occurred while \output is active []
+Underfull \vbox (badness 10000) has occurred while \output is active []
 
 
 
 [3 <./Figures/combined_normalized_reward_gp_smoothed.png>]
-LaTeX Font Info:    Trying to load font information for TS1+ptm on input line 195.
+LaTeX Font Info:    Trying to load font information for TS1+ptm on input line 203.
  (/usr/share/texmf-dist/tex/latex/psnfss/ts1ptm.fd
 File: ts1ptm.fd 2001/06/04 font definitions for TS1/ptm.
 )
@@ -677,100 +682,108 @@ File: ts1ptm.fd 2001/06/04 font definitions for TS1/ptm.
 [4]
 
 [5]
+Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on input line 312.
+
 
 [6]
-Overfull \hbox (0.93848pt too wide) in paragraph at lines 332--361
+Overfull \hbox (0.93848pt too wide) in paragraph at lines 353--382
  [][] 
  []
 
 
 
 [7]
-
-[8]
-Underfull \vbox (badness 1325) has occurred while \output is active []
-
-
-
-[9] (./iclr2026_conference.bbl
-
-[10]
-
-[11])
-
-[12]
-<Figures/combined_metrics_wiki_continuation.png, id=405, 722.7pt x 361.35pt>
-File: Figures/combined_metrics_wiki_continuation.png Graphic file (type png)
-<use Figures/combined_metrics_wiki_continuation.png>
-Package pdftex.def Info: Figures/combined_metrics_wiki_continuation.png  used on input line 488.
-(pdftex.def)             Requested size: 194.76982pt x 97.38385pt.
-<Figures/average_perturbation_results_plot_smooth40.png, id=406, 871.0944pt x 432.4155pt>
-File: Figures/average_perturbation_results_plot_smooth40.png Graphic file (type png)
-<use Figures/average_perturbation_results_plot_smooth40.png>
-Package pdftex.def Info: Figures/average_perturbation_results_plot_smooth40.png  used on input line 495.
-(pdftex.def)             Requested size: 194.76982pt x 96.68225pt.
-<Figures/gsm8k_multiple_critics_comparison.png, id=407, 860.7357pt x 430.2474pt>
+<Figures/gsm8k_multiple_critics_comparison.png, id=371, 860.7357pt x 430.2474pt>
 File: Figures/gsm8k_multiple_critics_comparison.png Graphic file (type png)
 <use Figures/gsm8k_multiple_critics_comparison.png>
-Package pdftex.def Info: Figures/gsm8k_multiple_critics_comparison.png  used on input line 504.
-(pdftex.def)             Requested size: 317.9892pt x 158.9527pt.
-
-
-[13 <./Figures/combined_metrics_wiki_continuation.png> <./Figures/average_perturbation_results_plot_smooth40.png> <./Figures/gsm8k_multiple_critics_comparison.png>]
-
-[14]
-<Figures/cot_performance_comparison.png, id=442, 867.24pt x 289.08pt>
-File: Figures/cot_performance_comparison.png Graphic file (type png)
-<use Figures/cot_performance_comparison.png>
-Package pdftex.def Info: Figures/cot_performance_comparison.png  used on input line 569.
-(pdftex.def)             Requested size: 389.53358pt x 129.84659pt.
-<Figures/wiki_multi_critic_comparison.png, id=444, 860.7357pt x 430.2474pt>
-File: Figures/wiki_multi_critic_comparison.png Graphic file (type png)
-<use Figures/wiki_multi_critic_comparison.png>
-Package pdftex.def Info: Figures/wiki_multi_critic_comparison.png  used on input line 579.
+Package pdftex.def Info: Figures/gsm8k_multiple_critics_comparison.png  used on input line 418.
 (pdftex.def)             Requested size: 389.53358pt x 194.71246pt.
 
 
-[15 <./Figures/cot_performance_comparison.png>]
+[8]
 
-[16 <./Figures/wiki_multi_critic_comparison.png>]
-Underfull \hbox (badness 2173) in paragraph at lines 639--640
+[9 <./Figures/gsm8k_multiple_critics_comparison.png>]
+LaTeX Font Info:    Trying to load font information for OT1+pcr on input line 437.
+ (/usr/share/texmf-dist/tex/latex/psnfss/ot1pcr.fd
+File: ot1pcr.fd 2001/06/04 font definitions for OT1/pcr.
+) (./iclr2026_conference.bbl
+
+[10
+
+]
+
+[11]
+
+[12])
+<Figures/combined_metrics_wiki_continuation.png, id=439, 722.7pt x 361.35pt>
+File: Figures/combined_metrics_wiki_continuation.png Graphic file (type png)
+<use Figures/combined_metrics_wiki_continuation.png>
+Package pdftex.def Info: Figures/combined_metrics_wiki_continuation.png  used on input line 513.
+(pdftex.def)             Requested size: 194.76982pt x 97.38385pt.
+<Figures/average_perturbation_results_plot_smooth40.png, id=440, 871.0944pt x 432.4155pt>
+File: Figures/average_perturbation_results_plot_smooth40.png Graphic file (type png)
+<use Figures/average_perturbation_results_plot_smooth40.png>
+Package pdftex.def Info: Figures/average_perturbation_results_plot_smooth40.png  used on input line 520.
+(pdftex.def)             Requested size: 194.76982pt x 96.68225pt.
+
+
+[13]
+
+[14 <./Figures/combined_metrics_wiki_continuation.png> <./Figures/average_perturbation_results_plot_smooth40.png>]
+<Figures/wiki_multi_critic_comparison.png, id=479, 860.7357pt x 430.2474pt>
+File: Figures/wiki_multi_critic_comparison.png Graphic file (type png)
+<use Figures/wiki_multi_critic_comparison.png>
+Package pdftex.def Info: Figures/wiki_multi_critic_comparison.png  used on input line 598.
+(pdftex.def)             Requested size: 389.53358pt x 194.71246pt.
+
+Underfull \hbox (badness 10000) in paragraph at lines 609--610
+\OT1/ptm/m/n/10 Here is an ex-am-ple from Llama-3.1-8B-Instruct on the arith-metic task (data:
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 609--610
+\OT1/pcr/m/n/10 /root/MarkovianTraining/results/arithmetic/20250925[]041804\OT1/ptm/m/n/10 ), show-
+ []
+
+
+
+[15]
+Underfull \hbox (badness 2173) in paragraph at lines 622--623
 \OT1/ptm/m/n/10 To bet-ter un-der-stand Llama-3.1-8B-Instruct's be-hav-ior af-ter Marko-vian train-ing to pre-dict
  []
 
 
 
+[16 <./Figures/wiki_multi_critic_comparison.png>]
+
 [17]
+Underfull \vbox (badness 6047) has occurred while \output is active []
+
+
 
 [18]
-LaTeX Font Info:    Trying to load font information for OT1+pcr on input line 732.
- (/usr/share/texmf-dist/tex/latex/psnfss/ot1pcr.fd
-File: ot1pcr.fd 2001/06/04 font definitions for OT1/pcr.
-)
 
-[19]
-
-[20] (./iclr2026_conference.aux)
+[19] (./iclr2026_conference.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
  ***********
 Package rerunfilecheck Info: File `iclr2026_conference.out' has not changed.
-(rerunfilecheck)             Checksum: F56DE68B3094A112DF6596129F4BC339;8525.
+(rerunfilecheck)             Checksum: 18B1F304EF2AF54A9F82633669EACA53;8163.
  ) 
 Here is how much of TeX's memory you used:
- 24890 strings out of 474051
- 448400 string characters out of 5747159
- 844232 words of memory out of 5000000
- 47492 multiletter control sequences out of 15000+600000
+ 24958 strings out of 474051
+ 449274 string characters out of 5747159
+ 840356 words of memory out of 5000000
+ 47544 multiletter control sequences out of 15000+600000
  591921 words of font info for 102 fonts, out of 8000000 for 9000
  725 hyphenation exceptions out of 8191
- 102i,13n,107p,1409b,748s stack positions out of 10000i,1000n,20000p,200000b,200000s
-</usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy5.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></usr/share/texmf-dist/fonts/type1/urw/courier/ucrr8a.pfb></usr/share/texmf-dist/fonts/type1/urw/helvetic/uhvb8a.pfb></usr/share/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/share/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
-Output written on iclr2026_conference.pdf (20 pages, 3112506 bytes).
+ 102i,13n,107p,1352b,748s stack positions out of 10000i,1000n,20000p,200000b,200000s
+</usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmbx9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi5.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi6.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy5.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/symbols/msbm10.pfb></usr/share/texmf-dist/fonts/type1/urw/courier/ucrr8a.pfb></usr/share/texmf-dist/fonts/type1/urw/helvetic/uhvb8a.pfb></usr/share/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/share/texmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/share/texmf-dist/fonts/type1/urw/times/utmri8a.pfb>
+Output written on iclr2026_conference.pdf (19 pages, 2724478 bytes).
 PDF statistics:
- 598 PDF objects out of 1000 (max. 8388607)
- 522 compressed objects within 6 object streams
- 134 named destinations out of 1000 (max. 500000)
- 371 words of extra memory for PDF output out of 10000 (max. 10000000)
+ 636 PDF objects out of 1000 (max. 8388607)
+ 558 compressed objects within 6 object streams
+ 150 named destinations out of 1000 (max. 500000)
+ 334 words of extra memory for PDF output out of 10000 (max. 10000000)
 

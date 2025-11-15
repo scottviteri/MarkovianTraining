@@ -1,4 +1,4 @@
-\begin{thebibliography}{43}
+\begin{thebibliography}{49}
 \providecommand{\natexlab}[1]{#1}
 \providecommand{\url}[1]{\texttt{#1}}
 \expandafter\ifx\csname urlstyle\endcsname\relax
@@ -29,6 +29,11 @@ Collin Burns, Haotian Ye, Dan Klein, and Jacob Steinhardt.
 Stephen Casper, Tilman Rauker, Anson Ho, and Dylan Hadfield-Menell.
 \newblock Sok: Toward transparent ai: A survey on interpreting the inner structures of deep neural networks, 2023.
 
+\bibitem[Chen et~al.(2021)Chen, Lu, Rajeswaran, Lee, Grover, Laskin, Abbeel, Srinivas, and Mordatch]{chen2021decisiontransformer}
+Lili Chen, Kevin Lu, Aravind Rajeswaran, Kimin Lee, Aditya Grover, Michael Laskin, Pieter Abbeel, Aravind Srinivas, and Igor Mordatch.
+\newblock Decision transformer: Reinforcement learning via sequence modeling.
+\newblock In \emph{Advances in Neural Information Processing Systems}, 2021.
+
 \bibitem[Christiano et~al.(2021)Christiano, Cotra, and Xu]{christiano2021eliciting}
 Paul Christiano, Ajeya Cotra, and Mark Xu.
 \newblock Eliciting latent knowledge: How to tell if your eyes deceive you, 2021.
@@ -41,6 +46,11 @@ Paul Christiano, Jan Leike, Tom~B. Brown, Miljan Martic, Shane Legg, and Dario A
 Junyoung Chung, Kyle Kastner, Laurent Dinh, Kratarth Goel, Aaron~C. Courville, and Yoshua Bengio.
 \newblock A recurrent latent variable model for sequential data, 2015.
 
+\bibitem[Clark et~al.(2018)Clark, Cowhey, Etzioni, Khot, Sabharwal, Schoenick, and Tafjord]{clark2018arc}
+Peter Clark, Isaac Cowhey, Oren Etzioni, Tushar Khot, Ashish Sabharwal, Carissa Schoenick, and Oyvind Tafjord.
+\newblock Think you have solved question answering? try arc, the ai2 reasoning challenge.
+\newblock In \emph{Proceedings of the 2018 Workshop on Machine Reading for Question Answering}, 2018.
+
 \bibitem[Cobbe et~al.(2021)Cobbe, Kosaraju, Bavarian, Chen, Jun, Kaiser, Plappert, Tworek, Hilton, Nakano, Hesse, and Schulman]{cobbe2021gsm8k}
 Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher Hesse, and John Schulman.
 \newblock Training verifiers to solve math word problems, 2021.
@@ -48,6 +58,10 @@ Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Ka
 \bibitem[DeepSeek-AI et~al.(2025)DeepSeek-AI, Guo, Yang, Zhang, Song, Zhang, Xu, et~al.]{deepseekai2025}
 DeepSeek-AI, Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Ruoyu Zhang, Runxin Xu, et~al.
 \newblock Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning, 2025.
+
+\bibitem[Foundation(2024)]{wikipediadump}
+Wikimedia Foundation.
+\newblock Wikipedia, 2024.
 
 \bibitem[Geiger et~al.(2022)Geiger, Wu, Lu, Rozner, Kreiss, Icard, Goodman, and Potts]{geiger2022inducing}
 Atticus Geiger, Zhengxuan Wu, Hanson Lu, Josh Rozner, Elisa Kreiss, Thomas Icard, Noah Goodman, and Christopher Potts.
@@ -72,6 +86,11 @@ Albert Gu, Karan Goel, and Christopher Ré.
 \bibitem[Gurnee \& Tegmark(2024)Gurnee and Tegmark]{gurnee2024language}
 Wes Gurnee and Max Tegmark.
 \newblock Language models represent space and time, 2024.
+
+\bibitem[Hendrycks et~al.(2020)Hendrycks, Burns, Basart, Zou, Mazeika, Song, and Steinhardt]{hendrycks2020mmlu}
+Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Jacob Steinhardt.
+\newblock Measuring massive multitask language understanding.
+\newblock \emph{arXiv preprint arXiv:2009.03300}, 2020.
 
 \bibitem[Hu et~al.(2022)Hu, Shen, Wallis, Allen-Zhu, Li, Wang, Wang, and Chen]{hu2022lora}
 Edward~J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu~Wang, and Weizhu Chen.
@@ -105,6 +124,11 @@ Tamera Lanham, Anna Chen, Ansh Radhakrishnan, Benoit Steiner, Carson Denison, Da
 Stephanie Lin, Jacob Hilton, and Owain Evans.
 \newblock Truthfulqa: Measuring how models mimic human falsehoods, 2022.
 
+\bibitem[Ling et~al.(2017)Ling, Yogatama, Dyer, and Blunsom]{ling2017aqua}
+Wang Ling, Dani Yogatama, Chris Dyer, and Phil Blunsom.
+\newblock Program induction by rationale generation: Learning to solve and explain algebraic word problems.
+\newblock In \emph{Proceedings of the 55th Annual Meeting of the Association for Computational Linguistics (ACL)}, 2017.
+
 \bibitem[Lyu et~al.(2023)Lyu, Havaldar, Stein, Zhang, Rao, Wong, Apidianaki, and Callison-Burch]{lyu2023faithful}
 Qing Lyu, Shreya Havaldar, Adam Stein, Li~Zhang, Delip Rao, Eric Wong, Marianna Apidianaki, and Chris Callison-Burch.
 \newblock Faithful chain-of-thought reasoning, 2023.
@@ -120,6 +144,11 @@ Neel Nanda, Lawrence Chan, Tom Lieberum, Jess Smith, and Jacob Steinhardt.
 \bibitem[Nye et~al.(2022)Nye, Andreassen, Gur-Ari, Michalewski, Austin, Bieber, Dohan, Lewkowycz, Bosma, Luan, Sutton, and Odena]{nye2022show}
 Maxwell Nye, Anders~Johan Andreassen, Guy Gur-Ari, Henryk Michalewski, Jacob Austin, David Bieber, David Dohan, Aitor Lewkowycz, Maarten Bosma, David Luan, Charles Sutton, and Augustus Odena.
 \newblock Show your work: Scratchpads for intermediate computation with language models, 2022.
+
+\bibitem[Patel et~al.(2021)Patel, Bhattamishra, and Goyal]{patel2021svamp}
+Prateek Patel, Satwik Bhattamishra, and Navin Goyal.
+\newblock Are nlp models really robust? a case study on numerical reasoning.
+\newblock In \emph{Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing}, 2021.
 
 \bibitem[Rivera et~al.(2024)Rivera, Mukobi, Reuel, Lamparth, Smith, and Schneider]{rivera2024escalation}
 Juan-Pablo Rivera, Gabriel Mukobi, Anka Reuel, Max Lamparth, Chandler Smith, and Jacquelyn Schneider.
