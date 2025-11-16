@@ -61,12 +61,12 @@ def get_default_train_batch_size(task_type: str) -> int:
     """
     if task_type in ("wiki_compression", "wiki_continuation"):
         return 16
-    if task_type in ("gsm8k", "aqua"):
-        return 8
-    if task_type in ("mathqa"):
-        return 6
-    if task_type == "mmlu":
-        return 4
+    #if task_type in ("gsm8k", "aqua"):
+    #    return 8
+    #if task_type in ("mathqa"):
+    #    return 6
+    #if task_type == "mmlu":
+    #    return 4
     return 12
 
 
