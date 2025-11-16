@@ -2242,7 +2242,8 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     else:
         colored_print("Weight Verification", "Weight verification disabled", Colors.YELLOW)
     
-    for batch_index in range(state.batch_index, hyperparameters["num_batches"]):
+    batch_index = state.batch_index
+    while batch_index < hyperparameters["num_batches"]:
         state.batch_index = batch_index
         print_batch_delimiter()
         colored_print("Batch:", str(batch_index), Colors.BOLD, inline=True)
@@ -2292,12 +2293,13 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 # Log warning with skip statistics
                 colored_print(
                     "OOM Error:",
-                    f"Skipping batch {batch_index} due to out of memory error. "
-                    f"Skip rate: {skip_fraction:.1%} (last {len(state.skip_history)} batches)",
+                    f"Skipping datapoint due to out of memory error. "
+                    f"Skip rate: {skip_fraction:.1%} (last {len(state.skip_history)} datapoints). "
+                    f"Will retry batch {batch_index} with next datapoint.",
                     Colors.RED
                 )
                 
-                # Continue to next batch without logging this one
+                # Continue to next datapoint without incrementing batch_index
                 continue
             else:
                 # Re-raise if not OOM
@@ -2338,6 +2340,9 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 
             # Verify actor model weights are changing properly
             verify_actor_weights_changing_comprehensive(state.actor_model, actor_full_snapshot)
+        
+        # Only increment batch_index after successful processing
+        batch_index += 1
     
     # Handle any remaining accumulated gradients at the end of training
     if state.accumulation_step > 0:
