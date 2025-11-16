@@ -593,25 +593,22 @@ def extract_math_answer(solution_text: str) -> str:
     - Fallback to last fraction or integer found
     - Else use the last non-empty line
     """
-    try:
-        # Normalize whitespace
-        text = solution_text.strip()
-        # 1) Last \boxed{...}
-        boxed = re.findall(r"\\boxed\{([^}]*)\}", text)
-        if boxed:
-            return boxed[-1].strip()
-        # 2) Fraction a/b or integer, take last occurrence
-        frac_or_int = re.findall(r"-?\d+\/\d+|-?\d+", text)
-        if frac_or_int:
-            return frac_or_int[-1].strip()
-        # 3) Last non-empty line
-        for line in reversed(text.splitlines()):
-            line = line.strip()
-            if line:
-                return line
-        return text
-    except Exception:
-        return solution_text
+    # Normalize whitespace
+    text = solution_text.strip()
+    # 1) Last \boxed{...}
+    boxed = re.findall(r"\\boxed\{([^}]*)\}", text)
+    if boxed:
+        return boxed[-1].strip()
+    # 2) Fraction a/b or integer, take last occurrence
+    frac_or_int = re.findall(r"-?\d+\/\d+|-?\d+", text)
+    if frac_or_int:
+        return frac_or_int[-1].strip()
+    # 3) Last non-empty line
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if line:
+            return line
+    return text
 
 
 def load_math_dataset(chunk_size: int = 1000, split: str = "train"):
@@ -621,13 +618,9 @@ def load_math_dataset(chunk_size: int = 1000, split: str = "train"):
     """
     # Use official HF dataset; pass auth token if provided to handle gated access
     hf_token = os.getenv("HUGGINGFACE_HUB_TOKEN") or os.getenv("HF_TOKEN")
-    try:
-        ds = load_dataset("hendrycks/competition_math", token=hf_token)
-        problems = ds[split]["problem"]
-        solutions = ds[split]["solution"]
-    except Exception as e:
-        colored_print("MATH Load Error", f"Failed to load hendrycks/competition_math ({e}). If this is a 403, set HUGGINGFACE_HUB_TOKEN or run huggingface-cli login.", Colors.RED)
-        raise
+    ds = load_dataset("hendrycks/competition_math", token=hf_token)
+    problems = ds[split]["problem"]
+    solutions = ds[split]["solution"]
     qa_pairs = []
     for problem, solution in zip(problems, solutions):
         ans = extract_math_answer(solution)
@@ -655,14 +648,11 @@ def extract_answer(answer):
     # Remove commas from numbers
     answer = answer.replace(",", "")
     
-    try:
-        # Find the first number (including negative numbers)
-        matches = re.findall(r"-?\d+", answer.strip())
-        if matches:
-            return int(matches[0])
-        else:
-            return "[invalid]"
-    except:
+    # Find the first number (including negative numbers)
+    matches = re.findall(r"-?\d+", answer.strip())
+    if matches:
+        return int(matches[0])
+    else:
         return "[invalid]"
 
 
@@ -753,20 +743,9 @@ def get_hyperparameters_from_log(model_dir, default_task=None):
     """
     import json
     log_path = os.path.join(model_dir, "log.jsonl")
-    try:
-        with open(log_path, 'r') as f:
-            hyperparameters = json.loads(f.readline().strip())
-        return hyperparameters
-    except Exception as e:
-        print(f"Warning: Could not read hyperparameters from log file ({e})")
-        # Fallback defaults
-        return {
-            "model_type": "mistral",
-            "task_type": default_task or "gsm8k",
-            "cot_length": 100,
-            "temperature": 1.0,
-            "batch_size": 12,
-        }
+    with open(log_path, 'r') as f:
+        hyperparameters = json.loads(f.readline().strip())
+    return hyperparameters
 
 
 def get_model_paths_and_type(provided_path=None, target_index=None, all_checkpoints=False):
@@ -800,13 +779,9 @@ def get_model_paths_and_type(provided_path=None, target_index=None, all_checkpoi
     
     # Get model type from log.jsonl
     log_path = os.path.join(model_dir, "log.jsonl")
-    try:
-        with open(log_path, 'r') as f:
-            hyperparameters = json.loads(f.readline().strip())
-            model_type = hyperparameters.get("model_type", "mistral")
-    except Exception as e:
-        print(f"Warning: Could not read model type from log file ({e}), defaulting to mistral")
-        model_type = "mistral"
+    with open(log_path, 'r') as f:
+        hyperparameters = json.loads(f.readline().strip())
+        model_type = hyperparameters.get("model_type", "mistral")
     
     return model_paths, model_type
 

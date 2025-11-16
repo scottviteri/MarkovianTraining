@@ -1763,10 +1763,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
     # If MATH, evaluate numeric QA
     elif state.hyperparameters["task_type"] == "math":
         colored_print("Evaluation", "Running MATH evaluation...", Colors.BOLD)
-        try:
-            test_data = list(load_math_dataset(split="test"))
-        except Exception:
-            test_data = list(load_math_dataset(split="validation"))
+        test_data = list(load_math_dataset(split="test"))
         with torch.no_grad():
             state.actor_model.eval()
             accuracy, results = evaluate_model_on_numeric(
@@ -1912,39 +1909,29 @@ def save_checkpoint(state: TrainingState):
     colored_print("Params", f"Total: {total_params:,}, Trainable: {trainable_params:,} ({trainable_ratio:.4%})", 
                 Colors.BLUE if trainable_ratio > 0 else Colors.RED)
     
-    try:
-        if is_peft_model:
-            # Get the active adapter
-            colored_print("Active Adapter", f"Current active adapter: {model_to_save.active_adapter}", Colors.GREEN)
-            
-            # Save the adapter using PEFT's built-in method
-            colored_print("Saving Adapter", f"Saving adapter to {adapter_path}", Colors.BLUE)
-            model_to_save.save_pretrained(adapter_path)
-            
-            # Also save optimizer state and batch index metadata
-            metadata_path = os.path.join(adapter_path, "training_metadata.pt")
-            torch.save(
-                {
-                    "optimizer_state_dict": state.actor_optimizer.state_dict(),
-                    "batch_index": state.batch_index,
-                    "hyperparameters": state.hyperparameters,
-                },
-                metadata_path
-            )
-            
-            colored_print("Save Success", f"Saved adapter at batch {state.batch_index} to {adapter_path}", Colors.GREEN)
-        else:
-            # If not a PEFT model, raise an error - we don't want to save full model
-            raise ValueError("Model is not a PEFT model with adapters. Cannot save checkpoint.")
-    except Exception as e:
-        colored_print("Error Saving Model", f"Error: {str(e)}", Colors.RED)
+    if is_peft_model:
+        # Get the active adapter
+        colored_print("Active Adapter", f"Current active adapter: {model_to_save.active_adapter}", Colors.GREEN)
         
-        # Print detailed traceback
-        import traceback
-        colored_print("Error Traceback", traceback.format_exc(), Colors.RED)
+        # Save the adapter using PEFT's built-in method
+        colored_print("Saving Adapter", f"Saving adapter to {adapter_path}", Colors.BLUE)
+        model_to_save.save_pretrained(adapter_path)
         
-        # Don't fall back to saving full model - just report the error
-        colored_print("Checkpoint Failed", "Could not save adapter weights. Check model configuration.", Colors.RED)
+        # Also save optimizer state and batch index metadata
+        metadata_path = os.path.join(adapter_path, "training_metadata.pt")
+        torch.save(
+            {
+                "optimizer_state_dict": state.actor_optimizer.state_dict(),
+                "batch_index": state.batch_index,
+                "hyperparameters": state.hyperparameters,
+            },
+            metadata_path
+        )
+        
+        colored_print("Save Success", f"Saved adapter at batch {state.batch_index} to {adapter_path}", Colors.GREEN)
+    else:
+        # If not a PEFT model, raise an error - we don't want to save full model
+        raise ValueError("Model is not a PEFT model with adapters. Cannot save checkpoint.")
     
     # Only verify critic model weights if weight verification is enabled
     if enable_weight_verification and critic_hash_before is not None:
@@ -2133,9 +2120,8 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     
     # Baseline evaluation at timestep 0 (before any training updates)
     if not resume and state.batch_index == 0:
-        try:
-            if task_type == "gsm8k":
-                colored_print("Baseline Eval", "Running GSM8K evaluation at timestep 0", Colors.BOLD)
+        if task_type == "gsm8k":
+            colored_print("Baseline Eval", "Running GSM8K evaluation at timestep 0", Colors.BOLD)
                 test_data = list(load_gsm8k_dataset(split="test"))
                 with torch.no_grad():
                     state.actor_model.eval()
@@ -2249,12 +2235,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
             elif task_type == "math":
                 colored_print("Baseline Eval", "Running MATH evaluation at timestep 0", Colors.BOLD)
-                # Hendrycks MATH has no official test split on HF; often uses test for eval here
-                # We will use split="test" if present; otherwise default to validation
-                try:
-                    test_data = list(load_math_dataset(split="test"))
-                except Exception:
-                    test_data = list(load_math_dataset(split="validation"))
+                test_data = list(load_math_dataset(split="test"))
                 with torch.no_grad():
                     state.actor_model.eval()
                     accuracy, results = evaluate_model_on_numeric(
@@ -2315,8 +2296,6 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                     json.dump(entry, f)
                     f.write("\n")
                  colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
-        except Exception as e:
-            colored_print("Baseline Eval", f"Failed: {str(e)}", Colors.YELLOW)
     
     # Get dataset size for tracking full passes
     if task_type == "gsm8k":
@@ -2360,96 +2339,63 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     else:
         colored_print("Weight Verification", "Weight verification disabled", Colors.YELLOW)
     
-    try:
-        for batch_index in range(state.batch_index, hyperparameters["num_batches"]):
-            state.batch_index = batch_index
-            print_batch_delimiter()
-            colored_print("Batch:", str(batch_index), Colors.BOLD, inline=True)
+    for batch_index in range(state.batch_index, hyperparameters["num_batches"]):
+        state.batch_index = batch_index
+        print_batch_delimiter()
+        colored_print("Batch:", str(batch_index), Colors.BOLD, inline=True)
 
-            try:
-                qa_batch = next(qa_generator)
-            except StopIteration:
-                # Reset generator if we run out of data
-                if batch_index < hyperparameters["num_batches"] - 1:
-                    qa_generator = generate_question_answer_batches(
-                        num_batches=hyperparameters["num_batches"] - batch_index,
-                        batch_size=hyperparameters["batch_size"],
-                        task_type=task_type,
-                        tokenizer=state.tokenizer,
-                        hyperparameters=hyperparameters,
-                    )
-                    qa_batch = next(qa_generator)
-                    completed_epochs += 1
-                    print(f"\nCompleted epoch {completed_epochs}, restarting dataset")
-                else:
-                    print("\nReached end of training")
-                    save_checkpoint(state)
-                    break
+        qa_batch = next(qa_generator)
 
-            batch_data = process_batch(state, qa_batch)
-            grad_norm = update_model(state, batch_data)
+        batch_data = process_batch(state, qa_batch)
+        grad_norm = update_model(state, batch_data)
 
-            # Update history and log
-            state.previous_normalized_rewards.extend(
-                batch_data.normalized_rewards.float().detach().cpu().numpy()
-            )
-            state.previous_advantages.extend(
-                batch_data.advantages.float().detach().cpu().numpy()
-            )
+        # Update history and log
+        state.previous_normalized_rewards.extend(
+            batch_data.normalized_rewards.float().detach().cpu().numpy()
+        )
+        state.previous_advantages.extend(
+            batch_data.advantages.float().detach().cpu().numpy()
+        )
 
-            metrics = LogMetrics.from_batch(
-                batch_data,
-                grad_norm,
-                state.previous_advantages,
-                state.hyperparameters["batch_size"],
-            )
-            log_batch_results(state, batch_data, metrics)
+        metrics = LogMetrics.from_batch(
+            batch_data,
+            grad_norm,
+            state.previous_advantages,
+            state.hyperparameters["batch_size"],
+        )
+        log_batch_results(state, batch_data, metrics)
 
-            # Periodic plotting via subprocess (non-blocking)
-            try:
-                plot_every = state.hyperparameters.get("plot_every", 15)
-                if plot_every and plot_every > 0 and batch_index > 0 and (batch_index % plot_every == 0):
-                    plotter_path = os.path.join(os.path.dirname(__file__), "plot_training_metrics.py")
-                    window = str(state.hyperparameters.get("plot_window_size", 10))
-                    cmd = [
-                        sys.executable,
-                        plotter_path,
-                        "--window_size", window,
-                        "--files", state.log_file,
-                    ]
-                    subprocess.Popen(cmd)
-            except Exception as e:
-                colored_print("Plotting Error", f"Failed to spawn plotter: {str(e)}", Colors.YELLOW)
+        # Periodic plotting via subprocess (non-blocking)
+        plot_every = state.hyperparameters.get("plot_every", 15)
+        if plot_every and plot_every > 0 and batch_index > 0 and (batch_index % plot_every == 0):
+            plotter_path = os.path.join(os.path.dirname(__file__), "plot_training_metrics.py")
+            window = str(state.hyperparameters.get("plot_window_size", 10))
+            cmd = [
+                sys.executable,
+                plotter_path,
+                "--window_size", window,
+                "--files", state.log_file,
+            ]
+            subprocess.Popen(cmd)
 
-            # Save checkpoint periodically
-            if batch_index % checkpoint_frequency == 0 and batch_index > 0:
-                save_checkpoint(state)
-            
-            # Run evaluation periodically (independent of checkpointing)
-            if batch_index % eval_frequency == 0 and batch_index > 0:
-                checkpoint_path = os.path.join(os.path.dirname(state.model_save_path), f"model_batch_{batch_index}.pt")
-                run_periodic_evaluation(state, checkpoint_path)
-
-            # Every X batches, verify model weights are behaving as expected if verification is enabled
-            if enable_weight_verification and batch_index % state.hyperparameters.get("weight_verification_freq", 10) == 0 and batch_index > 0:
-                colored_print("Weight Verification", f"Performing verification at batch {batch_index}", Colors.BLUE)
-                
-                # Verify critic model weights aren't changing (frozen correctly)
-                verify_all_frozen_weights(state.critic_model, critic_full_snapshot)
-                    
-                # Verify actor model weights are changing properly
-                verify_actor_weights_changing_comprehensive(state.actor_model, actor_full_snapshot)
-            
-
-
-    except KeyboardInterrupt:
-        print("\nTraining interrupted by user")
-        if completed_epochs > 0:
-            print("Saving checkpoint and running final evaluation")
+        # Save checkpoint periodically
+        if batch_index % checkpoint_frequency == 0 and batch_index > 0:
             save_checkpoint(state)
-        else:
-            print("No checkpoint saved (no full epochs completed)")
-        return
+        
+        # Run evaluation periodically (independent of checkpointing)
+        if batch_index % eval_frequency == 0 and batch_index > 0:
+            checkpoint_path = os.path.join(os.path.dirname(state.model_save_path), f"model_batch_{batch_index}.pt")
+            run_periodic_evaluation(state, checkpoint_path)
+
+        # Every X batches, verify model weights are behaving as expected if verification is enabled
+        if enable_weight_verification and batch_index % state.hyperparameters.get("weight_verification_freq", 10) == 0 and batch_index > 0:
+            colored_print("Weight Verification", f"Performing verification at batch {batch_index}", Colors.BLUE)
+            
+            # Verify critic model weights aren't changing (frozen correctly)
+            verify_all_frozen_weights(state.critic_model, critic_full_snapshot)
+                
+            # Verify actor model weights are changing properly
+            verify_actor_weights_changing_comprehensive(state.actor_model, actor_full_snapshot)
     
     # Handle any remaining accumulated gradients at the end of training
     if state.accumulation_step > 0:
