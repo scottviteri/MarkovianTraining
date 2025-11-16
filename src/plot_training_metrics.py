@@ -349,6 +349,11 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 ("computed_sign_agreement", "Loss Sign Agreement", "Training Batch No. []", "Same Direction (0/1)")
             ])
         
+        # Add OOM skip fraction metric (always available)
+        base_metrics.append(
+            ("Skip Metrics.Skip Fraction (Last 10 Batches)", "OOM Skip Fraction", "Training Batch No. []", "Fraction")
+        )
+        
         # Add test set accuracy if evaluation data is available
         if has_evaluation_data:
             base_metrics.append(
@@ -577,8 +582,8 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                             label=std_label
                         )
 
-        # Set y-limits for Contains Answer plot
-        if title == "Contains Answer":
+        # Set y-limits for fraction plots
+        if title in ["Contains Answer", "OOM Skip Fraction"]:
             axs[metric_idx].set_ylim(-0.05, 1.05)
 
         # Only add legend for specific conditions
