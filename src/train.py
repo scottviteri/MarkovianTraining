@@ -1398,11 +1398,12 @@ def evaluate_model_generic(
     hyperparameters: Dict[str, Any],
     answer_extractor_fn: Callable[[str], Any],
     answer_comparator_fn: Optional[Callable[[Any, str], bool]] = None,
+    answer_extractor_fn_wb: Optional[Callable[[str], Any]] = None,
     batch_size: int = 16,
     num_samples: Optional[int] = None,
     task_name: str = "Task",
     max_answer_tokens: int = 10
-) -> Tuple[float, List[Dict[str, Any]]]:
+) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
     """Generic evaluation function for all task types using critic model for answer generation.
     
     This follows the Markovian framework:
@@ -1422,13 +1423,14 @@ def evaluate_model_generic(
         answer_comparator_fn: Optional function to compare predicted vs gold answers
                              Signature: (extracted_pred: Any, gold_answer: str) -> bool
                              If None, uses simple equality (predicted == gold)
+        answer_extractor_fn_wb: Optional word-boundary extractor for dual metrics (MCQ only)
         batch_size: Evaluation batch size
         num_samples: Optional limit on number of samples to evaluate
         task_name: Name for progress bar
         max_answer_tokens: Maximum tokens to generate for answer
         
     Returns:
-        tuple: (accuracy: float, detailed_results: List[Dict])
+        tuple: (accuracy: float, detailed_results: List[Dict], accuracy_wb: Optional[float])
     """
     # Limit number of samples if specified
     if num_samples and num_samples < len(test_data):
@@ -1441,6 +1443,7 @@ def evaluate_model_generic(
     actor_model.eval()
     
     correct = 0
+    correct_wb = 0  # Track word boundary accuracy
     results = []
     
     for i in tqdm(range(0, len(test_data), batch_size), desc=f"Evaluating {task_name}"):
@@ -1520,11 +1523,25 @@ def evaluate_model_generic(
         # Type: predicted_answers is List[Any] (extracted answers, e.g., int for SVAMP, str for MMLU)
         predicted_answers = [answer_extractor_fn(ans) for ans in generated_answers]
         
+        # Word boundary extraction if provided
+        if answer_extractor_fn_wb is not None:
+            predicted_answers_wb = [answer_extractor_fn_wb(ans) for ans in generated_answers]
+        else:
+            predicted_answers_wb = [None] * len(generated_answers)
+        
         # Calculate accuracy using task-specific comparator
-        for q, cot, gen_ans, pred, gold in zip(questions, cot_texts, generated_answers, predicted_answers, answers):
+        for q, cot, gen_ans, pred, pred_wb, gold in zip(questions, cot_texts, generated_answers, predicted_answers, predicted_answers_wb, answers):
             is_correct = answer_comparator_fn(pred, gold)
             if is_correct:
                 correct += 1
+            
+            # Word boundary correctness (if applicable)
+            if pred_wb is not None:
+                is_correct_wb = (pred_wb == gold)  # Simple equality for word boundary
+                if is_correct_wb:
+                    correct_wb += 1
+            else:
+                is_correct_wb = None
                 
             # Use both "is_correct" and "correct" for backwards compatibility
             results.append({
@@ -1532,14 +1549,17 @@ def evaluate_model_generic(
                 "reasoning": cot,
                 "generated_answer": gen_ans,
                 "predicted": pred,
+                "predicted_wb": pred_wb,  # Word boundary prediction
                 "answer": gold,
                 "gold": gold,  # Alias for backwards compatibility
                 "correct": is_correct,
+                "correct_wb": is_correct_wb,  # Word boundary correctness
                 "is_correct": is_correct,  # Alias for backwards compatibility
             })
     
     accuracy = correct / len(test_data) if len(test_data) > 0 else 0.0
-    return accuracy, results
+    accuracy_wb = correct_wb / len(test_data) if answer_extractor_fn_wb and len(test_data) > 0 else None
+    return accuracy, results, accuracy_wb
 
 
 def evaluate_model_on_mmlu(
@@ -1551,8 +1571,11 @@ def evaluate_model_on_mmlu(
     hyperparameters: Dict[str, Any],
     batch_size: int = 16,
     num_samples: int = 500
-) -> Tuple[float, List[Dict[str, Any]]]:
-    """Evaluate MMLU - extract letter A-E from generated answer."""
+) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
+    """Evaluate MMLU - extract letter A-E from generated answer.
+    
+    Returns both original and word-boundary-based accuracy for comparison.
+    """
     def extract_letter(text: str) -> str:
         """Extract first letter A-E from text. Returns 'X' if none found."""
         matches = re.findall(r"[A-E]", text.upper())
@@ -1561,9 +1584,27 @@ def evaluate_model_on_mmlu(
     return evaluate_model_generic(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, extract_letter,
+        answer_extractor_fn_wb=extract_letter_word_boundary,
         batch_size=batch_size, num_samples=num_samples,
         task_name="MMLU", max_answer_tokens=10
     )
+
+
+def extract_letter_word_boundary(text: str) -> str:
+    """Extract first letter A-E with word boundaries. Returns 'X' if none found.
+    
+    This correctly extracts the intended choice letter, avoiding false matches
+    in common words like 'The' (contains E) or 'Select' (contains E).
+    """
+    # Try uppercase A-E with word boundary
+    match = re.search(r"\b([A-E])\b", text.upper())
+    if match:
+        return match.group(1)
+    # Try lowercase a-e with word boundary
+    match = re.search(r"\b([a-e])\b", text)
+    if match:
+        return match.group(1).upper()
+    return "X"
 
 
 def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, total, subject=None, batch_index_override=None):
@@ -1609,8 +1650,11 @@ def evaluate_model_on_aqua(
     test_data: List[Tuple[str, str]],
     hyperparameters: Dict[str, Any],
     batch_size: int = 16
-) -> Tuple[float, List[Dict[str, Any]]]:
-    """Evaluate AQuA - extract letter A-E from generated answer."""
+) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
+    """Evaluate AQuA - extract letter A-E from generated answer.
+    
+    Returns both original and word-boundary-based accuracy for comparison.
+    """
     def extract_letter(text: str) -> str:
         """Extract first letter A-E from text. Returns 'X' if none found."""
         matches = re.findall(r"[A-E]", text.upper())
@@ -1619,6 +1663,7 @@ def evaluate_model_on_aqua(
     return evaluate_model_generic(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, extract_letter,
+        answer_extractor_fn_wb=extract_letter_word_boundary,
         batch_size=batch_size,
         task_name="AQuA", max_answer_tokens=10
     )
@@ -1632,7 +1677,7 @@ def evaluate_model_on_numeric(
     test_data: List[Tuple[str, str]],
     hyperparameters: Dict[str, Any],
     batch_size: int = 16
-) -> Tuple[float, List[Dict[str, Any]]]:
+) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
     """Evaluate numeric-answer tasks (e.g., SVAMP, MATH) - handles LaTeX formatting.
     
     Pipeline:
@@ -1721,7 +1766,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         # Run evaluation in eval mode
         with torch.no_grad():
             state.actor_model.eval()
-            accuracy, results = evaluate_model_on_mmlu(
+            accuracy, results, accuracy_wb = evaluate_model_on_mmlu(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1745,7 +1790,11 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
             batch_index_override=state.batch_index,
         )
         
-        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        # Log both metrics
+        log_msg = f"Completed successfully. Accuracy: {accuracy:.2%}"
+        if accuracy_wb is not None:
+            log_msg += f" | Accuracy (word boundary): {accuracy_wb:.2%}"
+        colored_print("Evaluation", log_msg, Colors.GREEN)
         # Clear cache after evaluation
         torch.cuda.empty_cache()
 
@@ -1755,7 +1804,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         test_data = list(load_aqua_dataset(split="test"))
         with torch.no_grad():
             state.actor_model.eval()
-            accuracy, results = evaluate_model_on_aqua(
+            accuracy, results, accuracy_wb = evaluate_model_on_aqua(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1771,6 +1820,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
             "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
             "batch_index": state.batch_index,
             "accuracy": accuracy,
+            "accuracy_wb": accuracy_wb,  # Add word boundary accuracy
             "model_path": checkpoint_path,
             "model_type": state.hyperparameters["model_type"],
             "total_examples": len(test_data),
@@ -1780,7 +1830,12 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         with open(results_file, "a") as f:
             json.dump(entry, f)
             f.write("\n")
-        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        
+        # Log both metrics
+        log_msg = f"Completed successfully. Accuracy: {accuracy:.2%}"
+        if accuracy_wb is not None:
+            log_msg += f" | Accuracy (word boundary): {accuracy_wb:.2%}"
+        colored_print("Evaluation", log_msg, Colors.GREEN)
         # Clear cache after evaluation
         torch.cuda.empty_cache()
     
@@ -1790,7 +1845,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         test_data = list(load_svamp_dataset(split="test"))
         with torch.no_grad():
             state.actor_model.eval()
-            accuracy, results = evaluate_model_on_numeric(
+            accuracy, results, accuracy_wb = evaluate_model_on_numeric(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1806,6 +1861,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
             "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
             "batch_index": state.batch_index,
             "accuracy": accuracy,
+            "accuracy_wb": accuracy_wb,  # Always None for numeric tasks
             "model_path": checkpoint_path,
             "model_type": state.hyperparameters["model_type"],
             "total_examples": len(test_data),

@@ -223,6 +223,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
     
     # Try to load evaluation results for test set accuracy
     evaluation_data = {}  # Maps file_path -> {batch_index: accuracy}
+    evaluation_data_wb = {}  # Maps file_path -> {batch_index: accuracy_wb} for word boundary
     for file_path in file_paths:
         first_dir = os.path.dirname(os.path.abspath(file_path))
         # Try different evaluation result file patterns
@@ -240,6 +241,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         
         if eval_file:
             batch_to_acc = {}
+            batch_to_acc_wb = {}
             try:
                 with open(eval_file, "r") as f:
                     for line in f:
@@ -247,15 +249,20 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                             entry = json.loads(line)
                             bi = entry.get("batch_index")
                             acc = entry.get("accuracy")
+                            acc_wb = entry.get("accuracy_wb")
                             if bi is not None and acc is not None:
                                 batch_to_acc[bi] = acc
+                            if bi is not None and acc_wb is not None:
+                                batch_to_acc_wb[bi] = acc_wb
                         except Exception:
                             continue
                 evaluation_data[file_path] = batch_to_acc
+                evaluation_data_wb[file_path] = batch_to_acc_wb
             except Exception:
                 pass
     
     has_evaluation_data = any(len(data) > 0 for data in evaluation_data.values())
+    has_evaluation_data_wb = any(len(data) > 0 for data in evaluation_data_wb.values())
     
     if output_file is None:
         # Default to saving alongside the first provided log file
@@ -302,6 +309,11 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         if has_evaluation_data:
             metrics_to_plot.append(
                 ("evaluation.accuracy", "Test Set Accuracy", "Training Batch No. []", "Accuracy")
+            )
+        # Add word boundary accuracy for MCQ tasks
+        if has_evaluation_data_wb:
+            metrics_to_plot.append(
+                ("evaluation.accuracy_wb", "Test Set Accuracy (Word Boundary)", "Training Batch No. []", "Accuracy")
             )
     else:
         # Start with basic metrics that are always present
@@ -359,6 +371,11 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             base_metrics.append(
                 ("evaluation.accuracy", "Test Set Accuracy", "Training Batch No. []", "Accuracy")
             )
+        # Add word boundary accuracy for MCQ tasks
+        if has_evaluation_data_wb:
+            base_metrics.append(
+                ("evaluation.accuracy_wb", "Test Set Accuracy (Word Boundary)", "Training Batch No. []", "Accuracy")
+            )
             
         metrics_to_plot = base_metrics
 
@@ -402,6 +419,43 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                             markersize=8,
                             linewidth=2,
                             label=host_name if len(file_paths) > 1 else "Test Accuracy"
+                        )
+            
+            # Set labels and formatting for evaluation accuracy plot
+            axs[metric_idx].set_xlabel(xlabel, fontsize=label_size)
+            axs[metric_idx].set_ylabel(ylabel, fontsize=label_size)
+            axs[metric_idx].tick_params(axis='both', which='major', labelsize=label_size)
+            axs[metric_idx].grid(True, linestyle='--', alpha=0.3, color='gray')
+            if show_legend and len(file_paths) > 1:
+                axs[metric_idx].legend(fontsize=label_size)
+            if show_title:
+                axs[metric_idx].set_title(title, fontsize=label_size)
+            continue  # Skip the regular metric processing
+        
+        # Special handling for evaluation accuracy with word boundary metric
+        if metric_path == "evaluation.accuracy_wb":
+            for file_path, host_name in zip(file_paths, host_names):
+                if file_path in evaluation_data_wb and evaluation_data_wb[file_path]:
+                    batch_indices = sorted(evaluation_data_wb[file_path].keys())
+                    accuracies = [evaluation_data_wb[file_path][bi] for bi in batch_indices]
+                    
+                    # Filter by max_index if specified
+                    if max_index is not None:
+                        filtered_data = [(bi, acc) for bi, acc in zip(batch_indices, accuracies) if bi <= max_index]
+                        if filtered_data:
+                            batch_indices, accuracies = zip(*filtered_data)
+                        else:
+                            batch_indices, accuracies = [], []
+                    
+                    if batch_indices and accuracies:
+                        # Plot as scatter points with lines connecting them
+                        axs[metric_idx].plot(
+                            batch_indices,
+                            accuracies,
+                            marker='s',  # Square markers to differentiate from regular accuracy
+                            markersize=8,
+                            linewidth=2,
+                            label=host_name if len(file_paths) > 1 else "Test Accuracy (WB)"
                         )
             
             # Set labels and formatting for evaluation accuracy plot
