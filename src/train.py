@@ -1375,46 +1375,61 @@ def log_batch_results(
         f.write("\n")
 
 
-def evaluate_model_on_mmlu(
+def evaluate_model_generic(
     actor_model,
     critic_model,
     tokenizer,
     device,
     test_data,
     hyperparameters,
+    answer_extractor_fn,
+    answer_comparator_fn=None,
     batch_size=16,
-    num_samples=500  # Use fewer samples for quicker evaluation
+    num_samples=None,
+    task_name="Task",
+    max_answer_tokens=10
 ):
-    """Evaluate model performance on MMLU dataset using critic model for answer generation.
+    """Generic evaluation function for all task types using critic model for answer generation.
     
     This follows the Markovian framework:
     1. Actor generates CoT at training temperature
     2. Critic generates answer deterministically (temp 0) after "Answer:"
-    3. Extract letter from generated answer
+    3. Extract and compare answers using task-specific functions
     
     Args:
         actor_model: The model to evaluate
         critic_model: The critic model (frozen)
         tokenizer: Tokenizer for the models
         device: Device to run on
-        test_data: List of MMLU question-answer pairs
+        test_data: List of (question, answer) tuples
         hyperparameters: Training hyperparameters
+        answer_extractor_fn: Function to extract predicted answer from generated text
+                             Signature: (generated_text: str) -> extracted_answer
+        answer_comparator_fn: Optional function to compare predicted vs gold answers
+                             Signature: (predicted, gold) -> bool
+                             If None, uses simple equality (predicted == gold)
         batch_size: Evaluation batch size
-        num_samples: Number of samples to evaluate (for quicker evaluation)
+        num_samples: Optional limit on number of samples to evaluate
+        task_name: Name for progress bar
+        max_answer_tokens: Maximum tokens to generate for answer
         
     Returns:
         tuple: (accuracy, detailed_results)
     """
-    # Limit number of samples for quicker evaluation
+    # Limit number of samples if specified
     if num_samples and num_samples < len(test_data):
         test_data = random.sample(test_data, num_samples)
+    
+    # Default comparator is simple equality
+    if answer_comparator_fn is None:
+        answer_comparator_fn = lambda pred, gold: pred == gold
     
     actor_model.eval()
     
     correct = 0
     results = []
     
-    for i in tqdm(range(0, len(test_data), batch_size), desc="Evaluating MMLU"):
+    for i in tqdm(range(0, len(test_data), batch_size), desc=f"Evaluating {task_name}"):
         batch = test_data[i:i+batch_size]
         questions, answers = zip(*batch)
         
@@ -1434,13 +1449,15 @@ def evaluate_model_on_mmlu(
         
         with torch.no_grad():
             reasoning_outputs = actor_model.generate(
-                **inputs,
-                max_new_tokens=hyperparameters.get("cot_length", 50),
-                min_new_tokens=hyperparameters.get("cot_length", 50),
+                input_ids=inputs.input_ids,
+                attention_mask=inputs.attention_mask,
+                max_new_tokens=hyperparameters.get("cot_length", 100),
+                min_new_tokens=hyperparameters.get("cot_length", 100),
                 do_sample=True,
                 temperature=hyperparameters.get("temperature", 1.0),
                 top_k=None,
-                top_p=None
+                top_p=None,
+                pad_token_id=tokenizer.pad_token_id,
             )
         
         cot_texts = tokenizer.batch_decode(
@@ -1465,14 +1482,14 @@ def evaluate_model_on_mmlu(
             return_tensors="pt",
             padding=True,
             truncation=True,
-            max_length=hyperparameters.get("question_length", 512) + hyperparameters.get("cot_length", 50)
+            max_length=hyperparameters.get("question_length", 512) + hyperparameters.get("cot_length", 100)
         ).to(device)
         
         with torch.no_grad():
             answer_outputs = critic_model.generate(
                 input_ids=answer_inputs.input_ids,
                 attention_mask=answer_inputs.attention_mask,
-                max_new_tokens=10,
+                max_new_tokens=max_answer_tokens,
                 do_sample=False,  # Deterministic
                 top_k=None,
                 top_p=None,
@@ -1484,30 +1501,52 @@ def evaluate_model_on_mmlu(
             skip_special_tokens=True
         )
         
-        # Extract letter from generated answer (should be like "A" or "The answer is B")
-        predicted_answers = []
-        for ans in generated_answers:
-            matches = re.findall(r"[A-E]", ans.upper())
-            predicted = matches[0] if matches else "X"
-            predicted_answers.append(predicted)
+        # Extract predicted answers using task-specific function
+        predicted_answers = [answer_extractor_fn(ans) for ans in generated_answers]
         
-        # Calculate accuracy
+        # Calculate accuracy using task-specific comparator
         for q, cot, gen_ans, pred, gold in zip(questions, cot_texts, generated_answers, predicted_answers, answers):
-            is_correct = pred == gold
+            is_correct = answer_comparator_fn(pred, gold)
             if is_correct:
                 correct += 1
                 
+            # Use both "is_correct" and "correct" for backwards compatibility
             results.append({
                 "question": q,
                 "reasoning": cot,
                 "generated_answer": gen_ans,
                 "predicted": pred,
                 "answer": gold,
-                "correct": is_correct
+                "gold": gold,  # Alias for backwards compatibility
+                "correct": is_correct,
+                "is_correct": is_correct,  # Alias for backwards compatibility
             })
     
-    accuracy = correct / len(test_data)
+    accuracy = correct / len(test_data) if len(test_data) > 0 else 0.0
     return accuracy, results
+
+
+def evaluate_model_on_mmlu(
+    actor_model,
+    critic_model,
+    tokenizer,
+    device,
+    test_data,
+    hyperparameters,
+    batch_size=16,
+    num_samples=500
+):
+    """Evaluate MMLU - extract letter A-E from generated answer."""
+    def extract_letter(text):
+        matches = re.findall(r"[A-E]", text.upper())
+        return matches[0] if matches else "X"
+    
+    return evaluate_model_generic(
+        actor_model, critic_model, tokenizer, device, test_data,
+        hyperparameters, extract_letter,
+        batch_size=batch_size, num_samples=num_samples,
+        task_name="MMLU", max_answer_tokens=10
+    )
 
 
 def _plot_combined_accuracy(results_jsonl_path: str, save_path: str):
@@ -1583,151 +1622,39 @@ def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, tot
 
 
 def evaluate_model_on_aqua(actor_model, critic_model, tokenizer, device, test_data, hyperparameters, batch_size=16):
-    """Evaluate multiple-choice AQuA using critic model for answer generation.
+    """Evaluate AQuA - extract letter A-E from generated answer."""
+    def extract_letter(text):
+        matches = re.findall(r"[A-E]", text.upper())
+        return matches[0] if matches else "X"
     
-    This follows the Markovian framework:
-    1. Actor generates CoT at training temperature
-    2. Critic generates answer deterministically (temp 0) after "Answer:"
-    3. Extract letter from generated answer
-    """
-    actor_model.eval()
-    correct = 0
-    results = []
-    for i in tqdm(range(0, len(test_data), batch_size), desc="Evaluating AQuA"):
-        batch = test_data[i:i+batch_size]
-        questions, answers = zip(*batch)
-        
-        # Stage 1: Generate CoT with actor model
-        reasoning_prompts = [
-            construct_prompts(question=q, hyperparameters=hyperparameters)
-            for q in questions
-        ]
-        inputs = tokenizer(reasoning_prompts, return_tensors="pt", padding=True, truncation=True,
-                           max_length=hyperparameters.get("question_length", 512)).to(device)
-        with torch.no_grad():
-            cot_outputs = actor_model.generate(
-                **inputs,
-                max_new_tokens=hyperparameters.get("cot_length", 100),
-                min_new_tokens=hyperparameters.get("cot_length", 100),
-                do_sample=True,
-                temperature=hyperparameters.get("temperature", 1.0),
-                top_k=None,
-                top_p=None,
-            )
-        cot_texts = tokenizer.batch_decode(cot_outputs[:, inputs.input_ids.shape[1]:], skip_special_tokens=True)
-        
-        # Stage 2: Generate answer with critic model (deterministic)
-        include_question_in_eval = not hyperparameters.get("markovian", True)
-        answer_prompts = [
-            construct_prompts(
-                question=q,
-                hyperparameters=hyperparameters,
-                reasoning=cot,
-                include_question=include_question_in_eval
-            )
-            for q, cot in zip(questions, cot_texts)
-        ]
-        answer_inputs = tokenizer(answer_prompts, return_tensors="pt", padding=True, truncation=True,
-                                   max_length=hyperparameters.get("question_length", 512) + hyperparameters.get("cot_length", 100)).to(device)
-        with torch.no_grad():
-            answer_outputs = critic_model.generate(
-                input_ids=answer_inputs.input_ids,
-                attention_mask=answer_inputs.attention_mask,
-                max_new_tokens=10,
-                do_sample=False,  # Deterministic
-                top_k=None,
-                top_p=None,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-        generated_answers = tokenizer.batch_decode(
-            answer_outputs[:, answer_inputs.input_ids.shape[1]:],
-            skip_special_tokens=True
-        )
-        
-        # Extract letter from generated answer
-        predicted_letters = []
-        for ans in generated_answers:
-            matches = re.findall(r"[A-E]", ans.upper())
-            predicted_letters.append(matches[0] if matches else "X")
-        
-        for q, cot, gen_ans, p, a in zip(questions, cot_texts, generated_answers, predicted_letters, answers):
-            ok = (p == a)
-            if ok:
-                correct += 1
-            results.append({
-                "question": q,
-                "reasoning": cot,
-                "generated_answer": gen_ans,
-                "predicted": p,
-                "answer": a,
-                "correct": ok
-            })
-    accuracy = correct / len(test_data) if len(test_data) > 0 else 0.0
-    return accuracy, results
+    return evaluate_model_generic(
+        actor_model, critic_model, tokenizer, device, test_data,
+        hyperparameters, extract_letter,
+        batch_size=batch_size,
+        task_name="AQuA", max_answer_tokens=10
+    )
 
 
 def evaluate_model_on_numeric(actor_model, critic_model, tokenizer, device, test_data, hyperparameters, batch_size=16):
-    """Evaluate numeric-answer tasks (e.g., SVAMP, MATH) using actor CoT then critic answer."""
+    """Evaluate numeric-answer tasks (e.g., SVAMP, MATH) - handles LaTeX formatting."""
     def normalize_numeric(text: str) -> str:
         s = text.strip()
         s = re.sub(r"\\boxed\{([^}]*)\}", r"\1", s)
         s = s.replace("$", "").replace("\\", "")
         s = re.sub(r"\s+", "", s)
         return s
-
-    actor_model.eval()
-    correct = 0
-    results = []
-    for i in tqdm(range(0, len(test_data), batch_size), desc="Evaluating Numeric"):
-        batch = test_data[i:i+batch_size]
-        questions, answers = zip(*batch)
-        prompts = [construct_prompts(question=q, hyperparameters=hyperparameters) for q in questions]
-        tokenized_inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
-        with torch.no_grad():
-            cot_outputs = actor_model.generate(
-                input_ids=tokenized_inputs.input_ids,
-                attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=hyperparameters.get("cot_length", 100),
-                min_new_tokens=hyperparameters.get("cot_length", 100),
-                do_sample=True,
-                temperature=hyperparameters.get("temperature", 1.0),
-                top_k=None,
-                top_p=None,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-        cot_texts = tokenizer.batch_decode(cot_outputs[:, tokenized_inputs.input_ids.shape[1]:], skip_special_tokens=True)
-        include_question_in_eval = not hyperparameters.get("markovian", True)
-        answer_prompts = [
-            construct_prompts(question=q, hyperparameters=hyperparameters, reasoning=r, include_question=include_question_in_eval)
-            for q, r in zip(questions, cot_texts)
-        ]
-        answer_inputs = tokenizer(answer_prompts, padding=True, return_tensors="pt").to(device)
-        with torch.no_grad():
-            gen = critic_model.generate(
-                input_ids=answer_inputs.input_ids,
-                attention_mask=answer_inputs.attention_mask,
-                max_new_tokens=16,
-                do_sample=False,
-                top_k=None,
-                top_p=None,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-        gen_texts = tokenizer.batch_decode(gen[:, answer_inputs.input_ids.shape[1]:], skip_special_tokens=True)
-        for q, a, r, g in zip(questions, answers, cot_texts, gen_texts):
-            pred_norm = normalize_numeric(g)
-            gold_norm = normalize_numeric(str(a))
-            ok = (pred_norm == gold_norm)
-            if ok:
-                correct += 1
-            results.append({
-                "question": q,
-                "reasoning": r,
-                "generated_answer": g,
-                "gold": a,
-                "is_correct": ok,
-            })
-    accuracy = correct / len(test_data) if len(test_data) > 0 else 0.0
-    return accuracy, results
+    
+    def compare_normalized(pred, gold):
+        return normalize_numeric(pred) == normalize_numeric(str(gold))
+    
+    return evaluate_model_generic(
+        actor_model, critic_model, tokenizer, device, test_data,
+        hyperparameters,
+        answer_extractor_fn=lambda x: x,  # Return raw text, comparison does normalization
+        answer_comparator_fn=compare_normalized,
+        batch_size=batch_size,
+        task_name="Numeric", max_answer_tokens=16
+    )
 
 
 def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
