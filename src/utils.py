@@ -1030,7 +1030,7 @@ def load_mathqa_dataset(chunk_size: int = 1000, split: str = "train"):
     ds = None
     for ds_id in candidate_ids:
         try:
-            ds = load_dataset(ds_id)
+            ds = load_dataset(ds_id, trust_remote_code=True)
             break
         except Exception:
             continue

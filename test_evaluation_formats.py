@@ -16,8 +16,8 @@ from utils import (
     load_mmlu_dataset,
     load_aqua_dataset,
     load_svamp_dataset,
-    load_math_dataset,
     load_arc_dataset,
+    load_mathqa_dataset,
     load_model,
 )
 from train import (
@@ -75,16 +75,6 @@ def test_dataset_evaluation(
         print(f"\nExample question: {q[:100]}...")
         print(f"Example answer: {a}")
         
-        # Load model (use base model for quick testing)
-        colored_print("Loading model", "Using base model for testing", Colors.YELLOW)
-        model_path = os.environ.get("MODEL_PATH", "meta-llama/Llama-3.2-1B")
-        
-        actor_model, critic_model, tokenizer, device = load_model(
-            checkpoint_path=None,
-            use_base_model=True,
-            model_type="llama"
-        )
-        
         # Create minimal hyperparameters
         hyperparameters = {
             "task_type": task_type,
@@ -94,6 +84,14 @@ def test_dataset_evaluation(
             "question_length": 512,
             "markovian": True,
         }
+        
+        # Load model (use base model for quick testing)
+        colored_print("Loading model", "Using Llama for testing", Colors.YELLOW)
+        
+        actor_model, critic_model, tokenizer, device = load_model(
+            model_type="llama",
+            hyperparameters=hyperparameters
+        )
         
         # Run evaluation
         colored_print("Running evaluation", "This may take a minute...", Colors.YELLOW)
@@ -119,9 +117,18 @@ def test_dataset_evaluation(
             status = "✓" if r["is_correct"] else "✗"
             print(f"\n  {status} Example {i+1}:")
             print(f"    Question: {r['question'][:80]}...")
-            print(f"    Generated: {r['generated_answer'][:80]}...")
-            print(f"    Predicted: {r['predicted']}")
-            print(f"    Gold: {r['gold']}")
+            
+            # Handle different key names for generated answer
+            gen_ans = r.get('generated_answer', r.get('reasoning', ''))
+            print(f"    Generated: {gen_ans[:80]}...")
+            
+            # Handle different key names for predicted/extracted answer
+            pred = r.get('predicted', r.get('extracted_answer', 'N/A'))
+            print(f"    Predicted: {pred}")
+            
+            # Handle different key names for gold answer
+            gold = r.get('gold', r.get('correct_answer', r.get('answer', 'N/A')))
+            print(f"    Gold: {gold}")
             print(f"    Correct: {r['is_correct']}")
         
         # Check for zero accuracy issue
@@ -197,12 +204,12 @@ def main():
         num_samples=10
     ))
     
-    # Test MATH
+    # Test MathQA
     results.append(test_dataset_evaluation(
-        task_type="math",
-        dataset_name="Hendrycks MATH",
-        load_fn=load_math_dataset,
-        eval_fn=evaluate_model_on_numeric,
+        task_type="mathqa",
+        dataset_name="MathQA",
+        load_fn=load_mathqa_dataset,
+        eval_fn=evaluate_model,  # Uses same as GSM8K (handles both numeric and MCQ)
         num_samples=10
     ))
     
