@@ -12,7 +12,13 @@ import glob
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Dict
-from utils import construct_prompts, construct_baseline_prompts, find_latest_result
+from utils import (
+    construct_prompts,
+    construct_baseline_prompts,
+    find_latest_result,
+    get_hyperparameters_from_log,
+    get_model_paths_and_type,
+)
 import copy
 
 def extract_answer(answer):
@@ -100,27 +106,6 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return actor_model, critic_model, tokenizer, device
-
-
-def get_hyperparameters_from_log(model_dir):
-    """Get hyperparameters from the first line of log.jsonl"""
-    log_path = os.path.join(model_dir, "log.jsonl")
-    try:
-        with open(log_path, 'r') as f:
-            hyperparameters = json.loads(f.readline().strip())
-        return hyperparameters
-    except Exception as e:
-        print(f"Warning: Could not read hyperparameters from log file ({e})")
-        # Fallback to default hyperparameters
-        return {
-            "model_type": "mistral",
-            "task_type": "gsm8k",
-            "cot_length": 100,
-            "target_length": 15,
-            "temperature": 1.0,
-            "r": 0.9,
-            "question_length": 200,
-        }
 
 
 def evaluate_model(
@@ -314,36 +299,6 @@ def find_all_checkpoints(model_dir):
     if not checkpoint_files:
         raise FileNotFoundError(f"No checkpoint files found in {model_dir}")
     return sorted(checkpoint_files, key=os.path.getctime)  # Sort by creation time
-
-
-def get_model_paths_and_type(provided_path=None, target_index=None, all_checkpoints=False):
-    """Get model path(s) and infer model type from log file."""
-    if provided_path:
-        model_dir = os.path.dirname(provided_path)
-    else:
-        # Use find_latest_result to get the most recent directory
-        model_dir = find_latest_result()
-        if not model_dir:
-            raise FileNotFoundError("No results directory found")
-    
-    # Get model paths
-    if all_checkpoints:
-        model_paths = find_all_checkpoints(model_dir)
-        print(f"Found {len(model_paths)} checkpoints")
-    else:
-        model_paths = [find_checkpoint_with_index(model_dir, target_index)]
-    
-    # Get model type from log.jsonl
-    log_path = os.path.join(model_dir, "log.jsonl")
-    try:
-        with open(log_path, 'r') as f:
-            hyperparameters = json.loads(f.readline().strip())
-            model_type = hyperparameters.get("model_type", "mistral")
-    except Exception as e:
-        print(f"Warning: Could not read model type from log file ({e}), defaulting to mistral")
-        model_type = "mistral"
-    
-    return model_paths, model_type
 
 
 def plot_evaluation_results(results: List[Dict], save_path: str):

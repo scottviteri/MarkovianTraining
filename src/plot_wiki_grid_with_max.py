@@ -11,24 +11,7 @@ from scipy.ndimage import gaussian_filter1d
 import argparse
 import os
 from pathlib import Path
-
-def moving_average(data, window_size):
-    """Calculate moving average, properly handling NaN values"""
-    if len(data) < window_size:
-        return data
-        
-    data_array = np.array(data, dtype=float)
-    result = np.zeros(len(data_array) - window_size + 1)
-    
-    for i in range(len(result)):
-        window = data_array[i:i+window_size]
-        valid_values = window[~np.isnan(window)]
-        if len(valid_values) > 0:
-            result[i] = np.mean(valid_values)
-        else:
-            result[i] = np.nan
-    
-    return result
+from utils import moving_average
 
 def load_log_data(log_file, window_size=100):
     """Load normalized reward data from log file and compute smoothed version"""

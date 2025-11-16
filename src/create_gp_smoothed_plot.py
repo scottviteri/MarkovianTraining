@@ -9,28 +9,7 @@ import glob
 import re
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
-
-def moving_average(data, window_size):
-    """Calculate moving average, properly handling NaN values"""
-    if len(data) < window_size:
-        return data
-        
-    # Convert the data to a numpy array to ensure correct handling of NaN values
-    data_array = np.array(data, dtype=float)
-    
-    # Use a technique that doesn't count NaN values in the average
-    result = np.zeros(len(data_array) - window_size + 1)
-    
-    for i in range(len(result)):
-        window = data_array[i:i+window_size]
-        # Count only non-NaN values
-        valid_values = window[~np.isnan(window)]
-        if len(valid_values) > 0:
-            result[i] = np.mean(valid_values)
-        else:
-            result[i] = np.nan
-    
-    return result
+from utils import moving_average
 
 def get_nested_value(entry, path):
     """Helper function to get nested dictionary values using dot notation"""

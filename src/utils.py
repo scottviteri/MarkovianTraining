@@ -718,6 +718,99 @@ def get_grad_norm(parameters):
     return total_norm
 
 
+def moving_average(data, window_size):
+    """Calculate moving average, properly handling NaN values"""
+    if len(data) < window_size:
+        return data
+        
+    # Convert the data to a numpy array to ensure correct handling of NaN values
+    data_array = np.array(data, dtype=float)
+    
+    # Use a technique that doesn't count NaN values in the average
+    result = np.zeros(len(data_array) - window_size + 1)
+    
+    for i in range(len(result)):
+        window = data_array[i:i+window_size]
+        # Count only non-NaN values
+        valid_values = window[~np.isnan(window)]
+        if len(valid_values) > 0:
+            result[i] = np.mean(valid_values)
+        else:
+            result[i] = np.nan
+    
+    return result
+
+
+def get_hyperparameters_from_log(model_dir, default_task=None):
+    """Get hyperparameters from the first line of log.jsonl
+    
+    Args:
+        model_dir: Directory containing log.jsonl
+        default_task: Default task type to use if log file is not found
+        
+    Returns:
+        Dictionary of hyperparameters
+    """
+    import json
+    log_path = os.path.join(model_dir, "log.jsonl")
+    try:
+        with open(log_path, 'r') as f:
+            hyperparameters = json.loads(f.readline().strip())
+        return hyperparameters
+    except Exception as e:
+        print(f"Warning: Could not read hyperparameters from log file ({e})")
+        # Fallback defaults
+        return {
+            "model_type": "mistral",
+            "task_type": default_task or "gsm8k",
+            "cot_length": 100,
+            "temperature": 1.0,
+            "batch_size": 12,
+        }
+
+
+def get_model_paths_and_type(provided_path=None, target_index=None, all_checkpoints=False):
+    """Get model path(s) and infer model type from log file.
+    
+    Args:
+        provided_path: Optional explicit path to model or directory
+        target_index: Optional specific checkpoint index to load
+        all_checkpoints: Whether to return all checkpoints in directory
+        
+    Returns:
+        Tuple of (list of model paths, model type string)
+    """
+    import json
+    from typing import List, Tuple
+    
+    if provided_path:
+        model_dir = os.path.dirname(provided_path) if os.path.isfile(provided_path) else provided_path
+    else:
+        # Use find_latest_result to get the most recent directory
+        model_dir = find_latest_result()
+        if not model_dir:
+            raise FileNotFoundError("No results directory found")
+    
+    # Get model paths
+    if all_checkpoints:
+        model_paths = find_all_checkpoints(model_dir)
+        print(f"Found {len(model_paths)} checkpoints")
+    else:
+        model_paths = [find_checkpoint_with_index(model_dir, target_index)]
+    
+    # Get model type from log.jsonl
+    log_path = os.path.join(model_dir, "log.jsonl")
+    try:
+        with open(log_path, 'r') as f:
+            hyperparameters = json.loads(f.readline().strip())
+            model_type = hyperparameters.get("model_type", "mistral")
+    except Exception as e:
+        print(f"Warning: Could not read model type from log file ({e}), defaulting to mistral")
+        model_type = "mistral"
+    
+    return model_paths, model_type
+
+
 def is_lora_param(param_name):
     """Check if a parameter name belongs to a LoRA adapter."""
     # Common patterns in LoRA parameter names

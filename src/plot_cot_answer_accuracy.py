@@ -3,6 +3,7 @@ import json
 import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.cm as cm  # For color maps
+from utils import moving_average
 
 # Increase font size for all text elements
 # plt.rcParams.update({"font.size": 12})
@@ -79,10 +80,6 @@ cols = {
 
 # Modify the subplot configuration to have two columns
 fig, axs = plt.subplots(1, 2, figsize=(12, 4), sharex=False)
-
-
-def moving_average(data, window_size):
-    return np.convolve(data, np.ones(window_size), "valid") / window_size
 
 
 def calculate_aggregate(*res_y_lists, x_min=None, use_max=False):

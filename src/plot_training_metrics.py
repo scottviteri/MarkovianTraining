@@ -8,6 +8,7 @@ import math
 from constants import EI_SKIP_INITIAL
 import sys
 import glob
+from utils import moving_average
 
 
 def get_latest_log_file():
@@ -88,29 +89,6 @@ def get_nested_value(entry, path, metrics_dict=None):
 def compute_loss_balance_score(pg_loss, reward_loss):
     """Compute a normalized loss balance score that avoids division by zero."""
     return (pg_loss - reward_loss) / np.maximum(np.abs(pg_loss) + np.abs(reward_loss), 1e-10)
-
-
-def moving_average(data, window_size):
-    """Calculate moving average, properly handling NaN values"""
-    if len(data) < window_size:
-        return data
-        
-    # Convert the data to a numpy array to ensure correct handling of NaN values
-    data_array = np.array(data, dtype=float)
-    
-    # Use a technique that doesn't count NaN values in the average
-    result = np.zeros(len(data_array) - window_size + 1)
-    
-    for i in range(len(result)):
-        window = data_array[i:i+window_size]
-        # Count only non-NaN values
-        valid_values = window[~np.isnan(window)]
-        if len(valid_values) > 0:
-            result[i] = np.mean(valid_values)
-        else:
-            result[i] = np.nan
-    
-    return result
 
 
 def add_hyperparameters_display(fig, hyperparameters):

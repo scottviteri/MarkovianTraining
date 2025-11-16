@@ -12,7 +12,13 @@ import glob
 import matplotlib.pyplot as plt
 import numpy as np
 from typing import List, Dict, Tuple
-from utils import construct_prompts, construct_baseline_prompts, find_latest_result
+from utils import (
+    construct_prompts,
+    construct_baseline_prompts,
+    find_latest_result,
+    get_hyperparameters_from_log,
+    get_model_paths_and_type,
+)
 import copy
 
 
@@ -100,60 +106,6 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return actor_model, critic_model, tokenizer, device
-
-
-def get_hyperparameters_from_log(model_dir):
-    """Get hyperparameters from the first line of log.jsonl"""
-    log_path = os.path.join(model_dir, "log.jsonl")
-    try:
-        with open(log_path, 'r') as f:
-            hyperparameters = json.loads(f.readline().strip())
-        return hyperparameters
-    except Exception as e:
-        print(f"Warning: Could not read hyperparameters from log file ({e})")
-        # Fallback defaults for MMLU
-        return {
-            "model_type": "mistral",
-            "task_type": "mmlu",
-            "cot_length": 100,
-            "temperature": 1.0,
-            "batch_size": 12,
-            "mmlu_split": "validation",
-            "mmlu_subject": None,
-        }
-
-
-def get_model_paths_and_type(provided_path=None, target_index=None, all_checkpoints=False) -> Tuple[List[str], str]:
-    """Get model path(s) and infer model type from log file, similar to GSM8K helper."""
-    if provided_path:
-        model_dir = os.path.dirname(provided_path)
-    else:
-        model_dir = find_latest_result()
-        if not model_dir:
-            raise FileNotFoundError("No results directory found")
-
-    # Collect model paths
-    if all_checkpoints:
-        checkpoint_files = glob.glob(os.path.join(model_dir, "model*.pt"))
-        if not checkpoint_files:
-            raise FileNotFoundError(f"No checkpoint files found in {model_dir}")
-        model_paths = sorted(checkpoint_files, key=os.path.getctime)
-    else:
-        # Find most recent checkpoint
-        checkpoint_files = glob.glob(os.path.join(model_dir, "model*.pt"))
-        model_paths = [max(checkpoint_files, key=os.path.getctime)] if checkpoint_files else [None]
-
-    # Read model type
-    log_path = os.path.join(model_dir, "log.jsonl")
-    try:
-        with open(log_path, 'r') as f:
-            hyperparameters = json.loads(f.readline().strip())
-            model_type = hyperparameters.get("model_type", "mistral")
-    except Exception as e:
-        print(f"Warning: Could not read model type from log file ({e}), defaulting to mistral")
-        model_type = "mistral"
-
-    return model_paths, model_type
 
 
 def evaluate_model(

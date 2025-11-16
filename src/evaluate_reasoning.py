@@ -21,6 +21,8 @@ from utils import (
     load_arc_dataset,
     load_mathqa_dataset,
     generate_question_answer_batches,
+    get_hyperparameters_from_log,
+    get_model_paths_and_type,
 )
 import copy
 
@@ -147,53 +149,6 @@ def load_model(model_path, use_base_model=False, model_type="mistral"):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     return actor_model, critic_model, tokenizer, device
-
-
-def get_hyperparameters_from_log(model_dir, default_task: str):
-    log_path = os.path.join(model_dir, "log.jsonl")
-    try:
-        with open(log_path, 'r') as f:
-            hyperparameters = json.loads(f.readline().strip())
-        return hyperparameters
-    except Exception as e:
-        print(f"Warning: Could not read hyperparameters from log file ({e})")
-        # Fallback defaults
-        return {
-            "model_type": "mistral",
-            "task_type": default_task,
-            "cot_length": 100,
-            "temperature": 1.0,
-            "batch_size": 12,
-        }
-
-
-def get_model_paths_and_type(provided_path=None, all_checkpoints=False) -> Tuple[List[str], str]:
-    if provided_path:
-        model_dir = os.path.dirname(provided_path)
-    else:
-        model_dir = find_latest_result()
-        if not model_dir:
-            raise FileNotFoundError("No results directory found")
-
-    if all_checkpoints:
-        checkpoint_files = glob.glob(os.path.join(model_dir, "model*.pt"))
-        if not checkpoint_files:
-            model_paths = [None]
-        else:
-            model_paths = sorted(checkpoint_files, key=os.path.getctime)
-    else:
-        checkpoint_files = glob.glob(os.path.join(model_dir, "model*.pt"))
-        model_paths = [max(checkpoint_files, key=os.path.getctime)] if checkpoint_files else [None]
-
-    try:
-        with open(os.path.join(model_dir, "log.jsonl"), 'r') as f:
-            hyperparameters = json.loads(f.readline().strip())
-            model_type = hyperparameters.get("model_type", "mistral")
-    except Exception as e:
-        print(f"Warning: Could not read model type from log file ({e}), defaulting to mistral")
-        model_type = "mistral"
-
-    return model_paths, model_type
 
 
 def get_run_dir_from_path(path_hint: str = None) -> str:
