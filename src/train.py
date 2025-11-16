@@ -1655,6 +1655,9 @@ def evaluate_model_on_numeric(
 
 def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
     """Run periodic evaluation on test set for supported tasks."""
+    # Clear CUDA cache before evaluation to ensure maximum memory available
+    torch.cuda.empty_cache()
+    
     # If GSM8K, evaluate the model
     if state.hyperparameters["task_type"] == "gsm8k":
         colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
@@ -1689,6 +1692,8 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         )
         
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        # Clear cache after evaluation
+        torch.cuda.empty_cache()
     
     # If MMLU, evaluate the model
     elif state.hyperparameters["task_type"] == "mmlu":
@@ -1728,6 +1733,8 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         )
         
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        # Clear cache after evaluation
+        torch.cuda.empty_cache()
 
     # If AQuA, evaluate using multiple choice
     elif state.hyperparameters["task_type"] == "aqua":
@@ -1761,6 +1768,8 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
             json.dump(entry, f)
             f.write("\n")
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        # Clear cache after evaluation
+        torch.cuda.empty_cache()
     
     # If SVAMP, evaluate numeric QA
     elif state.hyperparameters["task_type"] == "svamp":
@@ -1794,6 +1803,8 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
             json.dump(entry, f)
             f.write("\n")
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        # Clear cache after evaluation
+        torch.cuda.empty_cache()
     
     # If MATH, evaluate numeric QA
     elif state.hyperparameters["task_type"] == "math":
@@ -1827,6 +1838,8 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
             json.dump(entry, f)
             f.write("\n")
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        # Clear cache after evaluation
+        torch.cuda.empty_cache()
 
     # If MathQA, evaluate multiple choice using evaluate_reasoning-like flow
     elif state.hyperparameters["task_type"] == "mathqa":
@@ -1861,6 +1874,8 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
             json.dump(entry, f)
             f.write("\n")
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        # Clear cache after evaluation
+        torch.cuda.empty_cache()
     
     # If ARC, evaluate multiple choice using evaluate_reasoning-like flow
     elif state.hyperparameters["task_type"] == "arc":
@@ -1899,6 +1914,8 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
             json.dump(entry, f)
             f.write("\n")
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        # Clear cache after evaluation
+        torch.cuda.empty_cache()
 
 
 
@@ -2228,6 +2245,10 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             state.hyperparameters["batch_size"],
         )
         log_batch_results(state, batch_data, metrics)
+        
+        # Clear CUDA cache to prevent memory fragmentation
+        # This is especially important for tasks like MMLU where question lengths vary
+        torch.cuda.empty_cache()
 
         # Periodic plotting via subprocess (non-blocking)
         plot_every = state.hyperparameters.get("plot_every", 15)
