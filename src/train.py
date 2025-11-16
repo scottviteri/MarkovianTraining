@@ -14,6 +14,7 @@ import sys
 from typing import Union, List, Tuple, Optional, Dict, Any, Callable
 from dataclasses import dataclass, asdict
 from tqdm import tqdm
+import collections
 from evaluate_gsm8k import evaluate_model, save_results
 from peft import PeftModel
 from utils import (
@@ -322,6 +323,9 @@ class TrainingState:
     
     # Gradient accumulation tracking
     accumulation_step: int
+    
+    # OOM tracking - track last 10 batches for skip rate calculation
+    skip_history: collections.deque
 
     @classmethod
     def initialize(
@@ -366,6 +370,7 @@ class TrainingState:
             log_file=log_file,
             hyperparameters=updated_hyperparameters,  # Use the updated hyperparameters
             accumulation_step=0,
+            skip_history=collections.deque(maxlen=10),
         )
 
 
@@ -1168,8 +1173,16 @@ def log_batch_results(
     state: TrainingState,
     batch_data: BatchData,
     metrics: LogMetrics,
+    skip_fraction: float = 0.0,
 ):
-    """Log training results for current batch"""
+    """Log training results for current batch
+    
+    Args:
+        state: Current training state
+        batch_data: Data from the current batch
+        metrics: Metrics computed for this batch
+        skip_fraction: Fraction of batches skipped in last 10 batches due to OOM
+    """
     # Print debug information
     q = batch_data.questions[0]
     a = batch_data.answers[0]
@@ -1372,6 +1385,12 @@ def log_batch_results(
         log_entry["Training Metrics"]["Active Only Loss"] = safe_float(batch_data.metrics["active_only_loss"])
     if "active_only_pg_loss" in batch_data.metrics:
         log_entry["Training Metrics"]["Active Only PG Loss"] = safe_float(batch_data.metrics["active_only_pg_loss"])
+    
+    # Add skip metrics (OOM tracking)
+    log_entry["Skip Metrics"] = {
+        "Skip Fraction (Last 10 Batches)": float(skip_fraction),
+        "Current Batch Skipped": False,  # Always False for logged entries
+    }
 
     # Write to log file
     with open(state.log_file, "a") as f:
@@ -2230,24 +2249,59 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
 
         qa_batch = next(qa_generator)
 
-        batch_data = process_batch(state, qa_batch)
-        grad_norm = update_model(state, batch_data)
+        # Try to process the batch, catching OOM errors
+        try:
+            batch_data = process_batch(state, qa_batch)
+            grad_norm = update_model(state, batch_data)
 
-        # Update history and log
-        state.previous_normalized_rewards.extend(
-            batch_data.normalized_rewards.float().detach().cpu().numpy()
-        )
-        state.previous_advantages.extend(
-            batch_data.advantages.float().detach().cpu().numpy()
-        )
+            # Update history and log
+            state.previous_normalized_rewards.extend(
+                batch_data.normalized_rewards.float().detach().cpu().numpy()
+            )
+            state.previous_advantages.extend(
+                batch_data.advantages.float().detach().cpu().numpy()
+            )
 
-        metrics = LogMetrics.from_batch(
-            batch_data,
-            grad_norm,
-            state.previous_advantages,
-            state.hyperparameters["batch_size"],
-        )
-        log_batch_results(state, batch_data, metrics)
+            metrics = LogMetrics.from_batch(
+                batch_data,
+                grad_norm,
+                state.previous_advantages,
+                state.hyperparameters["batch_size"],
+            )
+            
+            # Calculate skip fraction from last 10 batches
+            skip_fraction = sum(state.skip_history) / len(state.skip_history) if len(state.skip_history) > 0 else 0.0
+            
+            log_batch_results(state, batch_data, metrics, skip_fraction)
+            
+            # Record successful batch (not skipped)
+            state.skip_history.append(False)
+            
+        except RuntimeError as e:
+            # Check if this is an OOM error
+            if "out of memory" in str(e).lower():
+                # Clear CUDA cache to recover memory
+                torch.cuda.empty_cache()
+                
+                # Record skipped batch
+                state.skip_history.append(True)
+                
+                # Calculate skip fraction
+                skip_fraction = sum(state.skip_history) / len(state.skip_history) if len(state.skip_history) > 0 else 0.0
+                
+                # Log warning with skip statistics
+                colored_print(
+                    "OOM Error:",
+                    f"Skipping batch {batch_index} due to out of memory error. "
+                    f"Skip rate: {skip_fraction:.1%} (last {len(state.skip_history)} batches)",
+                    Colors.RED
+                )
+                
+                # Continue to next batch without logging this one
+                continue
+            else:
+                # Re-raise if not OOM
+                raise
         
         # Clear CUDA cache to prevent memory fragmentation
         # This is especially important for tasks like MMLU where question lengths vary
