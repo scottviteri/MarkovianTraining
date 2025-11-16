@@ -1385,7 +1385,12 @@ def evaluate_model_on_mmlu(
     batch_size=16,
     num_samples=500  # Use fewer samples for quicker evaluation
 ):
-    """Evaluate model performance on MMLU dataset
+    """Evaluate model performance on MMLU dataset using critic model for answer generation.
+    
+    This follows the Markovian framework:
+    1. Actor generates CoT at training temperature
+    2. Critic generates answer deterministically (temp 0) after "Answer:"
+    3. Extract letter from generated answer
     
     Args:
         actor_model: The model to evaluate
@@ -1413,17 +1418,12 @@ def evaluate_model_on_mmlu(
         batch = test_data[i:i+batch_size]
         questions, answers = zip(*batch)
         
-        # Generate chain-of-thought reasoning
-        reasoning_prompts = []
-        for question in questions:
-            # Use the same prompt format as in training
-            prompt = (
-                f"{question}\n\n"
-                f"Let's think step by step to determine the correct answer."
-            )
-            reasoning_prompts.append(prompt)
+        # Stage 1: Generate CoT with actor model
+        reasoning_prompts = [
+            construct_prompts(question=q, hyperparameters=hyperparameters)
+            for q in questions
+        ]
         
-        # Generate reasoning with actor model
         inputs = tokenizer(
             reasoning_prompts, 
             return_tensors="pt", 
@@ -1432,51 +1432,77 @@ def evaluate_model_on_mmlu(
             max_length=hyperparameters.get("question_length", 512)
         ).to(device)
         
-        reasoning_outputs = actor_model.generate(
-            **inputs,
-            max_new_tokens=hyperparameters.get("cot_length", 50),
-            min_new_tokens=hyperparameters.get("cot_length", 50),
-            do_sample=True,
-            temperature=hyperparameters.get("temperature", 1.0),
-            top_k=None,
-            top_p=None
-        )
+        with torch.no_grad():
+            reasoning_outputs = actor_model.generate(
+                **inputs,
+                max_new_tokens=hyperparameters.get("cot_length", 50),
+                min_new_tokens=hyperparameters.get("cot_length", 50),
+                do_sample=True,
+                temperature=hyperparameters.get("temperature", 1.0),
+                top_k=None,
+                top_p=None
+            )
         
-        # Decode the reasoning
-        actor_reasoning = tokenizer.batch_decode(
+        cot_texts = tokenizer.batch_decode(
             reasoning_outputs[:, inputs.input_ids.shape[1]:], 
             skip_special_tokens=True
         )
         
-        # Extract predicted answers from reasoning
-        # For MMLU, we're looking for a letter A-E in the reasoning
+        # Stage 2: Generate answer with critic model (deterministic)
+        include_question_in_eval = not hyperparameters.get("markovian", True)
+        answer_prompts = [
+            construct_prompts(
+                question=q,
+                hyperparameters=hyperparameters,
+                reasoning=cot,
+                include_question=include_question_in_eval
+            )
+            for q, cot in zip(questions, cot_texts)
+        ]
+        
+        answer_inputs = tokenizer(
+            answer_prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=hyperparameters.get("question_length", 512) + hyperparameters.get("cot_length", 50)
+        ).to(device)
+        
+        with torch.no_grad():
+            answer_outputs = critic_model.generate(
+                input_ids=answer_inputs.input_ids,
+                attention_mask=answer_inputs.attention_mask,
+                max_new_tokens=10,
+                do_sample=False,  # Deterministic
+                top_k=None,
+                top_p=None,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+        
+        generated_answers = tokenizer.batch_decode(
+            answer_outputs[:, answer_inputs.input_ids.shape[1]:],
+            skip_special_tokens=True
+        )
+        
+        # Extract letter from generated answer (should be like "A" or "The answer is B")
         predicted_answers = []
-        for reasoning in actor_reasoning:
-            # Look for answer pattern like "The answer is A" or "Therefore, C is correct"
-            answer_matches = re.findall(r"(?:answer|correct|choice) is ([A-E])", reasoning, re.IGNORECASE)
-            answer_matches += re.findall(r"([A-E]) is (?:correct|the answer)", reasoning, re.IGNORECASE)
-            answer_matches += re.findall(r"(?:I choose|I select|select|choose) ([A-E])", reasoning, re.IGNORECASE)
-            answer_matches += re.findall(r"^([A-E])$", reasoning.strip(), re.MULTILINE)
-            
-            # If no clear pattern is found, check for the last occurrence of a letter
-            if not answer_matches:
-                # Look for standalone A, B, C, D, E as a last resort
-                answer_matches = re.findall(r"\b([A-E])\b", reasoning)
-            
-            predicted = answer_matches[-1] if answer_matches else "X"  # X indicates no answer found
+        for ans in generated_answers:
+            matches = re.findall(r"[A-E]", ans.upper())
+            predicted = matches[0] if matches else "X"
             predicted_answers.append(predicted)
         
         # Calculate accuracy
-        for q, r, p, a in zip(questions, actor_reasoning, predicted_answers, answers):
-            is_correct = p == a
+        for q, cot, gen_ans, pred, gold in zip(questions, cot_texts, generated_answers, predicted_answers, answers):
+            is_correct = pred == gold
             if is_correct:
                 correct += 1
                 
             results.append({
                 "question": q,
-                "reasoning": r,
-                "predicted": p,
-                "answer": a,
+                "reasoning": cot,
+                "generated_answer": gen_ans,
+                "predicted": pred,
+                "answer": gold,
                 "correct": is_correct
             })
     
@@ -1556,15 +1582,22 @@ def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, tot
     return results_file
 
 
-def evaluate_model_on_aqua(actor_model, tokenizer, device, test_data, hyperparameters, batch_size=16):
-    """Evaluate multiple-choice AQuA: infer letter A-E from actor reasoning."""
+def evaluate_model_on_aqua(actor_model, critic_model, tokenizer, device, test_data, hyperparameters, batch_size=16):
+    """Evaluate multiple-choice AQuA using critic model for answer generation.
+    
+    This follows the Markovian framework:
+    1. Actor generates CoT at training temperature
+    2. Critic generates answer deterministically (temp 0) after "Answer:"
+    3. Extract letter from generated answer
+    """
     actor_model.eval()
     correct = 0
     results = []
     for i in tqdm(range(0, len(test_data), batch_size), desc="Evaluating AQuA"):
         batch = test_data[i:i+batch_size]
         questions, answers = zip(*batch)
-        # Build reasoning prompts
+        
+        # Stage 1: Generate CoT with actor model
         reasoning_prompts = [
             construct_prompts(question=q, hyperparameters=hyperparameters)
             for q in questions
@@ -1572,7 +1605,7 @@ def evaluate_model_on_aqua(actor_model, tokenizer, device, test_data, hyperparam
         inputs = tokenizer(reasoning_prompts, return_tensors="pt", padding=True, truncation=True,
                            max_length=hyperparameters.get("question_length", 512)).to(device)
         with torch.no_grad():
-            outputs = actor_model.generate(
+            cot_outputs = actor_model.generate(
                 **inputs,
                 max_new_tokens=hyperparameters.get("cot_length", 100),
                 min_new_tokens=hyperparameters.get("cot_length", 100),
@@ -1581,16 +1614,54 @@ def evaluate_model_on_aqua(actor_model, tokenizer, device, test_data, hyperparam
                 top_k=None,
                 top_p=None,
             )
-        reasoning = tokenizer.batch_decode(outputs[:, inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        cot_texts = tokenizer.batch_decode(cot_outputs[:, inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        
+        # Stage 2: Generate answer with critic model (deterministic)
+        include_question_in_eval = not hyperparameters.get("markovian", True)
+        answer_prompts = [
+            construct_prompts(
+                question=q,
+                hyperparameters=hyperparameters,
+                reasoning=cot,
+                include_question=include_question_in_eval
+            )
+            for q, cot in zip(questions, cot_texts)
+        ]
+        answer_inputs = tokenizer(answer_prompts, return_tensors="pt", padding=True, truncation=True,
+                                   max_length=hyperparameters.get("question_length", 512) + hyperparameters.get("cot_length", 100)).to(device)
+        with torch.no_grad():
+            answer_outputs = critic_model.generate(
+                input_ids=answer_inputs.input_ids,
+                attention_mask=answer_inputs.attention_mask,
+                max_new_tokens=10,
+                do_sample=False,  # Deterministic
+                top_k=None,
+                top_p=None,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+        generated_answers = tokenizer.batch_decode(
+            answer_outputs[:, answer_inputs.input_ids.shape[1]:],
+            skip_special_tokens=True
+        )
+        
+        # Extract letter from generated answer
         predicted_letters = []
-        for r in reasoning:
-            matches = re.findall(r"[A-E]", r)
-            predicted_letters.append(matches[-1] if matches else "X")
-        for q, r, p, a in zip(questions, reasoning, predicted_letters, answers):
+        for ans in generated_answers:
+            matches = re.findall(r"[A-E]", ans.upper())
+            predicted_letters.append(matches[0] if matches else "X")
+        
+        for q, cot, gen_ans, p, a in zip(questions, cot_texts, generated_answers, predicted_letters, answers):
             ok = (p == a)
             if ok:
                 correct += 1
-            results.append({"question": q, "reasoning": r, "predicted": p, "answer": a, "correct": ok})
+            results.append({
+                "question": q,
+                "reasoning": cot,
+                "generated_answer": gen_ans,
+                "predicted": p,
+                "answer": a,
+                "correct": ok
+            })
     accuracy = correct / len(test_data) if len(test_data) > 0 else 0.0
     return accuracy, results
 
@@ -1743,6 +1814,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
             state.actor_model.eval()
             accuracy, results = evaluate_model_on_aqua(
                 state.actor_model,
+                state.critic_model,
                 state.tokenizer,
                 state.device,
                 test_data,
@@ -2238,6 +2310,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                     state.actor_model.eval()
                     accuracy, results = evaluate_model_on_aqua(
                         state.actor_model,
+                        state.critic_model,
                         state.tokenizer,
                         state.device,
                         test_data,
