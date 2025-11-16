@@ -11,7 +11,7 @@ import re
 import os
 import subprocess
 import sys
-from typing import Union, List, Tuple, Optional, Dict, Any
+from typing import Union, List, Tuple, Optional, Dict, Any, Callable
 from dataclasses import dataclass, asdict
 from tqdm import tqdm
 from evaluate_gsm8k import evaluate_model, save_results
@@ -1374,19 +1374,19 @@ def log_batch_results(
 
 
 def evaluate_model_generic(
-    actor_model,
-    critic_model,
-    tokenizer,
-    device,
-    test_data,
-    hyperparameters,
-    answer_extractor_fn,
-    answer_comparator_fn=None,
-    batch_size=16,
-    num_samples=None,
-    task_name="Task",
-    max_answer_tokens=10
-):
+    actor_model: nn.Module,
+    critic_model: nn.Module,
+    tokenizer: Any,
+    device: torch.device,
+    test_data: List[Tuple[str, str]],
+    hyperparameters: Dict[str, Any],
+    answer_extractor_fn: Callable[[str], Any],
+    answer_comparator_fn: Optional[Callable[[Any, str], bool]] = None,
+    batch_size: int = 16,
+    num_samples: Optional[int] = None,
+    task_name: str = "Task",
+    max_answer_tokens: int = 10
+) -> Tuple[float, List[Dict[str, Any]]]:
     """Generic evaluation function for all task types using critic model for answer generation.
     
     This follows the Markovian framework:
@@ -1399,12 +1399,12 @@ def evaluate_model_generic(
         critic_model: The critic model (frozen)
         tokenizer: Tokenizer for the models
         device: Device to run on
-        test_data: List of (question, answer) tuples
+        test_data: List of (question: str, gold_answer: str) tuples
         hyperparameters: Training hyperparameters
         answer_extractor_fn: Function to extract predicted answer from generated text
-                             Signature: (generated_text: str) -> extracted_answer
+                             Signature: (generated_text: str) -> extracted_answer: Any
         answer_comparator_fn: Optional function to compare predicted vs gold answers
-                             Signature: (predicted, gold) -> bool
+                             Signature: (extracted_pred: Any, gold_answer: str) -> bool
                              If None, uses simple equality (predicted == gold)
         batch_size: Evaluation batch size
         num_samples: Optional limit on number of samples to evaluate
@@ -1412,7 +1412,7 @@ def evaluate_model_generic(
         max_answer_tokens: Maximum tokens to generate for answer
         
     Returns:
-        tuple: (accuracy, detailed_results)
+        tuple: (accuracy: float, detailed_results: List[Dict])
     """
     # Limit number of samples if specified
     if num_samples and num_samples < len(test_data):
@@ -1500,6 +1500,8 @@ def evaluate_model_generic(
         )
         
         # Extract predicted answers using task-specific function
+        # Type: generated_answers is List[str] (raw text from model)
+        # Type: predicted_answers is List[Any] (extracted answers, e.g., int for SVAMP, str for MMLU)
         predicted_answers = [answer_extractor_fn(ans) for ans in generated_answers]
         
         # Calculate accuracy using task-specific comparator
@@ -1525,17 +1527,18 @@ def evaluate_model_generic(
 
 
 def evaluate_model_on_mmlu(
-    actor_model,
-    critic_model,
-    tokenizer,
-    device,
-    test_data,
-    hyperparameters,
-    batch_size=16,
-    num_samples=500
-):
+    actor_model: nn.Module,
+    critic_model: nn.Module,
+    tokenizer: Any,
+    device: torch.device,
+    test_data: List[Tuple[str, str]],
+    hyperparameters: Dict[str, Any],
+    batch_size: int = 16,
+    num_samples: int = 500
+) -> Tuple[float, List[Dict[str, Any]]]:
     """Evaluate MMLU - extract letter A-E from generated answer."""
-    def extract_letter(text):
+    def extract_letter(text: str) -> str:
+        """Extract first letter A-E from text. Returns 'X' if none found."""
         matches = re.findall(r"[A-E]", text.upper())
         return matches[0] if matches else "X"
     
@@ -1582,9 +1585,18 @@ def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, tot
     return results_file
 
 
-def evaluate_model_on_aqua(actor_model, critic_model, tokenizer, device, test_data, hyperparameters, batch_size=16):
+def evaluate_model_on_aqua(
+    actor_model: nn.Module,
+    critic_model: nn.Module,
+    tokenizer: Any,
+    device: torch.device,
+    test_data: List[Tuple[str, str]],
+    hyperparameters: Dict[str, Any],
+    batch_size: int = 16
+) -> Tuple[float, List[Dict[str, Any]]]:
     """Evaluate AQuA - extract letter A-E from generated answer."""
-    def extract_letter(text):
+    def extract_letter(text: str) -> str:
+        """Extract first letter A-E from text. Returns 'X' if none found."""
         matches = re.findall(r"[A-E]", text.upper())
         return matches[0] if matches else "X"
     
@@ -1596,23 +1608,43 @@ def evaluate_model_on_aqua(actor_model, critic_model, tokenizer, device, test_da
     )
 
 
-def evaluate_model_on_numeric(actor_model, critic_model, tokenizer, device, test_data, hyperparameters, batch_size=16):
-    """Evaluate numeric-answer tasks (e.g., SVAMP, MATH) - handles LaTeX formatting."""
+def evaluate_model_on_numeric(
+    actor_model: nn.Module,
+    critic_model: nn.Module,
+    tokenizer: Any,
+    device: torch.device,
+    test_data: List[Tuple[str, str]],
+    hyperparameters: Dict[str, Any],
+    batch_size: int = 16
+) -> Tuple[float, List[Dict[str, Any]]]:
+    """Evaluate numeric-answer tasks (e.g., SVAMP, MATH) - handles LaTeX formatting.
+    
+    Pipeline:
+    1. extract_answer: str -> Union[int, str]  (extracts first number or "[invalid]")
+    2. compare_normalized: Union[int, str], str -> bool  (normalizes and compares)
+    """
     def normalize_numeric(text: str) -> str:
+        """Normalize numeric text by removing LaTeX, whitespace, etc."""
         s = text.strip()
         s = re.sub(r"\\boxed\{([^}]*)\}", r"\1", s)
         s = s.replace("$", "").replace("\\", "")
         s = re.sub(r"\s+", "", s)
         return s
     
-    def compare_normalized(pred, gold):
-        return normalize_numeric(pred) == normalize_numeric(str(gold))
+    def compare_normalized(pred: Union[int, str], gold: str) -> bool:
+        """Compare extracted prediction with gold answer after normalization.
+        
+        Args:
+            pred: Extracted answer from extract_answer (int or "[invalid]")
+            gold: Gold answer string from dataset
+        """
+        return normalize_numeric(str(pred)) == normalize_numeric(str(gold))
     
     return evaluate_model_generic(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters,
-        answer_extractor_fn=lambda x: x,  # Return raw text, comparison does normalization
-        answer_comparator_fn=compare_normalized,
+        answer_extractor_fn=extract_answer,  # str -> Union[int, str]
+        answer_comparator_fn=compare_normalized,  # Union[int, str], str -> bool
         batch_size=batch_size,
         task_name="Numeric", max_answer_tokens=16
     )
