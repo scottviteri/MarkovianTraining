@@ -2327,7 +2327,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             with open(results_file, "a") as f:
                 json.dump(entry, f)
                 f.write("\n")
-             colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+            colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
     
     # Get dataset size for tracking full passes
     if task_type == "gsm8k":
