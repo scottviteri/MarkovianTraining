@@ -2122,180 +2122,180 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     if not resume and state.batch_index == 0:
         if task_type == "gsm8k":
             colored_print("Baseline Eval", "Running GSM8K evaluation at timestep 0", Colors.BOLD)
-                test_data = list(load_gsm8k_dataset(split="test"))
-                with torch.no_grad():
-                    state.actor_model.eval()
-                    accuracy, results = evaluate_model(
-                        state.actor_model,
-                        state.critic_model,
-                        state.tokenizer,
-                        state.device,
-                        test_data,
-                        state.hyperparameters,
-                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
-                    )
-                    state.actor_model.train()
-                save_results(
-                    state.model_save_path,
-                    None,
-                    state.hyperparameters["model_type"],
-                    accuracy,
-                    results,
-                    len(test_data),
-                    batch_index_override=0,
+            test_data = list(load_gsm8k_dataset(split="test"))
+            with torch.no_grad():
+                state.actor_model.eval()
+                accuracy, results = evaluate_model(
+                    state.actor_model,
+                    state.critic_model,
+                    state.tokenizer,
+                    state.device,
+                    test_data,
+                    state.hyperparameters,
+            batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
                 )
-                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
-            elif task_type == "mmlu":
-                colored_print("Baseline Eval", "Running MMLU evaluation at timestep 0", Colors.BOLD)
-                subject = state.hyperparameters.get("mmlu_subject", None)
-                test_data = list(load_mmlu_dataset(split="test", subject=subject))
-                with torch.no_grad():
-                    state.actor_model.eval()
-                    accuracy, results = evaluate_model_on_mmlu(
-                        state.actor_model,
-                        state.critic_model,
-                        state.tokenizer,
-                        state.device,
-                        test_data,
-                        state.hyperparameters,
-                        batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
-                    )
-                    state.actor_model.train()
-                save_results_mmlu(
-                    os.path.dirname(state.model_save_path),
-                    None,
-                    state.hyperparameters["model_type"],
-                    accuracy,
-                    results,
-                    len(test_data),
-                    subject=subject,
-                    batch_index_override=0,
+                state.actor_model.train()
+            save_results(
+                state.model_save_path,
+                None,
+                state.hyperparameters["model_type"],
+                accuracy,
+                results,
+                len(test_data),
+                batch_index_override=0,
+            )
+            colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        elif task_type == "mmlu":
+            colored_print("Baseline Eval", "Running MMLU evaluation at timestep 0", Colors.BOLD)
+            subject = state.hyperparameters.get("mmlu_subject", None)
+            test_data = list(load_mmlu_dataset(split="test", subject=subject))
+            with torch.no_grad():
+                state.actor_model.eval()
+                accuracy, results = evaluate_model_on_mmlu(
+                    state.actor_model,
+                    state.critic_model,
+                    state.tokenizer,
+                    state.device,
+                    test_data,
+                    state.hyperparameters,
+                    batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
                 )
-                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
-            elif task_type == "aqua":
-                colored_print("Baseline Eval", "Running AQuA evaluation at timestep 0", Colors.BOLD)
-                test_data = list(load_aqua_dataset(split="test"))
-                with torch.no_grad():
-                    state.actor_model.eval()
-                    accuracy, results = evaluate_model_on_aqua(
-                        state.actor_model,
-                        state.critic_model,
-                        state.tokenizer,
-                        state.device,
-                        test_data,
-                        state.hyperparameters,
-                        batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
-                    )
-                    state.actor_model.train()
-                # Save JSONL and combined plot
-                results_file = os.path.join(state.model_save_path, f"aqua_results_{state.hyperparameters['model_type']}.jsonl")
-                entry = {
-                    "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-                    "batch_index": 0,
-                    "accuracy": accuracy,
-                    "model_path": None,
-                    "model_type": state.hyperparameters["model_type"],
-                    "total_examples": len(test_data),
-                    "results": results,
-                }
-                os.makedirs(state.model_save_path, exist_ok=True)
-                with open(results_file, "a") as f:
-                    json.dump(entry, f)
-                    f.write("\n")
-                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
-            elif task_type == "svamp":
-                colored_print("Baseline Eval", "Running SVAMP evaluation at timestep 0", Colors.BOLD)
-                test_data = list(load_svamp_dataset(split="test"))
-                with torch.no_grad():
-                    state.actor_model.eval()
-                    accuracy, results = evaluate_model_on_numeric(
-                        state.actor_model,
-                        state.critic_model,
-                        state.tokenizer,
-                        state.device,
-                        test_data,
-                        state.hyperparameters,
-                        batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
-                    )
-                    state.actor_model.train()
-                results_file = os.path.join(state.model_save_path, f"svamp_results_{state.hyperparameters['model_type']}.jsonl")
-                entry = {
-                    "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-                    "batch_index": 0,
-                    "accuracy": accuracy,
-                    "model_path": None,
-                    "model_type": state.hyperparameters["model_type"],
-                    "total_examples": len(test_data),
-                    "results": results,
-                }
-                os.makedirs(state.model_save_path, exist_ok=True)
-                with open(results_file, "a") as f:
-                    json.dump(entry, f)
-                    f.write("\n")
-                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
-            elif task_type == "math":
-                colored_print("Baseline Eval", "Running MATH evaluation at timestep 0", Colors.BOLD)
-                test_data = list(load_math_dataset(split="test"))
-                with torch.no_grad():
-                    state.actor_model.eval()
-                    accuracy, results = evaluate_model_on_numeric(
-                        state.actor_model,
-                        state.critic_model,
-                        state.tokenizer,
-                        state.device,
-                        test_data,
-                        state.hyperparameters,
-                        batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
-                    )
-                    state.actor_model.train()
-                results_file = os.path.join(state.model_save_path, f"math_results_{state.hyperparameters['model_type']}.jsonl")
-                entry = {
-                    "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-                    "batch_index": 0,
-                    "accuracy": accuracy,
-                    "model_path": None,
-                    "model_type": state.hyperparameters["model_type"],
-                    "total_examples": len(test_data),
-                    "results": results,
-                }
-                os.makedirs(state.model_save_path, exist_ok=True)
-                with open(results_file, "a") as f:
-                    json.dump(entry, f)
-                    f.write("\n")
-                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
-            elif task_type == "arc":
-                colored_print("Baseline Eval", "Running ARC evaluation at timestep 0", Colors.BOLD)
-                # Get subset from hyperparameters or environment variable
-                subset = state.hyperparameters.get("arc_subset") or os.getenv("ARC_SUBSET", "ARC-Challenge")
-                test_data = list(load_arc_dataset(split="validation", subset=subset))
-                with torch.no_grad():
-                    state.actor_model.eval()
-                    accuracy, results = evaluate_model(
-                        state.actor_model,
-                        state.critic_model,
-                        state.tokenizer,
-                        state.device,
-                        test_data,
-                        state.hyperparameters,
-                        batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
-                    )
-                    state.actor_model.train()
-                results_file = os.path.join(state.model_save_path, f"arc_results_{state.hyperparameters['model_type']}.jsonl")
-                entry = {
-                    "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-                    "batch_index": 0,
-                    "accuracy": accuracy,
-                    "model_path": None,
-                    "model_type": state.hyperparameters["model_type"],
-                    "subset": subset,
-                    "total_examples": len(test_data),
-                    "results": results,
-                }
-                os.makedirs(state.model_save_path, exist_ok=True)
-                with open(results_file, "a") as f:
-                    json.dump(entry, f)
-                    f.write("\n")
-                 colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+                state.actor_model.train()
+            save_results_mmlu(
+                os.path.dirname(state.model_save_path),
+                None,
+                state.hyperparameters["model_type"],
+                accuracy,
+                results,
+                len(test_data),
+                subject=subject,
+                batch_index_override=0,
+            )
+            colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        elif task_type == "aqua":
+            colored_print("Baseline Eval", "Running AQuA evaluation at timestep 0", Colors.BOLD)
+            test_data = list(load_aqua_dataset(split="test"))
+            with torch.no_grad():
+                state.actor_model.eval()
+                accuracy, results = evaluate_model_on_aqua(
+                    state.actor_model,
+                    state.critic_model,
+                    state.tokenizer,
+                    state.device,
+                    test_data,
+                    state.hyperparameters,
+                    batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
+                )
+                state.actor_model.train()
+            # Save JSONL and combined plot
+            results_file = os.path.join(state.model_save_path, f"aqua_results_{state.hyperparameters['model_type']}.jsonl")
+            entry = {
+                "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+                "batch_index": 0,
+                "accuracy": accuracy,
+                "model_path": None,
+                "model_type": state.hyperparameters["model_type"],
+                "total_examples": len(test_data),
+                "results": results,
+            }
+            os.makedirs(state.model_save_path, exist_ok=True)
+            with open(results_file, "a") as f:
+                json.dump(entry, f)
+                f.write("\n")
+            colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        elif task_type == "svamp":
+            colored_print("Baseline Eval", "Running SVAMP evaluation at timestep 0", Colors.BOLD)
+            test_data = list(load_svamp_dataset(split="test"))
+            with torch.no_grad():
+                state.actor_model.eval()
+                accuracy, results = evaluate_model_on_numeric(
+                    state.actor_model,
+                    state.critic_model,
+                    state.tokenizer,
+                    state.device,
+                    test_data,
+                    state.hyperparameters,
+                    batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
+                )
+                state.actor_model.train()
+            results_file = os.path.join(state.model_save_path, f"svamp_results_{state.hyperparameters['model_type']}.jsonl")
+            entry = {
+                "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+                "batch_index": 0,
+                "accuracy": accuracy,
+                "model_path": None,
+                "model_type": state.hyperparameters["model_type"],
+                "total_examples": len(test_data),
+                "results": results,
+            }
+            os.makedirs(state.model_save_path, exist_ok=True)
+            with open(results_file, "a") as f:
+                json.dump(entry, f)
+                f.write("\n")
+            colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        elif task_type == "math":
+            colored_print("Baseline Eval", "Running MATH evaluation at timestep 0", Colors.BOLD)
+            test_data = list(load_math_dataset(split="test"))
+            with torch.no_grad():
+                state.actor_model.eval()
+                accuracy, results = evaluate_model_on_numeric(
+                    state.actor_model,
+                    state.critic_model,
+                    state.tokenizer,
+                    state.device,
+                    test_data,
+                    state.hyperparameters,
+                    batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
+                )
+                state.actor_model.train()
+            results_file = os.path.join(state.model_save_path, f"math_results_{state.hyperparameters['model_type']}.jsonl")
+            entry = {
+                "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+                "batch_index": 0,
+                "accuracy": accuracy,
+                "model_path": None,
+                "model_type": state.hyperparameters["model_type"],
+                "total_examples": len(test_data),
+                "results": results,
+            }
+            os.makedirs(state.model_save_path, exist_ok=True)
+            with open(results_file, "a") as f:
+                json.dump(entry, f)
+                f.write("\n")
+            colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        elif task_type == "arc":
+            colored_print("Baseline Eval", "Running ARC evaluation at timestep 0", Colors.BOLD)
+            # Get subset from hyperparameters or environment variable
+            subset = state.hyperparameters.get("arc_subset") or os.getenv("ARC_SUBSET", "ARC-Challenge")
+            test_data = list(load_arc_dataset(split="validation", subset=subset))
+            with torch.no_grad():
+                state.actor_model.eval()
+                accuracy, results = evaluate_model(
+                    state.actor_model,
+                    state.critic_model,
+                    state.tokenizer,
+                    state.device,
+                    test_data,
+                    state.hyperparameters,
+                    batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
+                )
+                state.actor_model.train()
+            results_file = os.path.join(state.model_save_path, f"arc_results_{state.hyperparameters['model_type']}.jsonl")
+            entry = {
+                "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
+                "batch_index": 0,
+                "accuracy": accuracy,
+                "model_path": None,
+                "model_type": state.hyperparameters["model_type"],
+                "subset": subset,
+                "total_examples": len(test_data),
+                "results": results,
+            }
+            os.makedirs(state.model_save_path, exist_ok=True)
+            with open(results_file, "a") as f:
+                json.dump(entry, f)
+                f.write("\n")
+             colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
     
     # Get dataset size for tracking full passes
     if task_type == "gsm8k":
