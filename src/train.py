@@ -2206,7 +2206,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     else:
         dataset_size = float('inf')  # For generated datasets
     # Use a uniform default checkpoint frequency for all tasks
-    default_checkpoint_frequency = 1000
+    default_checkpoint_frequency = 5000
     default_eval_frequency = 200  # Evaluate more often than checkpointing
     
     # Use configured frequency if provided, otherwise use default
@@ -2519,7 +2519,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint_frequency",
         type=int,
-        help="How often to save model checkpoints in batches (default: 1000)",
+        help="How often to save model checkpoints in batches (default: 5000)",
     )
     parser.add_argument(
         "--eval_frequency",
