@@ -2150,8 +2150,9 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     # Display parallel overview if parallel sampling is enabled
     print_parallel_overview(state.hyperparameters)
     
-    # Baseline evaluation at timestep 0 (before any training updates)
-    if not resume and state.batch_index == 0:
+    # Skip baseline evaluation at timestep 0 to avoid OOM issues when tuning batch size
+    # First evaluation will happen at batch 5 instead (see training loop below)
+    if False and not resume and state.batch_index == 0:
         if task_type == "gsm8k":
             colored_print("Baseline Eval", "Running GSM8K evaluation at timestep 0", Colors.BOLD)
             test_data = list(load_gsm8k_dataset(split="test"))
@@ -2415,7 +2416,9 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
             save_checkpoint(state)
         
         # Run evaluation periodically (independent of checkpointing)
-        if batch_index % eval_frequency == 0 and batch_index > 0:
+        # First evaluation at batch 5 to check memory usage, then every eval_frequency batches
+        should_evaluate = (batch_index == 5) or (batch_index % eval_frequency == 0 and batch_index > 0)
+        if should_evaluate:
             checkpoint_path = os.path.join(os.path.dirname(state.model_save_path), f"model_batch_{batch_index}.pt")
             run_periodic_evaluation(state, checkpoint_path)
 
