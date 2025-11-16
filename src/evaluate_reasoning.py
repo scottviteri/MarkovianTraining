@@ -452,9 +452,6 @@ def save_results(model_dir, checkpoint_path, model_type, task_type, accuracy, re
         json.dump(entry, f)
         f.write("\n")
 
-    combined_plot_path = os.path.join(model_dir, f"combined_metrics_{task_type}.png")
-    plot_accuracy_over_batches(results_file, combined_plot_path, task_type)
-    print(f"Updated combined {task_type} accuracy plot at {combined_plot_path}")
     return results_file
 
 

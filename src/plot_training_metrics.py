@@ -229,6 +229,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
         first_entry = json.loads(file_contents[1].strip())  # Read first log entry
     
     task_type = hyperparameters.get('task_type', 'unknown')
+    model_type = hyperparameters.get('model_type', 'llama')
     has_answer_logprobs = "Actor Answer Log Probs" in first_entry.get("Training Metrics", {})
     has_critic_probs = "Critic Answer Log Probs" in first_entry.get("Training Metrics", {})
     
@@ -241,6 +242,42 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
     
     # Initialize metrics_dict for deriving critic probs if needed
     metrics_dict = None if has_critic_probs else {"derive_critic": True}
+    
+    # Try to load evaluation results for test set accuracy
+    evaluation_data = {}  # Maps file_path -> {batch_index: accuracy}
+    for file_path in file_paths:
+        first_dir = os.path.dirname(os.path.abspath(file_path))
+        # Try different evaluation result file patterns
+        eval_patterns = [
+            os.path.join(first_dir, f"{task_type}_results_{model_type}.jsonl"),
+            os.path.join(first_dir, f"{task_type}_results{model_type}.jsonl"),
+            os.path.join(first_dir, f"{task_type}_results.jsonl"),
+        ]
+        
+        eval_file = None
+        for pattern in eval_patterns:
+            if os.path.exists(pattern):
+                eval_file = pattern
+                break
+        
+        if eval_file:
+            batch_to_acc = {}
+            try:
+                with open(eval_file, "r") as f:
+                    for line in f:
+                        try:
+                            entry = json.loads(line)
+                            bi = entry.get("batch_index")
+                            acc = entry.get("accuracy")
+                            if bi is not None and acc is not None:
+                                batch_to_acc[bi] = acc
+                        except Exception:
+                            continue
+                evaluation_data[file_path] = batch_to_acc
+            except Exception:
+                pass
+    
+    has_evaluation_data = any(len(data) > 0 for data in evaluation_data.values())
     
     if output_file is None:
         # Default to saving alongside the first provided log file
@@ -282,6 +319,12 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
             metrics_to_plot = [
                 ("Training Metrics.Normalized Reward", "Normalized Reward", "Training Batch No. []", "ln π(ans|cot) - ln π(ans|cot')")
             ]
+        
+        # Add test set accuracy to summary plots if evaluation data is available
+        if has_evaluation_data:
+            metrics_to_plot.append(
+                ("evaluation.accuracy", "Test Set Accuracy", "Training Batch No. []", "Accuracy")
+            )
     else:
         # Start with basic metrics that are always present
         base_metrics = [
@@ -327,6 +370,12 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 ("computed_loss_balance", "Loss Balance Score", "Training Batch No. []", "Normalized Difference"),
                 ("computed_sign_agreement", "Loss Sign Agreement", "Training Batch No. []", "Same Direction (0/1)")
             ])
+        
+        # Add test set accuracy if evaluation data is available
+        if has_evaluation_data:
+            base_metrics.append(
+                ("evaluation.accuracy", "Test Set Accuracy", "Training Batch No. []", "Accuracy")
+            )
             
         metrics_to_plot = base_metrics
 
@@ -346,6 +395,43 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
     for metric_idx, (metric_path, title, xlabel, ylabel, *extra) in enumerate(
         metrics_to_plot
     ):
+        # Special handling for evaluation accuracy metric
+        if metric_path == "evaluation.accuracy":
+            for file_path, host_name in zip(file_paths, host_names):
+                if file_path in evaluation_data and evaluation_data[file_path]:
+                    batch_indices = sorted(evaluation_data[file_path].keys())
+                    accuracies = [evaluation_data[file_path][bi] for bi in batch_indices]
+                    
+                    # Filter by max_index if specified
+                    if max_index is not None:
+                        filtered_data = [(bi, acc) for bi, acc in zip(batch_indices, accuracies) if bi <= max_index]
+                        if filtered_data:
+                            batch_indices, accuracies = zip(*filtered_data)
+                        else:
+                            batch_indices, accuracies = [], []
+                    
+                    if batch_indices and accuracies:
+                        # Plot as scatter points with lines connecting them
+                        axs[metric_idx].plot(
+                            batch_indices,
+                            accuracies,
+                            marker='o',
+                            markersize=8,
+                            linewidth=2,
+                            label=host_name if len(file_paths) > 1 else "Test Accuracy"
+                        )
+            
+            # Set labels and formatting for evaluation accuracy plot
+            axs[metric_idx].set_xlabel(xlabel, fontsize=label_size)
+            axs[metric_idx].set_ylabel(ylabel, fontsize=label_size)
+            axs[metric_idx].tick_params(axis='both', which='major', labelsize=label_size)
+            axs[metric_idx].grid(True, linestyle='--', alpha=0.3, color='gray')
+            if show_legend and len(file_paths) > 1:
+                axs[metric_idx].legend(fontsize=label_size)
+            if show_title:
+                axs[metric_idx].set_title(title, fontsize=label_size)
+            continue  # Skip the regular metric processing
+        
         all_data = []  # Store data from all files for averaging
         
         for file_path, host_name in zip(file_paths, host_names):

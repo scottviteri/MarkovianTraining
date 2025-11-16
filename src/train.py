@@ -52,16 +52,14 @@ def get_default_eval_batch_size(train_batch_size: int) -> int:
 
 def get_default_train_batch_size(task_type: str) -> int:
     """Default TRAINING batch size by task type in one place.
-    - wiki_compression/wiki_continuation, gsm8k: 16
+    - wiki_compression/wiki_continuation: 16
     - arithmetic/arithmetic-negative, mmlu, and others: 12
-    - mathqa: 8
+    - gsm8k, mathqa: 8
     """
-    if task_type in ("wiki_compression", "wiki_continuation", "gsm8k"):
+    if task_type in ("wiki_compression", "wiki_continuation"):
         return 16
-    if task_type == "mathqa":
+    if task_type in ("mathqa", "gsm8k"):
         return 8
-    if task_type in ("arithmetic", "arithmetic-negative", "mmlu"):
-        return 12
     return 12
 
 
@@ -1549,39 +1547,6 @@ def evaluate_model_on_mmlu(
     )
 
 
-def _plot_combined_accuracy(results_jsonl_path: str, save_path: str):
-    """Plot accuracy vs batch index from a task's JSONL results."""
-    if not os.path.exists(results_jsonl_path):
-        return
-    batch_to_acc = {}
-    with open(results_jsonl_path, "r") as f:
-        for line in f:
-            try:
-                entry = json.loads(line)
-            except Exception:
-                continue
-            bi = entry.get("batch_index")
-            acc = entry.get("accuracy")
-            if bi is None or acc is None:
-                continue
-            batch_to_acc[bi] = acc
-    if not batch_to_acc:
-        return
-    import matplotlib.pyplot as plt
-    import numpy as np
-    xs = sorted(batch_to_acc.keys())
-    ys = [batch_to_acc[x] for x in xs]
-    plt.figure(figsize=(10, 5))
-    plt.plot(xs, ys, marker='o', linestyle='-', color='tab:blue')
-    plt.title('Accuracy vs Training Batch')
-    plt.xlabel('Training Batch')
-    plt.ylabel('Accuracy')
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-
-
 def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, total, subject=None, batch_index_override=None):
     """Append MMLU evaluation results to a JSONL file (mirrors GSM8K pipeline)."""
     # Determine batch index from checkpoint filename if available
@@ -1614,10 +1579,6 @@ def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, tot
         json.dump(entry, f)
         f.write("\n")
 
-    # Update combined plot
-    combined_plot_path = os.path.join(output_dir, "combined_metrics_mmlu.png")
-    _plot_combined_accuracy(results_file, combined_plot_path)
-    print(f"Updated combined MMLU accuracy plot at {combined_plot_path}")
     return results_file
 
 
@@ -1764,7 +1725,6 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         with open(results_file, "a") as f:
             json.dump(entry, f)
             f.write("\n")
-        _plot_combined_accuracy(results_file, os.path.join(model_dir, "combined_metrics_aqua.png"))
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
     
     # If SVAMP, evaluate numeric QA
@@ -1798,7 +1758,6 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         with open(results_file, "a") as f:
             json.dump(entry, f)
             f.write("\n")
-        _plot_combined_accuracy(results_file, os.path.join(model_dir, "combined_metrics_svamp.png"))
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
     
     # If MATH, evaluate numeric QA
@@ -1835,7 +1794,6 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         with open(results_file, "a") as f:
             json.dump(entry, f)
             f.write("\n")
-        _plot_combined_accuracy(results_file, os.path.join(model_dir, "combined_metrics_math.png"))
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
 
     # If MathQA, evaluate multiple choice using evaluate_reasoning-like flow
@@ -1870,7 +1828,6 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         with open(results_file, "a") as f:
             json.dump(entry, f)
             f.write("\n")
-        _plot_combined_accuracy(results_file, os.path.join(model_dir, "combined_metrics_mathqa.png"))
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
     
     # If ARC, evaluate multiple choice using evaluate_reasoning-like flow
@@ -1909,7 +1866,6 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         with open(results_file, "a") as f:
             json.dump(entry, f)
             f.write("\n")
-        _plot_combined_accuracy(results_file, os.path.join(model_dir, "arc_accuracy_over_batches.png"))
         colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
 
 
@@ -2260,7 +2216,6 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 with open(results_file, "a") as f:
                     json.dump(entry, f)
                     f.write("\n")
-                _plot_combined_accuracy(results_file, os.path.join(state.model_save_path, "combined_metrics_aqua.png"))
                 colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
             elif task_type == "svamp":
                 colored_print("Baseline Eval", "Running SVAMP evaluation at timestep 0", Colors.BOLD)
@@ -2291,7 +2246,6 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 with open(results_file, "a") as f:
                     json.dump(entry, f)
                     f.write("\n")
-                _plot_combined_accuracy(results_file, os.path.join(state.model_save_path, "combined_metrics_svamp.png"))
                 colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
             elif task_type == "math":
                 colored_print("Baseline Eval", "Running MATH evaluation at timestep 0", Colors.BOLD)
@@ -2327,7 +2281,6 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 with open(results_file, "a") as f:
                     json.dump(entry, f)
                     f.write("\n")
-                _plot_combined_accuracy(results_file, os.path.join(state.model_save_path, "combined_metrics_math.png"))
                 colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
             elif task_type == "arc":
                 colored_print("Baseline Eval", "Running ARC evaluation at timestep 0", Colors.BOLD)
@@ -2361,8 +2314,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
                 with open(results_file, "a") as f:
                     json.dump(entry, f)
                     f.write("\n")
-                _plot_combined_accuracy(results_file, os.path.join(state.model_save_path, "arc_accuracy_over_batches.png"))
-                colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
+                 colored_print("Baseline Eval", f"Completed. Accuracy: {accuracy:.2%}", Colors.GREEN)
         except Exception as e:
             colored_print("Baseline Eval", f"Failed: {str(e)}", Colors.YELLOW)
     

@@ -342,9 +342,6 @@ def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_
         json.dump(entry, f)
         f.write("\n")
 
-    combined_plot_path = os.path.join(model_dir, "combined_metrics_mmlu.png")
-    plot_accuracy_over_batches(results_file, combined_plot_path)
-    print(f"Updated combined MMLU accuracy plot at {combined_plot_path}")
     return results_file
 
 
