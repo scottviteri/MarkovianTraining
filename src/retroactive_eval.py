@@ -29,7 +29,7 @@ from train import (
     evaluate_model_on_numeric,
     get_default_eval_batch_size,
 )
-from evaluate_gsm8k import evaluate_model
+from evaluation import evaluate_model_on_gsm8k
 from utils import (
     load_gsm8k_dataset,
     load_svamp_dataset,
@@ -309,7 +309,7 @@ def evaluate_checkpoint(
         
         if task_type == "gsm8k":
             # GSM8K uses its own evaluation function
-            accuracy, results = evaluate_model(
+            accuracy, results = evaluate_model_on_gsm8k(
                 actor_model,
                 critic_model,
                 tokenizer,
@@ -345,7 +345,7 @@ def evaluate_checkpoint(
                 batch_size=batch_size,
             )
         
-        elif task_type in ["svamp", "math", "mathqa"] or task_type.startswith("arithmetic"):
+        elif task_type in ["svamp", "math"] or task_type.startswith("arithmetic"):
             # Numeric tasks - returns 3-tuple with accuracy_wb=None
             return evaluate_model_on_numeric(
                 actor_model,
@@ -357,9 +357,10 @@ def evaluate_checkpoint(
                 batch_size=batch_size,
             )
         
-        elif task_type == "arc":
-            # ARC is MCQ - uses same evaluation as MMLU/AQuA
-            return evaluate_model_on_mmlu(  # ARC uses same MCQ evaluation
+        elif task_type in ["arc", "mathqa"]:
+            # ARC and MathQA are MCQ - use same evaluation as MMLU/AQuA
+            # FIX: MathQA was incorrectly classified as numeric
+            return evaluate_model_on_mmlu(
                 actor_model,
                 critic_model,
                 tokenizer,

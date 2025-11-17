@@ -15,7 +15,15 @@ from typing import Union, List, Tuple, Optional, Dict, Any, Callable
 from dataclasses import dataclass, asdict
 from tqdm import tqdm
 import collections
-from evaluate_gsm8k import evaluate_model, save_results
+from evaluation import (
+    evaluate_model_on_gsm8k,
+    evaluate_model_on_mmlu,
+    evaluate_model_on_aqua,
+    evaluate_model_on_numeric,
+    save_results,
+    save_results_mmlu,
+    get_default_eval_batch_size,
+)
 from peft import PeftModel
 from utils import (
     Colors,
@@ -1748,7 +1756,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         # Run evaluation in eval mode
         with torch.no_grad():
             state.actor_model.eval()
-            accuracy, results = evaluate_model(
+            accuracy, results = evaluate_model_on_gsm8k(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1932,14 +1940,14 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         # Clear cache after evaluation
         torch.cuda.empty_cache()
 
-    # If MathQA, evaluate multiple choice using evaluate_reasoning-like flow
+    # If MathQA, evaluate as MCQ (FIX: was incorrectly using numeric evaluation)
     elif state.hyperparameters["task_type"] == "mathqa":
         colored_print("Evaluation", "Running MathQA evaluation...", Colors.BOLD)
         test_data = list(load_mathqa_dataset(split="test"))
         with torch.no_grad():
             state.actor_model.eval()
-            # Reuse evaluate_reasoning-style function already imported as evaluate_model
-            accuracy, results = evaluate_model(
+            # FIX: MathQA is MCQ (A-E), not numeric! Use MCQ evaluation
+            accuracy, results, accuracy_wb = evaluate_model_on_mmlu(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1947,6 +1955,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
                 test_data,
                 state.hyperparameters,
                 batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
+                num_samples=len(test_data),  # Evaluate all
             )
             state.actor_model.train()
         model_dir = state.model_save_path
@@ -1955,6 +1964,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
             "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
             "batch_index": state.batch_index,
             "accuracy": accuracy,
+            "accuracy_wb": accuracy_wb,  # Add word boundary accuracy
             "model_path": checkpoint_path,
             "model_type": state.hyperparameters["model_type"],
             "total_examples": len(test_data),
@@ -1964,11 +1974,15 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         with open(results_file, "a") as f:
             json.dump(entry, f)
             f.write("\n")
-        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        # Log both metrics
+        log_msg = f"Completed successfully. Accuracy: {accuracy:.2%}"
+        if accuracy_wb is not None:
+            log_msg += f" | Accuracy (word boundary): {accuracy_wb:.2%}"
+        colored_print("Evaluation", log_msg, Colors.GREEN)
         # Clear cache after evaluation
         torch.cuda.empty_cache()
     
-    # If ARC, evaluate multiple choice using evaluate_reasoning-like flow
+    # If ARC, evaluate as MCQ (FIX: was incorrectly using numeric evaluation)
     elif state.hyperparameters["task_type"] == "arc":
         colored_print("Evaluation", "Running ARC evaluation...", Colors.BOLD)
         # Get subset from hyperparameters or environment variable
@@ -1977,8 +1991,8 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         test_data = list(load_arc_dataset(split="validation", subset=subset))
         with torch.no_grad():
             state.actor_model.eval()
-            # Reuse evaluate_reasoning-style function already imported as evaluate_model
-            accuracy, results = evaluate_model(
+            # FIX: ARC is MCQ (A-D), not numeric! Use MCQ evaluation
+            accuracy, results, accuracy_wb = evaluate_model_on_mmlu(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1986,6 +2000,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
                 test_data,
                 state.hyperparameters,
                 batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
+                num_samples=len(test_data),  # Evaluate all
             )
             state.actor_model.train()
         model_dir = state.model_save_path
@@ -1994,6 +2009,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
             "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
             "batch_index": state.batch_index,
             "accuracy": accuracy,
+            "accuracy_wb": accuracy_wb,  # Add word boundary accuracy
             "model_path": checkpoint_path,
             "model_type": state.hyperparameters["model_type"],
             "subset": subset,
@@ -2004,7 +2020,11 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         with open(results_file, "a") as f:
             json.dump(entry, f)
             f.write("\n")
-        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+        # Log both metrics
+        log_msg = f"Completed successfully. Accuracy: {accuracy:.2%}"
+        if accuracy_wb is not None:
+            log_msg += f" | Accuracy (word boundary): {accuracy_wb:.2%}"
+        colored_print("Evaluation", log_msg, Colors.GREEN)
         # Clear cache after evaluation
         torch.cuda.empty_cache()
 

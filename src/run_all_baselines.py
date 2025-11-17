@@ -15,7 +15,7 @@ from utils import (
 )
 
 # Reuse evaluators' evaluate_model functions to ensure identical prompting behavior
-from evaluate_gsm8k import evaluate_model as eval_gsm8k
+from evaluation import evaluate_model_on_gsm8k as eval_gsm8k
 from evaluate_mmlu import evaluate_model as eval_mmlu
 from evaluate_reasoning import evaluate_model as eval_reasoning
 
