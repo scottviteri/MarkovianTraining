@@ -1,8 +1,49 @@
 # Evaluation Refactor Summary
 
-## Completion Status: ✅ COMPLETE
+## Completion Status: ✅ COMPLETE (Updated)
 
-All steps from the refactor plan have been successfully implemented and committed to branch `refactor-unified-evaluation`.
+All steps from both refactor plans have been successfully implemented and committed to branch `refactor-unified-evaluation`.
+
+## Latest Updates (Commit a9b6f3c)
+
+### 🔧 Fixed MCQ Evaluation Issues
+
+**Problem:** MMLU/ARC use 4 choices (A-D) but MathQA/AQuA use 5 choices (A-E). The code was treating them all the same, leading to incorrect extraction patterns.
+
+**Solution:**
+1. **Created Generic MCQ Function**
+   - `evaluate_model_on_mcq()` - Handles any number of choices (4 or 5)
+   - Dynamic letter extraction based on `num_choices` parameter
+   - Proper word boundary handling for each choice range
+
+2. **Created Task-Specific Wrappers**
+   - `evaluate_model_on_mmlu()` - 4-choice MCQ (A-D)
+   - `evaluate_model_on_arc()` - 4-choice MCQ (A-D)
+   - `evaluate_model_on_aqua()` - 5-choice MCQ (A-E)
+   - `evaluate_model_on_mathqa()` - 5-choice MCQ (A-E)
+
+3. **Fixed answer_comparator_fn Inconsistency**
+   - Word boundary predictions now use `answer_comparator_fn` consistently
+   - Previously hardcoded to simple equality on line 232
+   - Now both regular and word boundary predictions use the same comparator
+
+4. **Updated All References**
+   - `train.py`: Uses `evaluate_model_on_arc` and `evaluate_model_on_mathqa`
+   - `retroactive_eval.py`: Separates ARC and MathQA with proper functions
+   - Better naming - no longer using "mmlu" for generic MCQ evaluation
+
+5. **Added Stride to verify_refactor.py**
+   - `--stride` argument for faster testing (default: 10)
+   - Example: `python verify_refactor.py --stride 50`
+   - Applies stride to all test datasets
+
+### Impact
+- MathQA now correctly extracts from A-E range instead of A-D
+- ARC explicitly uses A-D range
+- More accurate and maintainable MCQ evaluation
+- Faster verification testing
+
+---
 
 ## What Was Done
 
@@ -170,8 +211,11 @@ Created comprehensive unified evaluation module containing:
 ## Commit Information
 
 **Branch:** `refactor-unified-evaluation`
-**Commit:** c5edc29
-**Message:** "Refactor: Consolidate evaluation code and fix MathQA/ARC bugs"
+
+**Commits:**
+1. **c5edc29** - "Refactor: Consolidate evaluation code and fix MathQA/ARC bugs"
+2. **f37b047** - "Add comprehensive refactor summary documentation"
+3. **a9b6f3c** - "Fix MCQ evaluation: Proper 4-choice vs 5-choice handling"
 
 ## Summary
 
