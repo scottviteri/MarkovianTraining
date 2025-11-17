@@ -229,7 +229,7 @@ def evaluate_model_generic(
             
             # Word boundary correctness (if applicable)
             if pred_wb is not None:
-                is_correct_wb = (pred_wb == gold)  # Simple equality for word boundary
+                is_correct_wb = answer_comparator_fn(pred_wb, gold)  # Use same comparator
                 if is_correct_wb:
                     correct_wb += 1
             else:
@@ -258,6 +258,57 @@ def evaluate_model_generic(
 # Task-Specific Evaluation Functions
 # ============================================================================
 
+def evaluate_model_on_mcq(
+    actor_model: nn.Module,
+    critic_model: nn.Module,
+    tokenizer: Any,
+    device: torch.device,
+    test_data: List[Tuple[str, str]],
+    hyperparameters: Dict[str, Any],
+    batch_size: int = 16,
+    num_samples: Optional[int] = None,
+    num_choices: int = 4,
+    task_name: str = "MCQ"
+) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
+    """Generic MCQ evaluation for any number of choices.
+    
+    Args:
+        num_choices: 4 for A-D (MMLU, ARC), 5 for A-E (AQuA, MathQA)
+        task_name: Name for progress bar
+    
+    Returns both original and word-boundary-based accuracy for comparison.
+    """
+    choice_letter = chr(64 + num_choices)  # D for 4, E for 5
+    
+    def extract_letter(text: str) -> str:
+        """Extract first letter A-{choice_letter} from text. Returns 'X' if none found."""
+        pattern = f"[A-{choice_letter}]"
+        matches = re.findall(pattern, text.upper())
+        return matches[0] if matches else "X"
+    
+    def extract_letter_wb(text: str) -> str:
+        """Extract first letter with word boundaries."""
+        # Try uppercase A-{choice_letter} with word boundary
+        pattern = f"\\b([A-{choice_letter}])\\b"
+        match = re.search(pattern, text.upper())
+        if match:
+            return match.group(1)
+        # Try lowercase a-{choice_letter} with word boundary
+        pattern_lower = f"\\b([a-{choice_letter.lower()}])\\b"
+        match = re.search(pattern_lower, text)
+        if match:
+            return match.group(1).upper()
+        return "X"
+    
+    return evaluate_model_generic(
+        actor_model, critic_model, tokenizer, device, test_data,
+        hyperparameters, extract_letter,
+        answer_extractor_fn_wb=extract_letter_wb,
+        batch_size=batch_size, num_samples=num_samples,
+        task_name=task_name, max_answer_tokens=10
+    )
+
+
 def evaluate_model_on_mmlu(
     actor_model: nn.Module,
     critic_model: nn.Module,
@@ -268,21 +319,35 @@ def evaluate_model_on_mmlu(
     batch_size: int = 16,
     num_samples: int = 500
 ) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
-    """Evaluate MMLU - extract letter A-E from generated answer.
+    """Evaluate MMLU - 4-choice MCQ (A-D).
     
     Returns both original and word-boundary-based accuracy for comparison.
     """
-    def extract_letter(text: str) -> str:
-        """Extract first letter A-E from text. Returns 'X' if none found."""
-        matches = re.findall(r"[A-E]", text.upper())
-        return matches[0] if matches else "X"
-    
-    return evaluate_model_generic(
+    return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
-        hyperparameters, extract_letter,
-        answer_extractor_fn_wb=extract_letter_word_boundary,
-        batch_size=batch_size, num_samples=num_samples,
-        task_name="MMLU", max_answer_tokens=10
+        hyperparameters, batch_size=batch_size, num_samples=num_samples,
+        num_choices=4, task_name="MMLU"
+    )
+
+
+def evaluate_model_on_arc(
+    actor_model: nn.Module,
+    critic_model: nn.Module,
+    tokenizer: Any,
+    device: torch.device,
+    test_data: List[Tuple[str, str]],
+    hyperparameters: Dict[str, Any],
+    batch_size: int = 16,
+    num_samples: Optional[int] = None
+) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
+    """Evaluate ARC - 4-choice MCQ (A-D).
+    
+    Returns both original and word-boundary-based accuracy for comparison.
+    """
+    return evaluate_model_on_mcq(
+        actor_model, critic_model, tokenizer, device, test_data,
+        hyperparameters, batch_size=batch_size, num_samples=num_samples,
+        num_choices=4, task_name="ARC"
     )
 
 
@@ -293,23 +358,38 @@ def evaluate_model_on_aqua(
     device: torch.device,
     test_data: List[Tuple[str, str]],
     hyperparameters: Dict[str, Any],
-    batch_size: int = 16
+    batch_size: int = 16,
+    num_samples: Optional[int] = None
 ) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
-    """Evaluate AQuA - extract letter A-E from generated answer.
+    """Evaluate AQuA - 5-choice MCQ (A-E).
     
     Returns both original and word-boundary-based accuracy for comparison.
     """
-    def extract_letter(text: str) -> str:
-        """Extract first letter A-E from text. Returns 'X' if none found."""
-        matches = re.findall(r"[A-E]", text.upper())
-        return matches[0] if matches else "X"
-    
-    return evaluate_model_generic(
+    return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
-        hyperparameters, extract_letter,
-        answer_extractor_fn_wb=extract_letter_word_boundary,
-        batch_size=batch_size,
-        task_name="AQuA", max_answer_tokens=10
+        hyperparameters, batch_size=batch_size, num_samples=num_samples,
+        num_choices=5, task_name="AQuA"
+    )
+
+
+def evaluate_model_on_mathqa(
+    actor_model: nn.Module,
+    critic_model: nn.Module,
+    tokenizer: Any,
+    device: torch.device,
+    test_data: List[Tuple[str, str]],
+    hyperparameters: Dict[str, Any],
+    batch_size: int = 16,
+    num_samples: Optional[int] = None
+) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
+    """Evaluate MathQA - 5-choice MCQ (A-E).
+    
+    Returns both original and word-boundary-based accuracy for comparison.
+    """
+    return evaluate_model_on_mcq(
+        actor_model, critic_model, tokenizer, device, test_data,
+        hyperparameters, batch_size=batch_size, num_samples=num_samples,
+        num_choices=5, task_name="MathQA"
     )
 
 

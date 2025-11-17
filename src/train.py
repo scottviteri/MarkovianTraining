@@ -18,7 +18,9 @@ import collections
 from evaluation import (
     evaluate_model_on_gsm8k,
     evaluate_model_on_mmlu,
+    evaluate_model_on_arc,
     evaluate_model_on_aqua,
+    evaluate_model_on_mathqa,
     evaluate_model_on_numeric,
     save_results,
     save_results_mmlu,
@@ -1940,14 +1942,14 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         # Clear cache after evaluation
         torch.cuda.empty_cache()
 
-    # If MathQA, evaluate as MCQ (FIX: was incorrectly using numeric evaluation)
+    # If MathQA, evaluate as 5-choice MCQ
     elif state.hyperparameters["task_type"] == "mathqa":
         colored_print("Evaluation", "Running MathQA evaluation...", Colors.BOLD)
         test_data = list(load_mathqa_dataset(split="test"))
         with torch.no_grad():
             state.actor_model.eval()
-            # FIX: MathQA is MCQ (A-E), not numeric! Use MCQ evaluation
-            accuracy, results, accuracy_wb = evaluate_model_on_mmlu(
+            # MathQA is 5-choice MCQ (A-E)
+            accuracy, results, accuracy_wb = evaluate_model_on_mathqa(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1982,7 +1984,7 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         # Clear cache after evaluation
         torch.cuda.empty_cache()
     
-    # If ARC, evaluate as MCQ (FIX: was incorrectly using numeric evaluation)
+    # If ARC, evaluate as 4-choice MCQ
     elif state.hyperparameters["task_type"] == "arc":
         colored_print("Evaluation", "Running ARC evaluation...", Colors.BOLD)
         # Get subset from hyperparameters or environment variable
@@ -1991,8 +1993,8 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
         test_data = list(load_arc_dataset(split="validation", subset=subset))
         with torch.no_grad():
             state.actor_model.eval()
-            # FIX: ARC is MCQ (A-D), not numeric! Use MCQ evaluation
-            accuracy, results, accuracy_wb = evaluate_model_on_mmlu(
+            # ARC is 4-choice MCQ (A-D)
+            accuracy, results, accuracy_wb = evaluate_model_on_arc(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -2295,14 +2297,9 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
         dataset_size = len(load_dataset("openai/gsm8k", "main")["train"])
     else:
         dataset_size = float('inf')  # For generated datasets
-    # Use a uniform default checkpoint frequency for all tasks
-    default_checkpoint_frequency = 1000
-    default_eval_frequency = 1000  # Evaluate at same frequency as checkpointing
     
-    # Use configured frequency if provided, otherwise use default
-    checkpoint_frequency = hyperparameters.get("checkpoint_frequency") or default_checkpoint_frequency
-    # If eval_frequency not specified, use checkpoint_frequency (backwards compatible)
-    eval_frequency = hyperparameters.get("eval_frequency") or hyperparameters.get("checkpoint_frequency") or default_eval_frequency
+    checkpoint_frequency = hyperparameters["checkpoint_frequency"]
+    eval_frequency = hyperparameters["eval_frequency"]
     
     batches_per_epoch = dataset_size // hyperparameters["batch_size"]
     completed_epochs = 0
@@ -2613,12 +2610,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint_frequency",
         type=int,
-        help="How often to save model checkpoints in batches (default: 5000)",
+        default=1000,
+        help="How often to save model checkpoints in batches (default: 1000)",
     )
     parser.add_argument(
         "--eval_frequency",
         type=int,
-        help="How often to run evaluation on test set in batches (default: same as checkpoint_frequency)",
+        default=1000,
+        help="How often to run evaluation on test set in batches (default: 1000)",
     )
     # Add weight verification frequency parameter
     parser.add_argument(

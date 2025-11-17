@@ -23,13 +23,15 @@ import torch.nn as nn
 from tqdm import tqdm
 
 # Import from train.py and utils.py
-from train import (
+from evaluation import (
+    evaluate_model_on_gsm8k,
     evaluate_model_on_mmlu,
+    evaluate_model_on_arc,
     evaluate_model_on_aqua,
+    evaluate_model_on_mathqa,
     evaluate_model_on_numeric,
     get_default_eval_batch_size,
 )
-from evaluation import evaluate_model_on_gsm8k
 from utils import (
     load_gsm8k_dataset,
     load_svamp_dataset,
@@ -357,10 +359,22 @@ def evaluate_checkpoint(
                 batch_size=batch_size,
             )
         
-        elif task_type in ["arc", "mathqa"]:
-            # ARC and MathQA are MCQ - use same evaluation as MMLU/AQuA
-            # FIX: MathQA was incorrectly classified as numeric
-            return evaluate_model_on_mmlu(
+        elif task_type == "arc":
+            # ARC is 4-choice MCQ (A-D)
+            return evaluate_model_on_arc(
+                actor_model,
+                critic_model,
+                tokenizer,
+                device,
+                test_data,
+                hyperparameters,
+                batch_size=batch_size,
+                num_samples=len(test_data),
+            )
+        
+        elif task_type == "mathqa":
+            # MathQA is 5-choice MCQ (A-E)
+            return evaluate_model_on_mathqa(
                 actor_model,
                 critic_model,
                 tokenizer,

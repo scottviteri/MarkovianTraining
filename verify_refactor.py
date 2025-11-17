@@ -97,6 +97,7 @@ def verify_checkpoint(
     hyperparameters: Dict,
     device: torch.device,
     batch_index: int,
+    stride: int = 10,
 ) -> Dict:
     """Verify one checkpoint's evaluation."""
     colored_print("Verify", f"Evaluating {checkpoint_dir}", Colors.CYAN)
@@ -109,28 +110,29 @@ def verify_checkpoint(
     # Load test data
     if task_type == "mmlu":
         test_data = list(load_mmlu_dataset(split="test", subject=None))
-        # Use stride for faster verification
-        test_data = test_data[::10]
+        # Apply stride for faster verification
+        test_data = test_data[::stride]
         accuracy, results, accuracy_wb = evaluate_model_on_mmlu(
             actor_model, critic_model, tokenizer, device, test_data,
             hyperparameters, batch_size=16, num_samples=len(test_data)
         )
     elif task_type == "aqua":
         test_data = list(load_aqua_dataset(split="test"))
-        test_data = test_data[::10]
+        test_data = test_data[::stride]
         accuracy, results, accuracy_wb = evaluate_model_on_aqua(
             actor_model, critic_model, tokenizer, device, test_data,
             hyperparameters, batch_size=16
         )
     elif task_type == "svamp":
         test_data = list(load_svamp_dataset(split="test"))
+        test_data = test_data[::stride]
         accuracy, results, accuracy_wb = evaluate_model_on_numeric(
             actor_model, critic_model, tokenizer, device, test_data,
             hyperparameters, batch_size=16
         )
     elif task_type == "gsm8k":
         test_data = list(load_gsm8k_dataset(split="test"))
-        test_data = test_data[::10]
+        test_data = test_data[::stride]
         accuracy, results = evaluate_model_on_gsm8k(
             actor_model, critic_model, tokenizer, device, test_data,
             hyperparameters, batch_size=16, num_samples=len(test_data)
@@ -155,6 +157,13 @@ def verify_checkpoint(
 
 def main():
     """Main verification routine."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Verify evaluation refactor doesn't change scores")
+    parser.add_argument("--stride", type=int, default=10, 
+                        help="Evaluate every Nth example for faster testing (default: 10)")
+    args = parser.parse_args()
+    
     # Test checkpoints to verify
     test_configs = [
         {
@@ -215,6 +224,7 @@ def main():
             hyperparameters,
             device,
             config["batch_index"],
+            stride=args.stride,
         )
         
         if result is None:
