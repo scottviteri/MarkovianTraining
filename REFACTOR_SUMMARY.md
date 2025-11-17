@@ -29,7 +29,7 @@ All steps from both refactor plans have been successfully implemented and commit
 
 4. **Updated All References**
    - `train.py`: Uses `evaluate_model_on_arc` and `evaluate_model_on_mathqa`
-   - `retroactive_eval.py`: Separates ARC and MathQA with proper functions
+   - Removed `retroactive_eval.py` (functionality superseded by unified evaluator CLI)
    - Better naming - no longer using "mmlu" for generic MCQ evaluation
 
 5. **Added Stride to verify_refactor.py**
@@ -42,6 +42,12 @@ All steps from both refactor plans have been successfully implemented and commit
 - ARC explicitly uses A-D range
 - More accurate and maintainable MCQ evaluation
 - Faster verification testing
+
+### 🧪 Test Suite Refresh (November 2025)
+- Replaced the legacy `tests/test_policy_gradient.py` with a structured suite under `tests/unit/` and `tests/integration/`
+- Added GPT-2 backed integration tests that exercise a full training step (`tests/integration/test_training_step.py`) and the numeric evaluation pipeline (`tests/integration/test_evaluation_flow.py`)
+- Added shared GPT-2 fixtures (`tests/conftest.py`) plus `pytest.ini` to register the `slow` marker
+- Documented the new workflow in the README testing section and moved the manual `test_evaluation_formats.py` script to `scripts/manual/evaluation_formats_cli.py`
 
 ---
 
@@ -73,8 +79,7 @@ Created comprehensive unified evaluation module containing:
 - `get_default_eval_batch_size()` - Batch size calculation
 
 **Save Functions:**
-- `save_results()` - GSM8K results saving and plotting
-- `save_results_mmlu()` - MMLU results saving
+- `save_task_results()` - unified results saving (GSM8K plotting + generic JSON)
 - `plot_accuracy_over_batches()` - Accuracy visualization
 
 ### ✅ Step 4: Update run_periodic_evaluation
@@ -85,10 +90,8 @@ Created comprehensive unified evaluation module containing:
 - Removed duplicate function definitions (now in evaluation.py)
 
 ### ✅ Step 5: Update Other Imports
-- `retroactive_eval.py`: Changed to import from `evaluation` module
-  - Fixed MathQA classification (was incorrectly grouped with numeric tasks)
-  - Now correctly groups MathQA with ARC as MCQ tasks
-- `run_all_baselines.py`: Updated to import from `evaluation` module
+- Removed the legacy `retroactive_eval.py` (functionality replaced by unified evaluator CLI)
+- Removed the legacy `run_all_baselines.py` workflow in favor of the unified evaluator
 
 ### ⚠️ Step 6: Delete evaluate_gsm8k.py
 - **NOT DELETED** - Kept as standalone CLI tool
@@ -133,8 +136,8 @@ Created comprehensive unified evaluation module containing:
 |------|--------|---------|
 | `src/evaluation.py` | ✅ NEW | Unified evaluation module (694 lines) |
 | `src/train.py` | ✅ MODIFIED | Updated imports, fixed MathQA/ARC, removed duplicate functions |
-| `src/retroactive_eval.py` | ✅ MODIFIED | Updated imports, fixed MathQA classification |
-| `src/run_all_baselines.py` | ✅ MODIFIED | Updated imports |
+| `src/retroactive_eval.py` | ❌ REMOVED | Functionality covered by unified evaluator |
+| `src/run_all_baselines.py` | ❌ REMOVED | Legacy baseline CLI replaced by unified evaluator |
 | `MMLU_EVAL_MYSTERY.md` | ✅ NEW | Documents evaluation discrepancy |
 | `verify_refactor.py` | ✅ NEW | Verification testing script |
 | `src/evaluate_gsm8k.py` | ⚠️ KEPT | Still used by analyze_base_logprobs.py |

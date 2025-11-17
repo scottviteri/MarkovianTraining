@@ -72,19 +72,6 @@ def find_latest_result():
 
     return None
 
-def find_latest_checkpoint(checkpoint_dir):
-    """Find most recent checkpoint file in a directory."""
-    checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "model_batch_*.pt"))
-    if not checkpoint_files:
-        # Fall back to the old format
-        if os.path.exists(os.path.join(checkpoint_dir, "model.pt")):
-            return os.path.join(checkpoint_dir, "model.pt")
-        return None
-    
-    # Sort by batch number (extract from filename)
-    return max(checkpoint_files, key=lambda f: int(re.search(r'model_batch_(\d+)\.pt', f).group(1)))
-
-
 def print_debug_info(
     task_type,
     q,
@@ -270,118 +257,6 @@ def construct_prompts(
             # Add answer header to partial prompt
             return base_with_type + reasoning + f" Answer: "
 
-def construct_baseline_prompts(
-    question: str,
-    hyperparameters: Dict[str, Any],
-    reasoning: Optional[str] = None,
-    max_thinking_tokens: Optional[int] = None,
-) -> str:
-    """
-    Construct a simpler, standard prompt for baseline evaluations.
-
-    This avoids the specialized CoT phrasing used in training prompts and
-    instead uses a plain instruction to think briefly before answering.
-
-    Args:
-        question: Input question/text
-        hyperparameters: Config with at least 'model_type' and 'task_type'
-        reasoning: Optional reasoning to include when constructing the answer prompt
-        max_thinking_tokens: Optional cap mentioned in the instruction text (display only)
-
-    Returns:
-        str: Formatted baseline prompt compatible with the model's chat format
-    """
-    model_type = hyperparameters["model_type"]
-    task_type = hyperparameters["task_type"]
-
-    tokens = get_model_specific_tokens(model_type)
-    format_type = tokens["format_type"]
-
-    # Create a concise baseline instruction per task
-    thinking_hint = (
-        f"Think step by step in up to {max_thinking_tokens} tokens, then provide the final answer."
-        if max_thinking_tokens is not None
-        else "Think step by step briefly, then provide the final answer."
-    )
-
-    if task_type in ["arithmetic", "arithmetic-negative", "gsm8k", "svamp"]:
-        user_text = (
-            "Solve the following problem. " + thinking_hint + "\n\nProblem: " + question
-        )
-        answer_prefix = "Answer: "
-    elif task_type in ["mmlu", "aqua", "arc", "mathqa"]:
-        user_text = (
-            "Answer the multiple choice question. "
-            + thinking_hint
-            + " Respond with a single letter (A, B, C, or D).\n\nQuestion: "
-            + question
-        )
-        answer_prefix = "Answer: "
-    elif task_type == "wiki_compression":
-        user_text = (
-            "Summarize the following text as a brief compressed representation. "
-            + thinking_hint
-            + "\n\nText: "
-            + question
-        )
-        answer_prefix = "Compression: "
-    elif task_type == "wiki_continuation":
-        user_text = (
-            "Continue the text coherently. "
-            + thinking_hint
-            + "\n\nText: "
-            + question
-        )
-        answer_prefix = "Continuation: "
-    else:
-        user_text = "Answer the question. " + thinking_hint + "\n\nQuestion: " + question
-        answer_prefix = "Answer: "
-
-    # Build prompts per chat format
-    if format_type == "phi-4":
-        if reasoning is None:
-            return (
-                f"{tokens['im_start']}user{tokens['im_sep']}\n{user_text}{tokens['im_end']}\n"
-                f"{tokens['im_start']}assistant{tokens['im_sep']}\n"
-            )
-        else:
-            return (
-                f"{tokens['im_start']}user{tokens['im_sep']}\n{user_text}{tokens['im_end']}\n"
-                f"{tokens['im_start']}assistant{tokens['im_sep']}\n{reasoning} {answer_prefix}"
-            )
-    elif format_type == "qwen3":
-        if reasoning is None:
-            return (
-                f"{tokens['im_start']}user\n{user_text}{tokens['im_end']}\n"
-                f"{tokens['im_start']}assistant\n"
-            )
-        else:
-            return (
-                f"{tokens['im_start']}user\n{user_text}{tokens['im_end']}\n"
-                f"{tokens['im_start']}assistant\n{reasoning} {answer_prefix}"
-            )
-    elif format_type == "gemma-3":
-        if reasoning is None:
-            return (
-                f"{tokens['bos']}{tokens['start_of_turn']}user\n{user_text}{tokens['end_of_turn']}\n"
-                f"{tokens['start_of_turn']}model\n"
-            )
-        else:
-            return (
-                f"{tokens['bos']}{tokens['start_of_turn']}user\n{user_text}{tokens['end_of_turn']}\n"
-                f"{tokens['start_of_turn']}model\n{reasoning} {answer_prefix}"
-            )
-    elif format_type == "mistral":
-        if reasoning is None:
-            return f"{tokens['inst_start']} {user_text} {tokens['inst_end']}\n"
-        else:
-            return f"{tokens['inst_start']} {user_text} {tokens['inst_end']}\n{reasoning} {answer_prefix}"
-    else:  # standard
-        if reasoning is None:
-            return f"{user_text}\n"
-        else:
-            return f"{user_text}\n{reasoning} {answer_prefix}"
-
 def load_model(model_type, hyperparameters=None):
     """Load either Mistral, Llama, GPT2, TinyStories, Phi, Phi-4, Qwen3, or Gemma 3 model based on parameter."""
     if model_type == "mistral":
@@ -555,29 +430,14 @@ def load_model_for_evaluation(model_path=None, use_base_model=False, model_type=
         # Base model evaluation - use same model for both actor and critic
         actor_model = critic_model = base_model
     else:
-        # Load checkpoint - support both adapter directories and legacy files
-        if os.path.isdir(model_path):
-            # Adapter directory (modern format saved via save_pretrained)
-            actor_model = PeftModel.from_pretrained(
-                base_model,
-                model_path,
-                is_trainable=False,
-            )
-            critic_model = copy.deepcopy(actor_model)
-        else:
-            # Legacy checkpoint file (contains model_state_dict)
-            peft_config = LoraConfig(
-                task_type="CAUSAL_LM",
-                inference_mode=True,
-                r=8,
-                lora_alpha=16,
-                lora_dropout=0.1,
-                target_modules="all-linear",
-            )
-            actor_model = get_peft_model(base_model, peft_config)
-            checkpoint = torch.load(model_path)
-            actor_model.load_state_dict(checkpoint["model_state_dict"])
-            critic_model = copy.deepcopy(actor_model)
+        if not os.path.isdir(model_path):
+            raise FileNotFoundError(f"Expected adapter directory at {model_path}")
+        actor_model = PeftModel.from_pretrained(
+            base_model,
+            model_path,
+            is_trainable=False,
+        )
+        critic_model = copy.deepcopy(actor_model)
     
     return actor_model, critic_model, tokenizer, device
 
@@ -850,44 +710,6 @@ def get_hyperparameters_from_log(model_dir, default_task=None):
     with open(log_path, 'r') as f:
         hyperparameters = json.loads(f.readline().strip())
     return hyperparameters
-
-
-def get_model_paths_and_type(provided_path=None, target_index=None, all_checkpoints=False):
-    """Get model path(s) and infer model type from log file.
-    
-    Args:
-        provided_path: Optional explicit path to model or directory
-        target_index: Optional specific checkpoint index to load
-        all_checkpoints: Whether to return all checkpoints in directory
-        
-    Returns:
-        Tuple of (list of model paths, model type string)
-    """
-    import json
-    from typing import List, Tuple
-    
-    if provided_path:
-        model_dir = os.path.dirname(provided_path) if os.path.isfile(provided_path) else provided_path
-    else:
-        # Use find_latest_result to get the most recent directory
-        model_dir = find_latest_result()
-        if not model_dir:
-            raise FileNotFoundError("No results directory found")
-    
-    # Get model paths
-    if all_checkpoints:
-        model_paths = find_all_checkpoints(model_dir)
-        print(f"Found {len(model_paths)} checkpoints")
-    else:
-        model_paths = [find_checkpoint_with_index(model_dir, target_index)]
-    
-    # Get model type from log.jsonl
-    log_path = os.path.join(model_dir, "log.jsonl")
-    with open(log_path, 'r') as f:
-        hyperparameters = json.loads(f.readline().strip())
-        model_type = hyperparameters.get("model_type", "mistral")
-    
-    return model_paths, model_type
 
 
 def is_lora_param(param_name):
@@ -1303,33 +1125,36 @@ def load_arc_dataset(chunk_size: int = 1000, split: str = "validation", subset: 
             random.shuffle(chunk)
         yield from chunk
 
-def generate_arithmetic_pairs(task_type: str, num_examples: int = 1000):
-    """Lazily generate arithmetic QA pairs with shuffling within chunks."""
+def generate_arithmetic_pairs(num_examples: int = 1000, allow_negative: bool = False):
+    """Generate arithmetic QA pairs with optional negative numbers."""
     qa_pairs = []
     for _ in range(num_examples):
-        if task_type == "arithmetic-negative":
-            # Generate numbers between -99 and 99, excluding 0
+        if allow_negative:
             numbers = [random.randint(-99, 99) for _ in range(15)]
-            numbers = [n for n in numbers if n != 0]  # Remove any zeros
-
-            # Format each number, wrapping negatives in parentheses
-            formatted_numbers = []
-            for n in numbers:
-                if n < 0:
-                    formatted_numbers.append(f"({n})")
-                else:
-                    formatted_numbers.append(str(n))
-
-            question = " + ".join(formatted_numbers)
-            answer = str(sum(numbers))
-        else:  # regular arithmetic
+            numbers = [n for n in numbers if n != 0]
+            formatted_numbers = [f"({n})" if n < 0 else str(n) for n in numbers]
+        else:
             numbers = [random.randint(1, 99) for _ in range(15)]
-            question = " + ".join(map(str, numbers))
-            answer = str(sum(numbers))
+            formatted_numbers = list(map(str, numbers))
+
+        question = " + ".join(formatted_numbers)
+        answer = str(sum(numbers))
         qa_pairs.append((question, answer))
 
     random.shuffle(qa_pairs)
     return qa_pairs
+
+
+def load_arithmetic_dataset(chunk_size: int = 500, split: str = "train", allow_negative: bool = False):
+    """Yield arithmetic QA pairs similar to other dataset loaders."""
+    # For evaluation splits, generate exactly chunk_size examples once
+    if split != "train":
+        yield from generate_arithmetic_pairs(num_examples=chunk_size, allow_negative=allow_negative)
+        return
+
+    while True:
+        batch = generate_arithmetic_pairs(num_examples=chunk_size, allow_negative=allow_negative)
+        yield from batch
 
 
 def generate_question_answer_batches(
@@ -1348,9 +1173,8 @@ def generate_question_answer_batches(
         colored_print("Parallel Mode", "Generating batches with whole-batch repetition", Colors.BOLD)
         
         # Generate unique examples for each batch
-        if task_type in ["arithmetic", "arithmetic-negative"]:
-            # Generate num_batches unique arithmetic problems
-            unique_pairs = list(generate_arithmetic_pairs(task_type, num_examples=num_batches))
+        if task_type == "arithmetic":
+            unique_pairs = generate_arithmetic_pairs(num_examples=num_batches)
             for unique_qa in unique_pairs:
                 repeated_batch = [unique_qa] * batch_size
                 yield repeated_batch
@@ -1539,8 +1363,8 @@ def generate_question_answer_batches(
         # Generate a single batch based on task type
         debug_batch = None
         
-        if task_type in ["arithmetic", "arithmetic-negative"]:
-            debug_batch = generate_arithmetic_pairs(task_type, num_examples=batch_size)
+        if task_type == "arithmetic":
+            debug_batch = generate_arithmetic_pairs(num_examples=batch_size)
         elif task_type == "gsm8k":
             dataset_iter = load_gsm8k_dataset(chunk_size=chunk_size)
             debug_batch = []
@@ -1684,12 +1508,11 @@ def generate_question_answer_batches(
         return
     
     # Regular (non-debug) data generation continues below
-    if task_type in ["arithmetic", "arithmetic-negative"]:
-        # For arithmetic, generate chunks of data as needed
-        for batch_idx in range(num_batches):
-            # Generate a new batch of arithmetic problems
-            qa_pairs = generate_arithmetic_pairs(task_type, num_examples=batch_size)
-            yield qa_pairs
+    if task_type == "arithmetic":
+        dataset_iter = load_arithmetic_dataset(chunk_size=batch_size, split="train")
+        for _ in range(num_batches):
+            batch = [next(dataset_iter) for _ in range(batch_size)]
+            yield batch
             
     elif task_type == "gsm8k":
         # Use load_gsm8k_dataset directly which already processes answers correctly

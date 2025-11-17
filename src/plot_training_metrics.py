@@ -275,7 +275,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
     
     if plot_summary:
         # For arithmetic tasks or gsm8k
-        if task_type in ['arithmetic', 'gsm8k', 'math', 'arithmetic-negative']:
+        if task_type in ['arithmetic', 'gsm8k', 'math']:
             metrics_to_plot = [
                 ("Training Metrics.Actor Answer Log Probs", "Actor Answer Log Probs", "Training Batch No. []", "ln π(ans|cot)"),
                 ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
@@ -347,7 +347,7 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 )
         
         # Add Contains Answer metric for relevant QA tasks
-        if task_type in ["gsm8k", "arithmetic", "arithmetic-negative", "math"]:
+        if task_type in ["gsm8k", "arithmetic", "math"]:
             base_metrics.append(
                 ("Example.Contains Answer", "Contains Answer", "Training Batch No. []", "Fraction")
             )

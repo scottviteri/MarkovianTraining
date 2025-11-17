@@ -372,6 +372,57 @@ def compare_extraction_methods(
     return comparison_results
 
 
+def get_answer_format_for_task(task_type: str) -> Optional[str]:
+    """Return answer format string for Haiku extraction."""
+    numeric_tasks = {"gsm8k", "svamp", "math", "arithmetic"}
+    mcq_ad = {"mmlu", "arc"}
+    mcq_ae = {"aqua", "mathqa"}
+    
+    if task_type in numeric_tasks:
+        return "numeric"
+    if task_type in mcq_ad:
+        return "A-D"
+    if task_type in mcq_ae:
+        return "A-E"
+    return None
+
+
+def compute_haiku_accuracy(
+    results: List[Dict[str, Any]],
+    task_type: str,
+    answer_format: str,
+) -> Optional[float]:
+    """Re-compute accuracy using Haiku extraction."""
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        colored_print("Haiku Metric", "ANTHROPIC_API_KEY not set; skipping Haiku metric", Colors.YELLOW)
+        return None
+    
+    total = 0
+    correct = 0
+    
+    for entry in results:
+        generated_text = entry.get("generated_answer") or entry.get("answer") or ""
+        gold_raw = entry.get("answer") or entry.get("gold")
+        if gold_raw is None:
+            continue
+        
+        haiku_pred = extract_answer(generated_text, method="llm", answer_format=answer_format)
+        
+        if answer_format == "numeric":
+            gold_value = extract_answer(str(gold_raw), method="anchor")
+            haiku_gold = gold_value
+        else:
+            haiku_gold = str(gold_raw).strip().upper()[:1]
+        
+        total += 1
+        if haiku_pred == haiku_gold:
+            correct += 1
+    
+    if total == 0:
+        return None
+    return correct / total
+
+
 def extract_letter(text: str) -> str:
     """Extract first letter A-E from text. Returns 'X' if none found.
     
@@ -729,7 +780,9 @@ def evaluate_model_on_numeric(
     test_data: List[Tuple[str, str]],
     hyperparameters: Dict[str, Any],
     batch_size: int = 16,
-    answer_extraction_method: str = "simple"
+    answer_extraction_method: str = "simple",
+    num_samples: Optional[int] = None,
+    max_answer_tokens: int = 16,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
     """Evaluate numeric QA tasks (GSM8K, SVAMP, MATH).
     
@@ -768,180 +821,55 @@ def evaluate_model_on_numeric(
         return extract_answer(answer, method=answer_extraction_method)
     
     return evaluate_model_generic(
-        actor_model, critic_model, tokenizer, device, test_data,
+        actor_model,
+        critic_model,
+        tokenizer,
+        device,
+        test_data,
         hyperparameters,
         answer_extractor_fn=extract_with_method,  # str -> Union[int, str]
         answer_comparator_fn=compare_normalized,  # Union[int, str], str -> bool
         batch_size=batch_size,
-        task_name="Numeric", max_answer_tokens=16
+        num_samples=num_samples,
+        task_name="Numeric",
+        max_answer_tokens=max_answer_tokens,
     )
 
 
 def evaluate_model_on_gsm8k(
-    actor_model,  
-    critic_model, 
+    actor_model,
+    critic_model,
     tokenizer,
     device,
     test_data,
     hyperparameters,
     num_samples=None,
     batch_size=None,
-    baseline_mode=False,
-    baseline_thinking_tokens=None,
-    baseline_temperature=None,
     answer_extraction_method="simple",
 ):
-    """Evaluate model on GSM8K test set.
-    
-    Args:
-        actor_model: Model for generating reasoning (with temperature) or baseline thinking
-        critic_model: Frozen model for generating answers (deterministic)
-        tokenizer: Tokenizer for both models
-        device: torch device
-        test_data: List of (question, answer) tuples
-        hyperparameters: Configuration dictionary
-        num_samples: Optional limit on number of samples to evaluate
-        batch_size: Batch size for evaluation
-        baseline_mode: If True, use standard baseline prompting
-        baseline_thinking_tokens: Max thinking tokens for baseline (caps new tokens for stage 1)
-        baseline_temperature: Temperature for baseline thinking generation
-        answer_extraction_method: Method for extracting numeric answers:
-            - "simple": Check '=' then find first number (default, backward compatible)
-            - "anchor": Check 'Answer:' label first, then '=', then first number
-    """
-    from utils import construct_baseline_prompts
-    
-    # Get method from hyperparameters if not explicitly provided
-    if answer_extraction_method == "simple" and "answer_extraction_method" in hyperparameters:
-        answer_extraction_method = hyperparameters["answer_extraction_method"]
-    
-    # Determine default eval batch size: floor(1.5x) of training batch size (defaults to 8 if absent)
+    """Evaluate GSM8K using the unified numeric pipeline."""
+    # Determine default eval batch size: floor(1.5x) of training batch size (defaults to 12 if absent)
     if batch_size is None:
         try:
             batch_size = max(1, int(hyperparameters.get("batch_size", 8) * 1.5))
         except Exception:
             batch_size = 12
-    if num_samples:
-        test_data = test_data[:num_samples]
-    
-    all_results = []
-    correct = 0
-    total = 0
-    
-    for i in tqdm(range(0, len(test_data), batch_size)):
-        batch = test_data[i:i + batch_size]
-        questions, answers = zip(*batch)
-        
-        # Create prompts for stage 1 (reasoning/thinking)
-        if baseline_mode:
-            prompts = [
-                construct_baseline_prompts(
-                    question=q,
-                    hyperparameters=hyperparameters,
-                )
-                for q in questions
-            ]
-        else:
-            prompts = [
-                construct_prompts(
-                    question=q,
-                    hyperparameters=hyperparameters,
-                )
-                for q in questions
-            ]
-        
-        # Tokenize
-        tokenized_inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
-        
-        # 1. Generate CoT/Thinking using actor model (with temperature)
-        with torch.no_grad():
-            cot_outputs = actor_model.generate(
-                input_ids=tokenized_inputs.input_ids,
-                attention_mask=tokenized_inputs.attention_mask,
-                max_new_tokens=(baseline_thinking_tokens if baseline_mode and baseline_thinking_tokens is not None else hyperparameters["cot_length"]),
-                min_new_tokens=(baseline_thinking_tokens if baseline_mode and baseline_thinking_tokens is not None else hyperparameters["cot_length"]),
-                do_sample=True,
-                temperature=(baseline_temperature if baseline_mode and baseline_temperature is not None else hyperparameters["temperature"]),
-                top_k=None,
-                top_p=None,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-            
-        # Decode CoT
-        cot_texts = tokenizer.batch_decode(
-            cot_outputs[:, tokenized_inputs.input_ids.shape[1]:],
-            skip_special_tokens=True
-        )
-        
-        # 2. Generate answers using critic model (deterministic)
-        # Honor Markovian flag: include question context when markovian=False
-        include_question_in_eval = not hyperparameters.get("markovian", True)
-        if baseline_mode:
-            answer_prompts = [
-                construct_baseline_prompts(
-                    question=q,
-                    hyperparameters=hyperparameters,
-                    reasoning=r,
-                    max_thinking_tokens=baseline_thinking_tokens,
-                )
-                for q, r in zip(questions, cot_texts)
-            ]
-        else:
-            answer_prompts = [
-                construct_prompts(
-                    question=q,
-                    hyperparameters=hyperparameters,
-                    reasoning=r,
-                    include_question=include_question_in_eval,
-                )
-                for q, r in zip(questions, cot_texts)
-            ]
-        
-        tokenized_answer_inputs = tokenizer(
-            answer_prompts, 
-            padding=True, 
-            return_tensors="pt"
-        ).to(device)
-        
-        with torch.no_grad():
-            answer_outputs = critic_model.generate(
-                input_ids=tokenized_answer_inputs.input_ids,
-                attention_mask=tokenized_answer_inputs.attention_mask,
-                max_new_tokens=10,  # Changed from 15 to 10 to match training
-                do_sample=False,    # Deterministic
-                top_k=None,
-                top_p=None,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-        
-        # Decode and extract answers
-        generated_answers = tokenizer.batch_decode(
-            answer_outputs[:, tokenized_answer_inputs.input_ids.shape[1]:],
-            skip_special_tokens=True
-        )
-        extracted_answers = [extract_answer(ans, method=answer_extraction_method) for ans in generated_answers]
-        
-        # Check correctness
-        for q, a, cot, gen_a, ext_a in zip(questions, answers, cot_texts, generated_answers, extracted_answers):
-            correct_answer = extract_answer(a, method=answer_extraction_method)
-            is_correct = (ext_a == correct_answer)
-            
-            result = {
-                "question": q,
-                "correct_answer": correct_answer,
-                "chain_of_thought": cot,
-                "generated_answer": gen_a,
-                "extracted_answer": ext_a,
-                "is_correct": is_correct,
-            }
-            all_results.append(result)
-            
-            if is_correct:
-                correct += 1
-            total += 1
-    
-    accuracy = correct / total if total > 0 else 0
-    return accuracy, all_results
+
+    eval_data = test_data[:num_samples] if num_samples else test_data
+
+    accuracy, results, _ = evaluate_model_on_numeric(
+        actor_model,
+        critic_model,
+        tokenizer,
+        device,
+        eval_data,
+        hyperparameters,
+        batch_size=batch_size,
+        answer_extraction_method=answer_extraction_method,
+        max_answer_tokens=10,
+        num_samples=None,
+    )
+    return accuracy, results
 
 
 # ============================================================================
@@ -983,97 +911,48 @@ def plot_accuracy_over_batches(results_jsonl_path: str, save_path: str):
     plt.close()
 
 
-def save_results(model_dir, checkpoint_path, model_type, accuracy, results, num_samples, batch_index_override=None):
-    """Save results to file and generate plots for GSM8K.
-    
-    Args:
-        model_dir: Directory where outputs should be written. Prefer a run directory (e.g., results/gsm8k/<timestamp>).
-        checkpoint_path: Optional path to checkpoint file for inferring batch index.
-        model_type: Model type string used in filenames.
-        accuracy: Final accuracy value.
-        results: Per-example evaluation results.
-        num_samples: Optional number of evaluated samples.
-        batch_index_override: If provided, force batch index in filenames/metadata (e.g., 0 for baseline).
-    """
-    # Create results entry
+def save_task_results(
+    task_type: str,
+    output_dir: str,
+    model_type: str,
+    accuracy: float,
+    results: List[Dict[str, Any]],
+    num_examples: int,
+    checkpoint_path: Optional[str] = None,
+    batch_index: Optional[int] = None,
+    subject: Optional[str] = None,
+    extra_metrics: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Persist evaluation results for any task and update task-specific artifacts."""
     entry = {
         "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-        "batch_index": None,
+        "task_type": task_type,
+        "batch_index": batch_index,
         "accuracy": accuracy,
         "model_path": checkpoint_path,
-        "model_type": model_type,  # This is the critic model type
-        "num_samples": num_samples,
-        "detailed_results": results
-    }
-    
-    # Determine batch index: prefer explicit override, then infer from checkpoint path
-    if batch_index_override is not None:
-        entry["batch_index"] = int(batch_index_override)
-    elif checkpoint_path:
-        basename = os.path.basename(checkpoint_path)
-        # Support both new and old filename formats
-        match = re.search(r'model_batch_(\d+)\.pt$', basename)
-        if not match:
-            match = re.search(r'model_(\d+)_', basename)
-        if match:
-            entry["batch_index"] = int(match.group(1))
-    
-    # Include model type in filenames
-    model_type_suffix = f"_{model_type}"
-    
-    # Save JSONL results with model type in filename
-    results_file = os.path.join(model_dir, f"gsm8k_results{model_type_suffix}.jsonl")
-    with open(results_file, "a") as f:
-        json.dump(entry, f)
-        f.write("\n")
-    
-    # Update accuracy-over-batches plot in the run directory
-    accuracy_plot_path = os.path.join(model_dir, "gsm8k_accuracy_over_batches.png")
-    plot_accuracy_over_batches(results_file, accuracy_plot_path)
-    print(f"Updated GSM8K accuracy plot at {accuracy_plot_path}")
-    
-    return results_file
-
-
-def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, total, subject=None, batch_index_override=None):
-    """Save MMLU evaluation results to JSONL file.
-    
-    Args:
-        output_dir: Directory where outputs should be written
-        model_path: Path to the model checkpoint
-        model_type: Model type string
-        accuracy: Final accuracy value
-        results: Per-example evaluation results
-        total: Total number of examples evaluated
-        subject: Optional MMLU subject filter
-        batch_index_override: Optional explicit batch index
-    """
-    # Create results entry
-    entry = {
-        "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-        "batch_index": None,
-        "accuracy": accuracy,
-        "model_path": model_path,
         "model_type": model_type,
-        "subject": subject,
-        "total_examples": total,
-        "results": results
+        "num_examples": num_examples,
+        "detailed_results": results,
     }
     
-    # Determine batch index from checkpoint path or use override
-    if batch_index_override is not None:
-        entry["batch_index"] = int(batch_index_override)
-    elif model_path:
-        basename = os.path.basename(model_path)
-        match = re.search(r'adapter_(\d+)', basename)
-        if match:
-            entry["batch_index"] = int(match.group(1))
+    # Backward compatibility for older tooling that expects num_samples/total_examples keys
+    entry["num_samples"] = num_examples
+    entry["total_examples"] = num_examples
     
-    # Save results to JSONL
-    results_file = os.path.join(output_dir, f"mmlu_results_{model_type}.jsonl")
+    if subject:
+        entry["subject"] = subject
+    if extra_metrics:
+        entry.update(extra_metrics)
+    
+    results_file = os.path.join(output_dir, f"{task_type}_results_{model_type}.jsonl")
     with open(results_file, "a") as f:
         json.dump(entry, f)
         f.write("\n")
+    
+    if task_type == "gsm8k":
+        accuracy_plot_path = os.path.join(output_dir, "gsm8k_accuracy_over_batches.png")
+        plot_accuracy_over_batches(results_file, accuracy_plot_path)
+        print(f"Updated GSM8K accuracy plot at {accuracy_plot_path}")
     
     return results_file
 
@@ -1164,7 +1043,7 @@ def main():
         "--task_type",
         type=str,
         required=True,
-        choices=["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic", "arithmetic-negative"],
+        choices=["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"],
         help="Task to evaluate"
     )
     parser.add_argument(
@@ -1228,6 +1107,11 @@ def main():
         default="simple",
         help="Answer extraction method for numeric tasks (default: simple)"
     )
+    parser.add_argument(
+        "--haiku_metric",
+        action="store_true",
+        help="Compute an additional accuracy metric using Claude Haiku extraction (requires ANTHROPIC_API_KEY)"
+    )
     
     # Checkpoint selection
     parser.add_argument(
@@ -1237,33 +1121,9 @@ def main():
         help="Specific training index to evaluate"
     )
     parser.add_argument(
-        "--all_checkpoints",
-        action="store_true",
-        help="Evaluate all checkpoints in the directory"
-    )
-    parser.add_argument(
         "--all_adapters",
         action="store_true",
-        help="Evaluate all adapter_* directories in run directory"
-    )
-    
-    # Baseline mode
-    parser.add_argument(
-        "--baseline",
-        action="store_true",
-        help="Use standard baseline prompting"
-    )
-    parser.add_argument(
-        "--baseline_thinking_tokens",
-        type=int,
-        default=None,
-        help="Max tokens for baseline thinking stage"
-    )
-    parser.add_argument(
-        "--baseline_temperature",
-        type=float,
-        default=None,
-        help="Temperature for baseline thinking generation"
+        help="Evaluate each LoRA adapter_* directory inside --run_dir or --model_path"
     )
     
     # Task-specific arguments
@@ -1293,7 +1153,6 @@ def main():
     from utils import (
         find_latest_result,
         get_hyperparameters_from_log,
-        get_model_paths_and_type,
         load_model_for_evaluation,
         load_svamp_dataset,
         load_aqua_dataset,
@@ -1301,44 +1160,64 @@ def main():
         load_mathqa_dataset,
         generate_question_answer_batches,
         load_gsm8k_dataset,
+        load_arithmetic_dataset,
     )
     
-    # Determine model paths
-    if args.all_adapters:
-        # Find all adapter directories in run_dir
-        run_dir = args.run_dir or args.model_path or find_latest_result()
-        if not run_dir:
-            raise FileNotFoundError("No results directory found")
-        if not os.path.isdir(run_dir):
-            run_dir = os.path.dirname(run_dir)
-        
-        checkpoints = find_checkpoints(run_dir)
-        if not checkpoints:
-            print(f"No adapter directories found in {run_dir}")
-            return
-        
-        model_paths = [ckpt_path for _, ckpt_path in checkpoints]
-        
-        # Infer model type from run_dir log
+    def resolve_run_dir(path: Optional[str]) -> Optional[str]:
+        if path and os.path.isdir(path) and os.path.basename(path).startswith("adapter_"):
+            return os.path.dirname(path)
+        return path
+    
+    def infer_model_type(run_dir: str) -> str:
         try:
             hyperparameters_base = get_hyperparameters_from_log(run_dir, default_task=args.task_type)
-            inferred_model_type = hyperparameters_base.get("model_type", "mistral")
+            return hyperparameters_base.get("model_type", "mistral")
         except Exception:
-            inferred_model_type = "mistral"
-        
-        if args.model_type is None:
-            args.model_type = inferred_model_type
-            print(f"Inferred model type: {args.model_type}")
-    elif not args.use_base_model:
-        model_paths, inferred_model_type = get_model_paths_and_type(
-            args.model_path, args.training_index, args.all_checkpoints
-        )
-        if args.model_type is None:
-            args.model_type = inferred_model_type
-            print(f"Inferred model type: {args.model_type}")
-    else:
+            return "mistral"
+    
+    model_paths: List[Optional[str]] = []
+    
+    if args.use_base_model:
         model_paths = [None]
         args.model_type = args.model_type or "mistral"
+    else:
+        if args.all_adapters:
+            run_dir = resolve_run_dir(args.run_dir or args.model_path or find_latest_result())
+            if not run_dir:
+                raise FileNotFoundError("No results directory found")
+            checkpoints = find_checkpoints(run_dir)
+            if not checkpoints:
+                raise FileNotFoundError(f"No adapter directories found in {run_dir}")
+            model_paths = [ckpt_path for _, ckpt_path in checkpoints]
+            if args.model_type is None:
+                args.model_type = infer_model_type(run_dir)
+                print(f"Inferred model type: {args.model_type}")
+        else:
+            candidate_path = args.model_path or args.run_dir or find_latest_result()
+            if not candidate_path:
+                raise FileNotFoundError("No model_path provided and no results directory found")
+            
+            if os.path.isdir(candidate_path) and os.path.basename(candidate_path).startswith("adapter_"):
+                model_paths = [candidate_path]
+                run_dir = os.path.dirname(candidate_path)
+            else:
+                run_dir = resolve_run_dir(candidate_path)
+                if not run_dir or not os.path.isdir(run_dir):
+                    raise FileNotFoundError(f"Run directory not found: {candidate_path}")
+                checkpoints = find_checkpoints(run_dir)
+                if not checkpoints:
+                    raise FileNotFoundError(f"No adapter directories found in {run_dir}")
+                if args.training_index is not None:
+                    matches = [ckpt_path for idx, ckpt_path in checkpoints if idx == args.training_index]
+                    if not matches:
+                        raise FileNotFoundError(f"No adapter_{args.training_index} found in {run_dir}")
+                    model_paths = [matches[0]]
+                else:
+                    model_paths = [checkpoints[-1][1]]
+            
+            if args.model_type is None:
+                args.model_type = infer_model_type(resolve_run_dir(model_paths[0]) if model_paths[0] else run_dir)
+                print(f"Inferred model type: {args.model_type}")
     
     # Process each checkpoint
     for checkpoint_path in model_paths:
@@ -1395,61 +1274,34 @@ def main():
             args.model_type
         )
         
-        # Load dataset based on task type
-        if args.task_type == "gsm8k":
-            test_data = list(load_gsm8k_dataset(split="test"))
-        elif args.task_type == "mmlu":
-            subject = hyperparameters.get("mmlu_subject", None)
-            split = hyperparameters.get("mmlu_split", "validation")
-            ds = load_dataset("cais/mmlu", subject if subject else "all")
-            split_name = "test" if split == "test" else "validation"
-            d = ds[split_name]
-            
-            test_data = []
-            for ex in d:
-                stem = ex["question"]
-                choices = ex["choices"] if "choices" in ex else ex.get("options", [])
-                if not choices or len(choices) < 4:
-                    continue
-                options_text = "\n".join([
-                    f"A. {choices[0]}",
-                    f"B. {choices[1]}",
-                    f"C. {choices[2]}",
-                    f"D. {choices[3]}",
-                ])
-                question_text = f"{stem}\n\nOptions:\n{options_text}"
-                if "answer" in ex and isinstance(ex["answer"], int):
-                    correct_letter = ["A", "B", "C", "D"][ex["answer"]]
-                else:
-                    correct_letter = str(ex.get("answer", "")).strip().upper()
-                    if correct_letter not in ["A", "B", "C", "D"]:
-                        continue
-                test_data.append((question_text, correct_letter))
-        elif args.task_type == "arc":
-            subset = args.arc_subset or os.getenv("ARC_SUBSET", "ARC-Challenge")
-            test_data = list(load_arc_dataset(split="validation", subset=subset))
-        elif args.task_type == "svamp":
-            test_data = list(load_svamp_dataset(split="test"))
-        elif args.task_type == "aqua":
-            test_data = list(load_aqua_dataset(split="test"))
-        elif args.task_type == "mathqa":
-            test_data = list(load_mathqa_dataset(split="test"))
-            if not test_data:
-                raise FileNotFoundError("No MathQA test data found. Set MATHQA_PATH or use HuggingFace dataset.")
-        elif args.task_type in ["arithmetic", "arithmetic-negative"]:
-            batch_size_gen = args.num_samples or 200
-            batch = next(
-                generate_question_answer_batches(
-                    num_batches=1,
-                    batch_size=batch_size_gen,
-                    task_type=args.task_type,
-                    tokenizer=None,
-                    hyperparameters={},
-                )
-            )
-            test_data = batch
-        else:
-            raise ValueError(f"Unsupported task type: {args.task_type}")
+        def load_cli_dataset(task_type: str) -> Tuple[List[Tuple[str, str]], Dict[str, Any]]:
+            meta: Dict[str, Any] = {}
+            loaders = {
+                "gsm8k": lambda: list(load_gsm8k_dataset(split="test")),
+                "mmlu": lambda: list(load_mmlu_dataset(
+                    split=hyperparameters.get("mmlu_split", "validation"),
+                    subject=meta.setdefault("subject", hyperparameters.get("mmlu_subject")),
+                )),
+                "arc": lambda: list(load_arc_dataset(
+                    split="validation",
+                    subset=meta.setdefault("subset", args.arc_subset or os.getenv("ARC_SUBSET", "ARC-Challenge")),
+                )),
+                "svamp": lambda: list(load_svamp_dataset(split="test")),
+                "aqua": lambda: list(load_aqua_dataset(split="test")),
+                "mathqa": lambda: list(load_mathqa_dataset(split="test")),
+                "math": lambda: list(load_math_dataset(split="test")),
+                "arithmetic": lambda: list(load_arithmetic_dataset(chunk_size=args.num_samples or 200, split="test")),
+            }
+            if task_type not in loaders:
+                raise ValueError(f"Unsupported task type: {task_type}")
+            data = loaders[task_type]()
+            if not data:
+                raise FileNotFoundError(f"No data found for task {task_type}")
+            return data, meta
+        
+        test_data, dataset_meta = load_cli_dataset(args.task_type)
+        mmlu_subject: Optional[str] = dataset_meta.get("subject")
+        arc_subset: Optional[str] = dataset_meta.get("subset")
         
         # Apply stride if specified
         if args.stride > 1:
@@ -1462,15 +1314,13 @@ def main():
         )
         
         # Run evaluation based on task type
+        accuracy_wb: Optional[float] = None
         if args.task_type == "gsm8k":
             accuracy, results = evaluate_model_on_gsm8k(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 num_samples=args.num_samples,
                 batch_size=eval_bs,
-                baseline_mode=args.baseline,
-                baseline_thinking_tokens=args.baseline_thinking_tokens,
-                baseline_temperature=args.baseline_temperature,
                 answer_extraction_method=args.answer_extraction_method,
             )
         elif args.task_type == "mmlu":
@@ -1509,15 +1359,26 @@ def main():
             )
             if accuracy_wb is not None:
                 colored_print("MathQA Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
-        elif args.task_type in ["svamp", "arithmetic", "arithmetic-negative"]:
+        elif args.task_type in ["svamp", "arithmetic"]:
             accuracy, results, _ = evaluate_model_on_numeric(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 batch_size=eval_bs,
                 answer_extraction_method=args.answer_extraction_method,
+                num_samples=args.num_samples,
             )
         else:
             raise ValueError(f"Unsupported task type: {args.task_type}")
+        
+        haiku_accuracy = None
+        if args.haiku_metric:
+            answer_format = get_answer_format_for_task(args.task_type)
+            if answer_format:
+                haiku_accuracy = compute_haiku_accuracy(results, args.task_type, answer_format)
+                if haiku_accuracy is not None:
+                    colored_print("Haiku Metric", f"Accuracy (Haiku extraction): {haiku_accuracy:.2%}", Colors.CYAN)
+            else:
+                colored_print("Haiku Metric", f"Task '{args.task_type}' not supported for Haiku metric", Colors.YELLOW)
         
         # Print results
         colored_print(f"{args.task_type.upper()} Accuracy", f"{accuracy:.2%}", Colors.GREEN if accuracy > 0.5 else Colors.YELLOW)
@@ -1525,39 +1386,29 @@ def main():
         # Save results
         model_dir = os.path.dirname(checkpoint_path) if checkpoint_path else f"results/{args.task_type}"
         if checkpoint_path and os.path.isdir(checkpoint_path):
-            # If checkpoint_path is a directory (adapter_*), use its parent
             model_dir = os.path.dirname(checkpoint_path)
         os.makedirs(model_dir, exist_ok=True)
         
-        if args.task_type == "gsm8k":
-            results_file = save_results(
-                model_dir, checkpoint_path, args.model_type,
-                accuracy, results, args.num_samples,
-                batch_index_override=(0 if args.baseline else batch_index)
-            )
-        elif args.task_type == "mmlu":
-            results_file = save_results_mmlu(
-                model_dir, checkpoint_path, args.model_type,
-                accuracy, results, len(test_data),
-                subject=args.mmlu_subject,
-                batch_index_override=(0 if args.baseline else batch_index)
-            )
-        else:
-            # Generic save for other tasks
-            entry = {
-                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
-                "batch_index": (0 if args.baseline else batch_index),
-                "accuracy": accuracy,
-                "model_path": checkpoint_path,
-                "model_type": args.model_type,
-                "task_type": args.task_type,
-                "num_samples": args.num_samples or len(test_data),
-                "detailed_results": results
-            }
-            results_file = os.path.join(model_dir, f"{args.task_type}_results_{args.model_type}.jsonl")
-            with open(results_file, "a") as f:
-                json.dump(entry, f)
-                f.write("\n")
+        extra_metrics = {}
+        if accuracy_wb is not None:
+            extra_metrics["accuracy_word_boundary"] = accuracy_wb
+        if args.task_type == "arc" and arc_subset:
+            extra_metrics["subset"] = arc_subset
+        if haiku_accuracy is not None:
+            extra_metrics["accuracy_haiku"] = haiku_accuracy
+        
+        results_file = save_task_results(
+            task_type=args.task_type,
+            output_dir=model_dir,
+            model_type=args.model_type,
+            accuracy=accuracy,
+            results=results,
+            num_examples=len(test_data),
+            checkpoint_path=checkpoint_path,
+            batch_index=batch_index,
+            subject=mmlu_subject if args.task_type == "mmlu" else None,
+            extra_metrics=extra_metrics or None,
+        )
         
         colored_print("Results", f"Appended to {results_file}", Colors.CYAN)
 

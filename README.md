@@ -30,9 +30,23 @@ pip install "transformers==4.46.3" wandb scipy datasets==2.14.6 torchtyping==0.1
 
 ## 🧪 Testing
 
+The automated suite has been rebuilt around the current `utils/`, `train/`, and `evaluation/` stacks:
+
+- Unit tests live in `tests/unit/` and cover arithmetic loaders, answer extraction, result saving, and helper math utilities.
+- GPT-2 integration tests live in `tests/integration/` and exercise a single training step plus the numeric evaluation pipeline end-to-end.
+- `tests/conftest.py` provides session-scoped GPT-2 fixtures so weights are loaded once per run.
+
+Run everything (requires ~13s once GPT-2 is cached):
+
 ```bash
 export PYTHONPATH=$PYTHONPATH:$(pwd)/src
 pytest
+```
+
+To skip the heavier GPT-2 integration tests:
+
+```bash
+pytest -m "not slow"
 ```
 
 ## 📖 Training
@@ -146,11 +160,11 @@ python src/evaluation.py --task_type svamp --model_path <path>
 
 ### Common Evaluation Options
 ```bash
-# Evaluate all checkpoints in directory
-python src/evaluation.py --task_type gsm8k --model_path results/gsm8k/20241201_143022 --all_checkpoints
-
 # Evaluate all adapter directories
 python src/evaluation.py --task_type gsm8k --run_dir results/gsm8k/20241201_143022 --all_adapters
+
+# Evaluate the latest adapter from a run directory
+python src/evaluation.py --task_type gsm8k --model_path results/gsm8k/20241201_143022
 
 # Quick evaluation with stride
 python src/evaluation.py --task_type gsm8k --stride 10 --num_samples 100
@@ -158,9 +172,11 @@ python src/evaluation.py --task_type gsm8k --stride 10 --num_samples 100
 # Use base model
 python src/evaluation.py --task_type gsm8k --use_base_model --model_type llama
 
-# Baseline prompting
-python src/evaluation.py --task_type gsm8k --baseline --baseline_thinking_tokens 150
+# Include Haiku extraction metric (requires ANTHROPIC_API_KEY)
+python src/evaluation.py --task_type gsm8k --haiku_metric
 ```
+
+> `--all_adapters` scans for all `adapter_*` directories within the specified run directory and evaluates each sequentially.
 
 ### Task-Specific Options
 ```bash

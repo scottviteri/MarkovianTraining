@@ -39,20 +39,6 @@ def main():
     except Exception as e:
         samples.append({"dataset": "arithmetic", "error": str(e)})
 
-    # Arithmetic-negative
-    try:
-        batch = next(generate_question_answer_batches(
-            num_batches=1,
-            batch_size=1,
-            task_type="arithmetic-negative",
-            tokenizer=None,
-            hyperparameters={},
-        ))
-        q, a = batch[0]
-        samples.append({"dataset": "arithmetic-negative", "question": q, "answer": a})
-    except Exception as e:
-        samples.append({"dataset": "arithmetic-negative", "error": str(e)})
-
     # GSM8K (test split)
     try:
         qa = take_first(load_gsm8k_dataset(split="test", chunk_size=1))

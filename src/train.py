@@ -22,8 +22,7 @@ from evaluation import (
     evaluate_model_on_aqua,
     evaluate_model_on_mathqa,
     evaluate_model_on_numeric,
-    save_results,
-    save_results_mmlu,
+    save_task_results,
     get_default_eval_batch_size,
 )
 from peft import PeftModel
@@ -38,7 +37,6 @@ from utils import (
     verify_all_frozen_weights,
     verify_actor_weights_changing_comprehensive,
     calculate_threshold,
-    find_latest_checkpoint,
     generate_question_answer_batches,
     load_gsm8k_dataset,
     extract_answer,
@@ -50,6 +48,7 @@ from utils import (
     load_arc_dataset,
     load_model,
     get_grad_norm,
+    load_arithmetic_dataset,
 )
 import glob
 from datasets import load_dataset
@@ -887,75 +886,42 @@ def initialize_model_and_optimizer(model_type, hyperparameters, checkpoint_path=
     )
 
     if checkpoint_path is not None:
-        # Find the latest checkpoint in the directory if checkpoint_path points to a directory
-        if os.path.isdir(checkpoint_path):
-            # First check for adapter directories within this run directory
+        if not os.path.isdir(checkpoint_path):
+            raise ValueError(f"Expected directory for checkpoint_path, got: {checkpoint_path}")
+        
+        if os.path.basename(checkpoint_path).startswith("adapter_"):
+            adapter_dirs = [checkpoint_path]
+        else:
             adapter_dirs = sorted(
                 [d for d in glob.glob(os.path.join(checkpoint_path, "adapter_*")) if os.path.isdir(d)],
-                key=lambda x: int(x.split("_")[-1])  # Sort by batch number
+                key=lambda x: int(x.split("_")[-1])
+            )
+        
+        if adapter_dirs:
+            latest_adapter = adapter_dirs[-1]
+            colored_print("Resume", f"Using latest adapter: {os.path.basename(latest_adapter)}", Colors.BOLD)
+            batch_num = int(latest_adapter.split("_")[-1])
+            
+            colored_print("Loading Adapter", f"Loading adapter from {latest_adapter}", Colors.BLUE)
+            model = PeftModel.from_pretrained(
+                model,
+                latest_adapter,
+                is_trainable=True
             )
             
-            if adapter_dirs:
-                # Use the latest adapter directory
-                latest_adapter = adapter_dirs[-1]
-                colored_print("Resume", f"Using latest adapter: {os.path.basename(latest_adapter)}", Colors.BOLD)
-                
-                # Get the batch number for logging 
-                batch_num = int(latest_adapter.split("_")[-1])
-                
-                # Load the adapter using PEFT's load_pretrained
-                from peft import PeftModel
-                
-                colored_print("Loading Adapter", f"Loading adapter from {latest_adapter}", Colors.BLUE)
-                model = PeftModel.from_pretrained(
-                    model,  # Base model
-                    latest_adapter,  # Adapter path
-                    is_trainable=True  # Ensure it's set to training mode
-                )
-                
-                # Load optimizer state and other metadata
-                metadata_path = os.path.join(latest_adapter, "training_metadata.pt")
-                if os.path.exists(metadata_path):
-                    metadata = torch.load(metadata_path)
-                    model_optimizer.load_state_dict(metadata["optimizer_state_dict"])
-                    colored_print("Metadata", f"Loaded optimizer state from batch {batch_num}", Colors.GREEN)
-                    
-                    # Print key info about the loaded adapter
-                    colored_print("Adapter Info", f"Loaded adapter from batch {batch_num}", Colors.GREEN)
-                    colored_print("Active Adapter", f"Current active adapter: {model.active_adapter}", Colors.GREEN)
-                else:
-                    colored_print("Warning", f"No metadata found at {metadata_path}", Colors.YELLOW)
-                
-                return model, frozen_model, tokenizer, device, model_optimizer
-            
-            # Fall back to traditional checkpoint files if no adapters found
-            colored_print("Note", "No adapter directories found in this run", Colors.YELLOW)
-            latest_checkpoint = find_latest_checkpoint(checkpoint_path)
-            if latest_checkpoint:
-                checkpoint_path = latest_checkpoint
-                colored_print("Resume", f"Using latest checkpoint: {os.path.basename(latest_checkpoint)}", Colors.BOLD)
+            metadata_path = os.path.join(latest_adapter, "training_metadata.pt")
+            if os.path.exists(metadata_path):
+                metadata = torch.load(metadata_path)
+                model_optimizer.load_state_dict(metadata["optimizer_state_dict"])
+                colored_print("Metadata", f"Loaded optimizer state from batch {batch_num}", Colors.GREEN)
+                colored_print("Adapter Info", f"Loaded adapter from batch {batch_num}", Colors.GREEN)
+                colored_print("Active Adapter", f"Current active adapter: {model.active_adapter}", Colors.GREEN)
             else:
-                colored_print("Warning", f"No checkpoints found in {checkpoint_path}", Colors.RED)
-                return model, frozen_model, tokenizer, device, model_optimizer
+                colored_print("Warning", f"No metadata found at {metadata_path}", Colors.YELLOW)
+            
+            return model, frozen_model, tokenizer, device, model_optimizer
         
-        # Load checkpoint
-        checkpoint = torch.load(checkpoint_path)
-        
-        # Check if this is a LoRA adapter checkpoint or full model checkpoint
-        if "adapter_state_dict" in checkpoint:
-            colored_print("Resume", "Loading LoRA adapter weights from checkpoint file", Colors.BOLD)
-            model.load_adapter_state_dict(checkpoint["adapter_state_dict"])
-            size_bytes = sum(tensor.nelement() * tensor.element_size() 
-                           for tensor in checkpoint["adapter_state_dict"].values())
-            size_mb = size_bytes / (1024 * 1024)
-            colored_print("Checkpoint Info", f"Loaded LoRA weights, size: {size_mb:.2f}MB", Colors.GREEN)
-        elif "model_state_dict" in checkpoint:
-            colored_print("Resume", "Loading full model weights (old format)", Colors.BOLD)
-            model.load_state_dict(checkpoint["model_state_dict"])
-        else:
-            colored_print("Warning", "Checkpoint has unknown format", Colors.RED)
-        
-        model_optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        colored_print("Warning", f"No adapter directories found in {checkpoint_path}", Colors.RED)
 
     return model, frozen_model, tokenizer, device, model_optimizer
 
@@ -1639,125 +1605,46 @@ def extract_letter_word_boundary(text: str) -> str:
     return "X"
 
 
-def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, total, subject=None, batch_index_override=None):
-    """Append MMLU evaluation results to a JSONL file (mirrors GSM8K pipeline)."""
-    # Determine batch index from checkpoint filename if available
-    batch_index = None
-    if batch_index_override is not None:
-        batch_index = int(batch_index_override)
-    elif model_path:
-        basename = os.path.basename(model_path)
-        match = re.search(r"model_batch_(\d+)\.pt$", basename)
-        if not match:
-            match = re.search(r"model_(\d+)_", basename)
-        if match:
-            batch_index = int(match.group(1))
 
-    # Prepare entry
-    entry = {
-        "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-        "batch_index": batch_index,
-        "accuracy": accuracy,
-        "model_path": model_path,
-        "model_type": model_type,
-        "total_examples": total,
-        "subject": subject,
-        "results": results,
-    }
-
-    # Append to a task-level JSONL file (same as GSM8K style)
-    results_file = os.path.join(output_dir, f"mmlu_results_{model_type}.jsonl")
-    with open(results_file, "a") as f:
-        json.dump(entry, f)
-        f.write("\n")
-
-    return results_file
-
-
-def evaluate_model_on_aqua(
-    actor_model: nn.Module,
-    critic_model: nn.Module,
-    tokenizer: Any,
-    device: torch.device,
-    test_data: List[Tuple[str, str]],
-    hyperparameters: Dict[str, Any],
-    batch_size: int = 16
-) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
-    """Evaluate AQuA - extract letter A-E from generated answer.
-    
-    Returns both original and word-boundary-based accuracy for comparison.
-    """
-    def extract_letter(text: str) -> str:
-        """Extract first letter A-E from text. Returns 'X' if none found."""
-        matches = re.findall(r"[A-E]", text.upper())
-        return matches[0] if matches else "X"
-    
-    return evaluate_model_generic(
-        actor_model, critic_model, tokenizer, device, test_data,
-        hyperparameters, extract_letter,
-        answer_extractor_fn_wb=extract_letter_word_boundary,
-        batch_size=batch_size,
-        task_name="AQuA", max_answer_tokens=10
-    )
-
-
-def evaluate_model_on_numeric(
-    actor_model: nn.Module,
-    critic_model: nn.Module,
-    tokenizer: Any,
-    device: torch.device,
-    test_data: List[Tuple[str, str]],
-    hyperparameters: Dict[str, Any],
-    batch_size: int = 16
-) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
-    """Evaluate numeric-answer tasks (e.g., SVAMP, MATH) - handles LaTeX formatting.
-    
-    Pipeline:
-    1. extract_answer: str -> Union[int, str]  (extracts first number or "[invalid]")
-    2. compare_normalized: Union[int, str], str -> bool  (normalizes and compares)
-    """
-    def normalize_numeric(text: str) -> str:
-        """Normalize numeric text by removing LaTeX, whitespace, etc."""
-        s = text.strip()
-        s = re.sub(r"\\boxed\{([^}]*)\}", r"\1", s)
-        s = s.replace("$", "").replace("\\", "")
-        s = re.sub(r"\s+", "", s)
-        return s
-    
-    def compare_normalized(pred: Union[int, str], gold: str) -> bool:
-        """Compare extracted prediction with gold answer after normalization.
-        
-        Args:
-            pred: Extracted answer from extract_answer (int or "[invalid]")
-            gold: Gold answer string from dataset
-        """
-        return normalize_numeric(str(pred)) == normalize_numeric(str(gold))
-    
-    return evaluate_model_generic(
-        actor_model, critic_model, tokenizer, device, test_data,
-        hyperparameters,
-        answer_extractor_fn=extract_answer,  # str -> Union[int, str]
-        answer_comparator_fn=compare_normalized,  # Union[int, str], str -> bool
-        batch_size=batch_size,
-        task_name="Numeric", max_answer_tokens=16
-    )
-
-
-def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
+def run_periodic_evaluation(state: TrainingState):
     """Run periodic evaluation on test set for supported tasks."""
-    # Clear CUDA cache before evaluation to ensure maximum memory available
     torch.cuda.empty_cache()
-    
-    # If GSM8K, evaluate the model
-    if state.hyperparameters["task_type"] == "gsm8k":
-        colored_print("Evaluation", "Running GSM8K evaluation...", Colors.BOLD)
-        
-        # Use test split for evaluation
-        test_data = list(load_gsm8k_dataset(split="test"))
-        
-        # Run evaluation in eval mode
-        with torch.no_grad():
-            state.actor_model.eval()
+    task_type = state.hyperparameters["task_type"]
+    batch_size = get_default_eval_batch_size(state.hyperparameters["batch_size"])
+
+    def load_eval_dataset():
+        meta = {}
+        if task_type == "gsm8k":
+            return list(load_gsm8k_dataset(split="test")), meta
+        if task_type == "mmlu":
+            subject = state.hyperparameters.get("mmlu_subject", None)
+            meta["subject"] = subject
+            split = state.hyperparameters.get("mmlu_split", "test")
+            return list(load_mmlu_dataset(split=split, subject=subject)), meta
+        if task_type == "arc":
+            subset = state.hyperparameters.get("arc_subset") or os.getenv("ARC_SUBSET", "ARC-Challenge")
+            meta["subset"] = subset
+            return list(load_arc_dataset(split="validation", subset=subset)), meta
+        if task_type == "aqua":
+            return list(load_aqua_dataset(split="test")), meta
+        if task_type == "mathqa":
+            return list(load_mathqa_dataset(split="test")), meta
+        if task_type == "svamp":
+            return list(load_svamp_dataset(split="test")), meta
+        if task_type == "math":
+            return list(load_math_dataset(split="test")), meta
+        if task_type == "arithmetic":
+            return list(load_arithmetic_dataset(chunk_size=200, split="test")), meta
+        colored_print("Evaluation", f"No evaluation implemented for task type: {task_type}", Colors.YELLOW)
+        return [], meta
+
+    test_data, meta = load_eval_dataset()
+    if not test_data:
+        return
+
+    with torch.no_grad():
+        state.actor_model.eval()
+        if task_type == "gsm8k":
             accuracy, results = evaluate_model_on_gsm8k(
                 state.actor_model,
                 state.critic_model,
@@ -1765,39 +1652,10 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"])
+                batch_size=batch_size,
             )
-            state.actor_model.train()
-        
-        # Save results into the run directory (e.g., results/gsm8k/<timestamp>)
-        model_dir = state.model_save_path
-        results_file = save_results(
-            model_dir,
-            checkpoint_path,  # Still pass for metadata, but override batch index explicitly
-            state.hyperparameters["model_type"],
-            accuracy,
-            results,
-            len(test_data),
-            batch_index_override=state.batch_index,
-        )
-        
-        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
-        # Clear cache after evaluation
-        torch.cuda.empty_cache()
-    
-    # If MMLU, evaluate the model
-    elif state.hyperparameters["task_type"] == "mmlu":
-        colored_print("Evaluation", "Running MMLU evaluation...", Colors.BOLD)
-        
-        # Get subject filter from hyperparameters
-        subject = state.hyperparameters.get("mmlu_subject", None)
-        
-        # Use test split for evaluation
-        test_data = list(load_mmlu_dataset(split="test", subject=subject))
-        
-        # Run evaluation in eval mode
-        with torch.no_grad():
-            state.actor_model.eval()
+            accuracy_wb = None
+        elif task_type == "mmlu":
             accuracy, results, accuracy_wb = evaluate_model_on_mmlu(
                 state.actor_model,
                 state.critic_model,
@@ -1805,195 +1663,9 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"])
+                batch_size=batch_size,
             )
-            state.actor_model.train()
-        
-        # Save results in run directory and update combined plot
-        model_dir = state.model_save_path
-        results_file = save_results_mmlu(
-            model_dir,
-            checkpoint_path,
-            state.hyperparameters["model_type"],
-            accuracy,
-            results,
-            len(test_data),
-            subject=subject,
-            batch_index_override=state.batch_index,
-        )
-        
-        # Log both metrics
-        log_msg = f"Completed successfully. Accuracy: {accuracy:.2%}"
-        if accuracy_wb is not None:
-            log_msg += f" | Accuracy (word boundary): {accuracy_wb:.2%}"
-        colored_print("Evaluation", log_msg, Colors.GREEN)
-        # Clear cache after evaluation
-        torch.cuda.empty_cache()
-
-    # If AQuA, evaluate using multiple choice
-    elif state.hyperparameters["task_type"] == "aqua":
-        colored_print("Evaluation", "Running AQuA evaluation...", Colors.BOLD)
-        test_data = list(load_aqua_dataset(split="test"))
-        with torch.no_grad():
-            state.actor_model.eval()
-            accuracy, results, accuracy_wb = evaluate_model_on_aqua(
-                state.actor_model,
-                state.critic_model,
-                state.tokenizer,
-                state.device,
-                test_data,
-                state.hyperparameters,
-                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
-            )
-            state.actor_model.train()
-        model_dir = state.model_save_path
-        results_file = os.path.join(model_dir, f"aqua_results_{state.hyperparameters['model_type']}.jsonl")
-        entry = {
-            "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "batch_index": state.batch_index,
-            "accuracy": accuracy,
-            "accuracy_wb": accuracy_wb,  # Add word boundary accuracy
-            "model_path": checkpoint_path,
-            "model_type": state.hyperparameters["model_type"],
-            "total_examples": len(test_data),
-            "results": results,
-        }
-        os.makedirs(model_dir, exist_ok=True)
-        with open(results_file, "a") as f:
-            json.dump(entry, f)
-            f.write("\n")
-        
-        # Log both metrics
-        log_msg = f"Completed successfully. Accuracy: {accuracy:.2%}"
-        if accuracy_wb is not None:
-            log_msg += f" | Accuracy (word boundary): {accuracy_wb:.2%}"
-        colored_print("Evaluation", log_msg, Colors.GREEN)
-        # Clear cache after evaluation
-        torch.cuda.empty_cache()
-    
-    # If SVAMP, evaluate numeric QA
-    elif state.hyperparameters["task_type"] == "svamp":
-        colored_print("Evaluation", "Running SVAMP evaluation...", Colors.BOLD)
-        test_data = list(load_svamp_dataset(split="test"))
-        with torch.no_grad():
-            state.actor_model.eval()
-            accuracy, results, accuracy_wb = evaluate_model_on_numeric(
-                state.actor_model,
-                state.critic_model,
-                state.tokenizer,
-                state.device,
-                test_data,
-                state.hyperparameters,
-                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
-            )
-            state.actor_model.train()
-        model_dir = state.model_save_path
-        results_file = os.path.join(model_dir, f"svamp_results_{state.hyperparameters['model_type']}.jsonl")
-        entry = {
-            "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "batch_index": state.batch_index,
-            "accuracy": accuracy,
-            "accuracy_wb": accuracy_wb,  # Always None for numeric tasks
-            "model_path": checkpoint_path,
-            "model_type": state.hyperparameters["model_type"],
-            "total_examples": len(test_data),
-            "results": results,
-        }
-        os.makedirs(model_dir, exist_ok=True)
-        with open(results_file, "a") as f:
-            json.dump(entry, f)
-            f.write("\n")
-        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
-        # Clear cache after evaluation
-        torch.cuda.empty_cache()
-    
-    # If MATH, evaluate numeric QA
-    elif state.hyperparameters["task_type"] == "math":
-        colored_print("Evaluation", "Running MATH evaluation...", Colors.BOLD)
-        test_data = list(load_math_dataset(split="test"))
-        with torch.no_grad():
-            state.actor_model.eval()
-            accuracy, results = evaluate_model_on_numeric(
-                state.actor_model,
-                state.critic_model,
-                state.tokenizer,
-                state.device,
-                test_data,
-                state.hyperparameters,
-                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"])
-            )
-            state.actor_model.train()
-        model_dir = state.model_save_path
-        results_file = os.path.join(model_dir, f"math_results_{state.hyperparameters['model_type']}.jsonl")
-        entry = {
-            "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "batch_index": state.batch_index,
-            "accuracy": accuracy,
-            "model_path": checkpoint_path,
-            "model_type": state.hyperparameters["model_type"],
-            "total_examples": len(test_data),
-            "results": results,
-        }
-        os.makedirs(model_dir, exist_ok=True)
-        with open(results_file, "a") as f:
-            json.dump(entry, f)
-            f.write("\n")
-        colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
-        # Clear cache after evaluation
-        torch.cuda.empty_cache()
-
-    # If MathQA, evaluate as 5-choice MCQ
-    elif state.hyperparameters["task_type"] == "mathqa":
-        colored_print("Evaluation", "Running MathQA evaluation...", Colors.BOLD)
-        test_data = list(load_mathqa_dataset(split="test"))
-        with torch.no_grad():
-            state.actor_model.eval()
-            # MathQA is 5-choice MCQ (A-E)
-            accuracy, results, accuracy_wb = evaluate_model_on_mathqa(
-                state.actor_model,
-                state.critic_model,
-                state.tokenizer,
-                state.device,
-                test_data,
-                state.hyperparameters,
-                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
-                num_samples=len(test_data),  # Evaluate all
-            )
-            state.actor_model.train()
-        model_dir = state.model_save_path
-        results_file = os.path.join(model_dir, f"mathqa_results_{state.hyperparameters['model_type']}.jsonl")
-        entry = {
-            "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "batch_index": state.batch_index,
-            "accuracy": accuracy,
-            "accuracy_wb": accuracy_wb,  # Add word boundary accuracy
-            "model_path": checkpoint_path,
-            "model_type": state.hyperparameters["model_type"],
-            "total_examples": len(test_data),
-            "results": results,
-        }
-        os.makedirs(model_dir, exist_ok=True)
-        with open(results_file, "a") as f:
-            json.dump(entry, f)
-            f.write("\n")
-        # Log both metrics
-        log_msg = f"Completed successfully. Accuracy: {accuracy:.2%}"
-        if accuracy_wb is not None:
-            log_msg += f" | Accuracy (word boundary): {accuracy_wb:.2%}"
-        colored_print("Evaluation", log_msg, Colors.GREEN)
-        # Clear cache after evaluation
-        torch.cuda.empty_cache()
-    
-    # If ARC, evaluate as 4-choice MCQ
-    elif state.hyperparameters["task_type"] == "arc":
-        colored_print("Evaluation", "Running ARC evaluation...", Colors.BOLD)
-        # Get subset from hyperparameters or environment variable
-        subset = state.hyperparameters.get("arc_subset") or os.getenv("ARC_SUBSET", "ARC-Challenge")
-        # Use validation split for ARC evaluation
-        test_data = list(load_arc_dataset(split="validation", subset=subset))
-        with torch.no_grad():
-            state.actor_model.eval()
-            # ARC is 4-choice MCQ (A-D)
+        elif task_type == "arc":
             accuracy, results, accuracy_wb = evaluate_model_on_arc(
                 state.actor_model,
                 state.critic_model,
@@ -2001,36 +1673,65 @@ def run_periodic_evaluation(state: TrainingState, checkpoint_path: str = None):
                 state.device,
                 test_data,
                 state.hyperparameters,
-                batch_size=get_default_eval_batch_size(state.hyperparameters["batch_size"]),
-                num_samples=len(test_data),  # Evaluate all
+                batch_size=batch_size,
             )
+        elif task_type == "aqua":
+            accuracy, results, accuracy_wb = evaluate_model_on_aqua(
+                state.actor_model,
+                state.critic_model,
+                state.tokenizer,
+                state.device,
+                test_data,
+                state.hyperparameters,
+                batch_size=batch_size,
+            )
+        elif task_type == "mathqa":
+            accuracy, results, accuracy_wb = evaluate_model_on_mathqa(
+                state.actor_model,
+                state.critic_model,
+                state.tokenizer,
+                state.device,
+                test_data,
+                state.hyperparameters,
+                batch_size=batch_size,
+            )
+        elif task_type in ("svamp", "math", "arithmetic"):
+            accuracy, results, _ = evaluate_model_on_numeric(
+                state.actor_model,
+                state.critic_model,
+                state.tokenizer,
+                state.device,
+                test_data,
+                state.hyperparameters,
+                batch_size=batch_size,
+            )
+            accuracy_wb = None
+        else:
+            colored_print("Evaluation", f"No evaluation implemented for task type: {task_type}", Colors.YELLOW)
             state.actor_model.train()
-        model_dir = state.model_save_path
-        results_file = os.path.join(model_dir, f"arc_results_{state.hyperparameters['model_type']}.jsonl")
-        entry = {
-            "timestamp": datetime.datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "batch_index": state.batch_index,
-            "accuracy": accuracy,
-            "accuracy_wb": accuracy_wb,  # Add word boundary accuracy
-            "model_path": checkpoint_path,
-            "model_type": state.hyperparameters["model_type"],
-            "subset": subset,
-            "total_examples": len(test_data),
-            "results": results,
-        }
-        os.makedirs(model_dir, exist_ok=True)
-        with open(results_file, "a") as f:
-            json.dump(entry, f)
-            f.write("\n")
-        # Log both metrics
-        log_msg = f"Completed successfully. Accuracy: {accuracy:.2%}"
-        if accuracy_wb is not None:
-            log_msg += f" | Accuracy (word boundary): {accuracy_wb:.2%}"
-        colored_print("Evaluation", log_msg, Colors.GREEN)
-        # Clear cache after evaluation
-        torch.cuda.empty_cache()
+            return
+        state.actor_model.train()
 
+    extra_metrics = {}
+    if accuracy_wb is not None:
+        extra_metrics["accuracy_word_boundary"] = accuracy_wb
+    if "subset" in meta:
+        extra_metrics["subset"] = meta["subset"]
 
+    save_task_results(
+        task_type=task_type,
+        output_dir=state.model_save_path,
+        model_type=state.hyperparameters["model_type"],
+        accuracy=accuracy,
+        results=results,
+        num_examples=len(test_data),
+        batch_index=state.batch_index,
+        subject=meta.get("subject"),
+        extra_metrics=extra_metrics or None,
+    )
+
+    colored_print("Evaluation", f"Completed successfully. Accuracy: {accuracy:.2%}", Colors.GREEN)
+    torch.cuda.empty_cache()
 
 
 def save_checkpoint(state: TrainingState):
@@ -2047,12 +1748,6 @@ def save_checkpoint(state: TrainingState):
         # Take snapshot of critic model before saving to verify it doesn't change
         critic_hash_before = get_model_hash(state.critic_model)
         colored_print("Critic Verification", f"Critic hash before saving: {critic_hash_before[:16]}...", Colors.BLUE)
-    
-    # Create checkpoint path with batch index to avoid overwriting
-    # Keep legacy checkpoint directory at task level, but store eval outputs in run dir
-    checkpoint_dir = os.path.dirname(state.model_save_path)
-    checkpoint_filename = f"model_batch_{state.batch_index}.pt"
-    checkpoint_path = os.path.join(checkpoint_dir, checkpoint_filename)
     
     # Create adapter path as a subdirectory of the run folder, not at the task level
     adapter_path = os.path.join(state.model_save_path, f"adapter_{state.batch_index}")
@@ -2288,7 +1983,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
     if not resume and state.batch_index == 0:
         colored_print("Baseline Eval", "Running evaluation at timestep 0", Colors.BOLD)
         try:
-            run_periodic_evaluation(state, checkpoint_path=None)
+            run_periodic_evaluation(state)
         except Exception as e:
             colored_print("Baseline Eval", f"Failed: {str(e)}", Colors.YELLOW)
     
@@ -2415,8 +2110,7 @@ def train(task_type: str, resume: bool, model_type: str, hyperparameters: dict):
         
         # Run evaluation periodically (independent of checkpointing)
         if batch_index % eval_frequency == 0 and batch_index > 0:
-            checkpoint_path = os.path.join(os.path.dirname(state.model_save_path), f"model_batch_{batch_index}.pt")
-            run_periodic_evaluation(state, checkpoint_path)
+            run_periodic_evaluation(state)
 
         # Every X batches, verify model weights are behaving as expected if verification is enabled
         if enable_weight_verification and batch_index % state.hyperparameters.get("weight_verification_freq", 10) == 0 and batch_index > 0:
@@ -2499,7 +2193,6 @@ class TrainingConfig:
             "wiki_compression": 50,
             "gsm8k": 100,
             "arithmetic": 150,
-            "arithmetic-negative": 150,
             "mmlu": 150,
             "mathqa": 150,
         }
@@ -2562,7 +2255,6 @@ if __name__ == "__main__":
         default="wiki_continuation",
         choices=[
             "arithmetic",
-            "arithmetic-negative",
             "gsm8k",
             "mmlu",
             "math",

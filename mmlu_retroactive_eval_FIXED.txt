@@ -1,131 +1,0 @@
-
-[1mRetroactive Evaluation[0m
-'Processing: results/mmlu/20251116_191617'
-
-[96mConfig[0m
-'Task: mmlu, Model: llama'
-
-[92mCheckpoints[0m
-'Found 2 checkpoints to evaluate'
-
-[96mBackup[0m
-'Skipping already-backed-up file: mmlu_results_llama_backup_20251117_042631.jsonl'
-
-[96mBackup[0m
-'Skipping already-backed-up file: mmlu_results_llama_backup_20251117_051305.jsonl'
-
-[93mBackup[0m
-'Created backup: mmlu_results_llama_backup_20251117_060852.jsonl'
-
-[92mBackup[0m
-'Backed up 1 existing result files'
-
-[96mDevice[0m
-'Using device: cuda'
-
-[96mDataset[0m
-'Loading test dataset for mmlu...'
-
-[92mDataset[0m
-'Using every 100th example: 141 test examples'
-
-[96mConfig[0m
-'Evaluation batch size: 16'
-
-[96mCritic[0m
-'Loading critic model (frozen)...'
-
-[96mModel[0m
-'Loading base model: llama'
-`torch_dtype` is deprecated! Use `dtype` instead!
-Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:03,  1.13s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:02<00:02,  1.08s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:03<00:01,  1.03s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.40it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.18it/s]
-
-[1mBaseline[0m
-'Evaluating untrained base model (batch 0)...'
-
-[96mModel[0m
-'Loading base model: llama'
-Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:03,  1.03s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:02<00:02,  1.04s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:03<00:01,  1.01s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.41it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.21it/s]
-Evaluating MMLU:   0%|          | 0/9 [00:00<?, ?it/s]The following generation flags are not valid and may be ignored: ['temperature']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
-Evaluating MMLU:  11%|█         | 1/9 [00:07<01:03,  7.98s/it]Evaluating MMLU:  22%|██▏       | 2/9 [00:15<00:55,  7.98s/it]Evaluating MMLU:  33%|███▎      | 3/9 [00:23<00:46,  7.74s/it]Evaluating MMLU:  44%|████▍     | 4/9 [00:31<00:39,  7.81s/it]Evaluating MMLU:  56%|█████▌    | 5/9 [00:38<00:30,  7.73s/it]Evaluating MMLU:  67%|██████▋   | 6/9 [00:46<00:23,  7.75s/it]Evaluating MMLU:  78%|███████▊  | 7/9 [00:54<00:15,  7.63s/it]Evaluating MMLU:  89%|████████▉ | 8/9 [01:01<00:07,  7.62s/it]Evaluating MMLU: 100%|██████████| 9/9 [01:09<00:00,  7.68s/it]Evaluating MMLU: 100%|██████████| 9/9 [01:09<00:00,  7.72s/it]
-
-[92mBatch 0 (Baseline)[0m
-'Accuracy: 15.60% | WB Accuracy: 9.22%'
-Evaluating checkpoints:   0%|          | 0/2 [00:00<?, ?it/s]
-[96mModel[0m
-'Loading base model: llama'
-
-Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s][A
-Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:03,  1.26s/it][A
-Loading checkpoint shards:  50%|█████     | 2/4 [00:02<00:02,  1.19s/it][A
-Loading checkpoint shards:  75%|███████▌  | 3/4 [00:03<00:01,  1.12s/it][A
-Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.28it/s][ALoading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.08it/s]
-
-[96mCheckpoint[0m
-'Loading adapter from: adapter_1000'
-
-Evaluating MMLU:   0%|          | 0/9 [00:00<?, ?it/s][A
-Evaluating MMLU:  11%|█         | 1/9 [00:11<01:29, 11.21s/it][A
-Evaluating MMLU:  22%|██▏       | 2/9 [00:22<01:20, 11.48s/it][A
-Evaluating MMLU:  33%|███▎      | 3/9 [00:34<01:08, 11.34s/it][A
-Evaluating MMLU:  44%|████▍     | 4/9 [00:45<00:56, 11.37s/it][A
-Evaluating MMLU:  56%|█████▌    | 5/9 [00:56<00:45, 11.42s/it][A
-Evaluating MMLU:  67%|██████▋   | 6/9 [01:08<00:34, 11.48s/it][A
-Evaluating MMLU:  78%|███████▊  | 7/9 [01:19<00:22, 11.43s/it][A
-Evaluating MMLU:  89%|████████▉ | 8/9 [01:31<00:11, 11.49s/it][A
-Evaluating MMLU: 100%|██████████| 9/9 [01:42<00:00, 11.38s/it][AEvaluating MMLU: 100%|██████████| 9/9 [01:42<00:00, 11.41s/it]
-
-[92mBatch 1000[0m
-'Accuracy: 16.31% | WB Accuracy: 12.06%'
-Evaluating checkpoints:  50%|█████     | 1/2 [01:49<01:49, 109.16s/it]
-[96mModel[0m
-'Loading base model: llama'
-
-Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s][A
-Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:03,  1.30s/it][A
-Loading checkpoint shards:  50%|█████     | 2/4 [00:02<00:02,  1.23s/it][A
-Loading checkpoint shards:  75%|███████▌  | 3/4 [00:03<00:01,  1.15s/it][A
-Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.26it/s][ALoading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.06it/s]
-
-[96mCheckpoint[0m
-'Loading adapter from: adapter_2000'
-
-Evaluating MMLU:   0%|          | 0/9 [00:00<?, ?it/s][A
-Evaluating MMLU:  11%|█         | 1/9 [00:11<01:32, 11.52s/it][A
-Evaluating MMLU:  22%|██▏       | 2/9 [00:22<01:20, 11.48s/it][A
-Evaluating MMLU:  33%|███▎      | 3/9 [00:34<01:08, 11.42s/it][A
-Evaluating MMLU:  44%|████▍     | 4/9 [00:45<00:57, 11.41s/it][A
-Evaluating MMLU:  56%|█████▌    | 5/9 [00:57<00:45, 11.37s/it][A
-Evaluating MMLU:  67%|██████▋   | 6/9 [01:08<00:34, 11.41s/it][A
-Evaluating MMLU:  78%|███████▊  | 7/9 [01:19<00:22, 11.37s/it][A
-Evaluating MMLU:  89%|████████▉ | 8/9 [01:30<00:11, 11.21s/it][A
-Evaluating MMLU: 100%|██████████| 9/9 [01:41<00:00, 11.10s/it][AEvaluating MMLU: 100%|██████████| 9/9 [01:41<00:00, 11.28s/it]
-
-[92mBatch 2000[0m
-'Accuracy: 12.06% | WB Accuracy: 9.93%'
-Evaluating checkpoints: 100%|██████████| 2/2 [03:37<00:00, 108.75s/it]Evaluating checkpoints: 100%|██████████| 2/2 [03:37<00:00, 108.81s/it]
-
-================================================================================
-
-[1mSummary[0m
-'Completed evaluation of 3 checkpoints'
-
-[96mTest Set[0m
-'Evaluated on 141 test examples'
-================================================================================
-
-Batch      Accuracy     WB Accuracy 
-----------------------------------------
-0          15.60%        9.22%
-1000       16.31%        12.06%
-2000       12.06%        9.93%
-
-[96mPlotting[0m
-'Regenerating combined metrics plot...'
-Combined plot saved to results/mmlu/20251116_191617/combined_metrics_mmlu.png
-
-[92mPlotting[0m
-'Plot saved to: combined_metrics_mmlu.png'
-
-[92mDone[0m
-'Results saved to: mmlu_results_llama.jsonl'
