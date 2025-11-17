@@ -95,6 +95,11 @@ def parse_args():
         default=None,
         help="Evaluation batch size (default: auto-determined from training batch size)",
     )
+    parser.add_argument(
+        "--skip_baseline",
+        action="store_true",
+        help="Skip baseline (batch 0) evaluation of untrained model",
+    )
     return parser.parse_args()
 
 
@@ -504,6 +509,76 @@ def main():
     
     # Evaluate each checkpoint
     results_summary = []
+    
+    # Check if baseline already exists in results file
+    results_file = os.path.join(args.results_dir, f"{task_type}_results_{model_type}.jsonl")
+    baseline_exists = False
+    if os.path.exists(results_file):
+        with open(results_file, 'r') as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                    if entry.get('batch_index') == 0:
+                        baseline_exists = True
+                        colored_print("Baseline", "Batch 0 already exists in results, skipping baseline evaluation", Colors.CYAN)
+                        break
+                except:
+                    continue
+    
+    # Evaluate baseline (batch 0 - no training) if not skipped and doesn't exist
+    if not args.skip_baseline and not baseline_exists:
+        colored_print("Baseline", "Evaluating untrained base model (batch 0)...", Colors.BOLD)
+        try:
+            base_model_baseline, _ = load_model_and_tokenizer(hyperparameters, device)
+            base_model_baseline.eval()
+            
+            with torch.no_grad():
+                accuracy, results, accuracy_wb = evaluate_checkpoint(
+                    base_model_baseline,
+                    critic_model,
+                    tokenizer,
+                    device,
+                    test_data,
+                    task_type,
+                    hyperparameters,
+                    batch_size,
+                )
+            
+            # Save baseline results
+            save_evaluation_results(
+                args.results_dir,
+                task_type,
+                model_type,
+                0,  # batch_index = 0 for baseline
+                accuracy,
+                accuracy_wb,
+                results,
+                "baseline (no training)",
+            )
+            
+            # Track for summary
+            results_summary.append((0, accuracy, accuracy_wb))
+            
+            # Log result
+            if accuracy_wb is not None:
+                colored_print(
+                    "Batch 0 (Baseline)",
+                    f"Accuracy: {accuracy:.2%} | WB Accuracy: {accuracy_wb:.2%}",
+                    Colors.GREEN
+                )
+            else:
+                colored_print(
+                    "Batch 0 (Baseline)",
+                    f"Accuracy: {accuracy:.2%}",
+                    Colors.GREEN
+                )
+            
+            # Cleanup
+            del base_model_baseline
+            torch.cuda.empty_cache()
+            
+        except Exception as e:
+            colored_print("Batch 0 (Baseline)", f"Evaluation failed: {e}", Colors.RED)
     
     for batch_idx, checkpoint_path in tqdm(checkpoints, desc="Evaluating checkpoints"):
         try:
