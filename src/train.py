@@ -277,6 +277,7 @@ class ReasoningOutput:
     R_mean_actor_logprobs: torch.Tensor
     R_mean_critic_logprobs: torch.Tensor
     kl: torch.Tensor
+    entropy: torch.Tensor
 
 
 @dataclass
@@ -501,6 +502,11 @@ def generate_reasoning_and_kl(
         kl = calculate_mean_kl(
             q_R_actor_logits, q_R_critic_logits, state.hyperparameters["cot_length"]
         )
+        
+        # Calculate entropy for exploration: H = -Σ p(x) log p(x)
+        # Higher entropy means more exploration/diversity
+        actor_probs = torch.exp(R_actor_logprobs)
+        entropy = -(actor_probs * R_actor_logprobs).sum(dim=-1).mean(dim=1)
     else:
         # Return zero tensors if we're not calculating KL
         device = q_R_tokens.device
@@ -508,6 +514,7 @@ def generate_reasoning_and_kl(
         R_mean_actor_logprobs = torch.zeros(batch_size, device=device)
         R_mean_critic_logprobs = torch.zeros(batch_size, device=device)
         kl = torch.zeros(batch_size, device=device)
+        entropy = torch.zeros(batch_size, device=device)
 
     # Decode actor reasoning text
     actor_reasoning = state.tokenizer.batch_decode(
@@ -520,6 +527,7 @@ def generate_reasoning_and_kl(
         R_mean_actor_logprobs=R_mean_actor_logprobs,
         R_mean_critic_logprobs=R_mean_critic_logprobs,
         kl=kl,
+        entropy=entropy,
     )
 
 
@@ -660,6 +668,7 @@ def calculate_losses(
     previous_normalized_rewards,
     hyperparameters,
     batch_index=None,
+    entropy=None,
 ):
     """Calculate training losses using specified methods (PG/PPO/EI).
 
@@ -709,6 +718,14 @@ def calculate_losses(
         weighted_kl = kl_penalty * kl
         losses = losses + weighted_kl
         metrics["weighted_kl"] = weighted_kl
+
+    # Add entropy bonus if specified (subtract because we want to maximize entropy)
+    entropy_bonus_weight = hyperparameters.get("entropy_bonus", 0.0)
+    if entropy_bonus_weight > 0.0 and entropy is not None:
+        entropy_bonus = entropy_bonus_weight * entropy
+        losses = losses - entropy_bonus  # Subtract to encourage higher entropy
+        metrics["entropy"] = entropy
+        metrics["entropy_bonus"] = entropy_bonus
 
     # Apply PPO if specified
     prob_ratios = torch.exp(R_mean_actor_logprobs - R_mean_critic_logprobs)
@@ -2102,6 +2119,7 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         state.previous_normalized_rewards,
         state.hyperparameters,
         state.batch_index,  # Pass batch index for accurate EI threshold calculation
+        entropy=reasoning_output.entropy,
     )
 
     batch_data = BatchData(
@@ -2421,6 +2439,7 @@ class TrainingConfig:
     question_length: int
     target_length: int
     kl_penalty: Optional[float]
+    entropy_bonus: float
     gradient_accumulation_steps: int
     batch_size: int
     normalize_loss: bool
@@ -2479,6 +2498,7 @@ class TrainingConfig:
             question_length=args.question_length,
             target_length=args.target_length,
             kl_penalty=args.kl_penalty,
+            entropy_bonus=args.entropy_bonus,
             gradient_accumulation_steps=args.gradient_accumulation_steps,
             batch_size=args.batch_size,
             normalize_loss=args.normalize_loss,
@@ -2554,6 +2574,8 @@ if __name__ == "__main__":
     parser.add_argument("--question_length", type=int, default=50)
     parser.add_argument("--target_length", type=int, default=50)
     parser.add_argument("--kl_penalty", type=float, default=0.1)
+    parser.add_argument("--entropy_bonus", type=float, default=0.0,
+                       help="Entropy bonus weight for exploration (default: 0.0, typical values: 0.01-0.1)")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, 
                        help="Number of batches to accumulate gradients before updating (default: 1)")
     parser.add_argument("--batch_size", type=int, default=None)
