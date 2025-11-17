@@ -103,5 +103,17 @@ Until this is resolved, be cautious about trusting MMLU evaluation scores from r
 
 ## Status
 
-🔴 **UNRESOLVED** - Needs investigation after evaluation refactor is complete.
+✅ **RESOLVED** - See `MMLU_MYSTERY_SOLVED.md` for complete explanation.
+
+### Short Answer
+
+The retroactive eval results showing 12% were generated using **buggy code** (before Nov 17, 06:30) that incorrectly used the **CRITIC model** instead of the **ACTOR model** for answer generation.
+
+The fix in commit `beafc9d` corrected this, and current evaluation code properly uses the actor model when `actor_reward_weight > 0`.
+
+In Markovian mode with `<Redacted>` questions:
+- **Critic (untrained)**: ~12% accuracy (produces garbage)
+- **Actor (trained)**: ~42-48% accuracy (learned to generate answers)
+
+Mystery solved! 🎉
 

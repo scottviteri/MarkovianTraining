@@ -15,9 +15,54 @@ from utils import (
 )
 
 # Reuse evaluators' evaluate_model functions to ensure identical prompting behavior
-from evaluation import evaluate_model_on_gsm8k as eval_gsm8k
-from evaluate_mmlu import evaluate_model as eval_mmlu
-from evaluate_reasoning import evaluate_model as eval_reasoning
+from evaluation import (
+    evaluate_model_on_gsm8k as eval_gsm8k,
+    evaluate_model_generic,
+)
+
+# For MMLU and reasoning tasks, we'll use the generic evaluator
+def eval_mmlu(actor_model, critic_model, tokenizer, device, test_data, h, 
+              num_samples=None, batch_size=None, baseline_mode=False,
+              baseline_thinking_tokens=None, baseline_temperature=None):
+    """Wrapper for MMLU evaluation using generic evaluator."""
+    from evaluation import evaluate_model_on_mmlu
+    return evaluate_model_on_mmlu(
+        actor_model, critic_model, tokenizer, device, test_data, h,
+        batch_size=batch_size, num_samples=num_samples
+    )
+
+def eval_reasoning(actor_model, critic_model, tokenizer, device, test_data, h, 
+                   num_samples=None, batch_size=None, baseline_mode=False,
+                   baseline_thinking_tokens=None, baseline_temperature=None):
+    """Wrapper for reasoning task evaluation using appropriate evaluator."""
+    task_type = h.get("task_type", "")
+    
+    # Determine which evaluator to use based on task type
+    if task_type == "arc":
+        from evaluation import evaluate_model_on_arc
+        return evaluate_model_on_arc(
+            actor_model, critic_model, tokenizer, device, test_data, h,
+            batch_size=batch_size, num_samples=num_samples
+        )
+    elif task_type == "aqua":
+        from evaluation import evaluate_model_on_aqua
+        return evaluate_model_on_aqua(
+            actor_model, critic_model, tokenizer, device, test_data, h,
+            batch_size=batch_size, num_samples=num_samples
+        )
+    elif task_type == "mathqa":
+        from evaluation import evaluate_model_on_mathqa
+        return evaluate_model_on_mathqa(
+            actor_model, critic_model, tokenizer, device, test_data, h,
+            batch_size=batch_size, num_samples=num_samples
+        )
+    else:
+        # Numeric tasks (svamp, arithmetic, math, etc.)
+        from evaluation import evaluate_model_on_numeric
+        return evaluate_model_on_numeric(
+            actor_model, critic_model, tokenizer, device, test_data, h,
+            batch_size=batch_size
+        )
 
 
 def default_task_specs() -> Dict[str, Dict]:

@@ -1,7 +1,7 @@
 import torch
 from torch.nn import functional as F
 import matplotlib.pyplot as plt
-from evaluate_gsm8k import load_model
+from utils import load_model_for_evaluation
 from train import generate_question_answer_batches
 import argparse
 import numpy as np
@@ -55,7 +55,7 @@ def calculate_token_logprobs_with_context(model, tokenizer, device, text, contex
 def process_samples(args):
     """Process samples and save raw data to file."""
     print("Loading model...")
-    model, tokenizer, device = load_model(
+    model, _, tokenizer, device = load_model_for_evaluation(
         model_path=None,
         use_base_model=True,
         model_type="llama"

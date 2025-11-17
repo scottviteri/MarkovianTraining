@@ -127,16 +127,52 @@ python src/train.py --task_type mmlu --model_type qwen3 --cot_length 150
 
 ## 📊 Evaluation
 
-### GSM8K Evaluation
-```bash
-# Evaluate specific checkpoint
-python src/evaluate_gsm8k.py --model_path results/gsm8k/20241201_143022/adapter_500
+### Unified Evaluation CLI
+All evaluation tasks are now consolidated in a single `evaluation.py` script:
 
+```bash
+# Evaluate GSM8K
+python src/evaluation.py --task_type gsm8k --model_path results/gsm8k/20241201_143022/adapter_500
+
+# Evaluate MMLU
+python src/evaluation.py --task_type mmlu --model_path <path> --num_samples 500
+
+# Evaluate ARC-Challenge
+python src/evaluation.py --task_type arc --model_path <path>
+
+# Evaluate other tasks: svamp, aqua, mathqa, arithmetic
+python src/evaluation.py --task_type svamp --model_path <path>
+```
+
+### Common Evaluation Options
+```bash
 # Evaluate all checkpoints in directory
-python src/evaluate_gsm8k.py --model_path results/gsm8k/20241201_143022 --all_checkpoints
+python src/evaluation.py --task_type gsm8k --model_path results/gsm8k/20241201_143022 --all_checkpoints
+
+# Evaluate all adapter directories
+python src/evaluation.py --task_type gsm8k --run_dir results/gsm8k/20241201_143022 --all_adapters
 
 # Quick evaluation with stride
-python src/evaluate_gsm8k.py --stride 10 --num_samples 100
+python src/evaluation.py --task_type gsm8k --stride 10 --num_samples 100
+
+# Use base model
+python src/evaluation.py --task_type gsm8k --use_base_model --model_type llama
+
+# Baseline prompting
+python src/evaluation.py --task_type gsm8k --baseline --baseline_thinking_tokens 150
+```
+
+### Task-Specific Options
+```bash
+# MMLU with specific subject
+python src/evaluation.py --task_type mmlu --mmlu_subject mathematics
+
+# ARC with subset selection
+python src/evaluation.py --task_type arc --arc_subset ARC-Easy
+ARC_SUBSET=ARC-Easy python src/evaluation.py --task_type arc  # via env var
+
+# Answer extraction methods (for numeric tasks)
+python src/evaluation.py --task_type gsm8k --answer_extraction_method anchor
 ```
 
 ### Cross-Model Evaluation
@@ -153,23 +189,94 @@ python src/evaluate_cross_model.py --log_file results/gsm8k/20241201_143022/log.
 python src/evaluate_cross_model.py --plot_multiple_critics --log_file results/gsm8k/
 ```
 
-### MMLU Evaluation
-```bash
-# Evaluate on MMLU
-python src/train.py --task_type mmlu --model_type qwen3 --num_batches 1000
+### Answer Extraction Methods
 
-# Evaluate specific MMLU subject
-python src/train.py --task_type mmlu --mmlu_subject mathematics --model_type llama
+The evaluation system supports three methods for extracting answers from model-generated text:
+
+| Method | Speed | Cost | Description | Use Case |
+|--------|-------|------|-------------|----------|
+| **simple** | Fast | Free | Basic regex-based extraction | Bulk evaluation |
+| **anchor** | Fast | Free | Context-aware extraction with anchors | Better accuracy, still free |
+| **llm** | Slow | ~$0.00001/sample | Claude Haiku gold-standard | Calibration & validation |
+
+#### Setup for LLM Extraction
+
+```bash
+# Install Anthropic SDK
+pip install anthropic
+
+# Set API key
+export ANTHROPIC_API_KEY="your-api-key-here"
 ```
 
-### ARC Evaluation
-```bash
-# Evaluate on ARC-Challenge (validation)
-python src/evaluate_reasoning.py --task_type arc --model_type llama --num_samples 500
+#### Comparing Extraction Methods
 
-# Choose ARC subset explicitly
-ARC_SUBSET=ARC-Easy python src/evaluate_reasoning.py --task_type arc --model_type llama --num_samples 500
+Use the demo script to compare all three methods on your checkpoints:
+
+```bash
+# Compare on base model
+python compare_extraction_demo.py --use_base_model --model_type llama --num_samples 50
+
+# Compare on trained checkpoint
+python compare_extraction_demo.py --model_path results/gsm8k/20241201_143022/adapter_500
+
+# Specify methods to compare
+python compare_extraction_demo.py --use_base_model --methods simple anchor llm
 ```
+
+#### Batch Calibration Across Checkpoints
+
+Run systematic calibration across multiple training runs:
+
+```bash
+# Calibrate GSM8K, SVAMP, and ARC checkpoints
+python src/batch_calibrate_extractions.py --datasets gsm8k svamp arc --num_samples 50
+
+# Control number of checkpoints per run
+python src/batch_calibrate_extractions.py --datasets gsm8k --max_checkpoints_per_run 3
+
+# All options
+python src/batch_calibrate_extractions.py \
+  --datasets gsm8k svamp arc aqua \
+  --num_samples 100 \
+  --model_type llama \
+  --max_checkpoints_per_run 5 \
+  --output_file my_calibration.json
+```
+
+#### Using in Your Code
+
+```python
+from evaluation import compare_extraction_methods, extract_answer
+from utils import load_model_for_evaluation, load_gsm8k_dataset
+
+# Load model and data
+actor, critic, tokenizer, device = load_model_for_evaluation(
+    model_path="results/gsm8k/.../adapter_500", 
+    model_type="llama"
+)
+test_data = list(load_gsm8k_dataset(split="test"))[:50]
+
+# Compare extraction methods
+results = compare_extraction_methods(
+    actor, critic, tokenizer, device, test_data,
+    hyperparameters={"task_type": "gsm8k", "model_type": "llama", 
+                     "cot_length": 100, "temperature": 1.0},
+    methods=["simple", "anchor", "llm"],
+    answer_format="numeric"  # or "A-D", "A-E" for MCQ
+)
+
+# Or extract answer with specific method
+answer_text = "Let me calculate: 2 + 2 = 4. The answer is 4."
+extracted = extract_answer(answer_text, method="llm", answer_format="numeric")
+```
+
+#### Recommended Workflow
+
+1. **Development**: Use `simple` or `anchor` methods for fast iteration
+2. **Calibration**: Periodically compare heuristics against `llm` gold-standard
+3. **Validation**: Use LLM extraction on critical evaluations or when debugging failures
+4. **Cost Management**: LLM extraction is ~$0.00001 per sample, very affordable for validation sets
 
 ## 🔬 Perturbation Analysis
 

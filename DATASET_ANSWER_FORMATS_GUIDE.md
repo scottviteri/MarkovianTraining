@@ -80,7 +80,7 @@ def extract_answer(answer):
 
 #### Evaluation Pipeline
 ```python
-# File: src/evaluate_gsm8k.py, lines 243-248
+# File: src/evaluation.py (evaluate_model_on_gsm8k function)
 extracted_answers = [extract_answer(ans) for ans in generated_answers]
 
 for q, a, cot, gen_a, ext_a in zip(...):

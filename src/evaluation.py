@@ -28,8 +28,15 @@ def get_default_eval_batch_size(train_batch_size: int) -> int:
     return max(1, int(train_batch_size * 1.5))
 
 
-def extract_answer(answer):
-    """Extract numerical answer from various text formats."""
+def extract_answer_simple(answer: str):
+    """Extract numerical answer using simple heuristics (original version).
+    
+    Heuristics:
+    1) If '=' exists, extract first number after '='
+    2) Else extract first number anywhere in text
+    
+    This is the original simple version kept for backward compatibility.
+    """
     if "=" in answer:
         answer = answer.split("=")[-1].strip()
     answer = answer.replace(",", "")
@@ -42,6 +49,327 @@ def extract_answer(answer):
     except:
         answer = "[invalid]"
     return answer
+
+
+def extract_answer_with_anchor(answer: str):
+    """Extract numerical answer with 'Answer:' anchor priority (sophisticated version).
+    
+    Heuristics (in order):
+    1) If an 'Answer' anchor exists (e.g., 'Answer:' or 'answer'), extract first integer after it
+    2) Else if an equals sign exists, extract first integer after '='
+    3) Else extract first integer anywhere in text
+    
+    This version prioritizes the 'Answer:' label which models are trained to use.
+    """
+    try:
+        text = (answer or "").strip()
+        # Normalize
+        text = text.replace(",", "")
+        
+        # 1) Anchor on 'Answer' label (case-insensitive), optional colon
+        m = re.search(r"(?i)answer\s*:?[\s\-]*", text)
+        if m:
+            after = text[m.end():]
+            m_num = re.search(r"-?\d+", after)
+            if m_num:
+                return int(m_num.group(0))
+        
+        # 2) After equals sign
+        if "=" in text:
+            after_eq = text.split("=", 1)[1]
+            m_num = re.search(r"-?\d+", after_eq)
+            if m_num:
+                return int(m_num.group(0))
+        
+        # 3) First integer anywhere
+        m_num = re.search(r"-?\d+", text)
+        if m_num:
+            return int(m_num.group(0))
+        
+        return "[invalid]"
+    except Exception:
+        return "[invalid]"
+
+
+def extract_answer_with_llm(answer: str, answer_format: str = "numeric"):
+    """Extract answer using Claude Haiku as gold-standard extractor.
+    
+    This uses an LLM to extract the answer from generated text, serving as a
+    gold-standard comparison point for heuristic methods.
+    
+    Args:
+        answer: Generated answer text to extract from
+        answer_format: Expected answer format:
+            - "numeric": Extract a number
+            - "A-D": Extract a letter choice A, B, C, or D
+            - "A-E": Extract a letter choice A, B, C, D, or E
+            
+    Returns:
+        Extracted answer or "[invalid]"
+        
+    Note:
+        Requires ANTHROPIC_API_KEY environment variable to be set.
+        Falls back to "[invalid]" if API call fails.
+    """
+    import os
+    
+    # Check for API key
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        # Fall back to simple extraction if no API key
+        return extract_answer_simple(answer) if answer_format == "numeric" else "[invalid]"
+    
+    try:
+        import anthropic
+        
+        client = anthropic.Anthropic(api_key=api_key)
+        
+        # Construct prompt based on answer format
+        if answer_format == "numeric":
+            system_prompt = """You are an expert at extracting numerical answers from text.
+Your task is to identify what numerical answer was provided in the text.
+Output ONLY the number, nothing else. If no clear answer is present, output: [invalid]"""
+            user_prompt = f"""Extract the numerical answer from this text:
+
+{answer}
+
+Output only the number (e.g., "42" or "-17"). If no clear numerical answer is present, output: [invalid]"""
+        
+        elif answer_format in ["A-D", "A-E"]:
+            max_letter = "D" if answer_format == "A-D" else "E"
+            system_prompt = f"""You are an expert at extracting multiple choice answers from text.
+Your task is to identify which letter choice (A through {max_letter}) was selected.
+Output ONLY the letter, nothing else. If no clear choice is present, output: [invalid]"""
+            user_prompt = f"""Extract the letter choice from this text:
+
+{answer}
+
+Output only the letter ({answer_format}). If no clear choice is present, output: [invalid]"""
+        
+        else:
+            raise ValueError(f"Unknown answer_format: {answer_format}")
+        
+        # Call Claude Haiku
+        message = client.messages.create(
+            model="claude-3-5-haiku-20241022",
+            max_tokens=20,
+            temperature=0,
+            system=system_prompt,
+            messages=[
+                {"role": "user", "content": user_prompt}
+            ]
+        )
+        
+        extracted = message.content[0].text.strip()
+        
+        # Post-process: convert to int for numeric, validate for MCQ
+        if answer_format == "numeric":
+            if extracted == "[invalid]":
+                return extracted
+            try:
+                # Try to extract just the number if LLM added extra text
+                match = re.search(r"-?\d+", extracted)
+                if match:
+                    return int(match.group(0))
+                else:
+                    return "[invalid]"
+            except:
+                return "[invalid]"
+        else:
+            # For MCQ, validate it's in the expected range
+            extracted_upper = extracted.upper()
+            if answer_format == "A-D" and extracted_upper in ["A", "B", "C", "D"]:
+                return extracted_upper
+            elif answer_format == "A-E" and extracted_upper in ["A", "B", "C", "D", "E"]:
+                return extracted_upper
+            else:
+                return "[invalid]" if extracted == "[invalid]" else "X"
+    
+    except Exception as e:
+        # On any error, fall back to simple extraction
+        print(f"Warning: LLM extraction failed ({str(e)}), falling back to simple method")
+        if answer_format == "numeric":
+            return extract_answer_simple(answer)
+        else:
+            return "[invalid]"
+
+
+def extract_answer(answer: str, method: str = "simple", answer_format: str = "numeric"):
+    """Configurable numerical answer extraction.
+    
+    Args:
+        answer: Generated answer text to extract from
+        method: Extraction method to use:
+            - "simple": Simple heuristics (check '=', then first number)
+            - "anchor": Check 'Answer:' label first, then '=', then first number
+            - "llm": Use Claude Haiku as gold-standard extractor
+        answer_format: For LLM method only - "numeric", "A-D", or "A-E"
+            
+    Returns:
+        Extracted integer or "[invalid]"
+    """
+    if method == "simple":
+        return extract_answer_simple(answer)
+    elif method == "anchor":
+        return extract_answer_with_anchor(answer)
+    elif method == "llm":
+        return extract_answer_with_llm(answer, answer_format=answer_format)
+    else:
+        raise ValueError(f"Unknown extraction method: {method}. Must be 'simple', 'anchor', or 'llm'")
+
+
+def compare_extraction_methods(
+    actor_model,
+    critic_model,
+    tokenizer,
+    device,
+    test_data: List[Tuple[str, str]],
+    hyperparameters: Dict[str, Any],
+    methods: List[str] = None,
+    batch_size: int = 16,
+    num_samples: int = None,
+    answer_format: str = "numeric"
+) -> Dict[str, Tuple[float, List[Dict[str, Any]]]]:
+    """Compare different answer extraction methods on the same evaluation run.
+    
+    This runs evaluation once with the model generating answers, then extracts
+    results using different methods to compare their performance.
+    
+    Args:
+        actor_model: Actor model for generating CoT
+        critic_model: Critic model for generating answers
+        tokenizer: Tokenizer
+        device: Device
+        test_data: List of (question, answer) tuples
+        hyperparameters: Hyperparameters dict
+        methods: List of extraction methods to compare (default: ["simple", "anchor", "llm"])
+        batch_size: Batch size for evaluation
+        num_samples: Optional limit on number of samples
+        answer_format: Answer format for LLM extraction - "numeric", "A-D", or "A-E"
+        
+    Returns:
+        Dictionary mapping method name to (accuracy, detailed_results) tuple
+        
+    Note:
+        If "llm" is in methods, requires ANTHROPIC_API_KEY environment variable.
+    """
+    from utils import colored_print, Colors
+    import os
+    
+    if methods is None:
+        # Include LLM if API key is available
+        methods = ["simple", "anchor"]
+        if os.getenv("ANTHROPIC_API_KEY"):
+            methods.append("llm")
+            colored_print("LLM Method", "ANTHROPIC_API_KEY found - including LLM gold-standard comparison", Colors.CYAN)
+        else:
+            colored_print("LLM Method", "ANTHROPIC_API_KEY not found - skipping LLM comparison", Colors.YELLOW)
+    
+    # Limit samples if requested
+    if num_samples and num_samples < len(test_data):
+        test_data = test_data[:num_samples]
+    
+    colored_print("Comparison", f"Comparing extraction methods: {', '.join(methods)}", Colors.CYAN)
+    
+    # Run evaluation once to get generated answers
+    # We'll use the generic function but extract with the first method
+    accuracy_first, results_first, _ = evaluate_model_on_numeric(
+        actor_model, critic_model, tokenizer, device, test_data,
+        hyperparameters, batch_size=batch_size,
+        answer_extraction_method=methods[0]
+    )
+    
+    # Now re-extract and re-score with each method
+    comparison_results = {}
+    
+    for method in methods:
+        correct = 0
+        method_results = []
+        
+        colored_print(f"Processing", f"Re-extracting with method: {method}", Colors.CYAN)
+        
+        # For LLM method, we may want to batch or rate limit
+        import time
+        
+        for idx, result in enumerate(results_first):
+            # Re-extract using this method
+            generated_answer = result["generated_answer"]
+            gold_answer = result["gold"]
+            
+            # Extract with this method
+            extracted = extract_answer(generated_answer, method=method, answer_format=answer_format)
+            gold_extracted = extract_answer(gold_answer, method=method, answer_format=answer_format)
+            
+            # Rate limiting for LLM calls (50 requests per second for Haiku)
+            if method == "llm" and idx > 0 and idx % 50 == 0:
+                time.sleep(1.1)  # Rate limit: max 50/sec
+                colored_print("Rate Limit", f"Processed {idx}/{len(results_first)} with LLM", Colors.CYAN)
+            
+            is_correct = (extracted == gold_extracted)
+            if is_correct:
+                correct += 1
+            
+            # Create result entry for this method
+            method_result = {
+                "question": result["question"],
+                "reasoning": result["reasoning"],
+                "generated_answer": generated_answer,
+                "predicted": extracted,
+                "gold": gold_answer,
+                "correct": is_correct,
+                "extraction_method": method
+            }
+            method_results.append(method_result)
+        
+        accuracy = correct / len(test_data) if len(test_data) > 0 else 0.0
+        comparison_results[method] = (accuracy, method_results)
+        
+        colored_print(f"Method: {method}", f"Accuracy: {accuracy:.2%}", Colors.GREEN if accuracy > 0.5 else Colors.YELLOW)
+    
+    # Print comparison summary with agreement analysis
+    print("\n" + "=" * 70)
+    colored_print("Comparison Summary", "Extraction Method Comparison", Colors.BOLD)
+    print("=" * 70)
+    
+    # Show accuracies
+    for method in methods:
+        accuracy, _ = comparison_results[method]
+        marker = "📊" if method == "llm" else "🔧"
+        print(f"{marker} {method:12s}: {accuracy:.2%}")
+    
+    # If LLM is included, show agreement with LLM (gold standard)
+    if "llm" in methods and "llm" in comparison_results:
+        print("\n" + "-" * 70)
+        colored_print("Agreement with LLM Gold Standard", "", Colors.BOLD)
+        print("-" * 70)
+        
+        llm_results = comparison_results["llm"][1]
+        llm_predictions = [r["predicted"] for r in llm_results]
+        
+        for method in methods:
+            if method == "llm":
+                continue
+            
+            method_results = comparison_results[method][1]
+            method_predictions = [r["predicted"] for r in method_results]
+            
+            # Calculate agreement
+            agreements = sum(1 for m, l in zip(method_predictions, llm_predictions) if m == l)
+            agreement_rate = agreements / len(method_predictions) if method_predictions else 0.0
+            
+            # Calculate where they differ
+            disagreements = [(i, m, l) for i, (m, l) in enumerate(zip(method_predictions, llm_predictions)) if m != l]
+            
+            print(f"{method:12s}: {agreement_rate:.2%} agreement ({len(disagreements)} disagreements)")
+            
+            # Show a few examples of disagreements
+            if disagreements and len(disagreements) <= 5:
+                for i, method_pred, llm_pred in disagreements[:3]:
+                    print(f"  Example: {method} extracted '{method_pred}' vs LLM '{llm_pred}'")
+    
+    print("=" * 70 + "\n")
+    
+    return comparison_results
 
 
 def extract_letter(text: str) -> str:
@@ -400,14 +728,24 @@ def evaluate_model_on_numeric(
     device: torch.device,
     test_data: List[Tuple[str, str]],
     hyperparameters: Dict[str, Any],
-    batch_size: int = 16
+    batch_size: int = 16,
+    answer_extraction_method: str = "simple"
 ) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
     """Evaluate numeric QA tasks (GSM8K, SVAMP, MATH).
     
     Pipeline:
     1. extract_answer: str -> Union[int, str]  (extracts first number or "[invalid]")
     2. compare_normalized: Union[int, str], str -> bool  (normalizes and compares)
+    
+    Args:
+        answer_extraction_method: Method for extracting numeric answers:
+            - "simple": Check '=' then find first number (default, backward compatible)
+            - "anchor": Check 'Answer:' label first, then '=', then first number
     """
+    # Get method from hyperparameters if not explicitly provided
+    if answer_extraction_method == "simple" and "answer_extraction_method" in hyperparameters:
+        answer_extraction_method = hyperparameters["answer_extraction_method"]
+    
     def normalize_numeric(text: str) -> str:
         """Normalize numeric text by removing LaTeX, whitespace, etc."""
         s = text.strip()
@@ -425,10 +763,14 @@ def evaluate_model_on_numeric(
         """
         return normalize_numeric(str(pred)) == normalize_numeric(str(gold))
     
+    # Create extraction function with configured method
+    def extract_with_method(answer: str):
+        return extract_answer(answer, method=answer_extraction_method)
+    
     return evaluate_model_generic(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters,
-        answer_extractor_fn=extract_answer,  # str -> Union[int, str]
+        answer_extractor_fn=extract_with_method,  # str -> Union[int, str]
         answer_comparator_fn=compare_normalized,  # Union[int, str], str -> bool
         batch_size=batch_size,
         task_name="Numeric", max_answer_tokens=16
@@ -447,6 +789,7 @@ def evaluate_model_on_gsm8k(
     baseline_mode=False,
     baseline_thinking_tokens=None,
     baseline_temperature=None,
+    answer_extraction_method="simple",
 ):
     """Evaluate model on GSM8K test set.
     
@@ -462,8 +805,15 @@ def evaluate_model_on_gsm8k(
         baseline_mode: If True, use standard baseline prompting
         baseline_thinking_tokens: Max thinking tokens for baseline (caps new tokens for stage 1)
         baseline_temperature: Temperature for baseline thinking generation
+        answer_extraction_method: Method for extracting numeric answers:
+            - "simple": Check '=' then find first number (default, backward compatible)
+            - "anchor": Check 'Answer:' label first, then '=', then first number
     """
     from utils import construct_baseline_prompts
+    
+    # Get method from hyperparameters if not explicitly provided
+    if answer_extraction_method == "simple" and "answer_extraction_method" in hyperparameters:
+        answer_extraction_method = hyperparameters["answer_extraction_method"]
     
     # Determine default eval batch size: floor(1.5x) of training batch size (defaults to 8 if absent)
     if batch_size is None:
@@ -569,11 +919,11 @@ def evaluate_model_on_gsm8k(
             answer_outputs[:, tokenized_answer_inputs.input_ids.shape[1]:],
             skip_special_tokens=True
         )
-        extracted_answers = [extract_answer(ans) for ans in generated_answers]
+        extracted_answers = [extract_answer(ans, method=answer_extraction_method) for ans in generated_answers]
         
         # Check correctness
         for q, a, cot, gen_a, ext_a in zip(questions, answers, cot_texts, generated_answers, extracted_answers):
-            correct_answer = extract_answer(a)
+            correct_answer = extract_answer(a, method=answer_extraction_method)
             is_correct = (ext_a == correct_answer)
             
             result = {
@@ -726,4 +1076,499 @@ def save_results_mmlu(output_dir, model_path, model_type, accuracy, results, tot
         f.write("\n")
     
     return results_file
+
+
+# ============================================================================
+# Batch Evaluation Functions
+# ============================================================================
+
+def find_checkpoints(results_dir: str) -> List[Tuple[int, str]]:
+    """Find all checkpoint directories in results_dir.
+    
+    Args:
+        results_dir: Path to results directory
+        
+    Returns:
+        List of (batch_index, checkpoint_path) tuples, sorted by batch_index
+    """
+    import glob
+    
+    checkpoint_dirs = glob.glob(os.path.join(results_dir, "adapter_*"))
+    
+    # Extract batch indices from directory names
+    checkpoints = []
+    for ckpt_dir in checkpoint_dirs:
+        match = re.search(r"adapter_(\d+)", os.path.basename(ckpt_dir))
+        if match:
+            batch_idx = int(match.group(1))
+            checkpoints.append((batch_idx, ckpt_dir))
+    
+    # Sort by batch index
+    checkpoints.sort(key=lambda x: x[0])
+    
+    return checkpoints
+
+
+def backup_existing_results(results_dir: str) -> List[str]:
+    """Backup existing evaluation result files.
+    
+    Args:
+        results_dir: Path to results directory
+        
+    Returns:
+        List of backup file paths created
+    """
+    import glob
+    import shutil
+    from utils import colored_print, Colors
+    
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    result_files = glob.glob(os.path.join(results_dir, "*_results_*.jsonl"))
+    
+    backups = []
+    for result_file in result_files:
+        base_name = os.path.basename(result_file)
+        
+        # Skip files that are already backups
+        if "_backup_" in base_name:
+            colored_print("Backup", f"Skipping already-backed-up file: {base_name}", Colors.CYAN)
+            continue
+        
+        # Create backup filename
+        backup_name = base_name.replace(".jsonl", f"_backup_{timestamp}.jsonl")
+        backup_path = os.path.join(results_dir, backup_name)
+        
+        # Move file to backup
+        shutil.move(result_file, backup_path)
+        backups.append(backup_path)
+        colored_print("Backup", f"Created backup: {backup_name}", Colors.YELLOW)
+    
+    return backups
+
+
+# ============================================================================
+# CLI Interface
+# ============================================================================
+
+def main():
+    """Unified CLI for all evaluation tasks."""
+    import argparse
+    from datasets import load_dataset
+    
+    parser = argparse.ArgumentParser(
+        description="Unified evaluation CLI for all tasks (GSM8K, MMLU, ARC, SVAMP, AQuA, MathQA, Arithmetic)"
+    )
+    
+    # Core arguments
+    parser.add_argument(
+        "--task_type",
+        type=str,
+        required=True,
+        choices=["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic", "arithmetic-negative"],
+        help="Task to evaluate"
+    )
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        default=None,
+        help="Path to trained model weights (default: latest result or base model)"
+    )
+    parser.add_argument(
+        "--model_type",
+        type=str,
+        choices=["llama", "llama3.2-1b", "mistral", "gpt2", "tinystories", "phi", "phi-4", "qwen3", "qwen3-14b", "gemma-3", "gemma-3-small"],
+        default=None,
+        help="Model type (default: infer from model path)"
+    )
+    parser.add_argument(
+        "--use_base_model",
+        action="store_true",
+        help="Use base model without adapters"
+    )
+    
+    # Evaluation parameters
+    parser.add_argument(
+        "--num_samples",
+        type=int,
+        default=None,
+        help="Number of samples to evaluate (default: all)"
+    )
+    parser.add_argument(
+        "--batch_size",
+        type=int,
+        default=None,
+        help="Batch size for evaluation (default: 1.5x training batch size)"
+    )
+    parser.add_argument(
+        "--stride",
+        type=int,
+        default=1,
+        help="Evaluate every nth example"
+    )
+    
+    # Generation parameters
+    parser.add_argument(
+        "--cot_length",
+        type=int,
+        default=None,
+        help="Override CoT length"
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Override temperature"
+    )
+    
+    # Answer extraction
+    parser.add_argument(
+        "--answer_extraction_method",
+        type=str,
+        choices=["simple", "anchor", "llm"],
+        default="simple",
+        help="Answer extraction method for numeric tasks (default: simple)"
+    )
+    
+    # Checkpoint selection
+    parser.add_argument(
+        "--training_index",
+        type=int,
+        default=None,
+        help="Specific training index to evaluate"
+    )
+    parser.add_argument(
+        "--all_checkpoints",
+        action="store_true",
+        help="Evaluate all checkpoints in the directory"
+    )
+    parser.add_argument(
+        "--all_adapters",
+        action="store_true",
+        help="Evaluate all adapter_* directories in run directory"
+    )
+    
+    # Baseline mode
+    parser.add_argument(
+        "--baseline",
+        action="store_true",
+        help="Use standard baseline prompting"
+    )
+    parser.add_argument(
+        "--baseline_thinking_tokens",
+        type=int,
+        default=None,
+        help="Max tokens for baseline thinking stage"
+    )
+    parser.add_argument(
+        "--baseline_temperature",
+        type=float,
+        default=None,
+        help="Temperature for baseline thinking generation"
+    )
+    
+    # Task-specific arguments
+    parser.add_argument(
+        "--run_dir",
+        type=str,
+        default=None,
+        help="Run directory containing adapter_* folders (for --all_adapters)"
+    )
+    parser.add_argument(
+        "--arc_subset",
+        type=str,
+        choices=["ARC-Challenge", "ARC-Easy"],
+        default=None,
+        help="ARC subset to use (default: from env ARC_SUBSET or ARC-Challenge)"
+    )
+    parser.add_argument(
+        "--mmlu_subject",
+        type=str,
+        default=None,
+        help="Specific MMLU subject to evaluate (default: all)"
+    )
+    
+    args = parser.parse_args()
+    
+    # Import utilities
+    from utils import (
+        find_latest_result,
+        get_hyperparameters_from_log,
+        get_model_paths_and_type,
+        load_model_for_evaluation,
+        load_svamp_dataset,
+        load_aqua_dataset,
+        load_arc_dataset,
+        load_mathqa_dataset,
+        generate_question_answer_batches,
+        load_gsm8k_dataset,
+    )
+    
+    # Determine model paths
+    if args.all_adapters:
+        # Find all adapter directories in run_dir
+        run_dir = args.run_dir or args.model_path or find_latest_result()
+        if not run_dir:
+            raise FileNotFoundError("No results directory found")
+        if not os.path.isdir(run_dir):
+            run_dir = os.path.dirname(run_dir)
+        
+        checkpoints = find_checkpoints(run_dir)
+        if not checkpoints:
+            print(f"No adapter directories found in {run_dir}")
+            return
+        
+        model_paths = [ckpt_path for _, ckpt_path in checkpoints]
+        
+        # Infer model type from run_dir log
+        try:
+            hyperparameters_base = get_hyperparameters_from_log(run_dir, default_task=args.task_type)
+            inferred_model_type = hyperparameters_base.get("model_type", "mistral")
+        except Exception:
+            inferred_model_type = "mistral"
+        
+        if args.model_type is None:
+            args.model_type = inferred_model_type
+            print(f"Inferred model type: {args.model_type}")
+    elif not args.use_base_model:
+        model_paths, inferred_model_type = get_model_paths_and_type(
+            args.model_path, args.training_index, args.all_checkpoints
+        )
+        if args.model_type is None:
+            args.model_type = inferred_model_type
+            print(f"Inferred model type: {args.model_type}")
+    else:
+        model_paths = [None]
+        args.model_type = args.model_type or "mistral"
+    
+    # Process each checkpoint
+    for checkpoint_path in model_paths:
+        if checkpoint_path:
+            print(f"\nEvaluating checkpoint: {checkpoint_path}")
+            run_dir = os.path.dirname(checkpoint_path) if os.path.isfile(checkpoint_path) else checkpoint_path
+            # If adapter dir, its parent is the run directory
+            if os.path.basename(run_dir).startswith("adapter_"):
+                run_dir = os.path.dirname(run_dir)
+            
+            hyperparameters = get_hyperparameters_from_log(run_dir, default_task=args.task_type)
+            hyperparameters["task_type"] = args.task_type
+            
+            # Override hyperparameters if provided
+            if args.cot_length is not None:
+                hyperparameters["cot_length"] = args.cot_length
+            if args.temperature is not None:
+                hyperparameters["temperature"] = args.temperature
+            if args.answer_extraction_method != "simple":
+                hyperparameters["answer_extraction_method"] = args.answer_extraction_method
+            if args.mmlu_subject:
+                hyperparameters["mmlu_subject"] = args.mmlu_subject
+                
+            # Extract batch index for results
+            if checkpoint_path:
+                basename = os.path.basename(checkpoint_path)
+                match = re.search(r'adapter_(\d+)', basename)
+                if match:
+                    batch_index = int(match.group(1))
+                else:
+                    batch_index = None
+            else:
+                batch_index = None
+        else:
+            # Base model evaluation
+            hyperparameters = {
+                "model_type": args.model_type,
+                "task_type": args.task_type,
+                "cot_length": args.cot_length or 150,
+                "temperature": args.temperature or 1.0,
+                "batch_size": 12,
+                "markovian": True,
+            }
+            if args.answer_extraction_method != "simple":
+                hyperparameters["answer_extraction_method"] = args.answer_extraction_method
+            if args.mmlu_subject:
+                hyperparameters["mmlu_subject"] = args.mmlu_subject
+            batch_index = None
+        
+        # Load models
+        actor_model, critic_model, tokenizer, device = load_model_for_evaluation(
+            checkpoint_path,
+            args.use_base_model,
+            args.model_type
+        )
+        
+        # Load dataset based on task type
+        if args.task_type == "gsm8k":
+            test_data = list(load_gsm8k_dataset(split="test"))
+        elif args.task_type == "mmlu":
+            subject = hyperparameters.get("mmlu_subject", None)
+            split = hyperparameters.get("mmlu_split", "validation")
+            ds = load_dataset("cais/mmlu", subject if subject else "all")
+            split_name = "test" if split == "test" else "validation"
+            d = ds[split_name]
+            
+            test_data = []
+            for ex in d:
+                stem = ex["question"]
+                choices = ex["choices"] if "choices" in ex else ex.get("options", [])
+                if not choices or len(choices) < 4:
+                    continue
+                options_text = "\n".join([
+                    f"A. {choices[0]}",
+                    f"B. {choices[1]}",
+                    f"C. {choices[2]}",
+                    f"D. {choices[3]}",
+                ])
+                question_text = f"{stem}\n\nOptions:\n{options_text}"
+                if "answer" in ex and isinstance(ex["answer"], int):
+                    correct_letter = ["A", "B", "C", "D"][ex["answer"]]
+                else:
+                    correct_letter = str(ex.get("answer", "")).strip().upper()
+                    if correct_letter not in ["A", "B", "C", "D"]:
+                        continue
+                test_data.append((question_text, correct_letter))
+        elif args.task_type == "arc":
+            subset = args.arc_subset or os.getenv("ARC_SUBSET", "ARC-Challenge")
+            test_data = list(load_arc_dataset(split="validation", subset=subset))
+        elif args.task_type == "svamp":
+            test_data = list(load_svamp_dataset(split="test"))
+        elif args.task_type == "aqua":
+            test_data = list(load_aqua_dataset(split="test"))
+        elif args.task_type == "mathqa":
+            test_data = list(load_mathqa_dataset(split="test"))
+            if not test_data:
+                raise FileNotFoundError("No MathQA test data found. Set MATHQA_PATH or use HuggingFace dataset.")
+        elif args.task_type in ["arithmetic", "arithmetic-negative"]:
+            batch_size_gen = args.num_samples or 200
+            batch = next(
+                generate_question_answer_batches(
+                    num_batches=1,
+                    batch_size=batch_size_gen,
+                    task_type=args.task_type,
+                    tokenizer=None,
+                    hyperparameters={},
+                )
+            )
+            test_data = batch
+        else:
+            raise ValueError(f"Unsupported task type: {args.task_type}")
+        
+        # Apply stride if specified
+        if args.stride > 1:
+            test_data = test_data[::args.stride]
+            print(f"Using stride={args.stride}, evaluating on {len(test_data)} examples")
+        
+        # Determine eval batch size
+        eval_bs = args.batch_size if args.batch_size is not None else get_default_eval_batch_size(
+            hyperparameters.get("batch_size", 12)
+        )
+        
+        # Run evaluation based on task type
+        if args.task_type == "gsm8k":
+            accuracy, results = evaluate_model_on_gsm8k(
+                actor_model, critic_model, tokenizer, device,
+                test_data, hyperparameters,
+                num_samples=args.num_samples,
+                batch_size=eval_bs,
+                baseline_mode=args.baseline,
+                baseline_thinking_tokens=args.baseline_thinking_tokens,
+                baseline_temperature=args.baseline_temperature,
+                answer_extraction_method=args.answer_extraction_method,
+            )
+        elif args.task_type == "mmlu":
+            accuracy, results, accuracy_wb = evaluate_model_on_mmlu(
+                actor_model, critic_model, tokenizer, device,
+                test_data, hyperparameters,
+                batch_size=eval_bs,
+                num_samples=args.num_samples,
+            )
+            if accuracy_wb is not None:
+                colored_print("MMLU Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
+        elif args.task_type == "arc":
+            accuracy, results, accuracy_wb = evaluate_model_on_arc(
+                actor_model, critic_model, tokenizer, device,
+                test_data, hyperparameters,
+                batch_size=eval_bs,
+                num_samples=args.num_samples,
+            )
+            if accuracy_wb is not None:
+                colored_print("ARC Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
+        elif args.task_type == "aqua":
+            accuracy, results, accuracy_wb = evaluate_model_on_aqua(
+                actor_model, critic_model, tokenizer, device,
+                test_data, hyperparameters,
+                batch_size=eval_bs,
+                num_samples=args.num_samples,
+            )
+            if accuracy_wb is not None:
+                colored_print("AQuA Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
+        elif args.task_type == "mathqa":
+            accuracy, results, accuracy_wb = evaluate_model_on_mathqa(
+                actor_model, critic_model, tokenizer, device,
+                test_data, hyperparameters,
+                batch_size=eval_bs,
+                num_samples=args.num_samples,
+            )
+            if accuracy_wb is not None:
+                colored_print("MathQA Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
+        elif args.task_type in ["svamp", "arithmetic", "arithmetic-negative"]:
+            accuracy, results, _ = evaluate_model_on_numeric(
+                actor_model, critic_model, tokenizer, device,
+                test_data, hyperparameters,
+                batch_size=eval_bs,
+                answer_extraction_method=args.answer_extraction_method,
+            )
+        else:
+            raise ValueError(f"Unsupported task type: {args.task_type}")
+        
+        # Print results
+        colored_print(f"{args.task_type.upper()} Accuracy", f"{accuracy:.2%}", Colors.GREEN if accuracy > 0.5 else Colors.YELLOW)
+        
+        # Save results
+        model_dir = os.path.dirname(checkpoint_path) if checkpoint_path else f"results/{args.task_type}"
+        if checkpoint_path and os.path.isdir(checkpoint_path):
+            # If checkpoint_path is a directory (adapter_*), use its parent
+            model_dir = os.path.dirname(checkpoint_path)
+        os.makedirs(model_dir, exist_ok=True)
+        
+        if args.task_type == "gsm8k":
+            results_file = save_results(
+                model_dir, checkpoint_path, args.model_type,
+                accuracy, results, args.num_samples,
+                batch_index_override=(0 if args.baseline else batch_index)
+            )
+        elif args.task_type == "mmlu":
+            results_file = save_results_mmlu(
+                model_dir, checkpoint_path, args.model_type,
+                accuracy, results, len(test_data),
+                subject=args.mmlu_subject,
+                batch_index_override=(0 if args.baseline else batch_index)
+            )
+        else:
+            # Generic save for other tasks
+            entry = {
+                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+                "batch_index": (0 if args.baseline else batch_index),
+                "accuracy": accuracy,
+                "model_path": checkpoint_path,
+                "model_type": args.model_type,
+                "task_type": args.task_type,
+                "num_samples": args.num_samples or len(test_data),
+                "detailed_results": results
+            }
+            results_file = os.path.join(model_dir, f"{args.task_type}_results_{args.model_type}.jsonl")
+            with open(results_file, "a") as f:
+                json.dump(entry, f)
+                f.write("\n")
+        
+        colored_print("Results", f"Appended to {results_file}", Colors.CYAN)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        exit(1)
+    except KeyboardInterrupt:
+        print("\nEvaluation interrupted by user")
+        exit(0)
 

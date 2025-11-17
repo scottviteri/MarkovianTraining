@@ -478,6 +478,110 @@ def load_model(model_type, hyperparameters=None):
     return model, frozen_model, tokenizer, device
 
 
+def load_model_for_evaluation(model_path=None, use_base_model=False, model_type="mistral"):
+    """
+    Unified model loading function for evaluation.
+    
+    Supports:
+    - Base model evaluation (use_base_model=True)
+    - Legacy checkpoint files (.pt with model_state_dict)
+    - Adapter directories (saved via save_pretrained)
+    
+    Args:
+        model_path: Path to checkpoint file or adapter directory (None for base model)
+        use_base_model: If True, only load base model without adapters
+        model_type: Model type string (mistral, llama, etc.)
+        
+    Returns:
+        Tuple of (actor_model, critic_model, tokenizer, device)
+    """
+    import copy
+    
+    # Get HuggingFace model name from model type
+    if model_type == "mistral":
+        model_name = "mistralai/Mistral-7B-Instruct-v0.2"
+    elif model_type == "llama":
+        model_name = "meta-llama/Llama-3.1-8B-Instruct"
+    elif model_type == "llama3.2-1b":
+        model_name = "meta-llama/Llama-3.2-1B-Instruct"
+    elif model_type == "gpt2":
+        model_name = "openai-community/gpt2"
+    elif model_type == "tinystories":
+        model_name = "roneneldan/TinyStories"
+    elif model_type == "phi":
+        model_name = "microsoft/Phi-3.5-mini-instruct"
+    elif model_type == "phi-4":
+        model_name = "microsoft/phi-4"
+    elif model_type == "qwen3":
+        model_name = "Qwen/Qwen3-4B"
+    elif model_type == "qwen3-14b":
+        model_name = "Qwen/Qwen3-14B"
+    elif model_type == "gemma-3":
+        model_name = "google/gemma-3-12b-it"
+    elif model_type == "gemma-3-small":
+        model_name = "google/gemma-3-1b-it"
+    else:
+        raise ValueError(
+            f"model_type must be one of: 'mistral', 'llama', 'llama3.2-1b', "
+            f"'gpt2', 'tinystories', 'phi', 'phi-4', 'qwen3', 'qwen3-14b', "
+            f"'gemma-3', 'gemma-3-small'. Got: {model_type}"
+        )
+    
+    # Check if model needs trust_remote_code
+    trust_remote_code = model_type in ["phi", "phi-4", "gemma-3", "gemma-3-small"]
+    
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name,
+        padding_side="left",
+        trust_remote_code=trust_remote_code,
+    )
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token_id = tokenizer.eos_token_id
+    
+    # Load base model
+    base_model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        trust_remote_code=trust_remote_code,
+    )
+    
+    # Determine device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    # Handle different loading scenarios
+    if use_base_model or model_path is None:
+        # Base model evaluation - use same model for both actor and critic
+        actor_model = critic_model = base_model
+    else:
+        # Load checkpoint - support both adapter directories and legacy files
+        if os.path.isdir(model_path):
+            # Adapter directory (modern format saved via save_pretrained)
+            actor_model = PeftModel.from_pretrained(
+                base_model,
+                model_path,
+                is_trainable=False,
+            )
+            critic_model = copy.deepcopy(actor_model)
+        else:
+            # Legacy checkpoint file (contains model_state_dict)
+            peft_config = LoraConfig(
+                task_type="CAUSAL_LM",
+                inference_mode=True,
+                r=8,
+                lora_alpha=16,
+                lora_dropout=0.1,
+                target_modules="all-linear",
+            )
+            actor_model = get_peft_model(base_model, peft_config)
+            checkpoint = torch.load(model_path)
+            actor_model.load_state_dict(checkpoint["model_state_dict"])
+            critic_model = copy.deepcopy(actor_model)
+    
+    return actor_model, critic_model, tokenizer, device
+
+
 def print_batch_delimiter():
     """Print a delimiter between training batches."""
     print("\n" + "=" * 80 + "\n")

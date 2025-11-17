@@ -20,3 +20,6 @@ hf-transfer==0.1.9
 
 # Visualization
 matplotlib==3.10.7
+
+# LLM APIs for gold-standard extraction
+anthropic==0.40.0
