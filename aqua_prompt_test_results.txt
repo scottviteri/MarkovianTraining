@@ -1,0 +1,53 @@
+
+[96mLoading[0m
+'Loading AQuA test data...'
+
+[92mLoaded[0m
+'254 examples (will use every 50th = 5)'
+
+[1mTesting[0m
+'Prompt variation: original'
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.07it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.12it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.15it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.63it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.40it/s]
+Generating CoT [original]:   0%|          | 0/1 [00:00<?, ?it/s]Generating CoT [original]: 100%|██████████| 1/1 [00:11<00:00, 11.78s/it]Generating CoT [original]: 100%|██████████| 1/1 [00:11<00:00, 11.78s/it]
+Generating Answers [original]:   0%|          | 0/1 [00:00<?, ?it/s]The following generation flags are not valid and may be ignored: ['temperature', 'top_p']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+Generating Answers [original]: 100%|██████████| 1/1 [00:00<00:00,  1.01it/s]Generating Answers [original]: 100%|██████████| 1/1 [00:00<00:00,  1.01it/s]
+
+[93moriginal[0m
+'Old regex: 16.67% | WB regex: 16.67%'
+
+
+[1mTesting[0m
+'Prompt variation: explicit_letter'
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.14it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.18it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.24it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.77it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.51it/s]
+Generating CoT [explicit_letter]:   0%|          | 0/1 [00:00<?, ?it/s]Generating CoT [explicit_letter]: 100%|██████████| 1/1 [00:11<00:00, 11.45s/it]Generating CoT [explicit_letter]: 100%|██████████| 1/1 [00:11<00:00, 11.45s/it]
+Generating Answers [explicit_letter]:   0%|          | 0/1 [00:00<?, ?it/s]Generating Answers [explicit_letter]: 100%|██████████| 1/1 [00:01<00:00,  1.03s/it]Generating Answers [explicit_letter]: 100%|██████████| 1/1 [00:01<00:00,  1.03s/it]
+
+[93mexplicit_letter[0m
+'Old regex: 50.00% | WB regex: 0.00%'
+
+
+[1mTesting[0m
+'Prompt variation: short_instruction'
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.15it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.19it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.24it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.78it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.51it/s]
+Generating CoT [short_instruction]:   0%|          | 0/1 [00:00<?, ?it/s]Generating CoT [short_instruction]: 100%|██████████| 1/1 [00:11<00:00, 11.33s/it]Generating CoT [short_instruction]: 100%|██████████| 1/1 [00:11<00:00, 11.33s/it]
+Generating Answers [short_instruction]:   0%|          | 0/1 [00:00<?, ?it/s]Generating Answers [short_instruction]: 100%|██████████| 1/1 [00:00<00:00,  1.03it/s]Generating Answers [short_instruction]: 100%|██████████| 1/1 [00:00<00:00,  1.03it/s]
+
+[93mshort_instruction[0m
+'Old regex: 33.33% | WB regex: 0.00%'
+
+
+======================================================================
+
+[1mSummary[0m
+'Prompt Variation Comparison'
+======================================================================
+Variation                 Old Regex       WB Regex       
+----------------------------------------------------------------------
+original                         16.67%          16.67%
+explicit_letter                  50.00%           0.00%
+short_instruction                33.33%           0.00%
+======================================================================
+
+[92mBest Prompt[0m
+'original with 16.67% accuracy (WB)'

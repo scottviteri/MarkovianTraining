@@ -1499,7 +1499,12 @@ def evaluate_model_generic(
             skip_special_tokens=True
         )
         
-        # Stage 2: Generate answer with critic model (deterministic)
+        # Stage 2: Generate answer with appropriate model (deterministic)
+        # Use actor if actor_reward_weight > 0 (actor was trained to generate answers)
+        # Use critic otherwise (standard Markovian baseline)
+        actor_reward_weight = hyperparameters.get("actor_reward_weight", 0.0)
+        answer_model = actor_model if actor_reward_weight > 0 else critic_model
+        
         include_question_in_eval = not hyperparameters.get("markovian", True)
         answer_prompts = [
             construct_prompts(
@@ -1520,7 +1525,7 @@ def evaluate_model_generic(
         ).to(device)
         
         with torch.no_grad():
-            answer_outputs = critic_model.generate(
+            answer_outputs = answer_model.generate(
                 input_ids=answer_inputs.input_ids,
                 attention_mask=answer_inputs.attention_mask,
                 max_new_tokens=max_answer_tokens,
