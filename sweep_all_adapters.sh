@@ -11,10 +11,15 @@ BATCH_SIZE=32  # Larger batch size for better GPU utilization
 
 # Parse arguments
 EXCLUDE_TASKS=""
+INCLUDE_TASK=""
 USE_HAIKU=false
 PROMPT_VARIANT="default"
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --task)
+            INCLUDE_TASK="$2"
+            shift 2
+            ;;
         --exclude)
             EXCLUDE_TASKS="$2"
             shift 2
@@ -48,6 +53,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
+            echo "  --task TASK             Evaluate only this specific task (e.g., gsm8k, mmlu, arc)"
             echo "  --exclude TASKS         Comma-separated list of tasks to skip (e.g., mmlu,mathqa)"
             echo "  --stride N              Evaluate every Nth example (default: 20)"
             echo "  --samples N             Number of samples per evaluation (default: 100, use 0 for unlimited)"
@@ -57,6 +63,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -h, --help              Show this help message"
             echo ""
             echo "Examples:"
+            echo "  $0 --task gsm8k --samples 0 --batch-size 128  # Full GSM8K evaluation"
             echo "  $0 --exclude mmlu,mathqa --stride 10"
             echo "  $0 --haiku --samples 50  # Use Haiku validation on small sample"
             echo "  $0 --prompt-variant letter --batch-size 64  # Use letter prompt variant"
@@ -85,6 +92,9 @@ echo "========================================================================"
 echo "ADAPTER SWEEP - All Checkpoints Profile"
 echo "========================================================================"
 echo "Stride: $STRIDE | Samples: $NUM_SAMPLES | Batch Size: $BATCH_SIZE"
+if [[ -n "$INCLUDE_TASK" ]]; then
+    echo "Task: $INCLUDE_TASK (only)"
+fi
 if [[ "$PROMPT_VARIANT" != "default" ]]; then
     echo "Prompt Variant: $PROMPT_VARIANT"
 fi
@@ -215,13 +225,22 @@ for task_dir in "$RESULTS_DIR"/*; do
         continue
     fi
     
-    # Skip excluded tasks
-    for excluded in "${EXCLUDE_ARRAY[@]}"; do
-        if [[ "$task" == "$excluded" ]]; then
-            echo -e "${YELLOW}Skipping excluded task: $task${NC}"
-            continue 2  # Continue outer loop
+    # If --task is specified, only process that task
+    if [[ -n "$INCLUDE_TASK" ]]; then
+        if [[ "$task" != "$INCLUDE_TASK" ]]; then
+            continue
         fi
-    done
+    fi
+    
+    # Skip excluded tasks (only if --task is not specified)
+    if [[ -z "$INCLUDE_TASK" ]]; then
+        for excluded in "${EXCLUDE_ARRAY[@]}"; do
+            if [[ "$task" == "$excluded" ]]; then
+                echo -e "${YELLOW}Skipping excluded task: $task${NC}"
+                continue 2  # Continue outer loop
+            fi
+        done
+    fi
     
     echo ""
     echo -e "${BLUE}════════════════════════════════════════${NC}"
