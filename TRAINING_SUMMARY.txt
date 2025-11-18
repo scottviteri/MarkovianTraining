@@ -1,0 +1,95 @@
+╔══════════════════════════════════════════════════════════════════════════╗
+║                    MARKOVIAN TRAINING ANALYSIS SUMMARY                   ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                                                                          ║
+║  Training Runs Analyzed: 10 runs across 7 datasets                      ║
+║  Model: Llama 3.1 8B (meta-llama/Llama-3.1-8B-Instruct)                ║
+║  Total Training Batches: 84,852                                         ║
+║  Training Mode: Markovian + Actor Rewards (actor_reward_weight=1.0)    ║
+║                                                                          ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                         PERFORMANCE RESULTS                              ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                                                                          ║
+║  Dataset        │ Accuracy │ Status                                     ║
+║  ───────────────┼──────────┼────────────────────────────────────────    ║
+║  GSM8K          │   5.23%  │ ⚠️  Very Poor (expected ~54%)              ║
+║  SVAMP          │  23.33%  │ ⚠️  Poor (best in batch)                   ║
+║  MMLU           │  24.00%  │ ⚠️  Poor (word boundary)                   ║
+║  AQuA           │  11.42%  │ ⚠️  Very Poor (word boundary)              ║
+║  ARC            │   0.00%  │ ❌  MODE COLLAPSE (PPO failure)            ║
+║  MathQA         │    N/A   │ ❓  Not evaluated                          ║
+║  Wiki Cont.     │    N/A   │ ❓  Not evaluated                          ║
+║                                                                          ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                         KEY FINDINGS                                     ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                                                                          ║
+║  ✅ WHAT'S WORKING:                                                      ║
+║     • Stable training (without PPO)                                     ║
+║     • Actor log probs improving (GSM8K: -3.8 → -0.09)                  ║
+║     • Some reasoning capability emerging                                ║
+║     • Markovian property maintained                                     ║
+║                                                                          ║
+║  ❌ WHAT'S FAILING:                                                      ║
+║     • PPO + Actor Rewards = Catastrophic collapse (ARC)                 ║
+║     • Very low absolute performance (<25% best case)                    ║
+║     • Reasoning quality issues (incoherent, arithmetic errors)          ║
+║     • No intermediate evaluation (can't track progress)                 ║
+║                                                                          ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                    CRITICAL ISSUE: ARC MODE COLLAPSE                     ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                                                                          ║
+║  Batch 0-99:    Normal training (log probs ~ -1.8)                      ║
+║  Batch 999:     ⚠️  PPO ratio explodes to 21.75 (vs epsilon=0.2)        ║
+║                 ⚠️  Log probs crash to -41.0                             ║
+║                 ⚠️  Normalized reward drops to -39.25                    ║
+║  Batch 6000:    Model generates "4444444..." (degenerate policy)        ║
+║                 Final accuracy: 0.00%                                   ║
+║                                                                          ║
+║  ROOT CAUSE: PPO instability with actor-reward gradients                ║
+║                                                                          ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                        TRAINING DYNAMICS                                 ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                                                                          ║
+║  GSM8K (Healthy Training):                                              ║
+║  ───────────────────────────────────────────────────────────────────    ║
+║    Batch    0: Loss=0.046,  Reward=-2.81, LogProb=-3.81               ║
+║    Batch  999: Loss=0.010,  Reward=-0.31, LogProb=-3.36               ║
+║    Batch 3999: Loss=-0.098, Reward=0.23,  LogProb=-1.53               ║
+║    Batch 7999: Loss=-0.153, Reward=0.39,  LogProb=-0.09               ║
+║                                                                          ║
+║  ARC (Collapsed Training):                                              ║
+║  ───────────────────────────────────────────────────────────────────    ║
+║    Batch    0: Loss=-0.000, Reward=0.21,   PPO=1.00                   ║
+║    Batch   99: Loss=-0.025, Reward=0.20,   PPO=1.17                   ║
+║    Batch  999: Loss=6.656,  Reward=-39.25, PPO=21.75  ⚠️ COLLAPSE     ║
+║    Batch 5999: Loss=-0.969, Reward=-33.75, PPO=8.13   (still bad)     ║
+║                                                                          ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                        RECOMMENDATIONS                                   ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                                                                          ║
+║  1. DISABLE PPO: use_ppo=False when actor_reward_weight > 0            ║
+║  2. EVAL FREQUENCY: Set to 1000 (currently null)                        ║
+║  3. BATCH SIZE: Increase to 32 (currently 12)                           ║
+║  4. LEARNING RATE: Reduce to 5e-5 (currently 1e-4)                      ║
+║  5. GRADIENT CLIPPING: Add max_grad_norm=1.0                            ║
+║  6. ACTOR WEIGHT: Start lower at 0.5, gradually increase                ║
+║                                                                          ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                        NEXT STEPS                                        ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                                                                          ║
+║  • Check earlier checkpoints (adapter_1000-4000)                        ║
+║  • Evaluate base model for comparison                                   ║
+║  • Run longer training with fixed hyperparameters                       ║
+║  • Plot training curves to visualize dynamics                           ║
+║  • Compare with paper's reported results (GSM8K: 54.5%)                 ║
+║                                                                          ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+For detailed analysis, see: TRAINING_ANALYSIS.md
+Generated: November 18, 2025

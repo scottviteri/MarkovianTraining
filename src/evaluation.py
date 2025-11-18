@@ -1503,8 +1503,10 @@ def main():
         
         # Run evaluation based on task type
         accuracy_wb: Optional[float] = None
+        haiku_metrics: Optional[Dict[str, Any]] = None
+        
         if args.task_type == "gsm8k":
-            accuracy, results = evaluate_model_on_gsm8k(
+            accuracy, results, haiku_metrics = evaluate_model_on_gsm8k(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 num_samples=args.num_samples,
@@ -1512,7 +1514,7 @@ def main():
                 answer_extraction_method=args.answer_extraction_method,
             )
         elif args.task_type == "mmlu":
-            accuracy, results, accuracy_wb = evaluate_model_on_mmlu(
+            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_mmlu(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 batch_size=eval_bs,
@@ -1521,7 +1523,7 @@ def main():
             if accuracy_wb is not None:
                 colored_print("MMLU Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
         elif args.task_type == "arc":
-            accuracy, results, accuracy_wb = evaluate_model_on_arc(
+            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_arc(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 batch_size=eval_bs,
@@ -1530,7 +1532,7 @@ def main():
             if accuracy_wb is not None:
                 colored_print("ARC Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
         elif args.task_type == "aqua":
-            accuracy, results, accuracy_wb = evaluate_model_on_aqua(
+            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_aqua(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 batch_size=eval_bs,
@@ -1539,7 +1541,7 @@ def main():
             if accuracy_wb is not None:
                 colored_print("AQuA Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
         elif args.task_type == "mathqa":
-            accuracy, results, accuracy_wb = evaluate_model_on_mathqa(
+            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_mathqa(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 batch_size=eval_bs,
@@ -1548,7 +1550,7 @@ def main():
             if accuracy_wb is not None:
                 colored_print("MathQA Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
         elif args.task_type in ["svamp", "arithmetic"]:
-            accuracy, results, _ = evaluate_model_on_numeric(
+            accuracy, results, _, haiku_metrics = evaluate_model_on_numeric(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 batch_size=eval_bs,
@@ -1558,15 +1560,9 @@ def main():
         else:
             raise ValueError(f"Unsupported task type: {args.task_type}")
         
-        haiku_accuracy = None
-        if args.haiku_metric:
-            answer_format = get_answer_format_for_task(args.task_type)
-            if answer_format:
-                haiku_accuracy = compute_haiku_accuracy(results, args.task_type, answer_format)
-                if haiku_accuracy is not None:
-                    colored_print("Haiku Metric", f"Accuracy (Haiku extraction): {haiku_accuracy:.2%}", Colors.CYAN)
-            else:
-                colored_print("Haiku Metric", f"Task '{args.task_type}' not supported for Haiku metric", Colors.YELLOW)
+        # Display Haiku metrics if available
+        if haiku_metrics is not None:
+            colored_print("Haiku Metric", f"Accuracy: {haiku_metrics['accuracy']:.2%} | Cost: ${haiku_metrics['cost_usd']:.4f}", Colors.CYAN)
         
         # Print results
         colored_print(f"{args.task_type.upper()} Accuracy", f"{accuracy:.2%}", Colors.GREEN if accuracy > 0.5 else Colors.YELLOW)
@@ -1582,8 +1578,10 @@ def main():
             extra_metrics["accuracy_word_boundary"] = accuracy_wb
         if args.task_type == "arc" and arc_subset:
             extra_metrics["subset"] = arc_subset
-        if haiku_accuracy is not None:
-            extra_metrics["accuracy_haiku"] = haiku_accuracy
+        if haiku_metrics is not None:
+            extra_metrics["haiku_accuracy"] = haiku_metrics["accuracy"]
+            extra_metrics["haiku_cost_usd"] = haiku_metrics["cost_usd"]
+            extra_metrics["haiku_num_calls"] = haiku_metrics["num_calls"]
         if args.answer_prompt_variant != "default":
             extra_metrics["answer_prompt_variant"] = args.answer_prompt_variant
         
