@@ -49,6 +49,16 @@ To skip the heavier GPT-2 integration tests:
 pytest -m "not slow"
 ```
 
+## 📊 Evaluation System
+
+The project includes a comprehensive evaluation framework with multiple answer extraction methods and validation metrics. See **[EVALUATION_GUIDE.md](EVALUATION_GUIDE.md)** for detailed documentation on:
+
+- Markovian framework and two-stage generation
+- Answer extraction methods (word boundary, anchor, LLM)
+- Model selection (Actor vs Critic)
+- Evaluation metrics and validation (including Haiku gold-standard)
+- Cost tracking and best practices
+
 ## 📖 Training
 
 ### Main Training Script (`src/train.py`)

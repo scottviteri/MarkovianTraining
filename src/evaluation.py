@@ -524,14 +524,26 @@ def evaluate_model_generic(
     batch_size: int = 16,
     num_samples: Optional[int] = None,
     task_name: str = "Task",
-    max_answer_tokens: int = 10
-) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
+    max_answer_tokens: int = 10,
+    enable_haiku_metric: bool = True,
+    answer_format: Optional[str] = None,
+) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
     """Generic evaluation function for all task types using critic model for answer generation.
     
     This follows the Markovian framework:
     1. Actor generates CoT at training temperature
     2. Critic generates answer deterministically (temp 0) after "Answer:"
     3. Extract and compare answers using task-specific functions
+    
+    Model Selection (Actor vs Critic):
+    - Standard Markovian (actor_reward_weight = 0): 
+      * Actor generates CoT reasoning
+      * Critic generates final answer (frozen, provides stable grading)
+      * Evaluation: CoT quality drives reward signal
+    - Actor-only mode (actor_reward_weight > 0):
+      * Actor generates both CoT and answer
+      * Actor receives reward for answer correctness
+      * Evaluation: Actor must learn complete reasoning + answering
     
     Args:
         actor_model: The model to evaluate
@@ -550,13 +562,20 @@ def evaluate_model_generic(
         num_samples: Optional limit on number of samples to evaluate
         task_name: Name for progress bar
         max_answer_tokens: Maximum tokens to generate for answer
+        enable_haiku_metric: If True and ANTHROPIC_API_KEY is set, compute Haiku extraction metric
+        answer_format: Answer format for Haiku extraction ("numeric", "A-D", "A-E", or None to infer)
         
     Returns:
-        tuple: (accuracy: float, detailed_results: List[Dict], accuracy_wb: Optional[float])
+        tuple: (accuracy: float, detailed_results: List[Dict], accuracy_wb: Optional[float], 
+                haiku_metrics: Optional[Dict])
+        - accuracy: Primary accuracy metric
+        - detailed_results: Per-example results with predictions and correctness
+        - accuracy_wb: Word-boundary accuracy (MCQ tasks) or None
+        - haiku_metrics: Dict with {"accuracy": float, "cost_usd": float, "num_calls": int} or None
     """
-    # Limit number of samples if specified
+    # Limit number of samples if specified (deterministic)
     if num_samples and num_samples < len(test_data):
-        test_data = random.sample(test_data, num_samples)
+        test_data = test_data[:num_samples]
     
     # Default comparator is simple equality
     if answer_comparator_fn is None:
@@ -686,7 +705,76 @@ def evaluate_model_generic(
     
     accuracy = correct / len(test_data) if len(test_data) > 0 else 0.0
     accuracy_wb = correct_wb / len(test_data) if answer_extractor_fn_wb and len(test_data) > 0 else None
-    return accuracy, results, accuracy_wb
+    
+    # Haiku extraction metric (optional, requires ANTHROPIC_API_KEY)
+    haiku_metrics = None
+    if enable_haiku_metric and os.getenv("ANTHROPIC_API_KEY"):
+        try:
+            import time
+            colored_print("Haiku Metric", f"Running Claude Haiku extraction on {len(results)} samples...", Colors.CYAN)
+            
+            # Infer answer format if not provided
+            if answer_format is None:
+                # Try to infer from task_name
+                if "numeric" in task_name.lower() or task_name.upper() in ["GSM8K", "SVAMP", "MATH"]:
+                    answer_format = "numeric"
+                elif any(x in task_name.upper() for x in ["MMLU", "ARC"]):
+                    answer_format = "A-D"
+                elif any(x in task_name.upper() for x in ["AQUA", "MATHQA"]):
+                    answer_format = "A-E"
+                else:
+                    answer_format = "numeric"  # Default fallback
+            
+            haiku_correct = 0
+            haiku_calls = 0
+            start_time = time.time()
+            
+            for idx, result in enumerate(results):
+                generated_text = result.get("generated_answer", "")
+                gold_answer = result.get("gold", "")
+                
+                # Extract with Haiku
+                haiku_pred = extract_answer(generated_text, method="llm", answer_format=answer_format)
+                haiku_calls += 1
+                
+                # Extract gold answer with same method for consistency
+                if answer_format == "numeric":
+                    haiku_gold = extract_answer(str(gold_answer), method="anchor")
+                else:
+                    haiku_gold = str(gold_answer).strip().upper()[:1] if gold_answer else "X"
+                
+                # Compare
+                if haiku_pred == haiku_gold:
+                    haiku_correct += 1
+                
+                # Rate limiting: max 50 requests per second for Haiku
+                if (idx + 1) % 50 == 0:
+                    elapsed = time.time() - start_time
+                    if elapsed < 1.0:
+                        time.sleep(1.0 - elapsed)
+                    start_time = time.time()
+            
+            haiku_accuracy = haiku_correct / len(results) if results else 0.0
+            # Cost: ~$0.0001 per call for Haiku (approximate)
+            haiku_cost_usd = haiku_calls * 0.0001
+            
+            haiku_metrics = {
+                "accuracy": haiku_accuracy,
+                "cost_usd": haiku_cost_usd,
+                "num_calls": haiku_calls,
+            }
+            
+            colored_print(
+                "Haiku Metric", 
+                f"Accuracy: {haiku_accuracy:.2%} | Cost: ${haiku_cost_usd:.4f} ({haiku_calls} calls)", 
+                Colors.GREEN if haiku_accuracy > 0.5 else Colors.YELLOW
+            )
+            
+        except Exception as e:
+            colored_print("Haiku Metric", f"Failed: {str(e)}", Colors.YELLOW)
+            haiku_metrics = None
+    
+    return accuracy, results, accuracy_wb, haiku_metrics
 
 
 # ============================================================================
@@ -703,26 +791,29 @@ def evaluate_model_on_mcq(
     batch_size: int = 16,
     num_samples: Optional[int] = None,
     num_choices: int = 4,
-    task_name: str = "MCQ"
-) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
+    task_name: str = "MCQ",
+    enable_haiku_metric: bool = True,
+) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
     """Generic MCQ evaluation for any number of choices.
     
     Args:
         num_choices: 4 for A-D (MMLU, ARC), 5 for A-E (AQuA, MathQA)
         task_name: Name for progress bar
+        enable_haiku_metric: If True and ANTHROPIC_API_KEY is set, compute Haiku extraction metric
     
-    Returns both original and word-boundary-based accuracy for comparison.
+    Returns:
+        tuple: (accuracy_wb: float, results: List[Dict], accuracy_legacy: Optional[float], 
+                haiku_metrics: Optional[Dict])
+        - accuracy_wb: Word boundary extraction (PRIMARY, correct method)
+        - results: Detailed results with both extraction methods
+        - accuracy_legacy: Legacy extraction without word boundaries (for backward compatibility)
+        - haiku_metrics: Haiku extraction accuracy and cost tracking
     """
     choice_letter = chr(64 + num_choices)  # D for 4, E for 5
-    
-    def extract_letter(text: str) -> str:
-        """Extract first letter A-{choice_letter} from text. Returns 'X' if none found."""
-        pattern = f"[A-{choice_letter}]"
-        matches = re.findall(pattern, text.upper())
-        return matches[0] if matches else "X"
+    answer_format = "A-D" if num_choices == 4 else "A-E"
     
     def extract_letter_wb(text: str) -> str:
-        """Extract first letter with word boundaries."""
+        """Extract first letter with word boundaries (PRIMARY method)."""
         # Try uppercase A-{choice_letter} with word boundary
         pattern = f"\\b([A-{choice_letter}])\\b"
         match = re.search(pattern, text.upper())
@@ -735,12 +826,20 @@ def evaluate_model_on_mcq(
             return match.group(1).upper()
         return "X"
     
+    def extract_letter_legacy(text: str) -> str:
+        """Extract first letter without word boundaries (LEGACY, kept for backward compatibility)."""
+        pattern = f"[A-{choice_letter}]"
+        matches = re.findall(pattern, text.upper())
+        return matches[0] if matches else "X"
+    
     return evaluate_model_generic(
         actor_model, critic_model, tokenizer, device, test_data,
-        hyperparameters, extract_letter,
-        answer_extractor_fn_wb=extract_letter_wb,
+        hyperparameters, extract_letter_wb,
+        answer_extractor_fn_wb=extract_letter_legacy,
         batch_size=batch_size, num_samples=num_samples,
-        task_name=task_name, max_answer_tokens=10
+        task_name=task_name, max_answer_tokens=10,
+        enable_haiku_metric=enable_haiku_metric,
+        answer_format=answer_format,
     )
 
 
@@ -752,16 +851,17 @@ def evaluate_model_on_mmlu(
     test_data: List[Tuple[str, str]],
     hyperparameters: Dict[str, Any],
     batch_size: int = 16,
-    num_samples: int = 500
-) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
+    num_samples: int = 500,
+    enable_haiku_metric: bool = True,
+) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
     """Evaluate MMLU - 4-choice MCQ (A-D).
     
-    Returns both original and word-boundary-based accuracy for comparison.
+    Returns word-boundary accuracy (primary), legacy accuracy, and Haiku metrics.
     """
     return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, batch_size=batch_size, num_samples=num_samples,
-        num_choices=4, task_name="MMLU"
+        num_choices=4, task_name="MMLU", enable_haiku_metric=enable_haiku_metric,
     )
 
 
@@ -773,16 +873,17 @@ def evaluate_model_on_arc(
     test_data: List[Tuple[str, str]],
     hyperparameters: Dict[str, Any],
     batch_size: int = 16,
-    num_samples: Optional[int] = None
-) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
+    num_samples: Optional[int] = None,
+    enable_haiku_metric: bool = True,
+) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
     """Evaluate ARC - 4-choice MCQ (A-D).
     
-    Returns both original and word-boundary-based accuracy for comparison.
+    Returns word-boundary accuracy (primary), legacy accuracy, and Haiku metrics.
     """
     return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, batch_size=batch_size, num_samples=num_samples,
-        num_choices=4, task_name="ARC"
+        num_choices=4, task_name="ARC", enable_haiku_metric=enable_haiku_metric,
     )
 
 
@@ -794,16 +895,17 @@ def evaluate_model_on_aqua(
     test_data: List[Tuple[str, str]],
     hyperparameters: Dict[str, Any],
     batch_size: int = 16,
-    num_samples: Optional[int] = None
-) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
+    num_samples: Optional[int] = None,
+    enable_haiku_metric: bool = True,
+) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
     """Evaluate AQuA - 5-choice MCQ (A-E).
     
-    Returns both original and word-boundary-based accuracy for comparison.
+    Returns word-boundary accuracy (primary), legacy accuracy, and Haiku metrics.
     """
     return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, batch_size=batch_size, num_samples=num_samples,
-        num_choices=5, task_name="AQuA"
+        num_choices=5, task_name="AQuA", enable_haiku_metric=enable_haiku_metric,
     )
 
 
@@ -815,16 +917,17 @@ def evaluate_model_on_mathqa(
     test_data: List[Tuple[str, str]],
     hyperparameters: Dict[str, Any],
     batch_size: int = 16,
-    num_samples: Optional[int] = None
-) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
+    num_samples: Optional[int] = None,
+    enable_haiku_metric: bool = True,
+) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
     """Evaluate MathQA - 5-choice MCQ (A-E).
     
-    Returns both original and word-boundary-based accuracy for comparison.
+    Returns word-boundary accuracy (primary), legacy accuracy, and Haiku metrics.
     """
     return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, batch_size=batch_size, num_samples=num_samples,
-        num_choices=5, task_name="MathQA"
+        num_choices=5, task_name="MathQA", enable_haiku_metric=enable_haiku_metric,
     )
 
 
@@ -836,10 +939,11 @@ def evaluate_model_on_numeric(
     test_data: List[Tuple[str, str]],
     hyperparameters: Dict[str, Any],
     batch_size: int = 16,
-    answer_extraction_method: str = "simple",
+    answer_extraction_method: str = "anchor",
     num_samples: Optional[int] = None,
     max_answer_tokens: int = 16,
-) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
+    enable_haiku_metric: bool = True,
+) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
     """Evaluate numeric QA tasks (GSM8K, SVAMP, MATH).
     
     Pipeline:
@@ -848,11 +952,13 @@ def evaluate_model_on_numeric(
     
     Args:
         answer_extraction_method: Method for extracting numeric answers:
-            - "simple": Check '=' then find first number (default, backward compatible)
-            - "anchor": Check 'Answer:' label first, then '=', then first number
+            - "anchor": Check 'Answer:' label first, then '=', then first number (DEFAULT, recommended)
+            - "simple": Check '=' then find first number (legacy, backward compatible)
+            - "llm": Use Claude Haiku as gold-standard extractor (requires ANTHROPIC_API_KEY)
+        enable_haiku_metric: If True and ANTHROPIC_API_KEY is set, compute Haiku extraction metric
     """
     # Get method from hyperparameters if not explicitly provided
-    if answer_extraction_method == "simple" and "answer_extraction_method" in hyperparameters:
+    if answer_extraction_method == "anchor" and "answer_extraction_method" in hyperparameters:
         answer_extraction_method = hyperparameters["answer_extraction_method"]
     
     def normalize_numeric(text: str) -> str:
@@ -889,6 +995,8 @@ def evaluate_model_on_numeric(
         num_samples=num_samples,
         task_name="Numeric",
         max_answer_tokens=max_answer_tokens,
+        enable_haiku_metric=enable_haiku_metric,
+        answer_format="numeric",
     )
 
 
@@ -901,9 +1009,19 @@ def evaluate_model_on_gsm8k(
     hyperparameters,
     num_samples=None,
     batch_size=None,
-    answer_extraction_method="simple",
+    answer_extraction_method="anchor",
+    enable_haiku_metric=True,
 ):
-    """Evaluate GSM8K using the unified numeric pipeline."""
+    """Evaluate GSM8K using the unified numeric pipeline.
+    
+    Args:
+        answer_extraction_method: "anchor" (default), "simple" (legacy), or "llm"
+        enable_haiku_metric: If True and ANTHROPIC_API_KEY is set, compute Haiku extraction metric
+    
+    Returns:
+        tuple: (accuracy: float, results: List[Dict], haiku_metrics: Optional[Dict])
+        Note: Returns 3-tuple (not 4) for backward compatibility since GSM8K doesn't use word boundary
+    """
     # Determine default eval batch size: floor(1.5x) of training batch size (defaults to 12 if absent)
     if batch_size is None:
         try:
@@ -913,7 +1031,7 @@ def evaluate_model_on_gsm8k(
 
     eval_data = test_data[:num_samples] if num_samples else test_data
 
-    accuracy, results, _ = evaluate_model_on_numeric(
+    accuracy, results, _, haiku_metrics = evaluate_model_on_numeric(
         actor_model,
         critic_model,
         tokenizer,
@@ -924,8 +1042,9 @@ def evaluate_model_on_gsm8k(
         answer_extraction_method=answer_extraction_method,
         max_answer_tokens=10,
         num_samples=None,
+        enable_haiku_metric=enable_haiku_metric,
     )
-    return accuracy, results
+    return accuracy, results, haiku_metrics
 
 
 # ============================================================================

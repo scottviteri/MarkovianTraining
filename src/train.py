@@ -1382,230 +1382,6 @@ def log_batch_results(
         f.write("\n")
 
 
-def evaluate_model_generic(
-    actor_model: nn.Module,
-    critic_model: nn.Module,
-    tokenizer: Any,
-    device: torch.device,
-    test_data: List[Tuple[str, str]],
-    hyperparameters: Dict[str, Any],
-    answer_extractor_fn: Callable[[str], Any],
-    answer_comparator_fn: Optional[Callable[[Any, str], bool]] = None,
-    answer_extractor_fn_wb: Optional[Callable[[str], Any]] = None,
-    batch_size: int = 16,
-    num_samples: Optional[int] = None,
-    task_name: str = "Task",
-    max_answer_tokens: int = 10
-) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
-    """Generic evaluation function for all task types using critic model for answer generation.
-    
-    This follows the Markovian framework:
-    1. Actor generates CoT at training temperature
-    2. Critic generates answer deterministically (temp 0) after "Answer:"
-    3. Extract and compare answers using task-specific functions
-    
-    Args:
-        actor_model: The model to evaluate
-        critic_model: The critic model (frozen)
-        tokenizer: Tokenizer for the models
-        device: Device to run on
-        test_data: List of (question: str, gold_answer: str) tuples
-        hyperparameters: Training hyperparameters
-        answer_extractor_fn: Function to extract predicted answer from generated text
-                             Signature: (generated_text: str) -> extracted_answer: Any
-        answer_comparator_fn: Optional function to compare predicted vs gold answers
-                             Signature: (extracted_pred: Any, gold_answer: str) -> bool
-                             If None, uses simple equality (predicted == gold)
-        answer_extractor_fn_wb: Optional word-boundary extractor for dual metrics (MCQ only)
-        batch_size: Evaluation batch size
-        num_samples: Optional limit on number of samples to evaluate
-        task_name: Name for progress bar
-        max_answer_tokens: Maximum tokens to generate for answer
-        
-    Returns:
-        tuple: (accuracy: float, detailed_results: List[Dict], accuracy_wb: Optional[float])
-    """
-    # Limit number of samples if specified
-    if num_samples and num_samples < len(test_data):
-        test_data = random.sample(test_data, num_samples)
-    
-    # Default comparator is simple equality
-    if answer_comparator_fn is None:
-        answer_comparator_fn = lambda pred, gold: pred == gold
-    
-    actor_model.eval()
-    
-    correct = 0
-    correct_wb = 0  # Track word boundary accuracy
-    results = []
-    
-    for i in tqdm(range(0, len(test_data), batch_size), desc=f"Evaluating {task_name}"):
-        batch = test_data[i:i+batch_size]
-        questions, answers = zip(*batch)
-        
-        # Stage 1: Generate CoT with actor model
-        reasoning_prompts = [
-            construct_prompts(question=q, hyperparameters=hyperparameters)
-            for q in questions
-        ]
-        
-        inputs = tokenizer(
-            reasoning_prompts, 
-            return_tensors="pt", 
-            padding=True, 
-            truncation=True,
-            max_length=hyperparameters.get("question_length", 512)
-        ).to(device)
-        
-        with torch.no_grad():
-            reasoning_outputs = actor_model.generate(
-                input_ids=inputs.input_ids,
-                attention_mask=inputs.attention_mask,
-                max_new_tokens=hyperparameters.get("cot_length", 100),
-                min_new_tokens=hyperparameters.get("cot_length", 100),
-                do_sample=True,
-                temperature=hyperparameters.get("temperature", 1.0),
-                top_k=None,
-                top_p=None,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-        
-        cot_texts = tokenizer.batch_decode(
-            reasoning_outputs[:, inputs.input_ids.shape[1]:], 
-            skip_special_tokens=True
-        )
-        
-        # Stage 2: Generate answer with appropriate model (deterministic)
-        # Use actor if actor_reward_weight > 0 (actor was trained to generate answers)
-        # Use critic otherwise (standard Markovian baseline)
-        actor_reward_weight = hyperparameters.get("actor_reward_weight", 0.0)
-        answer_model = actor_model if actor_reward_weight > 0 else critic_model
-        
-        include_question_in_eval = not hyperparameters.get("markovian", True)
-        answer_prompts = [
-            construct_prompts(
-                question=q,
-                hyperparameters=hyperparameters,
-                reasoning=cot,
-                include_question=include_question_in_eval
-            )
-            for q, cot in zip(questions, cot_texts)
-        ]
-        
-        answer_inputs = tokenizer(
-            answer_prompts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=hyperparameters.get("question_length", 512) + hyperparameters.get("cot_length", 100)
-        ).to(device)
-        
-        with torch.no_grad():
-            answer_outputs = answer_model.generate(
-                input_ids=answer_inputs.input_ids,
-                attention_mask=answer_inputs.attention_mask,
-                max_new_tokens=max_answer_tokens,
-                do_sample=False,  # Deterministic
-                top_k=None,
-                top_p=None,
-                pad_token_id=tokenizer.pad_token_id,
-            )
-        
-        generated_answers = tokenizer.batch_decode(
-            answer_outputs[:, answer_inputs.input_ids.shape[1]:],
-            skip_special_tokens=True
-        )
-        
-        # Extract predicted answers using task-specific function
-        # Type: generated_answers is List[str] (raw text from model)
-        # Type: predicted_answers is List[Any] (extracted answers, e.g., int for SVAMP, str for MMLU)
-        predicted_answers = [answer_extractor_fn(ans) for ans in generated_answers]
-        
-        # Word boundary extraction if provided
-        if answer_extractor_fn_wb is not None:
-            predicted_answers_wb = [answer_extractor_fn_wb(ans) for ans in generated_answers]
-        else:
-            predicted_answers_wb = [None] * len(generated_answers)
-        
-        # Calculate accuracy using task-specific comparator
-        for q, cot, gen_ans, pred, pred_wb, gold in zip(questions, cot_texts, generated_answers, predicted_answers, predicted_answers_wb, answers):
-            is_correct = answer_comparator_fn(pred, gold)
-            if is_correct:
-                correct += 1
-            
-            # Word boundary correctness (if applicable)
-            if pred_wb is not None:
-                is_correct_wb = (pred_wb == gold)  # Simple equality for word boundary
-                if is_correct_wb:
-                    correct_wb += 1
-            else:
-                is_correct_wb = None
-                
-            # Use both "is_correct" and "correct" for backwards compatibility
-            results.append({
-                "question": q,
-                "reasoning": cot,
-                "generated_answer": gen_ans,
-                "predicted": pred,
-                "predicted_wb": pred_wb,  # Word boundary prediction
-                "answer": gold,
-                "gold": gold,  # Alias for backwards compatibility
-                "correct": is_correct,
-                "correct_wb": is_correct_wb,  # Word boundary correctness
-                "is_correct": is_correct,  # Alias for backwards compatibility
-            })
-    
-    accuracy = correct / len(test_data) if len(test_data) > 0 else 0.0
-    accuracy_wb = correct_wb / len(test_data) if answer_extractor_fn_wb and len(test_data) > 0 else None
-    return accuracy, results, accuracy_wb
-
-
-def evaluate_model_on_mmlu(
-    actor_model: nn.Module,
-    critic_model: nn.Module,
-    tokenizer: Any,
-    device: torch.device,
-    test_data: List[Tuple[str, str]],
-    hyperparameters: Dict[str, Any],
-    batch_size: int = 16,
-    num_samples: int = 500
-) -> Tuple[float, List[Dict[str, Any]], Optional[float]]:
-    """Evaluate MMLU - extract letter A-E from generated answer.
-    
-    Returns both original and word-boundary-based accuracy for comparison.
-    """
-    def extract_letter(text: str) -> str:
-        """Extract first letter A-E from text. Returns 'X' if none found."""
-        matches = re.findall(r"[A-E]", text.upper())
-        return matches[0] if matches else "X"
-    
-    return evaluate_model_generic(
-        actor_model, critic_model, tokenizer, device, test_data,
-        hyperparameters, extract_letter,
-        answer_extractor_fn_wb=extract_letter_word_boundary,
-        batch_size=batch_size, num_samples=num_samples,
-        task_name="MMLU", max_answer_tokens=10
-    )
-
-
-def extract_letter_word_boundary(text: str) -> str:
-    """Extract first letter A-E with word boundaries. Returns 'X' if none found.
-    
-    This correctly extracts the intended choice letter, avoiding false matches
-    in common words like 'The' (contains E) or 'Select' (contains E).
-    """
-    # Try uppercase A-E with word boundary
-    match = re.search(r"\b([A-E])\b", text.upper())
-    if match:
-        return match.group(1)
-    # Try lowercase a-e with word boundary
-    match = re.search(r"\b([a-e])\b", text)
-    if match:
-        return match.group(1).upper()
-    return "X"
-
-
-
 def run_periodic_evaluation(state: TrainingState):
     """Run periodic evaluation on test set for supported tasks."""
     torch.cuda.empty_cache()
@@ -1644,8 +1420,9 @@ def run_periodic_evaluation(state: TrainingState):
 
     with torch.no_grad():
         state.actor_model.eval()
+        haiku_metrics = None
         if task_type == "gsm8k":
-            accuracy, results = evaluate_model_on_gsm8k(
+            accuracy, results, haiku_metrics = evaluate_model_on_gsm8k(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1656,7 +1433,7 @@ def run_periodic_evaluation(state: TrainingState):
             )
             accuracy_wb = None
         elif task_type == "mmlu":
-            accuracy, results, accuracy_wb = evaluate_model_on_mmlu(
+            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_mmlu(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1666,7 +1443,7 @@ def run_periodic_evaluation(state: TrainingState):
                 batch_size=batch_size,
             )
         elif task_type == "arc":
-            accuracy, results, accuracy_wb = evaluate_model_on_arc(
+            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_arc(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1676,7 +1453,7 @@ def run_periodic_evaluation(state: TrainingState):
                 batch_size=batch_size,
             )
         elif task_type == "aqua":
-            accuracy, results, accuracy_wb = evaluate_model_on_aqua(
+            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_aqua(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1686,7 +1463,7 @@ def run_periodic_evaluation(state: TrainingState):
                 batch_size=batch_size,
             )
         elif task_type == "mathqa":
-            accuracy, results, accuracy_wb = evaluate_model_on_mathqa(
+            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_mathqa(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1696,7 +1473,7 @@ def run_periodic_evaluation(state: TrainingState):
                 batch_size=batch_size,
             )
         elif task_type in ("svamp", "math", "arithmetic"):
-            accuracy, results, _ = evaluate_model_on_numeric(
+            accuracy, results, _, haiku_metrics = evaluate_model_on_numeric(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1717,6 +1494,10 @@ def run_periodic_evaluation(state: TrainingState):
         extra_metrics["accuracy_word_boundary"] = accuracy_wb
     if "subset" in meta:
         extra_metrics["subset"] = meta["subset"]
+    if haiku_metrics is not None:
+        extra_metrics["haiku_accuracy"] = haiku_metrics["accuracy"]
+        extra_metrics["haiku_cost_usd"] = haiku_metrics["cost_usd"]
+        extra_metrics["haiku_num_calls"] = haiku_metrics["num_calls"]
 
     save_task_results(
         task_type=task_type,
