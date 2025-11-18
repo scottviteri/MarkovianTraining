@@ -28,7 +28,6 @@ light_eval.log
 # Local analysis files (machine-specific)
 TRAINING_ANALYSIS.md
 TRAINING_SUMMARY.txt
-evaluate_all_results.sh
 summarize_results.py
 
 # Appendix LaTeX build artifacts (keep source and final PDF)
