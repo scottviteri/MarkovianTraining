@@ -22,6 +22,14 @@ test_*.png
 # Log files
 *.jsonl
 eval_*.log
+full_eval.log
+light_eval.log
+
+# Local analysis files (machine-specific)
+TRAINING_ANALYSIS.md
+TRAINING_SUMMARY.txt
+evaluate_all_results.sh
+summarize_results.py
 
 # Appendix LaTeX build artifacts (keep source and final PDF)
 LatexFolder/appendix.aux
