@@ -6,7 +6,7 @@ set -e
 
 RESULTS_DIR="/root/MarkovianTraining/results"
 STRIDE=20  # Evaluate every 20th example
-NUM_SAMPLES=100  # Small sample for quick evaluation
+NUM_SAMPLES=100  # Small sample for quick evaluation (use 0 for unlimited)
 BATCH_SIZE=32  # Larger batch size for better GPU utilization
 
 # Parse arguments
@@ -50,7 +50,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --exclude TASKS         Comma-separated list of tasks to skip (e.g., mmlu,mathqa)"
             echo "  --stride N              Evaluate every Nth example (default: 20)"
-            echo "  --samples N             Number of samples per evaluation (default: 100)"
+            echo "  --samples N             Number of samples per evaluation (default: 100, use 0 for unlimited)"
             echo "  --batch-size N          Batch size for evaluation (default: 32)"
             echo "  --prompt-variant TYPE   Answer prompt variant for MCQ tasks (default|letter|letter_strict, default: default)"
             echo "  --haiku                 Enable Haiku LLM-based extraction validation (requires ANTHROPIC_API_KEY)"
@@ -92,8 +92,9 @@ if [[ "$USE_HAIKU" == true ]]; then
     if [[ -n "$ANTHROPIC_API_KEY" ]]; then
         echo -e "Haiku validation: ${GREEN}ENABLED${NC}"
     else
-        echo -e "Haiku validation: ${YELLOW}REQUESTED BUT ANTHROPIC_API_KEY NOT SET${NC}"
-        echo -e "${YELLOW}Haiku validation will be skipped. Set ANTHROPIC_API_KEY to enable.${NC}"
+        echo -e "${RED}ERROR: --haiku flag specified but ANTHROPIC_API_KEY is not set${NC}"
+        echo -e "${RED}Please set the ANTHROPIC_API_KEY environment variable or remove the --haiku flag${NC}"
+        exit 1
     fi
 fi
 if [[ -n "$EXCLUDE_TASKS" ]]; then
@@ -127,8 +128,12 @@ evaluate_adapter() {
         --task_type $task \
         --model_path $adapter \
         --stride $STRIDE \
-        --num_samples $NUM_SAMPLES \
         --batch_size $BATCH_SIZE"
+    
+    # Only add num_samples if > 0 (0 means unlimited)
+    if [[ $NUM_SAMPLES -gt 0 ]]; then
+        CMD="$CMD --num_samples $NUM_SAMPLES"
+    fi
     
     # Add prompt variant if not default
     if [[ "$PROMPT_VARIANT" != "default" ]]; then
@@ -266,8 +271,12 @@ for task_dir in "$RESULTS_DIR"/*; do
                     --model_path $base_model \
                     --use_base_model \
                     --stride $STRIDE \
-                    --num_samples $NUM_SAMPLES \
                     --batch_size $BATCH_SIZE"
+                
+                # Only add num_samples if > 0 (0 means unlimited)
+                if [[ $NUM_SAMPLES -gt 0 ]]; then
+                    CMD="$CMD --num_samples $NUM_SAMPLES"
+                fi
                 
                 # Add prompt variant if not default
                 if [[ "$PROMPT_VARIANT" != "default" ]]; then
