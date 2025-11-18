@@ -40,12 +40,16 @@ def colored_print(
         print(f"\n{color}{label}{Colors.END}")
         print(repr(text))
 
-def find_latest_result():
+def find_latest_result(task_type: Optional[str] = None, return_log: bool = False):
     """
     Find the most recent result directory across all tasks and model types.
 
+    Args:
+        task_type: Optional task type to filter by (e.g., "gsm8k", "mmlu")
+        return_log: If True, return the latest JSONL log file inside the run directory
+
     Returns:
-        str: Path to the most recent result directory, or None if no results found
+        str: Path to the most recent result directory (or log file), or None if no results found
     """
     results_dir = "results"
 
@@ -54,6 +58,10 @@ def find_latest_result():
 
     # Walk through the results directory
     for task_dir in os.listdir(results_dir):
+        # Filter by task_type if specified
+        if task_type and task_dir != task_type:
+            continue
+        
         task_path = os.path.join(results_dir, task_dir)
         if os.path.isdir(task_path):
             for timestamp_dir in os.listdir(task_path):
@@ -68,7 +76,21 @@ def find_latest_result():
 
     # Sort by timestamp, most recent first
     if result_dirs:
-        return sorted(result_dirs, key=lambda x: x[0], reverse=True)[0][1]
+        latest_dir = sorted(result_dirs, key=lambda x: x[0], reverse=True)[0][1]
+        if return_log:
+            preferred_log = os.path.join(latest_dir, "evaluation_results.jsonl")
+            if os.path.isfile(preferred_log):
+                return preferred_log
+            jsonl_candidates = sorted(
+                glob.glob(os.path.join(latest_dir, "*.jsonl")),
+                key=os.path.getmtime,
+                reverse=True,
+            )
+            for candidate in jsonl_candidates:
+                if os.path.isfile(candidate):
+                    return candidate
+            return None
+        return latest_dir
 
     return None
 
@@ -133,6 +155,47 @@ def get_model_specific_tokens(model_type):
             "format_type": "standard"
         }
 
+MCQ_TASK_TYPES = {"mmlu", "arc", "aqua", "mathqa"}
+
+
+def _mcq_choice_span(task_type: str) -> Optional[str]:
+    if task_type not in MCQ_TASK_TYPES:
+        return None
+    if task_type in {"aqua", "mathqa"}:
+        return "A-E"
+    return "A-D"
+
+
+def _augment_base_prompt_with_variant(base_prompt: str, task_type: str, variant: str) -> str:
+    choice_span = _mcq_choice_span(task_type)
+    if not choice_span or variant == "default":
+        return base_prompt
+    instruction = ""
+    if variant == "letter":
+        instruction = (
+            f" After you finish reasoning, output exactly one line in the form 'Answer: X' "
+            f"where X is a single capital letter between {choice_span}. "
+            "Do not add any words after the letter."
+        )
+    elif variant == "letter_strict":
+        instruction = (
+            f" After reasoning, output EXACTLY one line 'Answer: X', where X is a single "
+            f"capital letter between {choice_span}. Output nothing after that letter."
+        )
+    return base_prompt + instruction if instruction else base_prompt
+
+
+def _answer_header_for_variant(task_type: str, variant: str) -> str:
+    choice_span = _mcq_choice_span(task_type)
+    if not choice_span or variant == "default":
+        return " Answer: "
+    if variant == "letter":
+        return f"\nAnswer (respond with 'Answer: X' where X is {choice_span}): Answer: "
+    if variant == "letter_strict":
+        return f"\nFinal Answer (type exactly 'Answer: X' with X in {choice_span}, no extra text): Answer: "
+    return " Answer: "
+
+
 def construct_prompts(
     question: str, hyperparameters: Dict[str, Any], reasoning: Optional[str] = None, include_question: bool = False
 ) -> str:
@@ -190,6 +253,10 @@ def construct_prompts(
         prompt_type = "Reasoning:"
     else:
         raise ValueError(f"Unknown task type: {task_type}")
+
+    answer_prompt_variant = hyperparameters.get("answer_prompt_variant", "default")
+    base_prompt = _augment_base_prompt_with_variant(base_prompt, task_type, answer_prompt_variant)
+    answer_header = _answer_header_for_variant(task_type, answer_prompt_variant)
         
     # Construct initial prompt with model-specific tokens
     if format_type == "phi-4":
@@ -204,7 +271,7 @@ def construct_prompts(
             question_placeholder = question if include_question else "<Redacted>"
             return (
                 f"{tokens['im_start']}user{tokens['im_sep']}\n{base_prompt} {question_placeholder}{tokens['im_end']}\n"
-                f"{tokens['im_start']}assistant{tokens['im_sep']}\n{prompt_type}{reasoning} Answer: "
+                f"{tokens['im_start']}assistant{tokens['im_sep']}\n{prompt_type}{reasoning}{answer_header}"
             )
     elif format_type == "qwen3":
         if reasoning is None:
@@ -218,7 +285,7 @@ def construct_prompts(
             question_placeholder = question if include_question else "<Redacted>"
             return (
                 f"{tokens['im_start']}user\n{base_prompt} {question_placeholder}{tokens['im_end']}\n"
-                f"{tokens['im_start']}assistant\n{prompt_type}{reasoning} Answer: "
+                f"{tokens['im_start']}assistant\n{prompt_type}{reasoning}{answer_header}"
             )
     elif format_type == "gemma-3":
         if reasoning is None:
@@ -236,7 +303,7 @@ def construct_prompts(
                 f"{tokens['bos']}{tokens['start_of_turn']}user\n"
                 f"{base_prompt} {question_placeholder}{tokens['end_of_turn']}\n"
                 f"{tokens['start_of_turn']}model\n"
-                f"{prompt_type}{reasoning} Answer: "
+                f"{prompt_type}{reasoning}{answer_header}"
             )
     elif format_type == "mistral":
         if reasoning is None:
@@ -246,7 +313,7 @@ def construct_prompts(
             question_placeholder = question if include_question else "<Redacted>"
             base_with_type = f"{tokens['inst_start']} {base_prompt} {question_placeholder} {tokens['inst_end']}\n{prompt_type}"
             # Add answer header to partial prompt
-            return base_with_type + reasoning + f" Answer: "
+            return base_with_type + reasoning + answer_header
     else:  # standard format (no special tokens)
         if reasoning is None:
             return f"{base_prompt} {question}\n{prompt_type}"
@@ -255,7 +322,7 @@ def construct_prompts(
             question_placeholder = question if include_question else "<Redacted>"
             base_with_type = f"{base_prompt} {question_placeholder}\n{prompt_type}"
             # Add answer header to partial prompt
-            return base_with_type + reasoning + f" Answer: "
+            return base_with_type + reasoning + answer_header
 
 def load_model(model_type, hyperparameters=None):
     """Load either Mistral, Llama, GPT2, TinyStories, Phi, Phi-4, Qwen3, or Gemma 3 model based on parameter."""

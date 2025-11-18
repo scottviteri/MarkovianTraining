@@ -11,12 +11,68 @@ from typing import List, Tuple, Dict, Any, Optional, Callable
 import re
 import json
 import os
+import glob
+import shutil
 import datetime
+import random
+import filecmp
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-import random
 
 from utils import construct_prompts, colored_print, Colors
+
+
+# Track which results files have already been reset during the current process
+_fresh_results_files: set[str] = set()
+
+
+def _get_latest_backup_path(results_file: str) -> Optional[str]:
+    """Return the most recent backup file for a results file, if any."""
+    directory = os.path.dirname(results_file)
+    base_name = os.path.basename(results_file)
+    pattern = os.path.join(directory, base_name.replace(".jsonl", "_backup_*.jsonl"))
+    backups = glob.glob(pattern)
+    if not backups:
+        return None
+    return max(backups, key=os.path.getmtime)
+
+
+def _maybe_backup_results_file(results_file: str) -> Optional[str]:
+    """Create a backup of an existing results file if needed.
+    
+    A new backup is written only when the current contents differ from the most
+    recent backup. The function returns the path to the backup that was created,
+    or None if no backup was required.
+    """
+    if not os.path.exists(results_file) or os.path.getsize(results_file) == 0:
+        return None
+    
+    latest_backup = _get_latest_backup_path(results_file)
+    if latest_backup and filecmp.cmp(results_file, latest_backup, shallow=False):
+        # Current contents match the latest backup; no need to duplicate it.
+        return None
+    
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    directory = os.path.dirname(results_file)
+    base_name = os.path.basename(results_file)
+    backup_name = base_name.replace(".jsonl", f"_backup_{timestamp}.jsonl")
+    backup_path = os.path.join(directory, backup_name)
+    shutil.copy2(results_file, backup_path)
+    return backup_path
+
+
+def _ensure_fresh_results_file(results_file: str):
+    """Truncate the results file once per process, creating backups when needed."""
+    if results_file in _fresh_results_files:
+        return
+    
+    if os.path.exists(results_file):
+        backup_path = _maybe_backup_results_file(results_file)
+        if backup_path:
+            colored_print("Backup", f"Created backup: {os.path.basename(backup_path)}", Colors.YELLOW)
+        # Start with a fresh file for the new evaluation run
+        open(results_file, "w").close()
+    _fresh_results_files.add(results_file)
 
 
 # ============================================================================
@@ -837,8 +893,8 @@ def evaluate_model_on_numeric(
 
 
 def evaluate_model_on_gsm8k(
-    actor_model,
-    critic_model,
+    actor_model,  
+    critic_model, 
     tokenizer,
     device,
     test_data,
@@ -945,10 +1001,12 @@ def save_task_results(
         entry.update(extra_metrics)
     
     results_file = os.path.join(output_dir, f"{task_type}_results_{model_type}.jsonl")
+    _ensure_fresh_results_file(results_file)
     with open(results_file, "a") as f:
         json.dump(entry, f)
         f.write("\n")
     
+    accuracy_plot_path: Optional[str] = None
     if task_type == "gsm8k":
         accuracy_plot_path = os.path.join(output_dir, "gsm8k_accuracy_over_batches.png")
         plot_accuracy_over_batches(results_file, accuracy_plot_path)
@@ -1108,6 +1166,13 @@ def main():
         help="Answer extraction method for numeric tasks (default: simple)"
     )
     parser.add_argument(
+        "--answer_prompt_variant",
+        type=str,
+        choices=["default", "letter", "letter_strict"],
+        default="default",
+        help="Modify answer prompt formatting (MCQ tasks only)"
+    )
+    parser.add_argument(
         "--haiku_metric",
         action="store_true",
         help="Compute an additional accuracy metric using Claude Haiku extraction (requires ANTHROPIC_API_KEY)"
@@ -1157,7 +1222,9 @@ def main():
         load_svamp_dataset,
         load_aqua_dataset,
         load_arc_dataset,
+        load_mmlu_dataset,
         load_mathqa_dataset,
+        load_math_dataset,
         generate_question_answer_batches,
         load_gsm8k_dataset,
         load_arithmetic_dataset,
@@ -1182,9 +1249,9 @@ def main():
         args.model_type = args.model_type or "mistral"
     else:
         if args.all_adapters:
-            run_dir = resolve_run_dir(args.run_dir or args.model_path or find_latest_result())
+            run_dir = resolve_run_dir(args.run_dir or args.model_path or find_latest_result(args.task_type))
             if not run_dir:
-                raise FileNotFoundError("No results directory found")
+                raise FileNotFoundError(f"No results directory found for task {args.task_type}")
             checkpoints = find_checkpoints(run_dir)
             if not checkpoints:
                 raise FileNotFoundError(f"No adapter directories found in {run_dir}")
@@ -1193,7 +1260,7 @@ def main():
                 args.model_type = infer_model_type(run_dir)
                 print(f"Inferred model type: {args.model_type}")
         else:
-            candidate_path = args.model_path or args.run_dir or find_latest_result()
+            candidate_path = args.model_path or args.run_dir or find_latest_result(args.task_type)
             if not candidate_path:
                 raise FileNotFoundError("No model_path provided and no results directory found")
             
@@ -1230,6 +1297,7 @@ def main():
             
             hyperparameters = get_hyperparameters_from_log(run_dir, default_task=args.task_type)
             hyperparameters["task_type"] = args.task_type
+            hyperparameters["answer_prompt_variant"] = args.answer_prompt_variant
             
             # Override hyperparameters if provided
             if args.cot_length is not None:
@@ -1260,6 +1328,7 @@ def main():
                 "temperature": args.temperature or 1.0,
                 "batch_size": 12,
                 "markovian": True,
+                "answer_prompt_variant": args.answer_prompt_variant,
             }
             if args.answer_extraction_method != "simple":
                 hyperparameters["answer_extraction_method"] = args.answer_extraction_method
@@ -1396,6 +1465,8 @@ def main():
             extra_metrics["subset"] = arc_subset
         if haiku_accuracy is not None:
             extra_metrics["accuracy_haiku"] = haiku_accuracy
+        if args.answer_prompt_variant != "default":
+            extra_metrics["answer_prompt_variant"] = args.answer_prompt_variant
         
         results_file = save_task_results(
             task_type=args.task_type,
