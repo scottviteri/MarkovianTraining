@@ -1,10 +1,6 @@
 #!/bin/bash
 # Sweep over ALL adapter checkpoints with small sample sizes
 # This creates a performance profile over training to identify best checkpoints
-#
-# Usage: ./sweep_all_adapters.sh [--exclude task1,task2,...]
-#
-# Example: ./sweep_all_adapters.sh --exclude mmlu,mathqa
 
 set -e
 
@@ -16,6 +12,7 @@ BATCH_SIZE=32  # Larger batch size for better GPU utilization
 # Parse arguments
 EXCLUDE_TASKS=""
 USE_HAIKU=false
+PROMPT_VARIANT="default"
 while [[ $# -gt 0 ]]; do
     case $1 in
         --exclude)
@@ -38,20 +35,31 @@ while [[ $# -gt 0 ]]; do
             USE_HAIKU=true
             shift
             ;;
+        --prompt-variant)
+            PROMPT_VARIANT="$2"
+            if [[ ! "$PROMPT_VARIANT" =~ ^(default|letter|letter_strict)$ ]]; then
+                echo "Error: Invalid prompt variant '$PROMPT_VARIANT'"
+                echo "Valid options: default, letter, letter_strict"
+                exit 1
+            fi
+            shift 2
+            ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --exclude TASKS    Comma-separated list of tasks to skip (e.g., mmlu,mathqa)"
-            echo "  --stride N         Evaluate every Nth example (default: 20)"
-            echo "  --samples N        Number of samples per evaluation (default: 100)"
-            echo "  --batch-size N     Batch size for evaluation (default: 32)"
-            echo "  --haiku            Enable Haiku LLM-based extraction validation (requires ANTHROPIC_API_KEY)"
-            echo "  -h, --help         Show this help message"
+            echo "  --exclude TASKS         Comma-separated list of tasks to skip (e.g., mmlu,mathqa)"
+            echo "  --stride N              Evaluate every Nth example (default: 20)"
+            echo "  --samples N             Number of samples per evaluation (default: 100)"
+            echo "  --batch-size N          Batch size for evaluation (default: 32)"
+            echo "  --prompt-variant TYPE   Answer prompt variant for MCQ tasks (default|letter|letter_strict, default: default)"
+            echo "  --haiku                 Enable Haiku LLM-based extraction validation (requires ANTHROPIC_API_KEY)"
+            echo "  -h, --help              Show this help message"
             echo ""
             echo "Examples:"
             echo "  $0 --exclude mmlu,mathqa --stride 10"
             echo "  $0 --haiku --samples 50  # Use Haiku validation on small sample"
+            echo "  $0 --prompt-variant letter --batch-size 64  # Use letter prompt variant"
             exit 0
             ;;
         *)
@@ -77,6 +85,9 @@ echo "========================================================================"
 echo "ADAPTER SWEEP - All Checkpoints Profile"
 echo "========================================================================"
 echo "Stride: $STRIDE | Samples: $NUM_SAMPLES | Batch Size: $BATCH_SIZE"
+if [[ "$PROMPT_VARIANT" != "default" ]]; then
+    echo "Prompt Variant: $PROMPT_VARIANT"
+fi
 if [[ "$USE_HAIKU" == true ]]; then
     if [[ -n "$ANTHROPIC_API_KEY" ]]; then
         echo -e "Haiku validation: ${GREEN}ENABLED${NC}"
@@ -118,6 +129,11 @@ evaluate_adapter() {
         --stride $STRIDE \
         --num_samples $NUM_SAMPLES \
         --batch_size $BATCH_SIZE"
+    
+    # Add prompt variant if not default
+    if [[ "$PROMPT_VARIANT" != "default" ]]; then
+        CMD="$CMD --answer_prompt_variant $PROMPT_VARIANT"
+    fi
     
     # Add Haiku if requested
     if [[ "$USE_HAIKU" == true ]]; then
@@ -229,6 +245,90 @@ for task_dir in "$RESULTS_DIR"/*; do
         fi
         
         echo "  Found ${#adapters[@]} adapters"
+        
+        # First evaluate base model (adapter_0) for baseline comparison
+        echo -n "  "
+        echo -e "${CYAN}[Baseline]${NC} adapter_0 (no adapter)"
+        
+        # Determine base model path from the first adapter's config
+        if [[ ${#adapters[@]} -gt 0 ]]; then
+            # Read base_model_name_or_path from first adapter's config
+            first_adapter="${adapters[0]}"
+            base_model=$(grep -oP '"base_model_name_or_path":\s*"\K[^"]+' "$first_adapter/adapter_config.json" 2>/dev/null || echo "")
+            
+            if [[ -n "$base_model" ]]; then
+                # Evaluate with base model
+                echo -n "  "
+                TOTAL_EVALS=$((TOTAL_EVALS + 1))
+                
+                CMD="PYTHONPATH=/root/MarkovianTraining/src python -m evaluation \
+                    --task_type $task \
+                    --model_path $base_model \
+                    --use_base_model \
+                    --stride $STRIDE \
+                    --num_samples $NUM_SAMPLES \
+                    --batch_size $BATCH_SIZE"
+                
+                # Add prompt variant if not default
+                if [[ "$PROMPT_VARIANT" != "default" ]]; then
+                    CMD="$CMD --answer_prompt_variant $PROMPT_VARIANT"
+                fi
+                
+                # Add Haiku if requested
+                if [[ "$USE_HAIKU" == true ]]; then
+                    CMD="$CMD --haiku_metric"
+                fi
+                
+                # Task-specific adjustments
+                if [[ "$task" == "mmlu" ]]; then
+                    CMD="$CMD --num_samples 50"
+                fi
+                
+                if output=$(eval "$CMD" 2>&1); then
+                    # Extract accuracy - same logic as evaluate_adapter
+                    accuracy=$(echo "$output" | grep -oP "'\d+\.?\d+%'" | grep -oP "\d+\.?\d+" | head -1)
+                    
+                    if [[ -z "$accuracy" ]]; then
+                        accuracy=$(echo "$output" | grep -oP "(?:Accuracy|accuracy)[:\s]+(\d+\.?\d*)%" | grep -oP "\d+\.?\d+" | head -1)
+                    fi
+                    
+                    if [[ -z "$accuracy" ]]; then
+                        accuracy=$(echo "$output" | grep -oP "(?:Accuracy|accuracy)[:\s]+(0\.\d+)" | grep -oP "0\.\d+" | head -1)
+                        if [[ -n "$accuracy" ]]; then
+                            accuracy=$(echo "$accuracy * 100" | bc -l | xargs printf "%.2f")
+                        fi
+                    fi
+                    
+                    accuracy_wb=$(echo "$output" | grep -i "word boundary" | grep -oP "\d+\.?\d+" | head -1)
+                    
+                    haiku_accuracy=""
+                    if [[ "$USE_HAIKU" == true ]]; then
+                        haiku_accuracy=$(echo "$output" | grep -i "haiku.*accuracy" | grep -oP "\d+\.?\d+" | head -1)
+                    fi
+                    
+                    if [[ -n "$accuracy" ]]; then
+                        SUCCESSFUL=$((SUCCESSFUL + 1))
+                        display_msg="${GREEN}✓${NC} adapter_0: ${CYAN}${accuracy}%${NC}"
+                        if [[ -n "$haiku_accuracy" ]]; then
+                            display_msg="$display_msg (Haiku: ${haiku_accuracy}%)"
+                        fi
+                        echo -e "$display_msg"
+                        echo "$task,$run_name,adapter_0,$accuracy,$accuracy_wb,$haiku_accuracy" >> "$SWEEP_DIR/${task}_sweep.csv"
+                    else
+                        FAILED=$((FAILED + 1))
+                        echo -e "${RED}✗${NC} adapter_0: No accuracy found"
+                    fi
+                else
+                    FAILED=$((FAILED + 1))
+                    echo -e "${RED}✗${NC} adapter_0: Evaluation failed"
+                fi
+                
+                # Clear GPU cache
+                python -c "import torch; torch.cuda.empty_cache()" 2>/dev/null || true
+            else
+                echo -e "  ${YELLOW}⚠${NC} Could not find base model path, skipping adapter_0"
+            fi
+        fi
         
         # Evaluate each adapter
         for adapter in "${adapters[@]}"; do
