@@ -7,7 +7,7 @@ set -e
 RESULTS_DIR="/root/MarkovianTraining/results"
 STRIDE=20  # Evaluate every 20th example
 NUM_SAMPLES=100  # Small sample for quick evaluation (use 0 for unlimited)
-BATCH_SIZE=32  # Larger batch size for better GPU utilization
+BATCH_SIZE=256  # Larger batch size for better GPU utilization
 
 # Parse arguments
 EXCLUDE_TASKS=""
