@@ -598,11 +598,9 @@ def evaluate_model_generic(
         ]
         
         inputs = tokenizer(
-            reasoning_prompts, 
-            return_tensors="pt", 
-            padding=True, 
-            truncation=True,
-            max_length=hyperparameters.get("question_length", 512)
+            reasoning_prompts,
+            return_tensors="pt",
+            padding=True,
         ).to(device)
         
         with torch.no_grad():
@@ -644,8 +642,6 @@ def evaluate_model_generic(
             answer_prompts,
             return_tensors="pt",
             padding=True,
-            truncation=True,
-            max_length=hyperparameters.get("question_length", 512) + hyperparameters.get("cot_length", 100)
         ).to(device)
         
         with torch.no_grad():

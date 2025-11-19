@@ -481,31 +481,37 @@ def load_model_for_evaluation(model_path=None, use_base_model=False, model_type=
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.pad_token_id = tokenizer.eos_token_id
     
-    # Load base model
-    base_model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
-        trust_remote_code=trust_remote_code,
-    )
+    # Shared loader helper
+    def load_base_model():
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+            trust_remote_code=trust_remote_code,
+        )
+        return apply_model_specific_patches(model, model_type)
     
     # Determine device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # Handle different loading scenarios
     if use_base_model or model_path is None:
-        # Base model evaluation - use same model for both actor and critic
+        base_model = load_base_model()
         actor_model = critic_model = base_model
     else:
         if not os.path.isdir(model_path):
             raise FileNotFoundError(f"Expected adapter directory at {model_path}")
+        base_model = load_base_model()
         actor_model = PeftModel.from_pretrained(
             base_model,
             model_path,
             is_trainable=False,
         )
-        critic_model = copy.deepcopy(actor_model)
+        critic_model = load_base_model()
+        for param in critic_model.parameters():
+            param.requires_grad = False
     
+    actor_model.to(device)
+    critic_model.to(device)
     return actor_model, critic_model, tokenizer, device
 
 
