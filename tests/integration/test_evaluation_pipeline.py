@@ -316,11 +316,11 @@ class TestDeterministicSampling:
 class TestActorVsCriticSelection:
     """Test model selection based on actor_reward_weight."""
     
-    def test_critic_used_in_standard_mode(self, mock_device):
-        """Test that critic is used when actor_reward_weight=0."""
+    def test_critic_used_when_actor_reward_weight_zero(self, mock_device):
+        """Critic should generate answers when actor_reward_weight=0.0."""
         hyperparams = {
             "task_type": "test",
-            "actor_reward_weight": 0.0,  # Standard Markovian
+            "actor_reward_weight": 0.0,  # Critic baseline
             "markovian": True,
             "cot_length": 50,
             "question_length": 256,
@@ -357,8 +357,8 @@ class TestActorVsCriticSelection:
         # Critic should be called for answer generation (second generate call)
         assert critic_model.generate.called
     
-    def test_actor_used_in_actor_reward_mode(self, mock_device):
-        """Test that actor is used when actor_reward_weight>0."""
+    def test_actor_used_when_actor_reward_weight_positive(self, mock_device):
+        """Actor should generate answers when actor_reward_weight>0."""
         hyperparams = {
             "task_type": "test",
             "actor_reward_weight": 0.5,  # Actor-only mode

@@ -316,7 +316,7 @@ accuracy, results, haiku_metrics = evaluate_model_on_gsm8k(
     hyperparameters=hyperparameters,
     batch_size=16,
     answer_extraction_method="anchor",  # Use recommended method
-    enable_haiku_metric=True,            # Enable Haiku validation
+    enable_haiku_metric=True,            # Opt-in to Haiku validation (default is off)
 )
 
 print(f"Accuracy: {accuracy:.2%}")

@@ -551,7 +551,7 @@ def evaluate_model_generic(
     num_samples: Optional[int] = None,
     task_name: str = "Task",
     max_answer_tokens: int = 10,
-    enable_haiku_metric: bool = True,
+    enable_haiku_metric: bool = False,
     answer_format: Optional[str] = None,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Generic evaluation function for all task types using critic model for answer generation.
@@ -793,7 +793,7 @@ def evaluate_model_on_mcq(
     num_samples: Optional[int] = None,
     num_choices: int = 4,
     task_name: str = "MCQ",
-    enable_haiku_metric: bool = True,
+    enable_haiku_metric: bool = False,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Generic MCQ evaluation for any number of choices.
     
@@ -844,7 +844,7 @@ def evaluate_model_on_mmlu(
     hyperparameters: Dict[str, Any],
     batch_size: int = 16,
     num_samples: int = 500,
-    enable_haiku_metric: bool = True,
+    enable_haiku_metric: bool = False,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Evaluate MMLU - 4-choice MCQ (A-D) using word boundary extraction."""
     return evaluate_model_on_mcq(
@@ -863,7 +863,7 @@ def evaluate_model_on_arc(
     hyperparameters: Dict[str, Any],
     batch_size: int = 16,
     num_samples: Optional[int] = None,
-    enable_haiku_metric: bool = True,
+    enable_haiku_metric: bool = False,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Evaluate ARC - 4-choice MCQ (A-D) using word boundary extraction."""
     return evaluate_model_on_mcq(
@@ -882,7 +882,7 @@ def evaluate_model_on_aqua(
     hyperparameters: Dict[str, Any],
     batch_size: int = 16,
     num_samples: Optional[int] = None,
-    enable_haiku_metric: bool = True,
+    enable_haiku_metric: bool = False,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Evaluate AQuA - 5-choice MCQ (A-E) using word boundary extraction."""
     return evaluate_model_on_mcq(
@@ -901,7 +901,7 @@ def evaluate_model_on_mathqa(
     hyperparameters: Dict[str, Any],
     batch_size: int = 16,
     num_samples: Optional[int] = None,
-    enable_haiku_metric: bool = True,
+    enable_haiku_metric: bool = False,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Evaluate MathQA - 5-choice MCQ (A-E) using word boundary extraction."""
     return evaluate_model_on_mcq(
@@ -922,7 +922,7 @@ def evaluate_model_on_numeric(
     answer_extraction_method: str = "anchor",
     num_samples: Optional[int] = None,
     max_answer_tokens: int = 16,
-    enable_haiku_metric: bool = True,
+    enable_haiku_metric: bool = False,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Evaluate numeric QA tasks (GSM8K, SVAMP, MATH).
     
@@ -990,7 +990,7 @@ def evaluate_model_on_gsm8k(
     num_samples=None,
     batch_size=None,
     answer_extraction_method="anchor",
-    enable_haiku_metric=True,
+    enable_haiku_metric=False,
 ):
     """Evaluate GSM8K using the unified numeric pipeline.
     
@@ -1490,6 +1490,7 @@ def main():
                 num_samples=args.num_samples,
                 batch_size=eval_bs,
                 answer_extraction_method=args.answer_extraction_method,
+                enable_haiku_metric=args.haiku_metric,
             )
         elif args.task_type == "mmlu":
             accuracy, results, haiku_metrics = evaluate_model_on_mmlu(
@@ -1497,6 +1498,7 @@ def main():
                 test_data, hyperparameters,
                 batch_size=eval_bs,
                 num_samples=args.num_samples,
+                enable_haiku_metric=args.haiku_metric,
             )
         elif args.task_type == "arc":
             accuracy, results, haiku_metrics = evaluate_model_on_arc(
@@ -1504,6 +1506,7 @@ def main():
                 test_data, hyperparameters,
                 batch_size=eval_bs,
                 num_samples=args.num_samples,
+                enable_haiku_metric=args.haiku_metric,
             )
         elif args.task_type == "aqua":
             accuracy, results, haiku_metrics = evaluate_model_on_aqua(
@@ -1511,6 +1514,7 @@ def main():
                 test_data, hyperparameters,
                 batch_size=eval_bs,
                 num_samples=args.num_samples,
+                enable_haiku_metric=args.haiku_metric,
             )
         elif args.task_type == "mathqa":
             accuracy, results, haiku_metrics = evaluate_model_on_mathqa(
@@ -1518,6 +1522,7 @@ def main():
                 test_data, hyperparameters,
                 batch_size=eval_bs,
                 num_samples=args.num_samples,
+                enable_haiku_metric=args.haiku_metric,
             )
         elif args.task_type in ["svamp", "arithmetic"]:
             accuracy, results, haiku_metrics = evaluate_model_on_numeric(
@@ -1526,6 +1531,7 @@ def main():
                 batch_size=eval_bs,
                 answer_extraction_method=args.answer_extraction_method,
                 num_samples=args.num_samples,
+                enable_haiku_metric=args.haiku_metric,
             )
         else:
             raise ValueError(f"Unsupported task type: {args.task_type}")

@@ -713,12 +713,12 @@ def calculate_losses(
         # Don't detach advantages - let gradients flow through reward model
         reward_gradient_losses = -actor_reward_weight * advantages
         losses = pg_losses + reward_gradient_losses
-        metrics["pg_losses"] = pg_losses
-        metrics["reward_gradient_losses"] = reward_gradient_losses
+        metrics["pg_losses"] = pg_losses.detach()
+        metrics["reward_gradient_losses"] = reward_gradient_losses.detach()
     else:
         # Standard policy gradient loss
         pg_losses = -R_mean_actor_logprobs * advantages.detach()
-        metrics["pg_losses"] = pg_losses
+        metrics["pg_losses"] = pg_losses.detach()
         losses = pg_losses
 
     # Add KL penalty if specified
@@ -726,21 +726,21 @@ def calculate_losses(
     if kl_penalty is not None:
         weighted_kl = kl_penalty * kl
         losses = losses + weighted_kl
-        metrics["weighted_kl"] = weighted_kl
+        metrics["weighted_kl"] = weighted_kl.detach()
 
     # Add entropy bonus if specified (subtract because we want to maximize entropy)
     entropy_bonus_weight = hyperparameters.get("entropy_bonus", 0.0)
     if entropy_bonus_weight > 0.0 and entropy is not None:
         entropy_bonus = entropy_bonus_weight * entropy
         losses = losses - entropy_bonus  # Subtract to encourage higher entropy
-        metrics["entropy"] = entropy
-        metrics["entropy_bonus"] = entropy_bonus
+        metrics["entropy"] = entropy.detach()
+        metrics["entropy_bonus"] = entropy_bonus.detach()
 
     # Apply PPO if specified
     prob_ratios = torch.exp(R_mean_actor_logprobs - R_mean_critic_logprobs)
     clipped_ratios = torch.clamp(prob_ratios, 1 - ppo_epsilon, 1 + ppo_epsilon)
-    metrics["prob_ratios"] = prob_ratios
-    metrics["clipped_ratios"] = clipped_ratios
+    metrics["prob_ratios"] = prob_ratios.detach()
+    metrics["clipped_ratios"] = clipped_ratios.detach()
     if use_ppo:
         losses = -torch.min(prob_ratios * advantages, clipped_ratios * advantages)
     
@@ -1626,13 +1626,13 @@ def process_batch(state: TrainingState, qa_batch: List[Tuple[str, str]]) -> Batc
         answers=answers,
         actor_reasoning=reasoning_output.actor_reasoning,
         critic_reasoning=reasoning_output.critic_reasoning,
-        R_mean_actor_logprobs=reasoning_output.R_mean_actor_logprobs,
-        R_mean_critic_logprobs=reasoning_output.R_mean_critic_logprobs,
-        kl=reasoning_output.kl,
-        advantages=advantage_output.advantages,
-        normalized_rewards=advantage_output.normalized_rewards,
-        actor_answer_logprobs=advantage_output.actor_answer_logprobs,
-        critic_answer_logprobs=advantage_output.critic_answer_logprobs,
+        R_mean_actor_logprobs=reasoning_output.R_mean_actor_logprobs.detach(),
+        R_mean_critic_logprobs=reasoning_output.R_mean_critic_logprobs.detach(),
+        kl=reasoning_output.kl.detach(),
+        advantages=advantage_output.advantages.detach(),
+        normalized_rewards=advantage_output.normalized_rewards.detach(),
+        actor_answer_logprobs=advantage_output.actor_answer_logprobs.detach(),
+        critic_answer_logprobs=advantage_output.critic_answer_logprobs.detach(),
         losses=losses,
         training_mask=training_mask,
         metrics=metrics,
@@ -1744,6 +1744,10 @@ def update_model(state: TrainingState, batch_data: BatchData) -> float:
                     f"Step {state.accumulation_step}/{accumulation_steps} - accumulating gradients",
                     Colors.YELLOW
                 )
+
+    # Detach losses after any gradient work so we don't hold onto the
+    # computation graph when logging or storing metrics.
+    batch_data.losses = batch_data.losses.detach()
 
     return grad_norm
 
