@@ -107,7 +107,6 @@ def evaluate_checkpoint(task_type: str, checkpoint_path: str) -> Dict:
         
         # Look for accuracy in output
         accuracy = None
-        accuracy_wb = None
         haiku_accuracy = None
         
         for line in output.split('\n'):
@@ -116,11 +115,6 @@ def evaluate_checkpoint(task_type: str, checkpoint_path: str) -> Dict:
                 match = re.search(r'(\d+\.\d+)%', line)
                 if match and accuracy is None:
                     accuracy = float(match.group(1)) / 100
-            
-            if "word boundary" in line.lower() and "%" in line:
-                match = re.search(r'(\d+\.\d+)%', line)
-                if match:
-                    accuracy_wb = float(match.group(1)) / 100
             
             if "haiku" in line.lower() and "accuracy" in line.lower() and "%" in line:
                 match = re.search(r'(\d+\.\d+)%', line)
@@ -140,8 +134,6 @@ def evaluate_checkpoint(task_type: str, checkpoint_path: str) -> Dict:
                         last_result = json.loads(lines[-1])
                         if accuracy is None:
                             accuracy = last_result.get("accuracy")
-                        if accuracy_wb is None:
-                            accuracy_wb = last_result.get("accuracy_word_boundary")
                         if haiku_accuracy is None:
                             haiku_accuracy = last_result.get("haiku_accuracy")
                     except:
@@ -150,7 +142,6 @@ def evaluate_checkpoint(task_type: str, checkpoint_path: str) -> Dict:
         return {
             "success": result.returncode == 0,
             "accuracy": accuracy,
-            "accuracy_wb": accuracy_wb,
             "haiku_accuracy": haiku_accuracy,
             "output": output,
             "error": result.stderr if result.returncode != 0 else None,
@@ -223,8 +214,6 @@ def main():
                 acc_str = f"{r['accuracy']:.2%}" if r['accuracy'] is not None else "N/A"
                 
                 extra = []
-                if r.get("accuracy_wb") is not None:
-                    extra.append(f"WB: {r['accuracy_wb']:.2%}")
                 if r.get("haiku_accuracy") is not None:
                     extra.append(f"Haiku: {r['haiku_accuracy']:.2%}")
                 

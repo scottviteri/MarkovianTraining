@@ -1431,9 +1431,8 @@ def run_periodic_evaluation(state: TrainingState):
                 state.hyperparameters,
                 batch_size=batch_size,
             )
-            accuracy_wb = None
         elif task_type == "mmlu":
-            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_mmlu(
+            accuracy, results, haiku_metrics = evaluate_model_on_mmlu(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1443,7 +1442,7 @@ def run_periodic_evaluation(state: TrainingState):
                 batch_size=batch_size,
             )
         elif task_type == "arc":
-            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_arc(
+            accuracy, results, haiku_metrics = evaluate_model_on_arc(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1453,7 +1452,7 @@ def run_periodic_evaluation(state: TrainingState):
                 batch_size=batch_size,
             )
         elif task_type == "aqua":
-            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_aqua(
+            accuracy, results, haiku_metrics = evaluate_model_on_aqua(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1463,7 +1462,7 @@ def run_periodic_evaluation(state: TrainingState):
                 batch_size=batch_size,
             )
         elif task_type == "mathqa":
-            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_mathqa(
+            accuracy, results, haiku_metrics = evaluate_model_on_mathqa(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1473,7 +1472,7 @@ def run_periodic_evaluation(state: TrainingState):
                 batch_size=batch_size,
             )
         elif task_type in ("svamp", "math", "arithmetic"):
-            accuracy, results, _, haiku_metrics = evaluate_model_on_numeric(
+            accuracy, results, haiku_metrics = evaluate_model_on_numeric(
                 state.actor_model,
                 state.critic_model,
                 state.tokenizer,
@@ -1482,7 +1481,6 @@ def run_periodic_evaluation(state: TrainingState):
                 state.hyperparameters,
                 batch_size=batch_size,
             )
-            accuracy_wb = None
         else:
             colored_print("Evaluation", f"No evaluation implemented for task type: {task_type}", Colors.YELLOW)
             state.actor_model.train()
@@ -1490,8 +1488,6 @@ def run_periodic_evaluation(state: TrainingState):
         state.actor_model.train()
 
     extra_metrics = {}
-    if accuracy_wb is not None:
-        extra_metrics["accuracy_word_boundary"] = accuracy_wb
     if "subset" in meta:
         extra_metrics["subset"] = meta["subset"]
     if haiku_metrics is not None:

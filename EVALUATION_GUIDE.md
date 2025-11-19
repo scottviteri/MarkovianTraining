@@ -19,7 +19,7 @@ The evaluation system in MarkovianTraining follows a structured pipeline:
 1. **Generation Stage**: Models generate chain-of-thought (CoT) reasoning and final answers
 2. **Extraction Stage**: Task-specific extractors parse answers from generated text
 3. **Comparison Stage**: Extracted answers are compared with gold answers
-4. **Metrics Stage**: Accuracy and optional validation metrics (Haiku, word boundary) are computed
+4. **Metrics Stage**: Accuracy and optional validation metrics (Haiku) are computed
 
 All evaluation code is centralized in `src/evaluation.py` for consistency and maintainability.
 
@@ -123,7 +123,7 @@ def extract_letter_word_boundary(text: str) -> str:
 - "Select option C" → C ✓
 - "The best choice" → X (no isolated letter)
 
-#### Legacy: First Letter Match
+#### Legacy: First Letter Match (Diagnostics Only)
 
 Finds first occurrence of any valid letter:
 
@@ -136,7 +136,7 @@ def extract_letter_legacy(text: str) -> str:
 **Issues**:
 - "The answer is D" → E (matches 'E' in "The")
 - "Select B" → E (matches 'E' in "Select")
-- Still reported as `accuracy_legacy` for backward compatibility
+- Kept only for debugging; no longer reported as an evaluation metric
 
 ### Numeric Tasks (GSM8K, SVAMP, MATH)
 
@@ -237,10 +237,7 @@ accuracy = correct_predictions / total_examples
 
 #### 2. Legacy/Alternative Accuracy
 
-For backward compatibility and comparison:
-
-- **MCQ tasks** (`accuracy_legacy`): First letter match without word boundaries
-- **Numeric tasks**: Currently only one accuracy reported, but extraction method is configurable
+Legacy MCQ extraction remains available for manual debugging (see `extract_letter`), but evaluation outputs now report a single accuracy per task. Numeric tasks still allow different extraction **methods** via configuration, but only the primary metric is persisted.
 
 ### Validation Metrics
 

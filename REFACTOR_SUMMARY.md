@@ -86,7 +86,7 @@ Created comprehensive unified evaluation module containing:
 - Updated `train.py` to import from `evaluation` module
 - **FIXED MathQA**: Now uses `evaluate_model_on_mmlu` (MCQ) instead of `evaluate_model` (numeric)
 - **FIXED ARC**: Now uses `evaluate_model_on_mmlu` (MCQ) instead of `evaluate_model` (numeric)
-- Added word boundary accuracy tracking for both tasks
+- Adopted word boundary extraction for both tasks
 - Removed duplicate function definitions (now in evaluation.py)
 
 ### ✅ Step 5: Update Other Imports

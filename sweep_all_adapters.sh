@@ -180,9 +180,6 @@ evaluate_adapter() {
             fi
         fi
         
-        # Word boundary accuracy (for MCQ tasks)
-        accuracy_wb=$(echo "$output" | grep -i "word boundary" | grep -oP "\d+\.?\d+" | head -1)
-        
         # Haiku accuracy (if enabled)
         haiku_accuracy=""
         if [[ "$USE_HAIKU" == true ]]; then
@@ -198,7 +195,7 @@ evaluate_adapter() {
             echo -e "$display_msg"
             
             # Save to sweep results file
-            echo "$task,$run_name,$adapter_name,$accuracy,$accuracy_wb,$haiku_accuracy" >> "$SWEEP_DIR/${task}_sweep.csv"
+            echo "$task,$run_name,$adapter_name,$accuracy,$haiku_accuracy" >> "$SWEEP_DIR/${task}_sweep.csv"
         else
             FAILED=$((FAILED + 1))
             echo -e "${RED}✗${NC} $adapter_name: No accuracy found"
@@ -248,7 +245,7 @@ for task_dir in "$RESULTS_DIR"/*; do
     echo -e "${BLUE}════════════════════════════════════════${NC}"
     
     # Create CSV header for this task
-    echo "task,run,adapter,accuracy,accuracy_wb,haiku_accuracy" > "$SWEEP_DIR/${task}_sweep.csv"
+    echo "task,run,adapter,accuracy,haiku_accuracy" > "$SWEEP_DIR/${task}_sweep.csv"
     
     # Find all timestamp directories
     for run_dir in "$task_dir"/*/; do
@@ -327,8 +324,6 @@ for task_dir in "$RESULTS_DIR"/*; do
                         fi
                     fi
                     
-                    accuracy_wb=$(echo "$output" | grep -i "word boundary" | grep -oP "\d+\.?\d+" | head -1)
-                    
                     haiku_accuracy=""
                     if [[ "$USE_HAIKU" == true ]]; then
                         haiku_accuracy=$(echo "$output" | grep -i "haiku.*accuracy" | grep -oP "\d+\.?\d+" | head -1)
@@ -341,7 +336,7 @@ for task_dir in "$RESULTS_DIR"/*; do
                             display_msg="$display_msg (Haiku: ${haiku_accuracy}%)"
                         fi
                         echo -e "$display_msg"
-                        echo "$task,$run_name,adapter_0,$accuracy,$accuracy_wb,$haiku_accuracy" >> "$SWEEP_DIR/${task}_sweep.csv"
+                        echo "$task,$run_name,adapter_0,$accuracy,$haiku_accuracy" >> "$SWEEP_DIR/${task}_sweep.csv"
                     else
                         FAILED=$((FAILED + 1))
                         echo -e "${RED}✗${NC} adapter_0: No accuracy found"
@@ -414,8 +409,6 @@ for csv_file in csv_files:
             ax.plot(run_data['batch'], run_data['accuracy'], 'o-', label='Primary', linewidth=2, markersize=8)
             
             # Add word boundary if available
-            if 'accuracy_wb' in run_data.columns and run_data['accuracy_wb'].notna().any():
-                ax.plot(run_data['batch'], run_data['accuracy_wb'], 's-', label='Word Boundary', linewidth=2, markersize=6)
             
             # Highlight best checkpoint
             best_idx = run_data['accuracy'].idxmax()

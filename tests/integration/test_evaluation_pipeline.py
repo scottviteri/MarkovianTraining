@@ -28,6 +28,19 @@ from evaluation import (
 )
 
 
+class MockBatchEncoding:
+    """Minimal BatchEncoding stand-in with .to() support."""
+    
+    def __init__(self, batch_size: int, seq_len: int = 10):
+        self.input_ids = torch.zeros((batch_size, seq_len), dtype=torch.long)
+        self.attention_mask = torch.ones((batch_size, seq_len), dtype=torch.long)
+    
+    def to(self, device):
+        self.input_ids = self.input_ids.to(device)
+        self.attention_mask = self.attention_mask.to(device)
+        return self
+
+
 class MockModel:
     """Mock model that returns predetermined outputs."""
     
@@ -58,12 +71,9 @@ class MockTokenizer:
         self.pad_token_id = 0
         
     def __call__(self, texts, **kwargs):
-        """Mock tokenization."""
+        """Mock tokenization that returns a batch encoding with .to()."""
         batch_size = len(texts) if isinstance(texts, list) else 1
-        return {
-            'input_ids': torch.zeros((batch_size, 10), dtype=torch.long),
-            'attention_mask': torch.ones((batch_size, 10), dtype=torch.long),
-        }
+        return MockBatchEncoding(batch_size=batch_size)
     
     def batch_decode(self, token_ids, **kwargs):
         """Mock decoding - return predetermined outputs."""
@@ -91,13 +101,14 @@ def mock_device():
 def basic_hyperparameters():
     """Basic hyperparameters for testing."""
     return {
-        "task_type": "test",
+        "task_type": "gsm8k",
         "cot_length": 50,
         "question_length": 256,
         "temperature": 1.0,
         "batch_size": 2,
         "markovian": True,
         "actor_reward_weight": 0.0,
+        "model_type": "llama",
     }
 
 
@@ -106,6 +117,7 @@ class TestMCQEvaluation:
     
     def test_mcq_basic_evaluation(self, mock_device, basic_hyperparameters):
         """Test basic MCQ evaluation with correct answers."""
+        basic_hyperparameters["task_type"] = "aqua"
         # Prepare test data
         test_data = [
             ("What is 2+2?", "A"),
@@ -127,7 +139,7 @@ class TestMCQEvaluation:
         critic_model = MockModel([])
         
         # Run evaluation
-        accuracy, results, accuracy_legacy, haiku_metrics = evaluate_model_on_mcq(
+        accuracy, results, haiku_metrics = evaluate_model_on_mcq(
             actor_model=actor_model,
             critic_model=critic_model,
             tokenizer=tokenizer,
@@ -155,7 +167,8 @@ class TestMCQEvaluation:
         assert "is_correct" in results[0]
     
     def test_mcq_word_boundary_vs_legacy(self, mock_device, basic_hyperparameters):
-        """Test that word boundary extraction differs from legacy."""
+        """Test that word boundary extraction ignores letters inside words."""
+        basic_hyperparameters["task_type"] = "aqua"
         test_data = [
             ("Question 1", "B"),
         ]
@@ -168,7 +181,7 @@ class TestMCQEvaluation:
         actor_model = MockModel([])
         critic_model = MockModel([])
         
-        accuracy, results, accuracy_legacy, _ = evaluate_model_on_mcq(
+        accuracy, results, _ = evaluate_model_on_mcq(
             actor_model=actor_model,
             critic_model=critic_model,
             tokenizer=tokenizer,
@@ -179,13 +192,9 @@ class TestMCQEvaluation:
             enable_haiku_metric=False,
         )
         
-        # Word boundary should be correct (B matches)
+        # Word boundary extraction should still capture the isolated 'B'
         assert accuracy == 1.0
         assert results[0]["predicted"] == "B"
-        
-        # Legacy should be incorrect (matches 'E' in "The")
-        assert accuracy_legacy == 0.0
-        assert results[0]["predicted_wb"] == "E"  # Legacy extraction stored in _wb field
 
 
 class TestNumericEvaluation:
@@ -211,7 +220,7 @@ class TestNumericEvaluation:
         actor_model = MockModel([])
         critic_model = MockModel([])
         
-        accuracy, results, _, haiku_metrics = evaluate_model_on_numeric(
+        accuracy, results, _ = evaluate_model_on_numeric(
             actor_model=actor_model,
             critic_model=critic_model,
             tokenizer=tokenizer,
@@ -242,7 +251,7 @@ class TestNumericEvaluation:
         actor_model = MockModel([])
         critic_model = MockModel([])
         
-        accuracy, results, _, _ = evaluate_model_on_numeric(
+        accuracy, results, _ = evaluate_model_on_numeric(
             actor_model=actor_model,
             critic_model=critic_model,
             tokenizer=tokenizer,
@@ -279,12 +288,13 @@ class TestDeterministicSampling:
         critic_model = MockModel([])
         
         # Evaluate with num_samples=2 multiple times
+        basic_hyperparameters["task_type"] = "aqua"
         results_list = []
         for _ in range(3):
             tokenizer.cot_call_count = 0
             tokenizer.answer_call_count = 0
             
-            _, results, _, _ = evaluate_model_on_mcq(
+            _, results, _ = evaluate_model_on_mcq(
                 actor_model=actor_model,
                 critic_model=critic_model,
                 tokenizer=tokenizer,
@@ -332,7 +342,7 @@ class TestActorVsCriticSelection:
         
         # Mock construct_prompts to avoid import issues
         with patch('evaluation.construct_prompts', return_value="prompt"):
-            _, _, _, _ = evaluate_model_generic(
+            _, _, _ = evaluate_model_generic(
                 actor_model=actor_model,
                 critic_model=critic_model,
                 tokenizer=tokenizer,
@@ -370,7 +380,7 @@ class TestActorVsCriticSelection:
         actor_model.generate.return_value = torch.zeros((1, 10), dtype=torch.long)
         
         with patch('evaluation.construct_prompts', return_value="prompt"):
-            _, _, _, _ = evaluate_model_generic(
+            _, _, _ = evaluate_model_generic(
                 actor_model=actor_model,
                 critic_model=critic_model,
                 tokenizer=tokenizer,
@@ -411,7 +421,7 @@ class TestHaikuIntegration:
         
         mock_extract.side_effect = extract_side_effect
         
-        accuracy, results, _, haiku_metrics = evaluate_model_on_numeric(
+        _, _, haiku_metrics = evaluate_model_on_numeric(
             actor_model=actor_model,
             critic_model=critic_model,
             tokenizer=tokenizer,
@@ -442,7 +452,7 @@ class TestHaikuIntegration:
         actor_model = MockModel([])
         critic_model = MockModel([])
         
-        accuracy, results, _, haiku_metrics = evaluate_model_on_numeric(
+        _, _, haiku_metrics = evaluate_model_on_numeric(
             actor_model=actor_model,
             critic_model=critic_model,
             tokenizer=tokenizer,
@@ -468,7 +478,8 @@ class TestBackwardCompatibility:
         actor_model = MockModel([])
         critic_model = MockModel([])
         
-        _, results, _, _ = evaluate_model_on_mcq(
+        basic_hyperparameters["task_type"] = "aqua"
+        _, results, _ = evaluate_model_on_mcq(
             actor_model=actor_model,
             critic_model=critic_model,
             tokenizer=tokenizer,
@@ -486,11 +497,9 @@ class TestBackwardCompatibility:
         assert "reasoning" in result
         assert "generated_answer" in result
         assert "predicted" in result
-        assert "predicted_wb" in result  # Word boundary/legacy prediction
         assert "answer" in result
         assert "gold" in result  # Alias for answer
         assert "correct" in result
-        assert "correct_wb" in result  # Word boundary/legacy correctness
         assert "is_correct" in result  # Alias for correct
 
 

@@ -122,20 +122,24 @@ def extract_answer_with_anchor(answer: str):
         # Normalize
         text = text.replace(",", "")
         
-        # 1) Anchor on 'Answer' label (case-insensitive), optional colon
-        m = re.search(r"(?i)answer\s*:?[\s\-]*", text)
-        if m:
-            after = text[m.end():]
-            m_num = re.search(r"-?\d+", after)
-            if m_num:
-                return int(m_num.group(0))
+        # 1) Anchor on 'Answer' style labels (case-insensitive), optional colon/equal sign
+        label_match = re.search(
+            r"(?i)(?:FINAL\s+ANSWER|CORRECT\s+ANSWER|ANSWER)\s*(?:IS|=|:)?\s*(-?\d+)",
+            text,
+        )
+        if label_match:
+            return int(label_match.group(1))
         
-        # 2) After equals sign
+        # 2) Prefer the last '=' expression to capture the final calculation
         if "=" in text:
-            after_eq = text.split("=", 1)[1]
-            m_num = re.search(r"-?\d+", after_eq)
-            if m_num:
-                return int(m_num.group(0))
+            segments = text.split("=")[1:]
+            last_value = None
+            for segment in segments:
+                m_num = re.search(r"-?\d+", segment)
+                if m_num:
+                    last_value = int(m_num.group(0))
+            if last_value is not None:
+                return last_value
         
         # 3) First integer anywhere
         m_num = re.search(r"-?\d+", text)
@@ -491,19 +495,42 @@ def extract_letter(text: str) -> str:
 
 
 def extract_letter_word_boundary(text: str) -> str:
-    """Extract first letter A-E with word boundaries. Returns 'X' if none found.
+    """Extract first letter A-E with contextual word boundaries. Returns 'X' if none found.
     
-    This correctly extracts the intended choice letter, avoiding false matches
-    in common words like 'The' (contains E) or 'Select' (contains E).
+    Heuristics:
+        1. Prefer explicit anchors such as "Answer: C" or "Final answer is D"
+        2. Remove enumerated MCQ headers (e.g., "A) Choice") to avoid false positives
+        3. Fall back to the first isolated letter with word boundaries
     """
-    # Try uppercase A-E with word boundary
-    match = re.search(r"\b([A-E])\b", text.upper())
+    if not text:
+        return "X"
+    
+    text_upper = text.upper()
+    
+    anchor_patterns = [
+        r"(?:FINAL\s+ANSWER|CORRECT\s+ANSWER|ANSWER)\s*(?:IS|=|:)?\s*([A-E])\b",
+        r"(?:OPTION|CHOICE)\s*(?:IS|=|:)?\s*([A-E])\b",
+    ]
+    for pattern in anchor_patterns:
+        match = re.search(pattern, text_upper)
+        if match:
+            return match.group(1)
+    
+    def strip_choice_headers(s: str) -> str:
+        # Replace leading enumerations like "A) Option" or "B. Choice" but keep standalone answers (e.g., "A.")
+        pattern = r"(?m)(^\s*[\*\-]?\s*)([A-E])([\)\].:-])(?=\s+\S)"
+        return re.sub(pattern, r"\1 \3", s)
+    
+    cleaned_text = strip_choice_headers(text_upper)
+    
+    match = re.search(r"\b([A-E])\b", cleaned_text)
     if match:
         return match.group(1)
-    # Try lowercase a-e with word boundary
+    
     match = re.search(r"\b([a-e])\b", text)
     if match:
         return match.group(1).upper()
+    
     return "X"
 
 
@@ -520,14 +547,13 @@ def evaluate_model_generic(
     hyperparameters: Dict[str, Any],
     answer_extractor_fn: Callable[[str], Any],
     answer_comparator_fn: Optional[Callable[[Any, str], bool]] = None,
-    answer_extractor_fn_wb: Optional[Callable[[str], Any]] = None,
     batch_size: int = 16,
     num_samples: Optional[int] = None,
     task_name: str = "Task",
     max_answer_tokens: int = 10,
     enable_haiku_metric: bool = True,
     answer_format: Optional[str] = None,
-) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
+) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Generic evaluation function for all task types using critic model for answer generation.
     
     This follows the Markovian framework:
@@ -557,7 +583,6 @@ def evaluate_model_generic(
         answer_comparator_fn: Optional function to compare predicted vs gold answers
                              Signature: (extracted_pred: Any, gold_answer: str) -> bool
                              If None, uses simple equality (predicted == gold)
-        answer_extractor_fn_wb: Optional word-boundary extractor for dual metrics (MCQ only)
         batch_size: Evaluation batch size
         num_samples: Optional limit on number of samples to evaluate
         task_name: Name for progress bar
@@ -566,11 +591,9 @@ def evaluate_model_generic(
         answer_format: Answer format for Haiku extraction ("numeric", "A-D", "A-E", or None to infer)
         
     Returns:
-        tuple: (accuracy: float, detailed_results: List[Dict], accuracy_wb: Optional[float], 
-                haiku_metrics: Optional[Dict])
+        tuple: (accuracy: float, detailed_results: List[Dict], haiku_metrics: Optional[Dict])
         - accuracy: Primary accuracy metric
         - detailed_results: Per-example results with predictions and correctness
-        - accuracy_wb: Word-boundary accuracy (MCQ tasks) or None
         - haiku_metrics: Dict with {"accuracy": float, "cost_usd": float, "num_calls": int} or None
     """
     # Limit number of samples if specified (deterministic)
@@ -584,7 +607,6 @@ def evaluate_model_generic(
     actor_model.eval()
     
     correct = 0
-    correct_wb = 0  # Track word boundary accuracy
     results = []
     
     for i in tqdm(range(0, len(test_data), batch_size), desc=f"Evaluating {task_name}"):
@@ -665,25 +687,11 @@ def evaluate_model_generic(
         # Type: predicted_answers is List[Any] (extracted answers, e.g., int for SVAMP, str for MMLU)
         predicted_answers = [answer_extractor_fn(ans) for ans in generated_answers]
         
-        # Word boundary extraction if provided
-        if answer_extractor_fn_wb is not None:
-            predicted_answers_wb = [answer_extractor_fn_wb(ans) for ans in generated_answers]
-        else:
-            predicted_answers_wb = [None] * len(generated_answers)
-        
         # Calculate accuracy using task-specific comparator
-        for q, cot, gen_ans, pred, pred_wb, gold in zip(questions, cot_texts, generated_answers, predicted_answers, predicted_answers_wb, answers):
+        for q, cot, gen_ans, pred, gold in zip(questions, cot_texts, generated_answers, predicted_answers, answers):
             is_correct = answer_comparator_fn(pred, gold)
             if is_correct:
                 correct += 1
-            
-            # Word boundary correctness (if applicable)
-            if pred_wb is not None:
-                is_correct_wb = answer_comparator_fn(pred_wb, gold)  # Use same comparator
-                if is_correct_wb:
-                    correct_wb += 1
-            else:
-                is_correct_wb = None
                 
             # Use both "is_correct" and "correct" for backwards compatibility
             results.append({
@@ -691,16 +699,13 @@ def evaluate_model_generic(
                 "reasoning": cot,
                 "generated_answer": gen_ans,
                 "predicted": pred,
-                "predicted_wb": pred_wb,  # Word boundary prediction
                 "answer": gold,
                 "gold": gold,  # Alias for backwards compatibility
                 "correct": is_correct,
-                "correct_wb": is_correct_wb,  # Word boundary correctness
                 "is_correct": is_correct,  # Alias for backwards compatibility
             })
     
     accuracy = correct / len(test_data) if len(test_data) > 0 else 0.0
-    accuracy_wb = correct_wb / len(test_data) if answer_extractor_fn_wb and len(test_data) > 0 else None
     
     # Haiku extraction metric (optional, requires ANTHROPIC_API_KEY)
     haiku_metrics = None
@@ -770,7 +775,7 @@ def evaluate_model_generic(
             colored_print("Haiku Metric", f"Failed: {str(e)}", Colors.YELLOW)
             haiku_metrics = None
     
-    return accuracy, results, accuracy_wb, haiku_metrics
+    return accuracy, results, haiku_metrics
 
 
 # ============================================================================
@@ -789,7 +794,7 @@ def evaluate_model_on_mcq(
     num_choices: int = 4,
     task_name: str = "MCQ",
     enable_haiku_metric: bool = True,
-) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
+) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Generic MCQ evaluation for any number of choices.
     
     Args:
@@ -798,11 +803,9 @@ def evaluate_model_on_mcq(
         enable_haiku_metric: If True and ANTHROPIC_API_KEY is set, compute Haiku extraction metric
     
     Returns:
-        tuple: (accuracy_wb: float, results: List[Dict], accuracy_legacy: Optional[float], 
-                haiku_metrics: Optional[Dict])
-        - accuracy_wb: Word boundary extraction (PRIMARY, correct method)
-        - results: Detailed results with both extraction methods
-        - accuracy_legacy: Legacy extraction without word boundaries (for backward compatibility)
+        tuple: (accuracy: float, results: List[Dict], haiku_metrics: Optional[Dict])
+        - accuracy: Word boundary extraction (primary, correct method)
+        - results: Detailed results
         - haiku_metrics: Haiku extraction accuracy and cost tracking
     """
     choice_letter = chr(64 + num_choices)  # D for 4, E for 5
@@ -822,16 +825,9 @@ def evaluate_model_on_mcq(
             return match.group(1).upper()
         return "X"
     
-    def extract_letter_legacy(text: str) -> str:
-        """Extract first letter without word boundaries (LEGACY, kept for backward compatibility)."""
-        pattern = f"[A-{choice_letter}]"
-        matches = re.findall(pattern, text.upper())
-        return matches[0] if matches else "X"
-    
     return evaluate_model_generic(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, extract_letter_wb,
-        answer_extractor_fn_wb=extract_letter_legacy,
         batch_size=batch_size, num_samples=num_samples,
         task_name=task_name, max_answer_tokens=10,
         enable_haiku_metric=enable_haiku_metric,
@@ -849,11 +845,8 @@ def evaluate_model_on_mmlu(
     batch_size: int = 16,
     num_samples: int = 500,
     enable_haiku_metric: bool = True,
-) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
-    """Evaluate MMLU - 4-choice MCQ (A-D).
-    
-    Returns word-boundary accuracy (primary), legacy accuracy, and Haiku metrics.
-    """
+) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Evaluate MMLU - 4-choice MCQ (A-D) using word boundary extraction."""
     return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, batch_size=batch_size, num_samples=num_samples,
@@ -871,11 +864,8 @@ def evaluate_model_on_arc(
     batch_size: int = 16,
     num_samples: Optional[int] = None,
     enable_haiku_metric: bool = True,
-) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
-    """Evaluate ARC - 4-choice MCQ (A-D).
-    
-    Returns word-boundary accuracy (primary), legacy accuracy, and Haiku metrics.
-    """
+) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Evaluate ARC - 4-choice MCQ (A-D) using word boundary extraction."""
     return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, batch_size=batch_size, num_samples=num_samples,
@@ -893,11 +883,8 @@ def evaluate_model_on_aqua(
     batch_size: int = 16,
     num_samples: Optional[int] = None,
     enable_haiku_metric: bool = True,
-) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
-    """Evaluate AQuA - 5-choice MCQ (A-E).
-    
-    Returns word-boundary accuracy (primary), legacy accuracy, and Haiku metrics.
-    """
+) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Evaluate AQuA - 5-choice MCQ (A-E) using word boundary extraction."""
     return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, batch_size=batch_size, num_samples=num_samples,
@@ -915,11 +902,8 @@ def evaluate_model_on_mathqa(
     batch_size: int = 16,
     num_samples: Optional[int] = None,
     enable_haiku_metric: bool = True,
-) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
-    """Evaluate MathQA - 5-choice MCQ (A-E).
-    
-    Returns word-boundary accuracy (primary), legacy accuracy, and Haiku metrics.
-    """
+) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Evaluate MathQA - 5-choice MCQ (A-E) using word boundary extraction."""
     return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, batch_size=batch_size, num_samples=num_samples,
@@ -939,7 +923,7 @@ def evaluate_model_on_numeric(
     num_samples: Optional[int] = None,
     max_answer_tokens: int = 16,
     enable_haiku_metric: bool = True,
-) -> Tuple[float, List[Dict[str, Any]], Optional[float], Optional[Dict[str, Any]]]:
+) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Evaluate numeric QA tasks (GSM8K, SVAMP, MATH).
     
     Pipeline:
@@ -1016,7 +1000,6 @@ def evaluate_model_on_gsm8k(
     
     Returns:
         tuple: (accuracy: float, results: List[Dict], haiku_metrics: Optional[Dict])
-        Note: Returns 3-tuple (not 4) for backward compatibility since GSM8K doesn't use word boundary
     """
     # Determine default eval batch size: floor(1.5x) of training batch size (defaults to 12 if absent)
     if batch_size is None:
@@ -1027,7 +1010,7 @@ def evaluate_model_on_gsm8k(
 
     eval_data = test_data[:num_samples] if num_samples else test_data
 
-    accuracy, results, _, haiku_metrics = evaluate_model_on_numeric(
+    accuracy, results, haiku_metrics = evaluate_model_on_numeric(
         actor_model,
         critic_model,
         tokenizer,
@@ -1498,7 +1481,6 @@ def main():
         )
         
         # Run evaluation based on task type
-        accuracy_wb: Optional[float] = None
         haiku_metrics: Optional[Dict[str, Any]] = None
         
         if args.task_type == "gsm8k":
@@ -1510,43 +1492,35 @@ def main():
                 answer_extraction_method=args.answer_extraction_method,
             )
         elif args.task_type == "mmlu":
-            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_mmlu(
+            accuracy, results, haiku_metrics = evaluate_model_on_mmlu(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 batch_size=eval_bs,
                 num_samples=args.num_samples,
             )
-            if accuracy_wb is not None:
-                colored_print("MMLU Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
         elif args.task_type == "arc":
-            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_arc(
+            accuracy, results, haiku_metrics = evaluate_model_on_arc(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 batch_size=eval_bs,
                 num_samples=args.num_samples,
             )
-            if accuracy_wb is not None:
-                colored_print("ARC Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
         elif args.task_type == "aqua":
-            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_aqua(
+            accuracy, results, haiku_metrics = evaluate_model_on_aqua(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 batch_size=eval_bs,
                 num_samples=args.num_samples,
             )
-            if accuracy_wb is not None:
-                colored_print("AQuA Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
         elif args.task_type == "mathqa":
-            accuracy, results, accuracy_wb, haiku_metrics = evaluate_model_on_mathqa(
+            accuracy, results, haiku_metrics = evaluate_model_on_mathqa(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 batch_size=eval_bs,
                 num_samples=args.num_samples,
             )
-            if accuracy_wb is not None:
-                colored_print("MathQA Word Boundary", f"Accuracy (word boundary): {accuracy_wb:.2%}", Colors.CYAN)
         elif args.task_type in ["svamp", "arithmetic"]:
-            accuracy, results, _, haiku_metrics = evaluate_model_on_numeric(
+            accuracy, results, haiku_metrics = evaluate_model_on_numeric(
                 actor_model, critic_model, tokenizer, device,
                 test_data, hyperparameters,
                 batch_size=eval_bs,
@@ -1570,8 +1544,6 @@ def main():
         os.makedirs(model_dir, exist_ok=True)
         
         extra_metrics = {}
-        if accuracy_wb is not None:
-            extra_metrics["accuracy_word_boundary"] = accuracy_wb
         if args.task_type == "arc" and arc_subset:
             extra_metrics["subset"] = arc_subset
         if haiku_metrics is not None:
