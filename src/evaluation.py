@@ -1248,7 +1248,7 @@ def main():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=None,
+        default=256,
         help="Batch size for evaluation (default: 1.5x training batch size)"
     )
     parser.add_argument(
