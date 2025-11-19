@@ -1277,8 +1277,8 @@ def main():
         "--answer_extraction_method",
         type=str,
         choices=["simple", "anchor", "llm"],
-        default="simple",
-        help="Answer extraction method for numeric tasks (default: simple)"
+        default="anchor",
+        help="Answer extraction method for numeric tasks (default: anchor - uses actor model)"
     )
     parser.add_argument(
         "--answer_prompt_variant",
