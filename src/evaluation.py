@@ -553,6 +553,8 @@ def evaluate_model_generic(
     max_answer_tokens: int = 10,
     enable_haiku_metric: bool = False,
     answer_format: Optional[str] = None,
+    precomputed_cots: Optional[List[str]] = None,
+    perturbation_fn: Optional[Callable[[str], str]] = None,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Generic evaluation function for all task types using critic model for answer generation.
     
@@ -589,6 +591,8 @@ def evaluate_model_generic(
         max_answer_tokens: Maximum tokens to generate for answer
         enable_haiku_metric: If True and ANTHROPIC_API_KEY is set, compute Haiku extraction metric
         answer_format: Answer format for Haiku extraction ("numeric", "A-D", "A-E", or None to infer)
+        precomputed_cots: Optional list of pre-generated CoT strings (must match test_data length)
+        perturbation_fn: Optional function to perturb the CoT before answer generation
         
     Returns:
         tuple: (accuracy: float, detailed_results: List[Dict], haiku_metrics: Optional[Dict])
@@ -599,6 +603,11 @@ def evaluate_model_generic(
     # Limit number of samples if specified (deterministic)
     if num_samples and num_samples < len(test_data):
         test_data = test_data[:num_samples]
+        if precomputed_cots:
+            precomputed_cots = precomputed_cots[:num_samples]
+            
+    if precomputed_cots and len(precomputed_cots) != len(test_data):
+        raise ValueError(f"Length mismatch: test_data ({len(test_data)}) vs precomputed_cots ({len(precomputed_cots)})")
     
     # Default comparator is simple equality
     if answer_comparator_fn is None:
@@ -613,35 +622,42 @@ def evaluate_model_generic(
         batch = test_data[i:i+batch_size]
         questions, answers = zip(*batch)
         
-        # Stage 1: Generate CoT with actor model
-        reasoning_prompts = [
-            construct_prompts(question=q, hyperparameters=hyperparameters)
-            for q in questions
-        ]
-        
-        inputs = tokenizer(
-            reasoning_prompts,
-            return_tensors="pt",
-            padding=True,
-        ).to(device)
-        
-        with torch.no_grad():
-            reasoning_outputs = actor_model.generate(
-                input_ids=inputs.input_ids,
-                attention_mask=inputs.attention_mask,
-                max_new_tokens=hyperparameters.get("cot_length", 100),
-                min_new_tokens=hyperparameters.get("cot_length", 100),
-                do_sample=True,
-                temperature=hyperparameters.get("temperature", 1.0),
-                top_k=None,
-                top_p=None,
-                pad_token_id=tokenizer.pad_token_id,
+        if precomputed_cots:
+            cot_texts = precomputed_cots[i:i+batch_size]
+        else:
+            # Stage 1: Generate CoT with actor model
+            reasoning_prompts = [
+                construct_prompts(question=q, hyperparameters=hyperparameters)
+                for q in questions
+            ]
+            
+            inputs = tokenizer(
+                reasoning_prompts,
+                return_tensors="pt",
+                padding=True,
+            ).to(device)
+            
+            with torch.no_grad():
+                reasoning_outputs = actor_model.generate(
+                    input_ids=inputs.input_ids,
+                    attention_mask=inputs.attention_mask,
+                    max_new_tokens=hyperparameters.get("cot_length", 100),
+                    min_new_tokens=hyperparameters.get("cot_length", 100),
+                    do_sample=True,
+                    temperature=hyperparameters.get("temperature", 1.0),
+                    top_k=None,
+                    top_p=None,
+                    pad_token_id=tokenizer.pad_token_id,
+                )
+            
+            cot_texts = tokenizer.batch_decode(
+                reasoning_outputs[:, inputs.input_ids.shape[1]:], 
+                skip_special_tokens=True
             )
         
-        cot_texts = tokenizer.batch_decode(
-            reasoning_outputs[:, inputs.input_ids.shape[1]:], 
-            skip_special_tokens=True
-        )
+        # Apply perturbation if requested
+        if perturbation_fn:
+            cot_texts = [perturbation_fn(cot) for cot in cot_texts]
         
         # Stage 2: Generate answer with appropriate model (deterministic)
         # Use actor if actor_reward_weight > 0 (actor was trained to generate answers)
@@ -794,6 +810,8 @@ def evaluate_model_on_mcq(
     num_choices: int = 4,
     task_name: str = "MCQ",
     enable_haiku_metric: bool = False,
+    precomputed_cots: Optional[List[str]] = None,
+    perturbation_fn: Optional[Callable[[str], str]] = None,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Generic MCQ evaluation for any number of choices.
     
@@ -801,6 +819,8 @@ def evaluate_model_on_mcq(
         num_choices: 4 for A-D (MMLU, ARC), 5 for A-E (AQuA, MathQA)
         task_name: Name for progress bar
         enable_haiku_metric: If True and ANTHROPIC_API_KEY is set, compute Haiku extraction metric
+        precomputed_cots: Optional list of pre-generated CoT strings
+        perturbation_fn: Optional function to perturb the CoT
     
     Returns:
         tuple: (accuracy: float, results: List[Dict], haiku_metrics: Optional[Dict])
@@ -832,6 +852,8 @@ def evaluate_model_on_mcq(
         task_name=task_name, max_answer_tokens=10,
         enable_haiku_metric=enable_haiku_metric,
         answer_format=answer_format,
+        precomputed_cots=precomputed_cots,
+        perturbation_fn=perturbation_fn,
     )
 
 
@@ -845,12 +867,15 @@ def evaluate_model_on_mmlu(
     batch_size: int = 16,
     num_samples: int = 500,
     enable_haiku_metric: bool = False,
+    precomputed_cots: Optional[List[str]] = None,
+    perturbation_fn: Optional[Callable[[str], str]] = None,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Evaluate MMLU - 4-choice MCQ (A-D) using word boundary extraction."""
     return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, batch_size=batch_size, num_samples=num_samples,
         num_choices=4, task_name="MMLU", enable_haiku_metric=enable_haiku_metric,
+        precomputed_cots=precomputed_cots, perturbation_fn=perturbation_fn,
     )
 
 
@@ -864,12 +889,15 @@ def evaluate_model_on_arc(
     batch_size: int = 16,
     num_samples: Optional[int] = None,
     enable_haiku_metric: bool = False,
+    precomputed_cots: Optional[List[str]] = None,
+    perturbation_fn: Optional[Callable[[str], str]] = None,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Evaluate ARC - 4-choice MCQ (A-D) using word boundary extraction."""
     return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, batch_size=batch_size, num_samples=num_samples,
         num_choices=4, task_name="ARC", enable_haiku_metric=enable_haiku_metric,
+        precomputed_cots=precomputed_cots, perturbation_fn=perturbation_fn,
     )
 
 
@@ -883,12 +911,15 @@ def evaluate_model_on_aqua(
     batch_size: int = 16,
     num_samples: Optional[int] = None,
     enable_haiku_metric: bool = False,
+    precomputed_cots: Optional[List[str]] = None,
+    perturbation_fn: Optional[Callable[[str], str]] = None,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Evaluate AQuA - 5-choice MCQ (A-E) using word boundary extraction."""
     return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, batch_size=batch_size, num_samples=num_samples,
         num_choices=5, task_name="AQuA", enable_haiku_metric=enable_haiku_metric,
+        precomputed_cots=precomputed_cots, perturbation_fn=perturbation_fn,
     )
 
 
@@ -902,12 +933,15 @@ def evaluate_model_on_mathqa(
     batch_size: int = 16,
     num_samples: Optional[int] = None,
     enable_haiku_metric: bool = False,
+    precomputed_cots: Optional[List[str]] = None,
+    perturbation_fn: Optional[Callable[[str], str]] = None,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Evaluate MathQA - 5-choice MCQ (A-E) using word boundary extraction."""
     return evaluate_model_on_mcq(
         actor_model, critic_model, tokenizer, device, test_data,
         hyperparameters, batch_size=batch_size, num_samples=num_samples,
         num_choices=5, task_name="MathQA", enable_haiku_metric=enable_haiku_metric,
+        precomputed_cots=precomputed_cots, perturbation_fn=perturbation_fn,
     )
 
 
@@ -923,6 +957,8 @@ def evaluate_model_on_numeric(
     num_samples: Optional[int] = None,
     max_answer_tokens: int = 16,
     enable_haiku_metric: bool = False,
+    precomputed_cots: Optional[List[str]] = None,
+    perturbation_fn: Optional[Callable[[str], str]] = None,
 ) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Evaluate numeric QA tasks (GSM8K, SVAMP, MATH).
     
@@ -936,6 +972,8 @@ def evaluate_model_on_numeric(
             - "simple": Check '=' then find first number (legacy, backward compatible)
             - "llm": Use Claude Haiku as gold-standard extractor (requires ANTHROPIC_API_KEY)
         enable_haiku_metric: If True and ANTHROPIC_API_KEY is set, compute Haiku extraction metric
+        precomputed_cots: Optional list of pre-generated CoT strings
+        perturbation_fn: Optional function to perturb the CoT
     """
     # Get method from hyperparameters if not explicitly provided
     if answer_extraction_method == "anchor" and "answer_extraction_method" in hyperparameters:
@@ -977,6 +1015,8 @@ def evaluate_model_on_numeric(
         max_answer_tokens=max_answer_tokens,
         enable_haiku_metric=enable_haiku_metric,
         answer_format="numeric",
+        precomputed_cots=precomputed_cots,
+        perturbation_fn=perturbation_fn,
     )
 
 
@@ -991,6 +1031,8 @@ def evaluate_model_on_gsm8k(
     batch_size=None,
     answer_extraction_method="anchor",
     enable_haiku_metric=False,
+    precomputed_cots: Optional[List[str]] = None,
+    perturbation_fn: Optional[Callable[[str], str]] = None,
 ):
     """Evaluate GSM8K using the unified numeric pipeline.
     
@@ -1022,6 +1064,8 @@ def evaluate_model_on_gsm8k(
         max_answer_tokens=10,
         num_samples=None,
         enable_haiku_metric=enable_haiku_metric,
+        precomputed_cots=precomputed_cots,
+        perturbation_fn=perturbation_fn,
     )
     return accuracy, results, haiku_metrics
 

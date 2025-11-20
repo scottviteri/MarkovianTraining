@@ -11,12 +11,31 @@ import matplotlib.colors as mcolors
 from scipy.signal import savgol_filter
 from train import calculate_answer_log_probs
 from utils import find_latest_result, print_debug_info
-from utils import construct_prompts, get_text_with_token_length
+from utils import (
+    construct_prompts, 
+    get_text_with_token_length,
+    load_gsm8k_dataset,
+    load_math_dataset,
+    load_mmlu_dataset,
+    load_svamp_dataset,
+    load_aqua_dataset,
+    load_mathqa_dataset,
+    load_arc_dataset,
+    load_arithmetic_dataset,
+    load_model_for_evaluation
+)
+from evaluation import (
+    evaluate_model_on_gsm8k,
+    evaluate_model_on_mmlu,
+    evaluate_model_on_arc,
+    evaluate_model_on_aqua,
+    evaluate_model_on_mathqa,
+    evaluate_model_on_numeric,
+)
 from datasets import load_dataset
 from tqdm import tqdm
 import string
 from pathlib import Path
-from utils import load_model
 from peft import PeftModel
 import glob
 
@@ -33,48 +52,103 @@ def load_model_with_adapters(log_file_path, model_type, hyperparameters, adapter
     Returns:
         tuple: (actor_model, frozen_model, tokenizer, device)
     """
-    # Load base models first
-    actor_model, frozen_model, tokenizer, device = load_model(model_type, hyperparameters)
-    
     # Look for adapter directories in the same directory as the log file
     log_dir = os.path.dirname(log_file_path)
     adapter_pattern = os.path.join(log_dir, "adapter_*")
     adapter_dirs = glob.glob(adapter_pattern)
     
+    adapter_to_load = None
+    
     if adapter_dirs:
         # If a specific adapter index is requested, try to use it first
-        selected_adapter = None
         if adapter_index is not None:
             requested = os.path.join(log_dir, f"adapter_{adapter_index}")
             if os.path.isdir(requested):
-                selected_adapter = requested
-                print(f"Loading requested adapter: {selected_adapter}")
+                adapter_to_load = requested
+                print(f"Loading requested adapter: {adapter_to_load}")
             else:
                 print(f"Requested adapter adapter_{adapter_index} not found in {log_dir}. Falling back to latest available.")
         
-        # Sort by batch number to get the latest adapter
-        def get_batch_number(adapter_path):
-            try:
-                return int(os.path.basename(adapter_path).split('_')[-1])
-            except (ValueError, IndexError):
-                return 0
-        
-        adapter_dirs_sorted = sorted(adapter_dirs, key=get_batch_number)
-        latest_adapter = adapter_dirs_sorted[-1]
-        adapter_to_load = selected_adapter or latest_adapter
-        print(f"Loading trained adapter from: {adapter_to_load}")
-        
-        # Load the adapter using PEFT
-        actor_model = PeftModel.from_pretrained(
-            actor_model,  # Base model with LoRA config
-            adapter_to_load,  # Adapter path
-            is_trainable=False  # Set to inference mode
-        )
-        print(f"Successfully loaded adapter from batch {os.path.basename(adapter_to_load)}")
+        if adapter_to_load is None:
+            # Sort by batch number to get the latest adapter
+            def get_batch_number(adapter_path):
+                try:
+                    return int(os.path.basename(adapter_path).split('_')[-1])
+                except (ValueError, IndexError):
+                    return 0
+            
+            adapter_dirs_sorted = sorted(adapter_dirs, key=get_batch_number)
+            adapter_to_load = adapter_dirs_sorted[-1]
+            print(f"Loading trained adapter from: {adapter_to_load}")
+            
     else:
         print(f"No trained adapters found in {log_dir}, using base model")
     
-    return actor_model, frozen_model, tokenizer, device
+    # Use unified loader from utils
+    if adapter_to_load:
+        return load_model_for_evaluation(model_path=adapter_to_load, model_type=model_type)
+    else:
+        return load_model_for_evaluation(use_base_model=True, model_type=model_type)
+
+
+def find_best_run_for_task(task_type, role):
+    """
+    Automatically find the best run and adapter for a given task and role.
+    
+    Args:
+        task_type: The task type (e.g., "gsm8k", "arithmetic")
+        role: The role string (e.g., "Markovian", "NonMarkovian")
+        
+    Returns:
+        Tuple of (log_file_path, adapter_index) or (None, None) if not found.
+    """
+    results_dir = os.path.join("results", task_type)
+    if not os.path.isdir(results_dir):
+        print(f"Results directory not found: {results_dir}")
+        return None, None
+        
+    # Glob for directories matching the pattern
+    pattern = os.path.join(results_dir, f"*{role}*")
+    candidate_dirs = [d for d in glob.glob(pattern) if os.path.isdir(d)]
+    
+    # Filter to ensure strict role matching (exclude NonMarkovian when looking for Markovian)
+    if role == "Markovian":
+        candidate_dirs = [d for d in candidate_dirs if "NonMarkovian" not in os.path.basename(d)]
+    
+    if not candidate_dirs:
+        print(f"No run directories found for task '{task_type}' with role '{role}'")
+        return None, None
+        
+    # Sort by name (which includes timestamp) to get the latest
+    candidate_dirs.sort()
+    latest_dir = candidate_dirs[-1]
+    print(f"Auto-detected latest run directory for {role}: {latest_dir}")
+    
+    # Look for best_adapter.json
+    best_adapter_path = os.path.join(latest_dir, "best_adapter.json")
+    if not os.path.exists(best_adapter_path):
+        print(f"Warning: best_adapter.json not found in {latest_dir}. Using latest available log file and adapter.")
+        # Fallback: use log.jsonl and None for adapter_index (defaults to latest)
+        log_path = os.path.join(latest_dir, "log.jsonl")
+        return log_path, None
+        
+    try:
+        with open(best_adapter_path, "r") as f:
+            data = json.load(f)
+            batch_index = data.get("batch_index")
+            # Check if it's a valid integer (it might be 0)
+            if batch_index is not None:
+                print(f"Found best adapter for {role} at batch index {batch_index}")
+                log_path = os.path.join(latest_dir, "log.jsonl")
+                return log_path, batch_index
+            else:
+                print(f"Warning: batch_index not found in {best_adapter_path}")
+    except Exception as e:
+        print(f"Error reading best_adapter.json: {e}")
+        
+    # Fallback
+    log_path = os.path.join(latest_dir, "log.jsonl")
+    return log_path, None
 
 
 def perturb_CoT(CoT, config):
@@ -891,7 +965,152 @@ def collate_perturbation_results(perturbation_files, output_dir, perturb_type, i
     print(f"Averaged results for {perturb_type} saved to {output_file}")
 
 
-def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb_type, stride=1, max_index=None, save_interval=10, batch_size=8, evaluator="actor", adapter_index=None):
+def compute_sensitivity_summary(results, perturb_type):
+    """
+    Compute summary statistics (mean sensitivity diff) for a set of results.
+    Returns a dict mapping degree -> mean difference.
+    """
+    if not results:
+        return {}
+        
+    perturbation_degrees = list(results[0]["Effect Difference"].keys())
+    baseline_name = f"{perturb_type.title().replace('_', '')}0%"
+    analysis_degrees = [deg for deg in perturbation_degrees if deg != baseline_name]
+    
+    summary = {}
+    for degree in analysis_degrees:
+        effect_differences = [entry["Effect Difference"][degree] for entry in results]
+        summary[degree] = np.mean(effect_differences)
+        
+    return summary
+
+
+def load_scan_results(output_dir, perturb_type):
+    """Load previously saved scan results."""
+    output_file = os.path.join(output_dir, f"scan_results_{perturb_type}.json")
+    if not os.path.exists(output_file):
+        print(f"Scan results file not found: {output_file}")
+        return None
+    with open(output_file, "r") as f:
+        return json.load(f)
+
+
+def run_checkpoint_scan(
+    markovian_log_file,
+    non_markovian_log_file,
+    perturb_type,
+    task_type,
+    num_samples=128,
+    batch_size=8,
+    question_length=None,
+    target_length=None,
+):
+    """
+    Iterate over ALL matching adapters in the log directories and compute fresh sensitivity.
+    """
+    markovian_dir = os.path.dirname(markovian_log_file)
+    non_markovian_dir = os.path.dirname(non_markovian_log_file)
+    
+    # Find common adapter indices
+    m_adapters = glob.glob(os.path.join(markovian_dir, "adapter_*"))
+    nm_adapters = glob.glob(os.path.join(non_markovian_dir, "adapter_*"))
+    
+    def get_idx(p):
+        try: return int(p.split("_")[-1])
+        except: return None
+        
+    m_idxs = set(get_idx(p) for p in m_adapters if get_idx(p) is not None)
+    nm_idxs = set(get_idx(p) for p in nm_adapters if get_idx(p) is not None)
+    
+    common_idxs = sorted(list(m_idxs.intersection(nm_idxs)))
+    
+    if not common_idxs:
+        print("No common adapter indices found between the two runs.")
+        return
+        
+    print(f"Found {len(common_idxs)} common checkpoints to scan: {common_idxs}")
+    
+    scan_results = []
+    
+    for idx in tqdm(common_idxs, desc="Scanning checkpoints"):
+        # Run eval for this checkpoint
+        # Note: We use 'accuracy' metric logic if task is QA, or log prob if not.
+        # Assuming QA task based on context.
+        # Using run_qa_perturbation_accuracy logic but simplified or calling it directly.
+        
+        # To avoid reloading base model constantly, ideally we'd refactor.
+        # For now, we'll call run_qa_perturbation_accuracy which loads everything.
+        # It is slow but robust.
+        
+        # Suppress print output from sub-function
+        # sys.stdout = open(os.devnull, 'w')
+        try:
+            comparison_data, _, _ = run_qa_perturbation_accuracy(
+                markovian_log_file=markovian_log_file,
+                non_markovian_log_file=non_markovian_log_file,
+                perturb_type=perturb_type,
+                task_type=task_type,
+                num_samples=num_samples,
+                batch_size=batch_size,
+                evaluator="actor",
+                adapter_index=idx,
+                question_length=question_length,
+                target_length=target_length,
+                markovian_adapter_index=idx, # Enforce same index
+                non_markovian_adapter_index=idx 
+            )
+        finally:
+            # sys.stdout = sys.__stdout__
+            pass
+            
+        summary = compute_sensitivity_summary(comparison_data, perturb_type)
+        scan_results.append({
+            "Batch Index": idx,  # Training batch index
+            "Sensitivity Summary": summary
+        })
+        
+    # Save scan results
+    output_dir = os.path.join(markovian_dir, "checkpoint_scan")
+    os.makedirs(output_dir, exist_ok=True)
+    output_file = os.path.join(output_dir, f"scan_results_{perturb_type}.json")
+    
+    with open(output_file, "w") as f:
+        json.dump(scan_results, f)
+        
+    print(f"Scan results saved to {output_file}")
+    return scan_results
+
+
+def plot_checkpoint_scan_results(scan_results, output_dir, perturb_type):
+    """
+    Plot Sensitivity vs Training Batch from scan results.
+    """
+    if not scan_results:
+        return
+
+    batches = [r["Batch Index"] for r in scan_results]
+    degrees = list(scan_results[0]["Sensitivity Summary"].keys())
+    
+    plt.figure(figsize=(12, 6))
+    colors = plt.cm.tab10(np.linspace(0, 1, len(degrees)))
+    
+    for i, degree in enumerate(degrees):
+        values = [r["Sensitivity Summary"][degree] for r in scan_results]
+        plt.plot(batches, values, marker='o', label=degree, color=colors[i])
+        
+    plt.xlabel("Training Batch")
+    plt.ylabel("Mean Sensitivity Difference\n(Markovian - Non-Markovian)")
+    plt.title(f"Sensitivity Differential Evolution: {perturb_type}")
+    plt.legend()
+    plt.grid(True)
+    
+    output_file = os.path.join(output_dir, f"scan_plot_{perturb_type}.png")
+    plt.savefig(output_file)
+    print(f"Scan plot saved to {output_file}")
+    plt.close()
+
+
+def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb_type, stride=1, max_index=None, save_interval=10, batch_size=8, evaluator="actor", adapter_index=None, markovian_adapter_index=None, non_markovian_adapter_index=None):
     """
     Compare perturbation sensitivity between Markovian and Non-Markovian models.
     
@@ -911,6 +1130,10 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
         raise ValueError(f"Unknown perturbation type: {perturb_type}")
 
     perturbations = PERTURBATION_SETS[perturb_type]["perturbations"]
+
+    # Resolve adapter indices
+    m_idx = markovian_adapter_index if markovian_adapter_index is not None else adapter_index
+    nm_idx = non_markovian_adapter_index if non_markovian_adapter_index is not None else adapter_index
 
     # Load both log files
     print("Loading Markovian model log file...")
@@ -937,10 +1160,10 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
     
     # Load both models with their respective adapters
     print("Loading Markovian model...")
-    actor_markovian, frozen_markovian, tokenizer, device = load_model_with_adapters(markovian_log_file, markovian_hyperparams["model_type"], markovian_hyperparams, adapter_index=adapter_index)
+    actor_markovian, frozen_markovian, tokenizer, device = load_model_with_adapters(markovian_log_file, markovian_hyperparams["model_type"], markovian_hyperparams, adapter_index=m_idx)
     
     print("Loading Non-Markovian model...")
-    actor_non_markovian, frozen_non_markovian, _, _ = load_model_with_adapters(non_markovian_log_file, non_markovian_hyperparams["model_type"], non_markovian_hyperparams, adapter_index=adapter_index)
+    actor_non_markovian, frozen_non_markovian, _, _ = load_model_with_adapters(non_markovian_log_file, non_markovian_hyperparams["model_type"], non_markovian_hyperparams, adapter_index=nm_idx)
 
     # Select evaluator per flag (default actor): use adapter-loaded actor, or frozen baseline
     markovian_eval_model = actor_markovian if evaluator == "actor" else frozen_markovian
@@ -1163,12 +1386,18 @@ def run_markovian_comparison_fresh(
     batch_size=8,
     evaluator="actor",
     adapter_index=None,
+    markovian_adapter_index=None,
+    non_markovian_adapter_index=None,
 ):
     """Run comparison using fixed checkpoints on fresh datapoints, not training logs."""
     if perturb_type not in PERTURBATION_SETS:
         raise ValueError(f"Unknown perturbation type: {perturb_type}")
 
     perturbations = PERTURBATION_SETS[perturb_type]["perturbations"]
+
+    # Resolve adapter indices
+    m_idx = markovian_adapter_index if markovian_adapter_index is not None else adapter_index
+    nm_idx = non_markovian_adapter_index if non_markovian_adapter_index is not None else adapter_index
 
     # Load hyperparameters from both logs
     with open(markovian_log_file, "r") as f:
@@ -1190,10 +1419,10 @@ def run_markovian_comparison_fresh(
 
     # Load models with specified adapters
     actor_markovian, frozen_markovian, tokenizer, device = load_model_with_adapters(
-        markovian_log_file, markovian_hyperparams["model_type"], markovian_hyperparams, adapter_index=adapter_index
+        markovian_log_file, markovian_hyperparams["model_type"], markovian_hyperparams, adapter_index=m_idx
     )
     actor_non_markovian, frozen_non_markovian, _, _ = load_model_with_adapters(
-        non_markovian_log_file, non_markovian_hyperparams["model_type"], non_markovian_hyperparams, adapter_index=adapter_index
+        non_markovian_log_file, non_markovian_hyperparams["model_type"], non_markovian_hyperparams, adapter_index=nm_idx
     )
 
     markovian_eval_model = actor_markovian if evaluator == "actor" else frozen_markovian
@@ -1475,7 +1704,9 @@ def plot_markovian_comparison_results(results, output_dir, perturb_type, window_
     
     # Create x-axis label with batch size information if available
     xlabel = "Training Batch"
-    if markovian_hyperparams and non_markovian_hyperparams:
+    if "fresh" in perturb_type:
+        xlabel = "Sample Index (Fresh Evaluation)"
+    elif markovian_hyperparams and non_markovian_hyperparams:
         m_batch_size = markovian_hyperparams.get('batch_size', 'unknown')
         nm_batch_size = non_markovian_hyperparams.get('batch_size', 'unknown')
         if m_batch_size == nm_batch_size:
@@ -1557,9 +1788,190 @@ def analyze_markovian_comparison_summary(results, perturb_type):
     print("\n" + "="*60)
 
 
+def run_qa_perturbation_accuracy(
+    markovian_log_file,
+    non_markovian_log_file,
+    perturb_type,
+    task_type,
+    num_samples=128,
+    batch_size=8,
+    evaluator="actor",
+    adapter_index=None,
+    question_length=None,
+    target_length=None,
+    markovian_adapter_index=None,
+    non_markovian_adapter_index=None,
+):
+    """
+    Run perturbation analysis measuring ACCURACY drop on QA tasks.
+    """
+    if perturb_type not in PERTURBATION_SETS:
+        raise ValueError(f"Unknown perturbation type: {perturb_type}")
+
+    perturbations = PERTURBATION_SETS[perturb_type]["perturbations"]
+
+    # Resolve adapter indices
+    m_idx = markovian_adapter_index if markovian_adapter_index is not None else adapter_index
+    nm_idx = non_markovian_adapter_index if non_markovian_adapter_index is not None else adapter_index
+
+    # Load hyperparameters
+    with open(markovian_log_file, "r") as f:
+        markovian_hyperparams = json.loads(next(f))
+    with open(non_markovian_log_file, "r") as f:
+        non_markovian_hyperparams = json.loads(next(f))
+
+    # Force task settings
+    markovian_hyperparams = {**markovian_hyperparams, "task_type": task_type}
+    non_markovian_hyperparams = {**non_markovian_hyperparams, "task_type": task_type}
+    
+    if question_length:
+        markovian_hyperparams["question_length"] = int(question_length)
+        non_markovian_hyperparams["question_length"] = int(question_length)
+    if target_length:
+        markovian_hyperparams["target_length"] = int(target_length)
+        non_markovian_hyperparams["target_length"] = int(target_length)
+
+    # Load models
+    actor_markovian, frozen_markovian, tokenizer, device = load_model_with_adapters(
+        markovian_log_file, markovian_hyperparams["model_type"], markovian_hyperparams, adapter_index=m_idx
+    )
+    actor_non_markovian, frozen_non_markovian, _, _ = load_model_with_adapters(
+        non_markovian_log_file, non_markovian_hyperparams["model_type"], non_markovian_hyperparams, adapter_index=nm_idx
+    )
+
+    markovian_eval_model = actor_markovian if evaluator == "actor" else frozen_markovian
+    non_markovian_eval_model = actor_non_markovian if evaluator == "actor" else frozen_non_markovian
+    
+    # Load Data
+    qa_pairs = []
+    print(f"Loading fresh {task_type} data for accuracy analysis...")
+    
+    if task_type == "gsm8k":
+        qa_pairs = list(load_gsm8k_dataset(split="test"))
+    elif task_type == "mmlu":
+        subject = markovian_hyperparams.get("mmlu_subject", None)
+        qa_pairs = list(load_mmlu_dataset(split="test", subject=subject))
+    elif task_type == "math":
+        qa_pairs = list(load_math_dataset(split="test"))
+    elif task_type == "svamp":
+        qa_pairs = list(load_svamp_dataset(split="test"))
+    elif task_type == "aqua":
+        qa_pairs = list(load_aqua_dataset(split="test"))
+    elif task_type == "mathqa":
+        qa_pairs = list(load_mathqa_dataset(split="test"))
+    elif task_type == "arc":
+        qa_pairs = list(load_arc_dataset(split="validation"))
+    elif task_type == "arithmetic":
+        qa_pairs = list(load_arithmetic_dataset(chunk_size=num_samples, split="test"))
+    else:
+        raise ValueError(f"Unsupported task type for QA perturbation: {task_type}")
+
+    if not qa_pairs:
+        raise RuntimeError(f"No samples found for {task_type}")
+        
+    if len(qa_pairs) > num_samples:
+        qa_pairs = qa_pairs[:num_samples]
+    print(f"Loaded {len(qa_pairs)} examples.")
+
+    # Helper to select evaluation function
+    def get_eval_func(tt):
+        if tt == "gsm8k": return evaluate_model_on_gsm8k
+        if tt == "mmlu": return evaluate_model_on_mmlu
+        if tt == "arc": return evaluate_model_on_arc
+        if tt == "aqua": return evaluate_model_on_aqua
+        if tt == "mathqa": return evaluate_model_on_mathqa
+        if tt in ["svamp", "math", "arithmetic"]: return evaluate_model_on_numeric
+        return evaluate_model_on_numeric 
+
+    eval_func = get_eval_func(task_type)
+
+    # 1. Generate Original CoTs and Baselines
+    print("Generating Original CoTs and Baseline Accuracy...")
+    
+    # Markovian (no question in Stage 2)
+    markovian_hyperparams["markovian"] = True 
+    _, m_results, _ = eval_func(
+        actor_markovian, markovian_eval_model, tokenizer, device, qa_pairs, markovian_hyperparams,
+        batch_size=batch_size, num_samples=len(qa_pairs)
+    )
+    m_cots = [r["reasoning"] for r in m_results]
+    
+    # Non-Markovian (question in Stage 2)
+    non_markovian_hyperparams["markovian"] = False
+    _, nm_results, _ = eval_func(
+        actor_non_markovian, non_markovian_eval_model, tokenizer, device, qa_pairs, non_markovian_hyperparams,
+        batch_size=batch_size, num_samples=len(qa_pairs)
+    )
+    nm_cots = [r["reasoning"] for r in nm_results]
+    
+    # Prepare results structure
+    comparison_data = []
+    for i in range(len(qa_pairs)):
+        comparison_data.append({
+            "Batch Index": i,
+            "Markovian Effects": {"Original": int(m_results[i]["correct"])},
+            "Non_Markovian Effects": {"Original": int(nm_results[i]["correct"])},
+            "Effect Difference": {"Original": int(m_results[i]["correct"]) - int(nm_results[i]["correct"])}
+        })
+
+    # 2. Run Perturbations
+    for pert_name, pert_config in perturbations.items():
+        if pert_name == "Original":
+            continue
+            
+        print(f"Evaluating perturbation: {pert_name}")
+        
+        # Define perturbation function
+        def p_func(text):
+            return perturb_CoT(text, pert_config)
+            
+        # Evaluate Markovian
+        _, m_pert_results, _ = eval_func(
+            actor_markovian, markovian_eval_model, tokenizer, device, qa_pairs, markovian_hyperparams,
+            batch_size=batch_size, num_samples=len(qa_pairs),
+            precomputed_cots=m_cots,
+            perturbation_fn=p_func
+        )
+        
+        # Evaluate Non-Markovian
+        _, nm_pert_results, _ = eval_func(
+            actor_non_markovian, non_markovian_eval_model, tokenizer, device, qa_pairs, non_markovian_hyperparams,
+            batch_size=batch_size, num_samples=len(qa_pairs),
+            precomputed_cots=nm_cots,
+            perturbation_fn=p_func
+        )
+        
+        for i in range(len(qa_pairs)):
+            m_orig = int(m_results[i]["correct"])
+            m_pert = int(m_pert_results[i]["correct"])
+            m_sensitivity = m_orig - m_pert
+            
+            nm_orig = int(nm_results[i]["correct"])
+            nm_pert = int(nm_pert_results[i]["correct"])
+            nm_sensitivity = nm_orig - nm_pert
+            
+            diff = m_sensitivity - nm_sensitivity
+            
+            comparison_data[i]["Markovian Effects"][pert_name] = m_sensitivity
+            comparison_data[i]["Non_Markovian Effects"][pert_name] = nm_sensitivity
+            comparison_data[i]["Effect Difference"][pert_name] = diff
+
+    # Save results
+    output_dir = os.path.join(os.path.dirname(markovian_log_file), "markovian_comparison_accuracy")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"comparison_results_accuracy_{perturb_type}.json")
+    
+    with open(output_path, "w") as f:
+        json.dump(comparison_data, f)
+        
+    print(f"Accuracy perturbation analysis saved to {output_path}")
+    return comparison_data, markovian_hyperparams, non_markovian_hyperparams
+
+
 def main():
     parser = argparse.ArgumentParser(description="Perturbation Analysis Tool")
     parser.add_argument("--log_file", help="Log file to analyze or directory containing perturbation results")
+    parser.add_argument("--metric", type=str, default="log_prob", choices=["log_prob", "accuracy"], help="Metric to evaluate: 'log_prob' or 'accuracy'")
     parser.add_argument(
         "--window_size", type=int, default=40, help="Smoothing window size"
     )
@@ -1717,34 +2129,118 @@ def main():
         help="Regenerate individual markovian comparison plots with new parameters before combining (for --combine_all_plots)"
     )
 
+    parser.add_argument(
+        "--sweep_checkpoints",
+        action="store_true",
+        help="Iterate over all common checkpoints and plot sensitivity evolution (requires --fresh_comparison)"
+    )
+    parser.add_argument(
+        "--plot_scan_only",
+        action="store_true",
+        help="Only plot from existing checkpoint sweep results (requires --sweep_checkpoints)"
+    )
+
     args = parser.parse_args()
 
     if args.all:
         args.perturb = list(PERTURBATION_SETS.keys())
 
+    # Auto-detection of logs and adapters if missing
+    markovian_adapter_index = args.adapter_index
+    non_markovian_adapter_index = args.adapter_index
+    
+    # Determine target task for auto-detection
+    target_task = args.fresh_task_type
+        
+    if (args.fresh_comparison or args.markovian_comparison) and (not args.markovian_log or not args.non_markovian_log):
+        if target_task:
+            print(f"Attempting to auto-detect logs for task: {target_task}")
+            if not args.markovian_log:
+                 log, idx = find_best_run_for_task(target_task, "Markovian")
+                 if log:
+                     print(f"  Markovian: {log} (adapter {idx})")
+                     args.markovian_log = log
+                     if idx is not None: markovian_adapter_index = idx
+            
+            if not args.non_markovian_log:
+                 log, idx = find_best_run_for_task(target_task, "NonMarkovian")
+                 if log:
+                     print(f"  NonMarkovian: {log} (adapter {idx})")
+                     args.non_markovian_log = log
+                     if idx is not None: non_markovian_adapter_index = idx
+
     # Handle fresh datapoint comparison mode
     if args.fresh_comparison:
         if not args.markovian_log or not args.non_markovian_log:
-            print("Error: --fresh_comparison requires both --markovian_log and --non_markovian_log")
+            print("Error: --fresh_comparison requires both --markovian_log and --non_markovian_log (auto-detection failed)")
             return
         if not args.perturb:
             print("Error: --fresh_comparison requires --perturb argument")
             return
+            
+        # Checkpoint Sweep Mode
+        if args.sweep_checkpoints:
+            for perturb_type in args.perturb:
+                output_dir = os.path.join(os.path.dirname(args.markovian_log), "checkpoint_scan")
+                
+                if args.plot_scan_only:
+                    print(f"Plotting existing scan results for {perturb_type}...")
+                    scan_results = load_scan_results(output_dir, perturb_type)
+                    if scan_results:
+                        plot_checkpoint_scan_results(scan_results, output_dir, perturb_type)
+                    continue
+
+                print(f"Running Checkpoint Sweep for {perturb_type}...")
+                scan_results = run_checkpoint_scan(
+                    markovian_log_file=args.markovian_log,
+                    non_markovian_log_file=args.non_markovian_log,
+                    perturb_type=perturb_type,
+                    task_type=args.fresh_task_type,
+                    num_samples=args.fresh_num_samples,
+                    batch_size=args.batch_size,
+                    question_length=args.fresh_question_length,
+                    target_length=args.fresh_target_length,
+                )
+                plot_checkpoint_scan_results(scan_results, output_dir, perturb_type)
+            return
+
         for perturb_type in args.perturb:
-            print(f"Running Fresh Markovian vs Non-Markovian comparison for {perturb_type}...")
-            comparison_data, markovian_hyperparams, non_markovian_hyperparams = run_markovian_comparison_fresh(
-                markovian_log_file=args.markovian_log,
-                non_markovian_log_file=args.non_markovian_log,
-                perturb_type=perturb_type,
-                num_samples=args.fresh_num_samples,
-                task_type=args.fresh_task_type,
-                question_length=args.fresh_question_length,
-                target_length=args.fresh_target_length,
-                batch_size=args.batch_size,
-                evaluator=args.evaluator,
-                adapter_index=args.adapter_index,
-            )
-            output_dir = os.path.join(os.path.dirname(args.markovian_log), "markovian_comparison")
+            print(f"Running Fresh Markovian vs Non-Markovian comparison for {perturb_type} (Metric: {args.metric})...")
+            
+            if args.metric == "accuracy":
+                comparison_data, markovian_hyperparams, non_markovian_hyperparams = run_qa_perturbation_accuracy(
+                    markovian_log_file=args.markovian_log,
+                    non_markovian_log_file=args.non_markovian_log,
+                    perturb_type=perturb_type,
+                    task_type=args.fresh_task_type,
+                    num_samples=args.fresh_num_samples,
+                    batch_size=args.batch_size,
+                    evaluator=args.evaluator,
+                    adapter_index=args.adapter_index,
+                    question_length=args.fresh_question_length,
+                    target_length=args.fresh_target_length,
+                    markovian_adapter_index=markovian_adapter_index,
+                    non_markovian_adapter_index=non_markovian_adapter_index,
+                )
+            else:
+                comparison_data, markovian_hyperparams, non_markovian_hyperparams = run_markovian_comparison_fresh(
+                    markovian_log_file=args.markovian_log,
+                    non_markovian_log_file=args.non_markovian_log,
+                    perturb_type=perturb_type,
+                    num_samples=args.fresh_num_samples,
+                    task_type=args.fresh_task_type,
+                    question_length=args.fresh_question_length,
+                    target_length=args.fresh_target_length,
+                    batch_size=args.batch_size,
+                    evaluator=args.evaluator,
+                    adapter_index=args.adapter_index,
+                    markovian_adapter_index=markovian_adapter_index,
+                    non_markovian_adapter_index=non_markovian_adapter_index,
+                )
+            
+            output_dir = os.path.join(os.path.dirname(args.markovian_log), f"markovian_comparison_{args.metric}")
+            os.makedirs(output_dir, exist_ok=True)
+            
             plot_markovian_comparison_results(
                 results=comparison_data,
                 output_dir=output_dir,
@@ -1762,7 +2258,7 @@ def main():
     # Handle markovian comparison mode
     if args.markovian_comparison:
         if not args.markovian_log or not args.non_markovian_log:
-            print("Error: --markovian_comparison requires both --markovian_log and --non_markovian_log arguments")
+            print("Error: --markovian_comparison requires both --markovian_log and --non_markovian_log arguments (auto-detection failed)")
             return
         if not args.perturb:
             print("Error: --markovian_comparison requires --perturb argument")
@@ -1780,6 +2276,8 @@ def main():
                 batch_size=args.batch_size,
                 evaluator=args.evaluator,
                 adapter_index=args.adapter_index,
+                markovian_adapter_index=markovian_adapter_index,
+                non_markovian_adapter_index=non_markovian_adapter_index,
             )
             
             # Generate plots and analysis
