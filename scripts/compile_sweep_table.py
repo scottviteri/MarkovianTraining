@@ -128,6 +128,39 @@ def select_metadata_for_stride(entries, required_stride):
 
 
 def collect_adapter_metadata(adapter_dirs, required_stride):
+def detect_model_type_from_metadata(metadata_entries):
+    for meta in metadata_entries:
+        mt = meta.get("model_type")
+        if mt:
+            return mt
+    return None
+
+
+def detect_model_type_from_log(run_dir):
+    log_path = os.path.join(run_dir, "log.jsonl")
+    if not os.path.exists(log_path):
+        return None
+    try:
+        with open(log_path, "r") as f:
+            first_line = f.readline().strip()
+            if first_line:
+                data = json.loads(first_line)
+                return data.get("model_type")
+    except Exception as e:
+        print(f"Warning: failed to parse {log_path}: {e}")
+    return None
+
+
+def detect_model_type(run_dir, metadata_entries, cli_default=None):
+    mt = detect_model_type_from_metadata(metadata_entries)
+    if mt:
+        return mt
+    mt = detect_model_type_from_log(run_dir)
+    if mt:
+        return mt
+    if cli_default:
+        return cli_default
+    return None
     metadata_entries = []
     missing_adapters = []
     for adapter_dir in adapter_dirs:
@@ -228,7 +261,7 @@ def get_wiki_max_smoothed_logprob(run_dir, window_size=200):
     return smoothed.max()
 
 
-def get_wiki_baseline_score(dataset, model_type, project_root):
+def get_wiki_baseline_score(dataset, project_root):
     """
     For wiki tasks baseline, we use the average of the first 100 'Critic Answer Log Probs'.
     The critic (frozen model) provides a baseline for the answer log probability.
@@ -293,12 +326,18 @@ def get_wiki_baseline_score(dataset, model_type, project_root):
     return sum(critic_log_probs) / len(critic_log_probs)
 
 
-def get_baseline_score(dataset, model_type, args, project_root, force_skip_eval=False):
+def get_baseline_score(dataset, run_dir, metadata_entries, args, project_root, force_skip_eval=False):
     """
     Get baseline (base model) score for the dataset.
     Runs evaluation if not present in logs.
     """
-    results_file = os.path.join(project_root, "results", dataset, f"{dataset}_results_{model_type}.jsonl")
+    model_type = detect_model_type(run_dir, metadata_entries)
+    if not model_type:
+        print(f"Warning: could not determine model type for baseline {dataset}; skipping.")
+        return 0.0
+
+    results_file = os.path.join(run_dir if run_dir else os.path.join(project_root, "results", dataset),
+                                f"{dataset}_results_{model_type}.jsonl")
     
     # Check if already exists
     if os.path.exists(results_file):
@@ -346,7 +385,7 @@ def get_baseline_score(dataset, model_type, args, project_root, force_skip_eval=
     
     return 0.0
 
-def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, force_skip_eval=False):
+def get_max_adapter_score(run_dir, dataset, args, project_root, model_type_hint, metadata_entries_hint, force_skip_eval=False):
     """
     Evaluate all adapters in a run directory and return the max accuracy.
     """
@@ -359,7 +398,10 @@ def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, forc
         return 0.0
 
     required_stride = args.stride if args.stride else 1
-    metadata_entries, missing_adapters = collect_adapter_metadata(adapters, required_stride)
+    metadata_entries = metadata_entries_hint or []
+    missing_adapters = []
+    if not metadata_entries:
+        metadata_entries, missing_adapters = collect_adapter_metadata(adapters, required_stride)
 
     if missing_adapters and not args.dry_run and not args.skip_eval and not force_skip_eval:
         print(
@@ -372,7 +414,7 @@ def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, forc
             "--task_type", dataset,
             "--run_dir", run_dir,
             "--all_adapters",
-            "--model_type", model_type
+            "--model_type", model_type_hint or "llama"
         ]
         if args.num_samples:
             cmd.extend(["--num_samples", str(args.num_samples)])
@@ -450,7 +492,6 @@ def main():
     parser = argparse.ArgumentParser(description="Compile sweep results into a table")
     parser.add_argument("--num_samples", type=int, help="Number of samples for evaluation")
     parser.add_argument("--stride", type=int, default=1, help="Evaluate every nth example (1 = full test set)")
-    parser.add_argument("--model_type", type=str, default="llama", help="Model type")
     parser.add_argument("--dry_run", action="store_true", help="Simulate the sweep without writing files or syncing to S3")
     parser.add_argument("--skip_eval", action="store_true", help="Do not launch new evaluations; rely solely on existing metadata")
     parser.add_argument("--task_type", type=str, default=None, help="Only process a specific task/dataset (e.g. gsm8k)")
@@ -539,35 +580,43 @@ def main():
     print(f"Found datasets: {datasets}")
     
     for dataset in datasets:
+        dataset_runs = [rd for rd in run_dirs if rd[0] == dataset]
+        sample_metadata = []
+        for _, _, path in dataset_runs:
+            adapters = list_adapter_dirs(path)
+            metadata_entries, _ = collect_adapter_metadata(adapters, args.stride if args.stride else 1)
+            sample_metadata.extend(metadata_entries)
+            if sample_metadata:
+                break
+
+        model_type = detect_model_type(dataset_runs[0][2] if dataset_runs else None, sample_metadata)
+
         if dataset in WIKI_TASKS:
-            # Wiki baseline calculation
-            score = get_wiki_baseline_score(dataset, args.model_type, project_root)
+            score = get_wiki_baseline_score(dataset, project_root)
             wiki_table[dataset]["Baseline"] = score
         else:
-            # Standard task baseline evaluation
-            should_evaluate = True
-            if args.task_type and dataset != args.task_type:
-                should_evaluate = False
-                
-            score = get_baseline_score(dataset, args.model_type, args, project_root, force_skip_eval=not should_evaluate)
+            should_evaluate = dataset_runs and (not args.task_type or dataset == args.task_type)
+            run_dir_for_baseline = dataset_runs[0][2] if dataset_runs else os.path.join(project_root, "results", dataset)
+            score = get_baseline_score(dataset, run_dir_for_baseline, sample_metadata, args, project_root, force_skip_eval=not should_evaluate)
             table[dataset]["Baseline"] = score
         
     # 3. Process Runs
     for dataset, method, path in run_dirs:
+        metadata_entries, missing_adapters = collect_adapter_metadata(list_adapter_dirs(path), args.stride if args.stride else 1)
+        model_type = detect_model_type(path, metadata_entries)
+
         if dataset in WIKI_TASKS:
-            # Wiki score calculation (max smoothed logprob)
             score = get_wiki_max_smoothed_logprob(path)
             wiki_table[dataset][method] = score
         else:
-            # Standard task evaluation
             should_evaluate = True
             if args.task_type and dataset != args.task_type:
                 should_evaluate = False
             if args.method and method != args.method:
                 should_evaluate = False
-                
-            score = get_max_adapter_score(path, dataset, args.model_type, args, project_root, force_skip_eval=not should_evaluate)
-            table[dataset]["Baseline"] = table[dataset]["Baseline"] # ensure baseline col exists
+
+            score = get_max_adapter_score(path, dataset, args, project_root, model_type, metadata_entries, force_skip_eval=not should_evaluate)
+            table[dataset].setdefault("Baseline", table[dataset].get("Baseline", 0.0))
             table[dataset][method] = score
 
     # 4. Generate Table
