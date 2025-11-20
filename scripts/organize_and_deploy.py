@@ -264,7 +264,7 @@ MATRIX = {
 
 # Column definitions (Hyperparameter overrides for each column)
 COLUMNS = [
-    ("Markovian", {"markovian": True}),
+    ("Markovian", {"markovian": True, "model_type": "llama"}),
     ("Non-Markovian", {"markovian": False}),
     ("No Reward", {"actor_reward_weight": 0.0}),
     ("PPO", {"use_ppo": True}),
