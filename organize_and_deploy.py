@@ -35,9 +35,15 @@ TARGET_HOSTS = {
 }
 
 
-def get_target_host(dataset):
+def get_target_host(dataset, target_group=None):
     """Return evaluation target host for dataset."""
-    return TARGET_HOSTS.get(dataset, "left3")
+    if target_group == "3-1":
+        return "left3"
+    if target_group == "3-3":
+        return "right3"
+    
+    # Default behavior if no group is specified: everything goes to left3 (3-1)
+    return "left3"
 
 
 def run_ssh_command(host, command, capture_output=True):
@@ -396,7 +402,7 @@ def process_local(selected_datasets, column_filters=None, skip_push=False, skip_
             if skip_push:
                 continue
 
-            target_host = get_target_host(dataset)
+            target_host = get_target_host(dataset, args.target_group)
             timestamp = best_run.name
             print(f"    > Pushing {dataset} ({col_name}) run {timestamp} to {target_host}...")
             cmd = [
@@ -448,7 +454,7 @@ def process_s3(
             print(f"    + Selected run: {best_run}")
             selected_any = True
 
-            target_host = get_target_host(dataset)
+            target_host = get_target_host(dataset, args.target_group)
             
             # Construct descriptive run name
             role_slug = sanitize_role(col_name)
@@ -553,11 +559,13 @@ if __name__ == "__main__":
     # Determine target group filter
     target_group_datasets = None
     if args.target_group == "3-1":
-        target_group_datasets = ["gsm8k", "svamp", "wiki_continuation"]
-        print(f"Filtering to target group 3-1 (left3): {target_group_datasets}")
+         # Optional: if you still want to filter datasets for 3-1 when explicitly requested, uncomment:
+         # target_group_datasets = ["gsm8k", "svamp", "wiki_continuation"]
+         pass
     elif args.target_group == "3-3":
-        target_group_datasets = ["arc", "arithmetic", "mmlu"]
-        print(f"Filtering to target group 3-3 (right3): {target_group_datasets}")
+         # target_group_datasets = ["arc", "arithmetic", "mmlu"]
+         pass
+
 
     # Combine dataset filters
     if args.datasets:
