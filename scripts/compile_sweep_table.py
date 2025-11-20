@@ -47,12 +47,12 @@ def parse_run_dir(run_dir):
     
     return dataset_name, method
 
-def get_baseline_score(dataset, model_type, args):
+def get_baseline_score(dataset, model_type, args, project_root, force_skip_eval=False):
     """
     Get baseline (base model) score for the dataset.
     Runs evaluation if not present in logs.
     """
-    results_file = os.path.join("results", dataset, f"{dataset}_results_{model_type}.jsonl")
+    results_file = os.path.join(project_root, "results", dataset, f"{dataset}_results_{model_type}.jsonl")
     
     # Check if already exists
     if os.path.exists(results_file):
@@ -62,29 +62,27 @@ def get_baseline_score(dataset, model_type, args):
                     data = json.loads(line)
                     # Look for entry with no model_path (base model)
                     if data.get("model_path") is None and data.get("model_type") == model_type:
-                        # Check if we should re-run based on sample count?
-                        # For now, assume existing is fine if it exists.
-                        # Unless args force it? 
                         return data.get("accuracy", 0.0)
                 except:
                     continue
 
     # Run evaluation
-    print(f"Evaluating baseline for {dataset}...")
-    cmd = [
-        "python", "src/evaluation.py",
-        "--task_type", dataset,
-        "--model_type", model_type,
-        "--use_base_model"
-    ]
-    if args.num_samples:
-        cmd.extend(["--num_samples", str(args.num_samples)])
-    if args.stride:
-        cmd.extend(["--stride", str(args.stride)])
-        
-    if not args.dry_run:
+    if not args.dry_run and not args.skip_eval and not force_skip_eval:
+        print(f"Evaluating baseline for {dataset}...")
+        eval_script = os.path.join(project_root, "src", "evaluation.py")
+        cmd = [
+            "python", eval_script,
+            "--task_type", dataset,
+            "--model_type", model_type,
+            "--use_base_model"
+        ]
+        if args.num_samples:
+            cmd.extend(["--num_samples", str(args.num_samples)])
+        if args.stride:
+            cmd.extend(["--stride", str(args.stride)])
+            
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, cwd=project_root)
         except subprocess.CalledProcessError as e:
             print(f"Error evaluating baseline for {dataset}: {e}")
             return 0.0
@@ -100,7 +98,7 @@ def get_baseline_score(dataset, model_type, args):
     
     return 0.0
 
-def get_max_adapter_score(run_dir, dataset, model_type, args):
+def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, force_skip_eval=False):
     """
     Evaluate all adapters in a run directory and return the max accuracy.
     """
@@ -109,32 +107,36 @@ def get_max_adapter_score(run_dir, dataset, model_type, args):
     # Check for adapters
     adapters = glob.glob(os.path.join(run_dir, "adapter_*"))
     if not adapters:
-        print(f"No adapters found in {run_dir}")
+        if not force_skip_eval:
+            print(f"No adapters found in {run_dir}")
         return 0.0
 
     # Run evaluation
-    print(f"Evaluating adapters in {os.path.basename(run_dir)}...")
-    cmd = [
-        "python", "src/evaluation.py",
-        "--task_type", dataset,
-        "--run_dir", run_dir,
-        "--all_adapters",
-        "--model_type", model_type
-    ]
-    if args.num_samples:
-        cmd.extend(["--num_samples", str(args.num_samples)])
-    if args.stride:
-        cmd.extend(["--stride", str(args.stride)])
-        
-    if not args.dry_run:
+    if not args.dry_run and not args.skip_eval and not force_skip_eval:
+        print(f"Evaluating adapters in {os.path.basename(run_dir)}...")
+        eval_script = os.path.join(project_root, "src", "evaluation.py")
+        cmd = [
+            "python", eval_script,
+            "--task_type", dataset,
+            "--run_dir", run_dir,
+            "--all_adapters",
+            "--model_type", model_type
+        ]
+        if args.num_samples:
+            cmd.extend(["--num_samples", str(args.num_samples)])
+        if args.stride:
+            cmd.extend(["--stride", str(args.stride)])
+            
         try:
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, cwd=project_root)
         except subprocess.CalledProcessError as e:
             print(f"Error evaluating adapters for {run_dir}: {e}")
             # Continue to try reading whatever exists
     
     # Read results
-    max_acc = 0.0
+    max_acc = -1.0  # Start with -1 so even 0.0 accuracy is captured
+    best_run = None
+    
     if os.path.exists(results_file):
         with open(results_file, 'r') as f:
             for line in f:
@@ -142,9 +144,26 @@ def get_max_adapter_score(run_dir, dataset, model_type, args):
                     data = json.loads(line)
                     # Filter for this specific run? The file is in the run dir, so it should be specific.
                     if data.get("accuracy") is not None:
-                        max_acc = max(max_acc, data.get("accuracy"))
+                        acc = data.get("accuracy")
+                        if acc > max_acc:
+                            max_acc = acc
+                            best_run = data
                 except:
                     continue
+    
+    # If max_acc is still -1, it means we found no valid entries or all were None
+    # If max_acc is 0.0, that's a valid score and we should have a best_run
+    if max_acc == -1.0:
+        max_acc = 0.0
+    
+    if best_run and not args.dry_run:
+        # Save best run info to a separate JSON file for easy retrieval
+        best_info_path = os.path.join(run_dir, "best_adapter.json")
+        with open(best_info_path, "w") as f:
+            json.dump(best_run, f, indent=2)
+        print(f"  - Best adapter: {best_run.get('model_path')} (Accuracy: {max_acc:.2%})")
+        print(f"  - Saved best adapter info to {best_info_path}")
+
     return max_acc
 
 def main():
@@ -152,7 +171,10 @@ def main():
     parser.add_argument("--num_samples", type=int, help="Number of samples for evaluation")
     parser.add_argument("--stride", type=int, default=1, help="Stride for evaluation")
     parser.add_argument("--model_type", type=str, default="llama", help="Model type")
-    parser.add_argument("--dry_run", action="store_true", help="Don't run actual evaluations")
+    parser.add_argument("--dry_run", action="store_true", help="Don't run actual evaluations or save files")
+    parser.add_argument("--skip_eval", action="store_true", help="Skip running evaluations (only process existing logs)")
+    parser.add_argument("--task_type", type=str, default=None, help="Only process a specific task/dataset (e.g. gsm8k)")
+    parser.add_argument("--method", type=str, default=None, help="Only process a specific method/hyperparameter (e.g. PPO, EI, Markovian)")
     args = parser.parse_args()
 
     # Supported tasks in evaluation.py
@@ -162,9 +184,26 @@ def main():
     table = defaultdict(lambda: defaultdict(float))
     
     # 1. Scan results directory
-    results_root = "results"
+    # Robustly find results directory relative to this script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)  # Go up one level from scripts/
+    results_root = os.path.join(project_root, "results")
+    
+    if not os.path.exists(results_root):
+        # Fallback to current directory if running from root
+        if os.path.exists("results"):
+            results_root = "results"
+            project_root = os.getcwd()
+        else:
+            print(f"Error: Could not find results directory at {results_root} or ./results")
+            return
+
     run_dirs = []
     for task in os.listdir(results_root):
+        # Filter by task_type if specified
+        if args.task_type and task != args.task_type:
+            continue
+
         task_dir = os.path.join(results_root, task)
         if not os.path.isdir(task_dir):
             continue
@@ -177,21 +216,37 @@ def main():
         for item in os.listdir(task_dir):
             path = os.path.join(task_dir, item)
             if os.path.isdir(path):
-                dataset, method = parse_run_dir(path)
-                if dataset and method:
-                    run_dirs.append((dataset, method, path))
+                dataset, method_name = parse_run_dir(path)
+                if dataset and method_name:
+                    # Filter by method if specified
+                    if args.method and method_name != args.method:
+                        continue
+                        
+                    run_dirs.append((dataset, method_name, path))
 
     # 2. Process Baselines (Batch 0)
     datasets = set(d[0] for d in run_dirs)
     print(f"Found datasets: {datasets}")
     
     for dataset in datasets:
-        score = get_baseline_score(dataset, args.model_type, args)
+        # Determine if we should evaluate this baseline
+        should_evaluate = True
+        if args.task_type and dataset != args.task_type:
+            should_evaluate = False
+            
+        score = get_baseline_score(dataset, args.model_type, args, project_root, force_skip_eval=not should_evaluate)
         table[dataset]["Baseline"] = score
         
     # 3. Process Runs
     for dataset, method, path in run_dirs:
-        score = get_max_adapter_score(path, dataset, args.model_type, args)
+        # Determine if we should evaluate this run
+        should_evaluate = True
+        if args.task_type and dataset != args.task_type:
+            should_evaluate = False
+        if args.method and method != args.method:
+            should_evaluate = False
+            
+        score = get_max_adapter_score(path, dataset, args.model_type, args, project_root, force_skip_eval=not should_evaluate)
         table[dataset][method] = score
 
     # 4. Generate Table
