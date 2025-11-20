@@ -6,6 +6,19 @@
 # Usage: ./scripts/sync_all_hosts.sh [parallel_jobs]
 # Example: ./scripts/sync_all_hosts.sh 4
 
+usage() {
+    echo "Usage: ./scripts/sync_all_hosts.sh [parallel_jobs]"
+    echo ""
+    echo "Runs git pull on every host defined in ~/.ssh/config (defaults to 4 parallel jobs)."
+    echo "Provide an optional integer to override the level of concurrency."
+    echo "Use -h or --help to show this message."
+}
+
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
 PARALLEL_JOBS=${1:-4}  # Default to 4 parallel jobs
 CONFIG_FILE="$HOME/.ssh/config"
 REPO_DIR="~/MarkovianTraining"  # Tilde expands to remote user's home (root)
