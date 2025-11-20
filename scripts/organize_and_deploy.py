@@ -7,6 +7,7 @@ import datetime
 from pathlib import Path
 import argparse
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 # Configuration
@@ -177,7 +178,7 @@ def sanitize_role(role_name):
     """Sanitize role name for directory usage."""
     return role_name.replace(" ", "").replace("-", "")
 
-def upload_run_to_s3(source_host, dataset, run, s3_run_name, s3_prefix):
+def upload_run_to_s3(source_host, dataset, run, s3_run_name, s3_prefix, max_attempts=3):
     """Trigger aws s3 sync on source host to upload run to a named S3 folder."""
     source_path = f"{REMOTE_RESULTS_DIR}/{dataset}/{run}"
     s3_path = f"{s3_prefix}/{s3_run_name}"
@@ -185,13 +186,19 @@ def upload_run_to_s3(source_host, dataset, run, s3_run_name, s3_prefix):
         f"bash -lc 'aws s3 sync \"{source_path}\" \"{s3_path}\" --delete'"
     )
     print(f"    Uploading {dataset}/{run} from {source_host} to {s3_path} ...")
-    result = run_ssh_command(source_host, cmd)
-    if result.returncode != 0:
-        print(f"    ! Upload failed: {result.stderr.strip()}")
-    return result.returncode == 0
+    for attempt in range(1, max_attempts + 1):
+        result = run_ssh_command(source_host, cmd)
+        if result.returncode == 0:
+            return True
+        print(f"    ! Upload failed (attempt {attempt}/{max_attempts}): {result.stderr.strip()}")
+        if attempt < max_attempts:
+            wait = min(30, attempt * 5)
+            print(f"      Retrying upload in {wait} seconds...")
+            time.sleep(wait)
+    return False
 
 
-def download_run_from_s3(target_host, dataset, s3_run_name, dest_run_name, s3_prefix):
+def download_run_from_s3(target_host, dataset, s3_run_name, dest_run_name, s3_prefix, max_attempts=3):
     """Trigger aws s3 sync on target host to download run from S3 to a named destination."""
     dest_path = f"{REMOTE_RESULTS_DIR}/{dataset}/{dest_run_name}"
     s3_path = f"{s3_prefix}/{s3_run_name}"
@@ -200,10 +207,48 @@ def download_run_from_s3(target_host, dataset, s3_run_name, dest_run_name, s3_pr
         f"aws s3 sync \"{s3_path}\" \"{dest_path}\" --delete'"
     )
     print(f"    Downloading {s3_path} to {target_host}:{dest_path} ...")
-    result = run_ssh_command(target_host, cmd)
+    for attempt in range(1, max_attempts + 1):
+        result = run_ssh_command(target_host, cmd)
+        if result.returncode == 0:
+            return True
+        print(f"    ! Download failed (attempt {attempt}/{max_attempts}): {result.stderr.strip()}")
+        if attempt < max_attempts:
+            wait = min(30, attempt * 5)
+            print(f"      Retrying download in {wait} seconds...")
+            time.sleep(wait)
+    return False
+
+
+def cleanup_old_s3_runs(dataset, role_slug, s3_prefix, keep_name):
+    """Remove older S3 entries for the same dataset/role pair to enforce one-per-pair invariant."""
+    base_prefix = s3_prefix.rstrip("/")
+    list_cmd = ["aws", "s3", "ls", f"{base_prefix}/"]
+    try:
+        result = subprocess.run(list_cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        print("    ! AWS CLI not found; cannot cleanup old S3 runs")
+        return
+
     if result.returncode != 0:
-        print(f"    ! Download failed: {result.stderr.strip()}")
-    return result.returncode == 0
+        print(f"    ! Failed to list S3 prefix {base_prefix}: {result.stderr.strip()}")
+        return
+
+    target_prefix = f"{dataset}_{role_slug}_"
+    keep_folder = f"{keep_name.strip('/')}/"
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        # aws s3 ls uses "PRE {folder}/" lines for directories
+        if not stripped.startswith("PRE "):
+            continue
+        folder = stripped[4:]
+        if not folder.startswith(target_prefix):
+            continue
+        if folder == keep_folder:
+            continue
+        delete_path = f"{base_prefix}/{folder}"
+        print(f"    - Removing outdated S3 entry: {delete_path}")
+        del_cmd = ["aws", "s3", "rm", delete_path, "--recursive"]
+        subprocess.run(del_cmd, check=False)
 
 
 def handle_find_requests(requests):
@@ -430,6 +475,7 @@ def process_s3(
     download_executor = ThreadPoolExecutor(max_workers=s3_parallel) if not skip_download else None
     upload_jobs = []
     download_jobs = []
+    cleaned_pairs = set()
 
     for dataset in selected_datasets:
         hosts_codes = MATRIX[dataset]
@@ -460,6 +506,11 @@ def process_s3(
             
             upload_key = (source_host, dataset, best_run)
             
+            pair_key = (dataset, role_slug)
+            if not skip_upload and pair_key not in cleaned_pairs:
+                cleanup_old_s3_runs(dataset, role_slug, s3_prefix, new_run_name)
+                cleaned_pairs.add(pair_key)
+
             if not skip_upload and upload_key not in uploaded_runs:
                 future = upload_executor.submit(
                     upload_run_to_s3, source_host, dataset, best_run, new_run_name, s3_prefix
