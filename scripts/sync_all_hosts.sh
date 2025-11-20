@@ -45,7 +45,7 @@ sync_host() {
             echo "STATUS: UNREACHABLE"
             echo "Cannot connect (timeout or connection refused)"
             echo "$prefix Cannot connect (timeout or connection refused)"
-            return 1
+            exit 1
         fi
         
         # Check if repo directory exists
@@ -53,7 +53,7 @@ sync_host() {
             echo "STATUS: NO_REPO"
             echo "~/MarkovianTraining does not exist or is not a git repo"
             echo "$prefix No git repository found"
-            return 1
+            exit 1
         fi
         
         # Check current branch
@@ -65,7 +65,7 @@ sync_host() {
             echo "STATUS: WRONG_BRANCH"
             echo "Not on main branch (on $current_branch), skipping"
             echo "$prefix ⚠ Not on main branch, skipping"
-            return 0
+            exit 0
         fi
         
         echo "$prefix Pulling..."
@@ -95,10 +95,10 @@ sync_host() {
             echo "DETAILS:"
             echo "$pull_output"
             echo "$prefix ✗ Git pull failed"
-            return 1
+            exit 1
         fi
         
-        return 0
+        exit 0
     } > "$log_file" 2>&1 &
     
     # Show output in real-time (everything that's not STATUS/BRANCH/HOST/DETAILS)
