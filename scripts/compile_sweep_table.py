@@ -389,6 +389,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size for evaluation")
     parser.add_argument("--run_dir", type=str, nargs="+", default=None, help="Specific run directory (or directories) to process. Overrides automatic scanning.")
     parser.add_argument("--shuffle", action="store_true", help="Process run directories in random order (useful for distributed workers)")
+    parser.add_argument("--reverse", action="store_true", help="Process run directories in reverse order (useful for simple 2-machine parallelism)")
     parser.add_argument("--s3_sync", type=str, default=None, help="S3 bucket URL (e.g. s3://my-bucket) to sync results to after processing each run")
     args = parser.parse_args()
 
@@ -459,9 +460,11 @@ def main():
                             
                         run_dirs.append((dataset, method_name, path))
 
-    # Shuffle run directories if requested (for distributed processing)
+    # Shuffle or reverse run directories if requested
     if args.shuffle:
         random.shuffle(run_dirs)
+    elif args.reverse:
+        run_dirs.reverse()
 
     # 2. Process Baselines (Batch 0)
     datasets = set(d[0] for d in run_dirs)
