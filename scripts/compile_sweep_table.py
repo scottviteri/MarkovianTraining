@@ -3,6 +3,7 @@ import glob
 import json
 import argparse
 import subprocess
+import math
 import pandas as pd
 from collections import defaultdict
 
@@ -46,6 +47,103 @@ def parse_run_dir(run_dir):
     method = "_".join(method_part)
     
     return dataset_name, method
+
+def get_wiki_max_smoothed_logprob(run_dir, window_size=200):
+    """
+    For wiki tasks, we use the 'Actor Answer Log Probs' from the log file.
+    This metric corresponds to the log probability of the answer (continuation)
+    given the reasoning (and question/context if non-Markovian).
+    
+    As requested, we smooth this metric using a rolling window and take the maximum.
+    """
+    log_file = os.path.join(run_dir, "log.jsonl")
+    if not os.path.exists(log_file):
+        return 0.0
+        
+    log_probs = []
+    try:
+        with open(log_file, 'r') as f:
+            for line in f:
+                try:
+                    data = json.loads(line)
+                    # We want "Actor Answer Log Probs" which is P(Answer | Context + Reasoning)
+                    # or P(Answer | Reasoning) depending on Markovian setting.
+                    # This matches the user's request for "log prob of the subsequent text given the reasoning"
+                    if "Training Metrics" in data and "Actor Answer Log Probs" in data["Training Metrics"]:
+                        val = data["Training Metrics"]["Actor Answer Log Probs"]
+                        if val is not None and not (isinstance(val, float) and math.isnan(val)):
+                            log_probs.append(val)
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        print(f"Error reading log file {log_file}: {e}")
+        return 0.0
+        
+    if not log_probs:
+        return 0.0
+        
+    # Create a pandas Series to easily calculate rolling mean
+    s = pd.Series(log_probs)
+    # Smooth with window size 200 (or length of data if smaller)
+    smoothed = s.rolling(window=min(window_size, len(s)), min_periods=1).mean()
+    
+    # Return the maximum smoothed value
+    return smoothed.max()
+
+
+def get_wiki_baseline_score(dataset, model_type, project_root):
+    """
+    For wiki tasks baseline, we use the average of the first 100 'Critic Answer Log Probs'.
+    The critic (frozen model) provides a baseline for the answer log probability.
+    """
+    # Find any run for this dataset to get the log file
+    # We just need the first few entries of a log file which should represent the baseline
+    # before significant training (or we can just use the Critic scores which are frozen/slowly moving 
+    # but typically we want the "untrained" performance).
+    # Actually, the user said: "take the average of the first 100 log probs of the answer given the critic reasoning."
+    # Critic is usually frozen or moves slowly, but specifically "first 100" implies early in training.
+    
+    results_dir = os.path.join(project_root, "results", dataset)
+    if not os.path.exists(results_dir):
+        return 0.0
+        
+    # Find the oldest run or any run
+    runs = [d for d in os.listdir(results_dir) if os.path.isdir(os.path.join(results_dir, d))]
+    if not runs:
+        return 0.0
+        
+    # Use the first found run
+    run_dir = os.path.join(results_dir, runs[0])
+    log_file = os.path.join(run_dir, "log.jsonl")
+    
+    if not os.path.exists(log_file):
+        return 0.0
+        
+    critic_log_probs = []
+    try:
+        with open(log_file, 'r') as f:
+            count = 0
+            for line in f:
+                if count >= 100:
+                    break
+                try:
+                    data = json.loads(line)
+                    if "Training Metrics" in data and "Critic Answer Log Probs" in data["Training Metrics"]:
+                        val = data["Training Metrics"]["Critic Answer Log Probs"]
+                        if val is not None and not (isinstance(val, float) and math.isnan(val)):
+                            critic_log_probs.append(val)
+                            count += 1
+                except json.JSONDecodeError:
+                    continue
+    except Exception as e:
+        print(f"Error reading log file {log_file}: {e}")
+        return 0.0
+        
+    if not critic_log_probs:
+        return 0.0
+        
+    return sum(critic_log_probs) / len(critic_log_probs)
+
 
 def get_baseline_score(dataset, model_type, args, project_root, force_skip_eval=False):
     """
@@ -184,9 +282,11 @@ def main():
 
     # Supported tasks in evaluation.py
     SUPPORTED_TASKS = ["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"]
+    WIKI_TASKS = ["wiki_continuation", "wiki_compression"]
     
     # Data structure: table[dataset][method] = score
     table = defaultdict(lambda: defaultdict(float))
+    wiki_table = defaultdict(lambda: defaultdict(float))
     
     # 1. Scan results directory
     # Robustly find results directory relative to this script
@@ -213,7 +313,7 @@ def main():
         if not os.path.isdir(task_dir):
             continue
             
-        if task not in SUPPORTED_TASKS:
+        if task not in SUPPORTED_TASKS and task not in WIKI_TASKS:
             print(f"Skipping unsupported task: {task}")
             continue
             
@@ -234,42 +334,65 @@ def main():
     print(f"Found datasets: {datasets}")
     
     for dataset in datasets:
-        # Determine if we should evaluate this baseline
-        should_evaluate = True
-        if args.task_type and dataset != args.task_type:
-            should_evaluate = False
-            
-        score = get_baseline_score(dataset, args.model_type, args, project_root, force_skip_eval=not should_evaluate)
-        table[dataset]["Baseline"] = score
+        if dataset in WIKI_TASKS:
+            # Wiki baseline calculation
+            score = get_wiki_baseline_score(dataset, args.model_type, project_root)
+            wiki_table[dataset]["Baseline"] = score
+        else:
+            # Standard task baseline evaluation
+            should_evaluate = True
+            if args.task_type and dataset != args.task_type:
+                should_evaluate = False
+                
+            score = get_baseline_score(dataset, args.model_type, args, project_root, force_skip_eval=not should_evaluate)
+            table[dataset]["Baseline"] = score
         
     # 3. Process Runs
     for dataset, method, path in run_dirs:
-        # Determine if we should evaluate this run
-        should_evaluate = True
-        if args.task_type and dataset != args.task_type:
-            should_evaluate = False
-        if args.method and method != args.method:
-            should_evaluate = False
-            
-        score = get_max_adapter_score(path, dataset, args.model_type, args, project_root, force_skip_eval=not should_evaluate)
-        table[dataset][method] = score
+        if dataset in WIKI_TASKS:
+            # Wiki score calculation (max smoothed logprob)
+            score = get_wiki_max_smoothed_logprob(path)
+            wiki_table[dataset][method] = score
+        else:
+            # Standard task evaluation
+            should_evaluate = True
+            if args.task_type and dataset != args.task_type:
+                should_evaluate = False
+            if args.method and method != args.method:
+                should_evaluate = False
+                
+            score = get_max_adapter_score(path, dataset, args.model_type, args, project_root, force_skip_eval=not should_evaluate)
+            table[dataset]["Baseline"] = table[dataset]["Baseline"] # ensure baseline col exists
+            table[dataset][method] = score
 
     # 4. Generate Table
     df = pd.DataFrame.from_dict(table, orient='index')
     
-    # Add Mean Row
+    # Add Mean Row for QA tasks
     if not df.empty:
         df.loc['Mean'] = df.mean()
         
     print("\n" + "="*50)
-    print("Sweep Results Table")
+    print("Sweep Results Table (QA Tasks - Accuracy)")
     print("="*50)
     print(df.to_markdown())
     
-    # Save to CSV
+    # 5. Generate Wiki Table
+    if wiki_table:
+        df_wiki = pd.DataFrame.from_dict(wiki_table, orient='index')
+        print("\n" + "="*50)
+        print("Sweep Results Table (Wiki Tasks - Max Smoothed LogProb)")
+        print("="*50)
+        print(df_wiki.to_markdown())
+        
+        # Combine for CSV saving (if desired, though formats differ)
+        # For now, maybe save separate CSVs or append with a clear separator/index
+        df_wiki.to_csv("sweep_results_wiki.csv")
+        print("\nSaved wiki results to sweep_results_wiki.csv")
+    
+    # Save QA results to CSV
     df.to_csv("sweep_results_table.csv")
-    print("\nSaved to sweep_results_table.csv")
+    print("Saved QA results to sweep_results_table.csv")
 
 if __name__ == "__main__":
     main()
-
