@@ -95,30 +95,41 @@ def get_wiki_baseline_score(dataset, model_type, project_root):
     """
     For wiki tasks baseline, we use the average of the first 100 'Critic Answer Log Probs'.
     The critic (frozen model) provides a baseline for the answer log probability.
+    We pick the longest run (most logged lines) to extract this baseline from,
+    as it's likely to be the most complete/reliable record.
     """
-    # Find any run for this dataset to get the log file
-    # We just need the first few entries of a log file which should represent the baseline
-    # before significant training (or we can just use the Critic scores which are frozen/slowly moving 
-    # but typically we want the "untrained" performance).
-    # Actually, the user said: "take the average of the first 100 log probs of the answer given the critic reasoning."
-    # Critic is usually frozen or moves slowly, but specifically "first 100" implies early in training.
-    
     results_dir = os.path.join(project_root, "results", dataset)
     if not os.path.exists(results_dir):
         return 0.0
         
-    # Find the oldest run or any run
+    # Find all run directories
     runs = [d for d in os.listdir(results_dir) if os.path.isdir(os.path.join(results_dir, d))]
     if not runs:
         return 0.0
         
-    # Use the first found run
-    run_dir = os.path.join(results_dir, runs[0])
-    log_file = os.path.join(run_dir, "log.jsonl")
+    # Find the longest run (most lines in log.jsonl)
+    best_run_dir = None
+    max_lines = -1
+
+    for run in runs:
+        run_path = os.path.join(results_dir, run)
+        log_path = os.path.join(run_path, "log.jsonl")
+        if os.path.exists(log_path):
+            try:
+                # Count lines efficiently
+                with open(log_path, 'rb') as f:
+                    lines = sum(1 for _ in f)
+                if lines > max_lines:
+                    max_lines = lines
+                    best_run_dir = run_path
+            except Exception:
+                continue
     
-    if not os.path.exists(log_file):
+    if not best_run_dir:
         return 0.0
         
+    log_file = os.path.join(best_run_dir, "log.jsonl")
+    
     critic_log_probs = []
     try:
         with open(log_file, 'r') as f:
