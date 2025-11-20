@@ -280,24 +280,36 @@ def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, forc
 
     # Sync to S3 if requested
     if args.s3_sync and not args.dry_run:
-        # Construct S3 path: s3://bucket/results/dataset/run_dir
-        # args.s3_sync should be "s3://bucket_name"
-        # We assume the local structure matches the s3 structure under a 'results' prefix?
-        # Or we just map run_dir to s3_base/results/dataset/run_dir_name
-        
-        # run_dir is like .../results/gsm8k/gsm8k_method_timestamp
-        # We want s3://bucket/results/gsm8k/gsm8k_method_timestamp
-        
-        rel_path = os.path.relpath(run_dir, project_root) # results/gsm8k/run_dir
+        rel_path = os.path.relpath(run_dir, project_root)
         s3_dest = f"{args.s3_sync}/{rel_path}"
         
-        print(f"Syncing {run_dir} to {s3_dest}...")
+        # 1. Check if this run exists on S3 to avoid uploading local-only experiments
+        # We only want to update existing "representatives"
         try:
-            # exclude everything then include only relevant files to save bandwidth/time? 
-            # Or just sync the whole folder. Sync is smart enough to only copy new files.
-            # We definitely want results.jsonl and best_adapter.json
+            # ls the directory. If it returns output, it exists.
+            result = subprocess.run(
+                ["aws", "s3", "ls", s3_dest + "/"], 
+                capture_output=True, 
+                text=True
+            )
+            if not result.stdout.strip():
+                print(f"Skipping S3 sync for {run_dir} (not found in S3 bucket)")
+                return max_acc
+        except Exception as e:
+            print(f"Error checking S3 existence: {e}")
+            return max_acc
+
+        print(f"Syncing results for {run_dir} to {s3_dest}...")
+        try:
+            # 2. Selective sync: ONLY upload the result files we just generated/modified
+            # Exclude everything, then include specific JSON/JSONL files
             subprocess.run(
-                ["aws", "s3", "sync", run_dir, s3_dest],
+                [
+                    "aws", "s3", "sync", run_dir, s3_dest,
+                    "--exclude", "*",
+                    "--include", "best_adapter.json",
+                    "--include", "*_results_*.jsonl"
+                ],
                 check=True
             )
         except subprocess.CalledProcessError as e:
