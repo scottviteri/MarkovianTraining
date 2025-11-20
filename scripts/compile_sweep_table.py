@@ -5,6 +5,7 @@ import argparse
 import subprocess
 import math
 import random
+import datetime
 import pandas as pd
 from collections import defaultdict
 
@@ -48,6 +49,56 @@ def parse_run_dir(run_dir):
     method = "_".join(method_part)
     
     return dataset_name, method
+
+def list_adapter_dirs(run_dir):
+    return sorted(glob.glob(os.path.join(run_dir, "adapter_*")))
+
+
+def adapter_metadata_path(adapter_dir):
+    return os.path.join(adapter_dir, "eval_metadata.json")
+
+
+def load_adapter_metadata(adapter_dir):
+    metadata_file = adapter_metadata_path(adapter_dir)
+    if not os.path.exists(metadata_file):
+        return None
+    try:
+        with open(metadata_file, "r") as f:
+            data = json.load(f)
+        data["_metadata_path"] = metadata_file
+        data["_adapter_dir"] = adapter_dir
+        if "adapter_name" not in data:
+            data["adapter_name"] = os.path.basename(adapter_dir)
+        return data
+    except Exception as e:
+        print(f"Error reading metadata {metadata_file}: {e}")
+        return None
+
+
+def collect_adapter_metadata(adapter_dirs):
+    metadata_entries = []
+    missing_adapters = []
+    for adapter_dir in adapter_dirs:
+        metadata = load_adapter_metadata(adapter_dir)
+        if metadata:
+            metadata_entries.append(metadata)
+        else:
+            missing_adapters.append(adapter_dir)
+    return metadata_entries, missing_adapters
+
+
+def safe_relpath(path, base_dir):
+    if not base_dir:
+        return path
+    try:
+        base_abs = os.path.abspath(base_dir)
+        path_abs = os.path.abspath(path)
+        common = os.path.commonpath([path_abs, base_abs])
+        if common == base_abs:
+            return os.path.relpath(path_abs, base_abs)
+    except ValueError:
+        pass
+    return path
 
 def get_wiki_max_smoothed_logprob(run_dir, window_size=200):
     """
@@ -215,73 +266,20 @@ def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, forc
     Evaluate all adapters in a run directory and return the max accuracy.
     """
     results_file = os.path.join(run_dir, f"{dataset}_results_{model_type}.jsonl")
-    
-    # Check for adapters
-    adapters = glob.glob(os.path.join(run_dir, "adapter_*"))
+
+    adapters = list_adapter_dirs(run_dir)
     if not adapters:
         if not force_skip_eval:
             print(f"No adapters found in {run_dir}")
         return 0.0
 
-    # Check if best_adapter.json already exists (skip eval if so)
-    best_adapter_path = os.path.join(run_dir, "best_adapter.json")
-    if os.path.exists(best_adapter_path) and not force_skip_eval:
-        try:
-            with open(best_adapter_path, 'r') as f:
-                data = json.load(f)
-                if "accuracy" in data:
-                    # If we are just compiling the table (not specifically asked to re-run),
-                    # we can use the cached result.
-                    # However, if the user specifically omitted --skip_eval, they might WANT to re-run?
-                    # But for the distributed use case, we definitely want to skip.
-                    # Let's assume presence of best_adapter.json means "done" unless explicit re-run logic is added.
-                    
-                    # Check stride if present in args and in data
-                    # Default stride is 1 if not specified
-                    current_stride = args.stride if args.stride else 1
-                    cached_stride = data.get("stride", 1)
-                    
-                    # If user requested a specific stride (args.stride > 1) and cached result used a DIFFERENT stride,
-                    # we should re-evaluate.
-                    # If args.stride is default (1), we generally accept whatever is cached unless it was computed with a
-                    # larger stride (less accurate)? No, usually we just accept it.
-                    # But user specifically asked: "If the current sweep is at a lower stride, then we should recompute"
-                    # "lower stride" means MORE samples (stride 1 = all samples, stride 10 = 1/10th samples).
-                    # So if current_stride < cached_stride, we must recompute (we want more accuracy than we have).
-                    
-                    if current_stride < cached_stride:
-                         print(f"Found best_adapter.json with stride {cached_stride}, but requested stride {current_stride}. Re-evaluating for higher accuracy.")
-                         # Fall through to evaluation
-                    else:
-                        print(f"Found existing best_adapter.json in {os.path.basename(run_dir)} (stride: {cached_stride}), skipping eval.")
-                        
-                        # Ensure we still sync if requested (in case it was computed but not synced)
-                        if args.s3_sync and not args.dry_run:
-                            # ... sync logic ...
-                            rel_path = os.path.relpath(run_dir, project_root)
-                            s3_dest = f"{args.s3_sync}/{rel_path}"
-                            # Check existence first (optimization)
-                            try:
-                                 res = subprocess.run(["aws", "s3", "ls", s3_dest + "/"], capture_output=True, text=True)
-                                 if not res.stdout.strip():
-                                     # Not in S3, but we have it locally. Sync it.
-                                     print(f"Syncing cached results for {run_dir} to {s3_dest}...")
-                                     subprocess.run([
-                                        "aws", "s3", "sync", run_dir, s3_dest,
-                                        "--exclude", "*",
-                                        "--include", "best_adapter.json",
-                                        "--include", "*_results_*.jsonl"
-                                     ], check=True)
-                            except Exception as e:
-                                print(f"Error checking/syncing S3: {e}")
+    metadata_entries, missing_adapters = collect_adapter_metadata(adapters)
 
-                        return data["accuracy"]
-        except Exception as e:
-            print(f"Error reading {best_adapter_path}: {e}, will re-evaluate.")
-
-    # Run evaluation
-    if not args.dry_run and not args.skip_eval and not force_skip_eval:
-        print(f"Evaluating adapters in {os.path.basename(run_dir)}...")
+    if missing_adapters and not args.dry_run and not args.skip_eval and not force_skip_eval:
+        print(
+            f"Evaluating adapters in {os.path.basename(run_dir)} "
+            f"(missing metadata for {len(missing_adapters)} adapters)..."
+        )
         eval_script = os.path.join(project_root, "src", "evaluation.py")
         cmd = [
             "python", eval_script,
@@ -302,40 +300,60 @@ def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, forc
         except subprocess.CalledProcessError as e:
             print(f"Error evaluating adapters for {run_dir}: {e}")
             # Continue to try reading whatever exists
-    
-    # Read results
-    max_acc = -1.0  # Start with -1 so even 0.0 accuracy is captured
-    best_run = None
-    
-    if os.path.exists(results_file):
-        with open(results_file, 'r') as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    # Filter for this specific run? The file is in the run dir, so it should be specific.
-                    if data.get("accuracy") is not None:
-                        acc = data.get("accuracy")
-                        if acc > max_acc:
-                            max_acc = acc
-                            best_run = data
-                except:
-                    continue
-    
-    # If max_acc is still -1, it means we found no valid entries or all were None
-    # If max_acc is 0.0, that's a valid score and we should have a best_run
-    if max_acc == -1.0:
-        max_acc = 0.0
-    
-    if best_run and not args.dry_run:
-        # Save best run info to a separate JSON file for easy retrieval
+        metadata_entries, missing_adapters = collect_adapter_metadata(adapters)
+    elif missing_adapters:
+        print(
+            f"Warning: Missing metadata for {len(missing_adapters)} adapters in {run_dir} "
+            f"(evaluation skipped due to flags)."
+        )
+
+    if not metadata_entries:
+        print(f"No adapter metadata available in {run_dir}.")
+        return 0.0
+
+    def metadata_accuracy(meta):
+        acc = meta.get("accuracy")
+        return acc if isinstance(acc, (int, float)) else None
+
+    best_metadata = None
+    best_acc_value = float("-inf")
+    for meta in metadata_entries:
+        acc = metadata_accuracy(meta)
+        if acc is None:
+            continue
+        if acc > best_acc_value:
+            best_acc_value = acc
+            best_metadata = meta
+
+    if best_metadata is None:
+        best_metadata = metadata_entries[0]
+        best_acc_value = metadata_accuracy(best_metadata) or 0.0
+
+    if not args.dry_run:
+        metadata_copy = {
+            k: v for k, v in best_metadata.items() if not k.startswith("_")
+        }
+        rel_metadata_path = safe_relpath(best_metadata["_metadata_path"], run_dir)
+        best_info = {
+            "adapter": metadata_copy.get("adapter_name"),
+            "accuracy": best_acc_value,
+            "model_path": metadata_copy.get("model_path"),
+            "model_type": metadata_copy.get("model_type"),
+            "task_type": metadata_copy.get("task_type", dataset),
+            "num_examples": metadata_copy.get("num_examples"),
+            "batch_index": metadata_copy.get("batch_index"),
+            "metadata_file": rel_metadata_path,
+            "metadata": metadata_copy,
+            "generated_at": datetime.datetime.now().isoformat(),
+        }
+
         best_info_path = os.path.join(run_dir, "best_adapter.json")
-        
-        # Add stride to the saved data
-        best_run["stride"] = args.stride if args.stride else 1
-        
         with open(best_info_path, "w") as f:
-            json.dump(best_run, f, indent=2)
-        print(f"  - Best adapter: {best_run.get('model_path')} (Accuracy: {max_acc:.2%})")
+            json.dump(best_info, f, indent=2)
+        print(
+            f"  - Best adapter: {best_info.get('adapter')} "
+            f"(Accuracy: {best_acc_value:.2%})"
+        )
         print(f"  - Saved best adapter info to {best_info_path}")
 
     # Sync to S3 if requested
@@ -368,14 +386,15 @@ def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, forc
                     "aws", "s3", "sync", run_dir, s3_dest,
                     "--exclude", "*",
                     "--include", "best_adapter.json",
-                    "--include", "*_results_*.jsonl"
+                    "--include", "*_results_*.jsonl",
+                    "--include", "adapter_*/eval_metadata.json",
                 ],
                 check=True
             )
         except subprocess.CalledProcessError as e:
             print(f"Error syncing to S3: {e}")
 
-    return max_acc
+    return best_acc_value
 
 def main():
     parser = argparse.ArgumentParser(description="Compile sweep results into a table")

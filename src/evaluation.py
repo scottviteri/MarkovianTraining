@@ -26,6 +26,21 @@ from utils import construct_prompts, colored_print, Colors
 _fresh_results_files: set[str] = set()
 
 
+def adapter_metadata_path(adapter_dir: str) -> str:
+    return os.path.join(adapter_dir, "eval_metadata.json")
+
+
+def has_adapter_metadata(adapter_dir: str) -> bool:
+    return os.path.exists(adapter_metadata_path(adapter_dir))
+
+
+def write_adapter_metadata(adapter_dir: str, metadata: Dict[str, Any]):
+    path = adapter_metadata_path(adapter_dir)
+    with open(path, "w") as f:
+        json.dump(metadata, f, indent=2)
+    return path
+
+
 def _get_latest_backup_path(results_file: str) -> Optional[str]:
     """Return the most recent backup file for a results file, if any."""
     directory = os.path.dirname(results_file)
@@ -1325,6 +1340,11 @@ def main():
         action="store_true",
         help="Evaluate each LoRA adapter_* directory inside --run_dir or --model_path"
     )
+    parser.add_argument(
+        "--force_eval",
+        action="store_true",
+        help="Recompute adapter evaluations even if metadata already exists"
+    )
     
     # Task-specific arguments
     parser.add_argument(
@@ -1423,6 +1443,15 @@ def main():
     
     # Process each checkpoint
     for checkpoint_path in model_paths:
+        adapter_dir: Optional[str] = None
+        adapter_name: Optional[str] = None
+
+        if checkpoint_path and os.path.isdir(checkpoint_path):
+            basename = os.path.basename(checkpoint_path)
+            if basename.startswith("adapter_"):
+                adapter_dir = checkpoint_path
+                adapter_name = basename
+
         if checkpoint_path:
             print(f"\nEvaluating checkpoint: {checkpoint_path}")
             run_dir = os.path.dirname(checkpoint_path) if os.path.isfile(checkpoint_path) else checkpoint_path
@@ -1454,6 +1483,14 @@ def main():
                     batch_index = None
             else:
                 batch_index = None
+
+            if adapter_dir and not args.force_eval and has_adapter_metadata(adapter_dir):
+                colored_print(
+                    "Adapter Eval",
+                    f"Skipping {adapter_name} (metadata already exists)",
+                    Colors.CYAN,
+                )
+                continue
         else:
             # Base model evaluation
             hyperparameters = {
@@ -1610,6 +1647,47 @@ def main():
         )
         
         colored_print("Results", f"Appended to {results_file}", Colors.CYAN)
+
+        if adapter_dir:
+            metadata: Dict[str, Any] = {
+                "adapter_name": adapter_name or os.path.basename(adapter_dir),
+                "task_type": args.task_type,
+                "model_type": args.model_type,
+                "model_path": checkpoint_path,
+                "accuracy": accuracy,
+                "num_examples": len(test_data),
+                "batch_index": batch_index,
+                "timestamp": datetime.datetime.now().isoformat(),
+                "evaluation": {
+                    "batch_size": eval_bs,
+                    "num_samples": args.num_samples,
+                    "stride": args.stride,
+                    "answer_extraction_method": args.answer_extraction_method,
+                    "haiku_metric": args.haiku_metric,
+                },
+            }
+            if haiku_metrics is not None:
+                metadata["haiku_metrics"] = haiku_metrics
+
+            if run_dir:
+                try:
+                    metadata["adapter_dir"] = os.path.relpath(adapter_dir, run_dir)
+                except ValueError:
+                    metadata["adapter_dir"] = adapter_dir
+            else:
+                metadata["adapter_dir"] = adapter_dir
+
+            if results_file:
+                try:
+                    if run_dir:
+                        metadata["results_file"] = os.path.relpath(results_file, run_dir)
+                    else:
+                        metadata["results_file"] = results_file
+                except ValueError:
+                    metadata["results_file"] = results_file
+
+            metadata_path = write_adapter_metadata(adapter_dir, metadata)
+            colored_print("Metadata", f"Wrote adapter metadata to {metadata_path}", Colors.CYAN)
 
 
 if __name__ == "__main__":
