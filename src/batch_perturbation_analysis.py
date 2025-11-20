@@ -1,12 +1,17 @@
 import subprocess
 import sys
 import os
+import argparse
 
 def run_command(cmd):
     print(f"Running: {cmd}")
     subprocess.run(cmd, shell=True, check=True)
 
 def main():
+    parser = argparse.ArgumentParser(description="Run batch perturbation analysis for all datasets")
+    parser.add_argument("--batch_size", type=int, default=128, help="Batch size for evaluation")
+    args = parser.parse_args()
+
     datasets = ["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"]
     perturbations = ["delete", "truncate_back", "truncate_front", "digit_replace", "char_replace"]
     perturb_str = " ".join(perturbations)
@@ -26,7 +31,7 @@ def main():
             f"--metric accuracy "
             f"--fresh_task_type {dataset} "
             f"--perturb {perturb_str} "
-            f"--batch_size 8"
+            f"--batch_size {args.batch_size}"
         )
         
         try:
