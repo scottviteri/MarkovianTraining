@@ -1043,13 +1043,6 @@ def evaluate_model_on_gsm8k(
     Returns:
         tuple: (accuracy: float, results: List[Dict], haiku_metrics: Optional[Dict])
     """
-    # Determine default eval batch size: floor(1.5x) of training batch size (defaults to 12 if absent)
-    if batch_size is None:
-        try:
-            batch_size = max(1, int(hyperparameters.get("batch_size", 8) * 1.5))
-        except Exception:
-            batch_size = 12
-
     eval_data = test_data[:num_samples] if num_samples else test_data
 
     accuracy, results, haiku_metrics = evaluate_model_on_numeric(
@@ -1275,7 +1268,7 @@ def main():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=256,
+        default=None,
         help="Batch size for evaluation (default: 1.5x training batch size)"
     )
     parser.add_argument(
