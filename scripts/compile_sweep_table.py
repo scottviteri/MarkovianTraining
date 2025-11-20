@@ -4,6 +4,7 @@ import json
 import argparse
 import subprocess
 import math
+import random
 import pandas as pd
 from collections import defaultdict
 
@@ -277,6 +278,31 @@ def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, forc
         print(f"  - Best adapter: {best_run.get('model_path')} (Accuracy: {max_acc:.2%})")
         print(f"  - Saved best adapter info to {best_info_path}")
 
+    # Sync to S3 if requested
+    if args.s3_sync and not args.dry_run:
+        # Construct S3 path: s3://bucket/results/dataset/run_dir
+        # args.s3_sync should be "s3://bucket_name"
+        # We assume the local structure matches the s3 structure under a 'results' prefix?
+        # Or we just map run_dir to s3_base/results/dataset/run_dir_name
+        
+        # run_dir is like .../results/gsm8k/gsm8k_method_timestamp
+        # We want s3://bucket/results/gsm8k/gsm8k_method_timestamp
+        
+        rel_path = os.path.relpath(run_dir, project_root) # results/gsm8k/run_dir
+        s3_dest = f"{args.s3_sync}/{rel_path}"
+        
+        print(f"Syncing {run_dir} to {s3_dest}...")
+        try:
+            # exclude everything then include only relevant files to save bandwidth/time? 
+            # Or just sync the whole folder. Sync is smart enough to only copy new files.
+            # We definitely want results.jsonl and best_adapter.json
+            subprocess.run(
+                ["aws", "s3", "sync", run_dir, s3_dest],
+                check=True
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"Error syncing to S3: {e}")
+
     return max_acc
 
 def main():
@@ -289,6 +315,8 @@ def main():
     parser.add_argument("--task_type", type=str, default=None, help="Only process a specific task/dataset (e.g. gsm8k)")
     parser.add_argument("--method", type=str, default=None, help="Only process a specific method/hyperparameter (e.g. PPO, EI, Markovian)")
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size for evaluation")
+    parser.add_argument("--shuffle", action="store_true", help="Process run directories in random order (useful for distributed workers)")
+    parser.add_argument("--s3_sync", type=str, default=None, help="S3 bucket URL (e.g. s3://my-bucket) to sync results to after processing each run")
     args = parser.parse_args()
 
     # Supported tasks in evaluation.py
@@ -339,6 +367,10 @@ def main():
                         continue
                         
                     run_dirs.append((dataset, method_name, path))
+
+    # Shuffle run directories if requested (for distributed processing)
+    if args.shuffle:
+        random.shuffle(run_dirs)
 
     # 2. Process Baselines (Batch 0)
     datasets = set(d[0] for d in run_dirs)
