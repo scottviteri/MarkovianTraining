@@ -235,29 +235,47 @@ def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, forc
                     # However, if the user specifically omitted --skip_eval, they might WANT to re-run?
                     # But for the distributed use case, we definitely want to skip.
                     # Let's assume presence of best_adapter.json means "done" unless explicit re-run logic is added.
-                    print(f"Found existing best_adapter.json in {os.path.basename(run_dir)}, skipping eval.")
                     
-                    # Ensure we still sync if requested (in case it was computed but not synced)
-                    if args.s3_sync and not args.dry_run:
-                        # ... sync logic ...
-                        rel_path = os.path.relpath(run_dir, project_root)
-                        s3_dest = f"{args.s3_sync}/{rel_path}"
-                        # Check existence first (optimization)
-                        try:
-                             res = subprocess.run(["aws", "s3", "ls", s3_dest + "/"], capture_output=True, text=True)
-                             if not res.stdout.strip():
-                                 # Not in S3, but we have it locally. Sync it.
-                                 print(f"Syncing cached results for {run_dir} to {s3_dest}...")
-                                 subprocess.run([
-                                    "aws", "s3", "sync", run_dir, s3_dest,
-                                    "--exclude", "*",
-                                    "--include", "best_adapter.json",
-                                    "--include", "*_results_*.jsonl"
-                                 ], check=True)
-                        except Exception as e:
-                            print(f"Error checking/syncing S3: {e}")
+                    # Check stride if present in args and in data
+                    # Default stride is 1 if not specified
+                    current_stride = args.stride if args.stride else 1
+                    cached_stride = data.get("stride", 1)
+                    
+                    # If user requested a specific stride (args.stride > 1) and cached result used a DIFFERENT stride,
+                    # we should re-evaluate.
+                    # If args.stride is default (1), we generally accept whatever is cached unless it was computed with a
+                    # larger stride (less accurate)? No, usually we just accept it.
+                    # But user specifically asked: "If the current sweep is at a lower stride, then we should recompute"
+                    # "lower stride" means MORE samples (stride 1 = all samples, stride 10 = 1/10th samples).
+                    # So if current_stride < cached_stride, we must recompute (we want more accuracy than we have).
+                    
+                    if current_stride < cached_stride:
+                         print(f"Found best_adapter.json with stride {cached_stride}, but requested stride {current_stride}. Re-evaluating for higher accuracy.")
+                         # Fall through to evaluation
+                    else:
+                        print(f"Found existing best_adapter.json in {os.path.basename(run_dir)} (stride: {cached_stride}), skipping eval.")
+                        
+                        # Ensure we still sync if requested (in case it was computed but not synced)
+                        if args.s3_sync and not args.dry_run:
+                            # ... sync logic ...
+                            rel_path = os.path.relpath(run_dir, project_root)
+                            s3_dest = f"{args.s3_sync}/{rel_path}"
+                            # Check existence first (optimization)
+                            try:
+                                 res = subprocess.run(["aws", "s3", "ls", s3_dest + "/"], capture_output=True, text=True)
+                                 if not res.stdout.strip():
+                                     # Not in S3, but we have it locally. Sync it.
+                                     print(f"Syncing cached results for {run_dir} to {s3_dest}...")
+                                     subprocess.run([
+                                        "aws", "s3", "sync", run_dir, s3_dest,
+                                        "--exclude", "*",
+                                        "--include", "best_adapter.json",
+                                        "--include", "*_results_*.jsonl"
+                                     ], check=True)
+                            except Exception as e:
+                                print(f"Error checking/syncing S3: {e}")
 
-                    return data["accuracy"]
+                        return data["accuracy"]
         except Exception as e:
             print(f"Error reading {best_adapter_path}: {e}, will re-evaluate.")
 
@@ -311,6 +329,10 @@ def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, forc
     if best_run and not args.dry_run:
         # Save best run info to a separate JSON file for easy retrieval
         best_info_path = os.path.join(run_dir, "best_adapter.json")
+        
+        # Add stride to the saved data
+        best_run["stride"] = args.stride if args.stride else 1
+        
         with open(best_info_path, "w") as f:
             json.dump(best_run, f, indent=2)
         print(f"  - Best adapter: {best_run.get('model_path')} (Accuracy: {max_acc:.2%})")
