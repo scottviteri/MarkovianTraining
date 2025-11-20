@@ -80,6 +80,8 @@ def get_baseline_score(dataset, model_type, args, project_root, force_skip_eval=
             cmd.extend(["--num_samples", str(args.num_samples)])
         if args.stride:
             cmd.extend(["--stride", str(args.stride)])
+        if args.batch_size:
+            cmd.extend(["--batch_size", str(args.batch_size)])
             
         try:
             subprocess.run(cmd, check=True, cwd=project_root)
@@ -126,6 +128,8 @@ def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, forc
             cmd.extend(["--num_samples", str(args.num_samples)])
         if args.stride:
             cmd.extend(["--stride", str(args.stride)])
+        if args.batch_size:
+            cmd.extend(["--batch_size", str(args.batch_size)])
             
         try:
             subprocess.run(cmd, check=True, cwd=project_root)
@@ -175,6 +179,7 @@ def main():
     parser.add_argument("--skip_eval", action="store_true", help="Skip running evaluations (only process existing logs)")
     parser.add_argument("--task_type", type=str, default=None, help="Only process a specific task/dataset (e.g. gsm8k)")
     parser.add_argument("--method", type=str, default=None, help="Only process a specific method/hyperparameter (e.g. PPO, EI, Markovian)")
+    parser.add_argument("--batch_size", type=int, default=None, help="Batch size for evaluation")
     args = parser.parse_args()
 
     # Supported tasks in evaluation.py
