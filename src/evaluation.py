@@ -18,9 +18,8 @@ import random
 import filecmp
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from datasets import load_dataset
 
-from utils import construct_prompts, colored_print, Colors, get_text_with_token_length
+from utils import construct_prompts, colored_print, Colors
 
 
 # Track which results files have already been reset during the current process
@@ -533,145 +532,6 @@ def extract_letter_word_boundary(text: str) -> str:
         return match.group(1).upper()
     
     return "X"
-
-
-def _load_wiki_eval_pairs(
-    tokenizer,
-    question_length: int,
-    target_length: int,
-    num_samples: int,
-    start_index: int = 10000,
-    dataset_name: str = "wikimedia/wikipedia",
-    dataset_config: str = "20231101.en",
-) -> List[Tuple[str, str]]:
-    """Load (context, target) pairs from Wikipedia for evaluation."""
-    wiki_dataset = load_dataset(dataset_name, dataset_config, split="train")
-    total_articles = len(wiki_dataset)
-    qa_pairs: List[Tuple[str, str]] = []
-    article_idx = start_index
-    
-    if article_idx >= total_articles:
-        raise ValueError(
-            f"Start index {start_index} exceeds dataset length ({total_articles})."
-        )
-    
-    while len(qa_pairs) < num_samples and article_idx < total_articles:
-        article = wiki_dataset[article_idx]
-        article_idx += 1
-        text = article.get("text", "")
-        if not text:
-            continue
-        
-        question_chunk, _ = get_text_with_token_length(text, question_length, tokenizer)
-        if not question_chunk:
-            continue
-        
-        remaining_text = text[len(question_chunk):]
-        target_chunk, _ = get_text_with_token_length(remaining_text, target_length, tokenizer)
-        if not target_chunk:
-            continue
-        
-        qa_pairs.append((question_chunk.strip(), target_chunk.strip()))
-    
-    if len(qa_pairs) < num_samples:
-        colored_print(
-            "Wiki Eval",
-            f"Requested {num_samples} samples but only collected {len(qa_pairs)} past index {start_index}.",
-            Colors.YELLOW,
-        )
-    
-    return qa_pairs
-
-
-def _compute_actor_log_prob(
-    actor_model,
-    tokenizer,
-    device,
-    prompt_text: str,
-    target_text: str,
-) -> Optional[float]:
-    """Compute mean log probability of target_text under the actor model."""
-    if not target_text:
-        return None
-    
-    prompt_inputs = tokenizer(prompt_text, return_tensors="pt")
-    target_inputs = tokenizer(target_text, return_tensors="pt", add_special_tokens=False)
-    
-    if prompt_inputs.input_ids.shape[1] == 0 or target_inputs.input_ids.shape[1] == 0:
-        return None
-    
-    prompt_ids = prompt_inputs.input_ids.to(device)
-    target_ids = target_inputs.input_ids.to(device)
-    combined_ids = torch.cat([prompt_ids, target_ids], dim=1)
-    attention_mask = torch.ones_like(combined_ids)
-    
-    with torch.no_grad():
-        logits = actor_model(input_ids=combined_ids, attention_mask=attention_mask).logits
-    
-    log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
-    prompt_len = prompt_ids.shape[1]
-    target_len = target_ids.shape[1]
-    
-    if prompt_len == 0 or target_len == 0:
-        return None
-    
-    # Use logits corresponding to each target token position
-    relevant_logits = log_probs[:, prompt_len - 1 : prompt_len + target_len - 1, :]
-    token_log_probs = relevant_logits.gather(2, target_ids.unsqueeze(-1)).squeeze(-1)
-    return float(token_log_probs.mean().item())
-
-
-def evaluate_model_on_wiki(
-    actor_model,
-    tokenizer,
-    device,
-    hyperparameters: Dict[str, Any],
-    task_type: str,
-    num_samples: Optional[int] = None,
-) -> Tuple[float, List[Dict[str, Any]], None]:
-    """Evaluate wiki tasks by averaging actor log probabilities on unseen text."""
-    question_length = hyperparameters.get("question_length")
-    target_length = hyperparameters.get("target_length")
-    
-    if question_length is None or target_length is None:
-        raise ValueError(
-            "Wiki evaluation requires both 'question_length' and 'target_length' in hyperparameters."
-        )
-    
-    eval_samples = num_samples or 64
-    wiki_pairs = _load_wiki_eval_pairs(
-        tokenizer=tokenizer,
-        question_length=int(question_length),
-        target_length=int(target_length),
-        num_samples=eval_samples,
-    )
-    
-    if not wiki_pairs:
-        raise RuntimeError("Failed to collect wiki evaluation samples.")
-    
-    log_probs = []
-    detailed_results = []
-    actor_model.eval()
-    
-    for question_text, target_text in wiki_pairs:
-        prompt_text = construct_prompts(question_text, hyperparameters)
-        log_prob = _compute_actor_log_prob(actor_model, tokenizer, device, prompt_text, target_text)
-        if log_prob is None:
-            continue
-        log_probs.append(log_prob)
-        detailed_results.append(
-            {
-                "context": question_text,
-                "target": target_text,
-                "log_prob": log_prob,
-            }
-        )
-    
-    if not log_probs:
-        raise RuntimeError("Actor log probability computation failed for all wiki samples.")
-    
-    avg_log_prob = float(sum(log_probs) / len(log_probs))
-    return avg_log_prob, detailed_results, None
 
 
 # ============================================================================
@@ -1331,7 +1191,7 @@ def main():
     from datasets import load_dataset
     
     parser = argparse.ArgumentParser(
-        description="Unified evaluation CLI for all tasks (GSM8K, MMLU, ARC, SVAMP, AQuA, MathQA, Arithmetic, Wiki)"
+        description="Unified evaluation CLI for all tasks (GSM8K, MMLU, ARC, SVAMP, AQuA, MathQA, Arithmetic)"
     )
     
     # Core arguments
@@ -1339,7 +1199,7 @@ def main():
         "--task_type",
         type=str,
         required=True,
-        choices=["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic", "wiki_continuation", "wiki_compression"],
+        choices=["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"],
         help="Task to evaluate"
     )
     parser.add_argument(
@@ -1606,19 +1466,12 @@ def main():
                 raise FileNotFoundError(f"No data found for task {task_type}")
             return data, meta
         
-        wiki_task = args.task_type in ["wiki_continuation", "wiki_compression"]
-        if not wiki_task:
-            test_data, dataset_meta = load_cli_dataset(args.task_type)
-            mmlu_subject: Optional[str] = dataset_meta.get("subject")
-            arc_subset: Optional[str] = dataset_meta.get("subset")
-        else:
-            test_data = []
-            dataset_meta = {}
-            mmlu_subject = None
-            arc_subset = None
+        test_data, dataset_meta = load_cli_dataset(args.task_type)
+        mmlu_subject: Optional[str] = dataset_meta.get("subject")
+        arc_subset: Optional[str] = dataset_meta.get("subset")
         
-        # Apply stride if specified (non-wiki tasks only)
-        if not wiki_task and args.stride > 1:
+        # Apply stride if specified
+        if args.stride > 1:
             test_data = test_data[::args.stride]
             print(f"Using stride={args.stride}, evaluating on {len(test_data)} examples")
         
@@ -1680,15 +1533,6 @@ def main():
                 num_samples=args.num_samples,
                 enable_haiku_metric=args.haiku_metric,
             )
-        elif wiki_task:
-            accuracy, results, haiku_metrics = evaluate_model_on_wiki(
-                actor_model,
-                tokenizer,
-                device,
-                hyperparameters,
-                task_type=args.task_type,
-                num_samples=args.num_samples,
-            )
         else:
             raise ValueError(f"Unsupported task type: {args.task_type}")
         
@@ -1697,14 +1541,7 @@ def main():
             colored_print("Haiku Metric", f"Accuracy: {haiku_metrics['accuracy']:.2%} | Cost: ${haiku_metrics['cost_usd']:.4f}", Colors.CYAN)
         
         # Print results
-        if wiki_task:
-            colored_print(
-                f"{args.task_type.upper()} Avg Actor Log Prob",
-                f"{accuracy:.4f}",
-                Colors.GREEN if accuracy > 0 else Colors.YELLOW,
-            )
-        else:
-            colored_print(f"{args.task_type.upper()} Accuracy", f"{accuracy:.2%}", Colors.GREEN if accuracy > 0.5 else Colors.YELLOW)
+        colored_print(f"{args.task_type.upper()} Accuracy", f"{accuracy:.2%}", Colors.GREEN if accuracy > 0.5 else Colors.YELLOW)
         
         # Save results
         model_dir = os.path.dirname(checkpoint_path) if checkpoint_path else f"results/{args.task_type}"
@@ -1721,17 +1558,14 @@ def main():
             extra_metrics["haiku_num_calls"] = haiku_metrics["num_calls"]
         if args.answer_prompt_variant != "default":
             extra_metrics["answer_prompt_variant"] = args.answer_prompt_variant
-        if wiki_task:
-            extra_metrics["metric"] = "avg_actor_log_prob"
         
-        num_examples_logged = len(results) if wiki_task else len(test_data)
         results_file = save_task_results(
             task_type=args.task_type,
             output_dir=model_dir,
             model_type=args.model_type,
             accuracy=accuracy,
             results=results,
-            num_examples=num_examples_logged,
+            num_examples=len(test_data),
             checkpoint_path=checkpoint_path,
             batch_index=batch_index,
             subject=mmlu_subject if args.task_type == "mmlu" else None,
