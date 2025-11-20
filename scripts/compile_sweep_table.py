@@ -223,6 +223,44 @@ def get_max_adapter_score(run_dir, dataset, model_type, args, project_root, forc
             print(f"No adapters found in {run_dir}")
         return 0.0
 
+    # Check if best_adapter.json already exists (skip eval if so)
+    best_adapter_path = os.path.join(run_dir, "best_adapter.json")
+    if os.path.exists(best_adapter_path) and not force_skip_eval:
+        try:
+            with open(best_adapter_path, 'r') as f:
+                data = json.load(f)
+                if "accuracy" in data:
+                    # If we are just compiling the table (not specifically asked to re-run),
+                    # we can use the cached result.
+                    # However, if the user specifically omitted --skip_eval, they might WANT to re-run?
+                    # But for the distributed use case, we definitely want to skip.
+                    # Let's assume presence of best_adapter.json means "done" unless explicit re-run logic is added.
+                    print(f"Found existing best_adapter.json in {os.path.basename(run_dir)}, skipping eval.")
+                    
+                    # Ensure we still sync if requested (in case it was computed but not synced)
+                    if args.s3_sync and not args.dry_run:
+                        # ... sync logic ...
+                        rel_path = os.path.relpath(run_dir, project_root)
+                        s3_dest = f"{args.s3_sync}/{rel_path}"
+                        # Check existence first (optimization)
+                        try:
+                             res = subprocess.run(["aws", "s3", "ls", s3_dest + "/"], capture_output=True, text=True)
+                             if not res.stdout.strip():
+                                 # Not in S3, but we have it locally. Sync it.
+                                 print(f"Syncing cached results for {run_dir} to {s3_dest}...")
+                                 subprocess.run([
+                                    "aws", "s3", "sync", run_dir, s3_dest,
+                                    "--exclude", "*",
+                                    "--include", "best_adapter.json",
+                                    "--include", "*_results_*.jsonl"
+                                 ], check=True)
+                        except Exception as e:
+                            print(f"Error checking/syncing S3: {e}")
+
+                    return data["accuracy"]
+        except Exception as e:
+            print(f"Error reading {best_adapter_path}: {e}, will re-evaluate.")
+
     # Run evaluation
     if not args.dry_run and not args.skip_eval and not force_skip_eval:
         print(f"Evaluating adapters in {os.path.basename(run_dir)}...")
