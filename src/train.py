@@ -1386,7 +1386,13 @@ def run_periodic_evaluation(state: TrainingState):
     """Run periodic evaluation on test set for supported tasks."""
     torch.cuda.empty_cache()
     task_type = state.hyperparameters["task_type"]
-    batch_size = get_default_eval_batch_size(state.hyperparameters["batch_size"])
+    
+    # Use explicit eval_batch_size if provided, otherwise calculate default
+    eval_batch_size = state.hyperparameters.get("eval_batch_size")
+    if eval_batch_size is None:
+        batch_size = get_default_eval_batch_size(state.hyperparameters["batch_size"])
+    else:
+        batch_size = eval_batch_size
 
     def load_eval_dataset():
         meta = {}
@@ -1961,6 +1967,8 @@ class TrainingConfig:
     # Plotting controls
     plot_every: int = 15
     plot_window_size: int = 10
+    # Evaluation controls
+    eval_batch_size: Optional[int] = None
 
     @classmethod
     def from_args(cls, args):
@@ -2013,6 +2021,7 @@ class TrainingConfig:
             actor_reward_weight=args.actor_reward_weight,
             plot_every=args.plot_every,
             plot_window_size=args.plot_window_size,
+            eval_batch_size=args.eval_batch_size,
         )
 
 
@@ -2074,6 +2083,12 @@ if __name__ == "__main__":
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, 
                        help="Number of batches to accumulate gradients before updating (default: 1)")
     parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument(
+        "--eval_batch_size", 
+        type=int, 
+        default=None,
+        help="Batch size for periodic evaluation (default: 1.5x train batch size)"
+    )
     parser.add_argument(
         "--normalize_loss", type=lambda x: x.lower() == "true", default=True
     )
