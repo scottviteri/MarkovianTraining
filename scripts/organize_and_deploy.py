@@ -300,7 +300,7 @@ def handle_find_requests(requests):
 # Each cell is the "a-b" code from your notes
 MATRIX = {
     "gsm8k": ["1-1", "3-1", "1-4", "1-2", "1-3", "3-2", "4-2"], # Mkv, NonMkv, NoRew, PPO, Unnorm, EMA(was NoPar), EI
-    "svamp": ["1-3", "3-3", "1-3", "3-2", "2-4", "3-3", "4-4"],
+    "svamp": ["1-3", "3-3", "1-3", "3-3", "2-4", "3-3", "4-4"],
     "wiki_continuation": ["1-4", "3-4", "3-4", "2-2", "3-3", "1-4", "4-3"], 
     "arc":   ["2-2", "4-2", "2-2", "2-2", "3-4", "4-1", "3-4"],
     "arithmetic": ["2-3", "2-3", "2-3", "2-4", "2-4", "2-4", "2-4"],
