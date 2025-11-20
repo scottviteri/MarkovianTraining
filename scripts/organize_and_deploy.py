@@ -24,26 +24,22 @@ HOST_MAP = {
     "4-1": "left4",  "4-2": "mid4",  "4-3": "right4",  "4-4": "riight4",
 }
 
-# Target destinations for pushing results
+# Default destinations for pushing results when no targets are specified
 TARGET_HOSTS = {
-    "gsm8k": "left3",         # 3-1
-    "svamp": "left3",         # 3-1
-    "wiki_continuation": "left3",  # 3-1
-    "arc": "right3",          # 3-3
-    "arithmetic": "right3",   # 3-3
-    "mmlu": "right3",         # 3-3
+    "gsm8k": ["left3"],
+    "svamp": ["left3"],
+    "wiki_continuation": ["left3"],
+    "arc": ["right3"],
+    "arithmetic": ["right3"],
+    "mmlu": ["right3"],
 }
 
 
-def get_target_host(dataset, target_group=None):
-    """Return evaluation target host for dataset."""
-    if target_group == "3-1":
-        return "left3"
-    if target_group == "3-3":
-        return "right3"
-    
-    # Default behavior if no group is specified: everything goes to left3 (3-1)
-    return "left3"
+def get_target_hosts(dataset, specified_targets=None):
+    """Return list of target hosts for a dataset."""
+    if specified_targets:
+        return specified_targets
+    return TARGET_HOSTS.get(dataset, ["left3"])
 
 
 def run_ssh_command(host, command, capture_output=True):
@@ -336,7 +332,7 @@ def check_params(log_path, overrides):
         print(f"Error checking params for {log_path}: {e}")
         return False
 
-def process_local(selected_datasets, column_filters=None, skip_push=False, skip_pull=False):
+def process_local(selected_datasets, column_filters=None, skip_push=False, skip_pull=False, specified_targets=None):
     datasets_to_process = []
     for dataset in selected_datasets:
         if dataset not in MATRIX:
@@ -402,16 +398,17 @@ def process_local(selected_datasets, column_filters=None, skip_push=False, skip_
             if skip_push:
                 continue
 
-            target_host = get_target_host(dataset, args.target_group)
+            target_hosts = list(get_target_hosts(dataset, specified_targets))
             timestamp = best_run.name
-            print(f"    > Pushing {dataset} ({col_name}) run {timestamp} to {target_host}...")
-            cmd = [
-                "./push_results.sh",
-                "--source", f"{hostname}:{dataset}:{timestamp}",
-                "--target", target_host,
-                "--parallel", "8"
-            ]
-            subprocess.run(cmd)
+            for target_host in target_hosts:
+                print(f"    > Pushing {dataset} ({col_name}) run {timestamp} to {target_host}...")
+                cmd = [
+                    "./push_results.sh",
+                    "--source", f"{hostname}:{dataset}:{timestamp}",
+                    "--target", target_host,
+                    "--parallel", "8"
+                ]
+                subprocess.run(cmd)
 
     if not selected_any:
         print("No runs selected. Nothing to do.")
@@ -424,6 +421,7 @@ def process_s3(
     skip_download=False,
     s3_prefix="s3://scottviteri/dataset_hrmnsc",
     s3_parallel=4,
+    specified_targets=None,
 ):
     uploaded_runs = set()
     downloaded_runs = set()
@@ -454,41 +452,47 @@ def process_s3(
             print(f"    + Selected run: {best_run}")
             selected_any = True
 
-            target_host = get_target_host(dataset, args.target_group)
+            target_hosts = list(get_target_hosts(dataset, specified_targets))
             
             # Construct descriptive run name
             role_slug = sanitize_role(col_name)
             new_run_name = f"{dataset}_{role_slug}_{best_run}"
             
             upload_key = (source_host, dataset, best_run)
-            # Download key needs to be unique per destination path too
-            download_key = (target_host, dataset, new_run_name)
-
-            if not skip_upload:
-                if upload_key not in uploaded_runs:
-                    future = upload_executor.submit(
-                        upload_run_to_s3, source_host, dataset, best_run, new_run_name, s3_prefix
-                    )
-                    upload_jobs.append((future, dataset, new_run_name, target_host, upload_key, download_key))
-                    uploaded_runs.add(upload_key)
-            else:
+            
+            if not skip_upload and upload_key not in uploaded_runs:
+                future = upload_executor.submit(
+                    upload_run_to_s3, source_host, dataset, best_run, new_run_name, s3_prefix
+                )
+                upload_jobs.append((future, dataset, new_run_name, tuple(target_hosts), upload_key))
+                uploaded_runs.add(upload_key)
+            elif skip_upload:
                 print("    Skipping upload (per flag)")
-                if not skip_download and download_key not in downloaded_runs:
-                    future = download_executor.submit(
-                        download_run_from_s3, target_host, dataset, new_run_name, new_run_name, s3_prefix
-                    )
-                    download_jobs.append((future, dataset, new_run_name, target_host))
-                    downloaded_runs.add(download_key)
+                # even when skipping upload, ensure we schedule downloads if allowed
+                for target_host in target_hosts:
+                    download_key = (target_host, dataset, new_run_name)
+                    if not skip_download and download_key not in downloaded_runs:
+                        future = download_executor.submit(
+                            download_run_from_s3, target_host, dataset, new_run_name, new_run_name, s3_prefix
+                        )
+                        download_jobs.append((future, dataset, new_run_name, target_host))
+                        downloaded_runs.add(download_key)
 
     if upload_executor:
-        for future, dataset, new_run_name, target_host, upload_key, download_key in upload_jobs:
+        for future, dataset, new_run_name, target_hosts, upload_key in upload_jobs:
             success = future.result()
-            if success and download_executor and download_key not in downloaded_runs:
-                dl_future = download_executor.submit(
-                    download_run_from_s3, target_host, dataset, new_run_name, new_run_name, s3_prefix
-                )
-                download_jobs.append((dl_future, dataset, new_run_name, target_host))
-                downloaded_runs.add(download_key)
+            if not success:
+                continue
+            if download_executor:
+                for target_host in target_hosts:
+                    download_key = (target_host, dataset, new_run_name)
+                    if download_key in downloaded_runs:
+                        continue
+                    dl_future = download_executor.submit(
+                        download_run_from_s3, target_host, dataset, new_run_name, new_run_name, s3_prefix
+                    )
+                    download_jobs.append((dl_future, dataset, new_run_name, target_host))
+                    downloaded_runs.add(download_key)
         upload_executor.shutdown(wait=True)
 
     if download_executor:
@@ -523,9 +527,9 @@ if __name__ == "__main__":
         help="Skip pulling logs from remote hosts (use existing local logs)",
     )
     parser.add_argument(
-        "--target-group",
-        choices=["3-1", "3-3"],
-        help="Only process datasets going to specified evaluation machine: 3-1 (left3: gsm8k, svamp, wiki_continuation) or 3-3 (right3: arc, arithmetic, mmlu)",
+        "--targets",
+        nargs="+",
+        help="Explicit list of destination hosts to push/download into (defaults use dataset-specific hosts).",
     )
     parser.add_argument(
         "--use-s3",
@@ -556,25 +560,11 @@ if __name__ == "__main__":
         handle_find_requests(args.find)
         sys.exit(0)
 
-    # Determine target group filter
-    target_group_datasets = None
-    if args.target_group == "3-1":
-         # Optional: if you still want to filter datasets for 3-1 when explicitly requested, uncomment:
-         # target_group_datasets = ["gsm8k", "svamp", "wiki_continuation"]
-         pass
-    elif args.target_group == "3-3":
-         # target_group_datasets = ["arc", "arithmetic", "mmlu"]
-         pass
-
-
     # Combine dataset filters
     if args.datasets:
         selected_datasets = args.datasets
-        if target_group_datasets:
-            # Intersection: only datasets that match both filters
-            selected_datasets = [d for d in selected_datasets if d in target_group_datasets]
     else:
-        selected_datasets = target_group_datasets if target_group_datasets else list(MATRIX.keys())
+        selected_datasets = list(MATRIX.keys())
 
     # Combine column filters
     column_filters = parse_column_filters(args.columns) if args.columns else None
@@ -588,6 +578,7 @@ if __name__ == "__main__":
                 skip_download=args.skip_push,
                 s3_prefix=args.s3_prefix,
                 s3_parallel=max(1, args.s3_parallel),
+                specified_targets=args.targets,
             )
         else:
             process_local(
@@ -595,6 +586,7 @@ if __name__ == "__main__":
                 column_filters=column_filters,
                 skip_push=args.skip_push,
                 skip_pull=args.skip_pull,
+                specified_targets=args.targets,
             )
     except ValueError as exc:
         print(f"Error: {exc}")
