@@ -128,6 +128,18 @@ def select_metadata_for_stride(entries, required_stride):
 
 
 def collect_adapter_metadata(adapter_dirs, required_stride):
+    metadata_entries = []
+    missing_adapters = []
+    for adapter_dir in adapter_dirs:
+        entries = load_adapter_metadata_entries(adapter_dir)
+        metadata = select_metadata_for_stride(entries, required_stride)
+        if metadata:
+            metadata_entries.append(metadata)
+        else:
+            missing_adapters.append(adapter_dir)
+    return metadata_entries, missing_adapters
+
+
 def detect_model_type_from_metadata(metadata_entries):
     for meta in metadata_entries:
         mt = meta.get("model_type")
@@ -137,6 +149,8 @@ def detect_model_type_from_metadata(metadata_entries):
 
 
 def detect_model_type_from_log(run_dir):
+    if not run_dir:
+        return None
     log_path = os.path.join(run_dir, "log.jsonl")
     if not os.path.exists(log_path):
         return None
@@ -151,26 +165,17 @@ def detect_model_type_from_log(run_dir):
     return None
 
 
-def detect_model_type(run_dir, metadata_entries, cli_default=None):
+DEFAULT_MODEL_TYPE = os.environ.get("SWEEP_DEFAULT_MODEL_TYPE", "llama")
+
+
+def detect_model_type(run_dir, metadata_entries):
     mt = detect_model_type_from_metadata(metadata_entries)
     if mt:
         return mt
     mt = detect_model_type_from_log(run_dir)
     if mt:
         return mt
-    if cli_default:
-        return cli_default
-    return None
-    metadata_entries = []
-    missing_adapters = []
-    for adapter_dir in adapter_dirs:
-        entries = load_adapter_metadata_entries(adapter_dir)
-        metadata = select_metadata_for_stride(entries, required_stride)
-        if metadata:
-            metadata_entries.append(metadata)
-        else:
-            missing_adapters.append(adapter_dir)
-    return metadata_entries, missing_adapters
+    return DEFAULT_MODEL_TYPE
 
 
 def safe_relpath(path, base_dir):
@@ -336,8 +341,9 @@ def get_baseline_score(dataset, run_dir, metadata_entries, args, project_root, f
         print(f"Warning: could not determine model type for baseline {dataset}; skipping.")
         return 0.0
 
-    results_file = os.path.join(run_dir if run_dir else os.path.join(project_root, "results", dataset),
-                                f"{dataset}_results_{model_type}.jsonl")
+    base_dir = run_dir or os.path.join(project_root, "results", dataset)
+    os.makedirs(base_dir, exist_ok=True)
+    results_file = os.path.join(base_dir, f"{dataset}_results_{model_type}.jsonl")
     
     # Check if already exists
     if os.path.exists(results_file):
@@ -385,10 +391,17 @@ def get_baseline_score(dataset, run_dir, metadata_entries, args, project_root, f
     
     return 0.0
 
-def get_max_adapter_score(run_dir, dataset, args, project_root, model_type_hint, metadata_entries_hint, force_skip_eval=False):
+def get_max_adapter_score(run_dir, dataset, args, project_root, model_type_hint, metadata_entries_hint, missing_adapters_hint, force_skip_eval=False):
     """
     Evaluate all adapters in a run directory and return the max accuracy.
     """
+    required_stride = args.stride if args.stride else 1
+    metadata_entries = list(metadata_entries_hint) if metadata_entries_hint else []
+    missing_adapters = list(missing_adapters_hint) if missing_adapters_hint else []
+    if not metadata_entries:
+        metadata_entries, missing_adapters = collect_adapter_metadata(list_adapter_dirs(run_dir), required_stride)
+
+    model_type = model_type_hint or detect_model_type(run_dir, metadata_entries)
     results_file = os.path.join(run_dir, f"{dataset}_results_{model_type}.jsonl")
 
     adapters = list_adapter_dirs(run_dir)
@@ -396,12 +409,6 @@ def get_max_adapter_score(run_dir, dataset, args, project_root, model_type_hint,
         if not force_skip_eval:
             print(f"No adapters found in {run_dir}")
         return 0.0
-
-    required_stride = args.stride if args.stride else 1
-    metadata_entries = metadata_entries_hint or []
-    missing_adapters = []
-    if not metadata_entries:
-        metadata_entries, missing_adapters = collect_adapter_metadata(adapters, required_stride)
 
     if missing_adapters and not args.dry_run and not args.skip_eval and not force_skip_eval:
         print(
@@ -414,7 +421,7 @@ def get_max_adapter_score(run_dir, dataset, args, project_root, model_type_hint,
             "--task_type", dataset,
             "--run_dir", run_dir,
             "--all_adapters",
-            "--model_type", model_type_hint or "llama"
+            "--model_type", model_type
         ]
         if args.num_samples:
             cmd.extend(["--num_samples", str(args.num_samples)])
@@ -615,7 +622,7 @@ def main():
             if args.method and method != args.method:
                 should_evaluate = False
 
-            score = get_max_adapter_score(path, dataset, args, project_root, model_type, metadata_entries, force_skip_eval=not should_evaluate)
+            score = get_max_adapter_score(path, dataset, args, project_root, model_type, metadata_entries, missing_adapters, force_skip_eval=not should_evaluate)
             table[dataset].setdefault("Baseline", table[dataset].get("Baseline", 0.0))
             table[dataset][method] = score
 
