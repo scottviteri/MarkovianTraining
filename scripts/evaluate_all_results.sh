@@ -1,9 +1,14 @@
 #!/bin/bash
 # Comprehensive evaluation script for all results
 # This script evaluates all checkpoints in the results folder
-# Usage: ./evaluate_all_results.sh [--light]
+# Usage: ./scripts/evaluate_all_results.sh [--light]
 
 set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "$REPO_ROOT"
+PYTHONPATH_VALUE="$REPO_ROOT/src"
 
 LIGHT_MODE=false
 if [[ "$1" == "--light" ]]; then
@@ -13,7 +18,7 @@ else
     echo "Running in FULL evaluation mode"
 fi
 
-RESULTS_DIR="/root/MarkovianTraining/results"
+RESULTS_DIR="$REPO_ROOT/results"
 TOTAL_RUNS=0
 SUCCESSFUL=0
 FAILED=0
@@ -42,7 +47,7 @@ evaluate_run() {
     echo -e "${BLUE}[$TOTAL_RUNS] Evaluating:${NC} $task / $(basename $run_dir) / $(basename $adapter)"
     
     # Build command
-    CMD="PYTHONPATH=/root/MarkovianTraining/src python -m evaluation --task_type $task --model_path $adapter"
+    CMD="PYTHONPATH=${PYTHONPATH_VALUE} python -m evaluation --task_type $task --model_path $adapter"
     
     # Add light mode parameters
     if [[ "$LIGHT_MODE" == true ]]; then

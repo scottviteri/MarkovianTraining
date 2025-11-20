@@ -17,11 +17,13 @@ import json
 from pathlib import Path
 from typing import List, Tuple, Dict
 
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_DIR = REPO_ROOT / "src"
+RESULTS_DIR = REPO_ROOT / "results"
+sys.path.insert(0, str(SRC_DIR))
 
 
-def find_runs_with_checkpoints(results_dir: str = "results") -> List[Tuple[str, str, str]]:
+def find_runs_with_checkpoints(results_dir: Path = RESULTS_DIR) -> List[Tuple[str, str, str]]:
     """
     Find all runs with adapter checkpoints.
     
@@ -98,8 +100,8 @@ def evaluate_checkpoint(task_type: str, checkpoint_path: str) -> Dict:
             capture_output=True,
             text=True,
             timeout=1800,  # 30 minute timeout
-            cwd="/root/MarkovianTraining",
-            env={**os.environ, "PYTHONPATH": "/root/MarkovianTraining/src"}
+            cwd=str(REPO_ROOT),
+            env={**os.environ, "PYTHONPATH": str(SRC_DIR)}
         )
         
         # Parse output for accuracy
@@ -169,7 +171,7 @@ def main():
     print()
     
     # Find all runs
-    runs = find_runs_with_checkpoints("/root/MarkovianTraining/results")
+    runs = find_runs_with_checkpoints(RESULTS_DIR)
     
     if not runs:
         print("No runs with checkpoints found!")
@@ -224,7 +226,7 @@ def main():
                 print(f"  {run_name}/{checkpoint_name}: FAILED - {r.get('error', 'Unknown error')}")
     
     # Save detailed results
-    output_file = "/root/MarkovianTraining/evaluation_summary.json"
+    output_file = REPO_ROOT / "evaluation_summary.json"
     with open(output_file, 'w') as f:
         json.dump(results, f, indent=2)
     

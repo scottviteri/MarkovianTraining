@@ -4,17 +4,21 @@
 # Automatically removes previous experiments from the same machine
 #
 # Usage:
-#   ./collect_remote_experiments.sh                    # Collect from all machines
-#   ./collect_remote_experiments.sh 1                  # Collect from tier 1: left, mid, right, riight
-#   ./collect_remote_experiments.sh 2                  # Collect from tier 2: left2, mid2, right2, riight2  
-#   ./collect_remote_experiments.sh 3                  # Collect from tier 3: left3, mid3, right3, riight3
-#   ./collect_remote_experiments.sh 1 left             # Collect only from left (tier 1)
-#   ./collect_remote_experiments.sh 2 mid2             # Collect only from mid2 (tier 2)
+#   ./scripts/collect_remote_experiments.sh                    # Collect from all machines
+#   ./scripts/collect_remote_experiments.sh 1                  # Collect from tier 1: left, mid, right, riight
+#   ./scripts/collect_remote_experiments.sh 2                  # Collect from tier 2: left2, mid2, right2, riight2  
+#   ./scripts/collect_remote_experiments.sh 3                  # Collect from tier 3: left3, mid3, right3, riight3
+#   ./scripts/collect_remote_experiments.sh 1 left             # Collect only from left (tier 1)
+#   ./scripts/collect_remote_experiments.sh 2 mid2             # Collect only from mid2 (tier 2)
 #
 # Optional flags:
 #   --adapters                                          # Also collect adapter directories (not just log files)
 
 set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "$REPO_ROOT"
 
 # Define machines from SSH config (with their user paths)
 declare -A MACHINES=(
@@ -45,12 +49,12 @@ while [[ $# -gt 0 ]]; do
             echo "Automatically removes previous experiments from the same machine"
             echo ""
             echo "Usage:"
-            echo "  ./collect_remote_experiments.sh                    # Collect from all machines"
-            echo "  ./collect_remote_experiments.sh 1                  # Collect from tier 1: left, mid, right, riight"
-            echo "  ./collect_remote_experiments.sh 2                  # Collect from tier 2: left2, mid2, right2, riight2"
-            echo "  ./collect_remote_experiments.sh 3                  # Collect from tier 3: left3, mid3, right3, riight3"
-            echo "  ./collect_remote_experiments.sh 1 left             # Collect only from left (tier 1)"
-            echo "  ./collect_remote_experiments.sh 2 mid2             # Collect only from mid2 (tier 2)"
+            echo "  ./scripts/collect_remote_experiments.sh                    # Collect from all machines"
+            echo "  ./scripts/collect_remote_experiments.sh 1                  # Collect from tier 1: left, mid, right, riight"
+            echo "  ./scripts/collect_remote_experiments.sh 2                  # Collect from tier 2: left2, mid2, right2, riight2"
+            echo "  ./scripts/collect_remote_experiments.sh 3                  # Collect from tier 3: left3, mid3, right3, riight3"
+            echo "  ./scripts/collect_remote_experiments.sh 1 left             # Collect only from left (tier 1)"
+            echo "  ./scripts/collect_remote_experiments.sh 2 mid2             # Collect only from mid2 (tier 2)"
             echo ""
             echo "Optional flags:"
             echo "  --adapters                                          # Also collect adapter directories (not just log files)"
@@ -405,9 +409,9 @@ echo "   python src/plot_training_metrics.py -f results/wiki_continuation/*/log.
 # Show usage examples
 echo ""
 echo "💡 Usage examples:"
-echo "   ./collect_remote_experiments.sh           # Collect from all machines"
-echo "   ./collect_remote_experiments.sh 1         # Collect from tier 1 (left, mid, right, riight)"
-echo "   ./collect_remote_experiments.sh 2         # Collect from tier 2 (left2, mid2, right2, riight2)"
-echo "   ./collect_remote_experiments.sh 1 left    # Collect only from left machine"
-echo "   ./collect_remote_experiments.sh --adapters 1  # Collect from tier 1 with adapters"
-echo "   ./collect_remote_experiments.sh --adapters    # Collect from all machines with adapters"
+echo "   ./scripts/collect_remote_experiments.sh           # Collect from all machines"
+echo "   ./scripts/collect_remote_experiments.sh 1         # Collect from tier 1 (left, mid, right, riight)"
+echo "   ./scripts/collect_remote_experiments.sh 2         # Collect from tier 2 (left2, mid2, right2, riight2)"
+echo "   ./scripts/collect_remote_experiments.sh 1 left    # Collect only from left machine"
+echo "   ./scripts/collect_remote_experiments.sh --adapters 1  # Collect from tier 1 with adapters"
+echo "   ./scripts/collect_remote_experiments.sh --adapters    # Collect from all machines with adapters"

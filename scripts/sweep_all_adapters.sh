@@ -4,7 +4,11 @@
 
 set -e
 
-RESULTS_DIR="/root/MarkovianTraining/results"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "$REPO_ROOT"
+
+RESULTS_DIR="$REPO_ROOT/results"
 STRIDE=20  # Evaluate every 20th example
 NUM_SAMPLES=100  # Small sample for quick evaluation (use 0 for unlimited)
 BATCH_SIZE=256  # Larger batch size for better GPU utilization
@@ -134,7 +138,7 @@ evaluate_adapter() {
     TOTAL_EVALS=$((TOTAL_EVALS + 1))
     
     # Build command
-    CMD="PYTHONPATH=/root/MarkovianTraining/src python -m evaluation \
+    CMD="PYTHONPATH=${REPO_ROOT}/src python -m evaluation \
         --task_type $task \
         --model_path $adapter \
         --stride $STRIDE \
@@ -282,7 +286,7 @@ for task_dir in "$RESULTS_DIR"/*; do
                 echo -n "  "
                 TOTAL_EVALS=$((TOTAL_EVALS + 1))
                 
-                CMD="PYTHONPATH=/root/MarkovianTraining/src python -m evaluation \
+                CMD="PYTHONPATH=${REPO_ROOT}/src python -m evaluation \
                     --task_type $task \
                     --model_path $base_model \
                     --use_base_model \

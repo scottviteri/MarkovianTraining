@@ -241,13 +241,13 @@ Use the demo script to compare all three methods on your checkpoints:
 
 ```bash
 # Compare on base model
-python compare_extraction_demo.py --use_base_model --model_type llama --num_samples 50
+python scripts/compare_extraction_demo.py --use_base_model --model_type llama --num_samples 50
 
 # Compare on trained checkpoint
-python compare_extraction_demo.py --model_path results/gsm8k/20241201_143022/adapter_500
+python scripts/compare_extraction_demo.py --model_path results/gsm8k/20241201_143022/adapter_500
 
 # Specify methods to compare
-python compare_extraction_demo.py --use_base_model --methods simple anchor llm
+python scripts/compare_extraction_demo.py --use_base_model --methods simple anchor llm
 ```
 
 #### Batch Calibration Across Checkpoints

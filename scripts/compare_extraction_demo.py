@@ -11,24 +11,25 @@ Requirements:
 
 Usage:
     # With a trained model
-    python compare_extraction_demo.py --model_path results/gsm8k/.../adapter_500
+    python scripts/compare_extraction_demo.py --model_path results/gsm8k/.../adapter_500
 
     # With base model (to test extraction only)
-    python compare_extraction_demo.py --use_base_model --model_type mistral
+    python scripts/compare_extraction_demo.py --use_base_model --model_type mistral
 
     # Specify number of samples (recommended for LLM to control costs)
-    python compare_extraction_demo.py --use_base_model --num_samples 20
+    python scripts/compare_extraction_demo.py --use_base_model --num_samples 20
 
     # Compare specific methods
-    python compare_extraction_demo.py --use_base_model --methods simple anchor llm
+    python scripts/compare_extraction_demo.py --use_base_model --methods simple anchor llm
 """
 
 import argparse
 import os
 import sys
+from pathlib import Path
 
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from utils import (
     load_model_for_evaluation,
