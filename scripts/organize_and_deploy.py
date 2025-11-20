@@ -584,6 +584,11 @@ if __name__ == "__main__":
         help="Explicit list of destination hosts to push/download into (defaults use dataset-specific hosts).",
     )
     parser.add_argument(
+        "--all-targets",
+        action="store_true",
+        help="Push/download every selected run to all hosts defined in HOST_MAP.",
+    )
+    parser.add_argument(
         "--use-s3",
         action="store_true",
         help="Use AWS S3 transfers (orchestrate aws s3 sync on remote hosts instead of local pull/push).",
@@ -612,6 +617,10 @@ if __name__ == "__main__":
         handle_find_requests(args.find)
         sys.exit(0)
 
+    if args.targets and args.all_targets:
+        print("Cannot use --targets and --all-targets together.")
+        sys.exit(1)
+
     # Combine dataset filters
     if args.datasets:
         selected_datasets = args.datasets
@@ -622,6 +631,8 @@ if __name__ == "__main__":
     column_filters = parse_column_filters(args.columns) if args.columns else None
 
     try:
+        target_list = list(HOST_MAP.values()) if args.all_targets else args.targets
+
         if args.use_s3:
             process_s3(
                 selected_datasets,
@@ -630,7 +641,7 @@ if __name__ == "__main__":
                 skip_download=args.skip_push,
                 s3_prefix=args.s3_prefix,
                 s3_parallel=max(1, args.s3_parallel),
-                specified_targets=args.targets,
+                specified_targets=target_list,
             )
         else:
             process_local(
@@ -638,7 +649,7 @@ if __name__ == "__main__":
                 column_filters=column_filters,
                 skip_push=args.skip_push,
                 skip_pull=args.skip_pull,
-                specified_targets=args.targets,
+                specified_targets=target_list,
             )
     except ValueError as exc:
         print(f"Error: {exc}")
