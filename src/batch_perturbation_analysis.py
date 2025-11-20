@@ -9,7 +9,7 @@ def run_command(cmd):
 
 def main():
     parser = argparse.ArgumentParser(description="Run batch perturbation analysis for all datasets")
-    parser.add_argument("--batch_size", type=int, default=128, help="Batch size for evaluation")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for evaluation")
     args = parser.parse_args()
 
     datasets = ["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"]

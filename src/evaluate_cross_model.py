@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter
 from tqdm import tqdm
-from train import calculate_answer_log_probs
+from evaluation import calculate_answer_log_probs
 from utils import print_debug_info, find_latest_result, load_model
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch

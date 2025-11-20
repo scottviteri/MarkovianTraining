@@ -7,14 +7,29 @@ import math
 import random
 import datetime
 import re
-import pandas as pd
+import sys
 from collections import defaultdict
+
+import pandas as pd
+import torch
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from src.utils import load_model_for_evaluation
+from src.evaluation import compute_wiki_logprob, write_adapter_metadata
 
 
 S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET", "s3://scottviteri")
 S3_BUCKET = S3_BUCKET.rstrip("/") if S3_BUCKET else None
 METADATA_PATTERN = re.compile(r"eval_metadata(?:_stride(\d+))?\.json$")
 _S3_WARNING_PRINTED = False
+WIKI_DEFAULT_NUM_SAMPLES = 256
+WIKI_DEFAULT_START_INDEX = 10000
+WIKI_DEFAULT_QUESTION_LENGTH = 512
+WIKI_DEFAULT_TARGET_LENGTH = 128
 
 def parse_run_dir(run_dir):
     """
@@ -140,6 +155,97 @@ def collect_adapter_metadata(adapter_dirs, required_stride):
     return metadata_entries, missing_adapters
 
 
+
+def read_run_hyperparameters(run_dir, default_task=None):
+    log_file = os.path.join(run_dir, "log.jsonl")
+    if not os.path.exists(log_file):
+        return None
+    try:
+        with open(log_file, "r") as f:
+            first_line = f.readline()
+            if not first_line:
+                return None
+            data = json.loads(first_line)
+            if default_task:
+                data.setdefault("task_type", default_task)
+            return data
+    except Exception:
+        return None
+
+
+def find_wiki_metadata_entry(adapter_dir, dataset, required_stride=1):
+    entries, _ = collect_adapter_metadata([adapter_dir], required_stride)
+    for entry in entries:
+        if entry.get("task_type") != dataset:
+            continue
+        if entry.get("metric") != "wiki_log_prob":
+            continue
+        return entry
+    return None
+
+
+def evaluate_wiki_adapter(adapter_dir, run_dir, dataset, model_type, args, project_root):
+    required_stride = args.stride if args.stride else 1
+    existing = find_wiki_metadata_entry(adapter_dir, dataset, required_stride=required_stride)
+    if existing:
+        return existing.get("accuracy", existing.get("average_log_prob", 0.0))
+    hyper = read_run_hyperparameters(run_dir, default_task=dataset)
+    if hyper is None:
+        hyper = {
+            "task_type": dataset,
+            "question_length": WIKI_DEFAULT_QUESTION_LENGTH,
+            "target_length": WIKI_DEFAULT_TARGET_LENGTH,
+        }
+    try:
+        actor_model, _, tokenizer, device = load_model_for_evaluation(
+            model_path=adapter_dir,
+            model_type=model_type,
+        )
+        mean_log_prob, eval_meta = compute_wiki_logprob(
+            actor_model,
+            tokenizer,
+            device,
+            hyper,
+            num_samples=WIKI_DEFAULT_NUM_SAMPLES,
+            stride=required_stride,
+            start_index=WIKI_DEFAULT_START_INDEX,
+            question_length=hyper.get("question_length"),
+            target_length=hyper.get("target_length"),
+        )
+    finally:
+        del actor_model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    metadata = {
+        "adapter_name": os.path.basename(adapter_dir),
+        "task_type": dataset,
+        "model_type": model_type,
+        "model_path": adapter_dir,
+        "accuracy": mean_log_prob,
+        "metric": "wiki_log_prob",
+        "num_examples": eval_meta["num_samples"],
+        "timestamp": datetime.datetime.now().isoformat(),
+        "evaluation": eval_meta,
+    }
+    write_adapter_metadata(adapter_dir, metadata, eval_meta["stride"])
+    sync_run_dir(run_dir, project_root)
+    return mean_log_prob
+
+
+def get_wiki_run_score(run_dir, dataset, model_type, args, project_root):
+    adapters = list_adapter_dirs(run_dir)
+    if not adapters:
+        return 0.0
+    best_score = float("-inf")
+    for adapter_dir in adapters:
+        score = evaluate_wiki_adapter(adapter_dir, run_dir, dataset, model_type, args, project_root)
+        if score is not None and score > best_score:
+            best_score = score
+    if best_score == float("-inf"):
+        return 0.0
+    return best_score
+
+
 def detect_model_type_from_metadata(metadata_entries):
     for meta in metadata_entries:
         mt = meta.get("model_type")
@@ -209,6 +315,7 @@ def sync_run_dir(run_dir, project_root):
         "--include", "best_adapter.json",
         "--include", "*_results_*.jsonl",
         "--include", "adapter_*/eval_metadata*.json",
+        "--include", "wiki_baseline_*.json",
     ]
     print(f"Syncing {run_dir} -> {s3_dest}")
     try:
@@ -223,112 +330,50 @@ def sync_run_dir(run_dir, project_root):
     except subprocess.CalledProcessError as e:
         print(f"Error syncing to S3: {e}")
 
-def get_wiki_max_smoothed_logprob(run_dir, window_size=200):
-    """
-    For wiki tasks, we use the 'Actor Answer Log Probs' from the log file.
-    This metric corresponds to the log probability of the answer (continuation)
-    given the reasoning (and question/context if non-Markovian).
-    
-    As requested, we smooth this metric using a rolling window and take the maximum.
-    """
-    log_file = os.path.join(run_dir, "log.jsonl")
-    if not os.path.exists(log_file):
-        return 0.0
-        
-    log_probs = []
-    try:
-        with open(log_file, 'r') as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    # We want "Actor Answer Log Probs" which is P(Answer | Context + Reasoning)
-                    # or P(Answer | Reasoning) depending on Markovian setting.
-                    # This matches the user's request for "log prob of the subsequent text given the reasoning"
-                    if "Training Metrics" in data and "Actor Answer Log Probs" in data["Training Metrics"]:
-                        val = data["Training Metrics"]["Actor Answer Log Probs"]
-                        if val is not None and not (isinstance(val, float) and math.isnan(val)):
-                            log_probs.append(val)
-                except json.JSONDecodeError:
-                    continue
-    except Exception as e:
-        print(f"Error reading log file {log_file}: {e}")
-        return 0.0
-        
-    if not log_probs:
-        return 0.0
-        
-    # Create a pandas Series to easily calculate rolling mean
-    s = pd.Series(log_probs)
-    # Smooth with window size 200 (or length of data if smaller)
-    smoothed = s.rolling(window=min(window_size, len(s)), min_periods=1).mean()
-    
-    # Return the maximum smoothed value
-    return smoothed.max()
-
-
-def get_wiki_baseline_score(dataset, project_root):
-    """
-    For wiki tasks baseline, we use the average of the first 100 'Critic Answer Log Probs'.
-    The critic (frozen model) provides a baseline for the answer log probability.
-    We pick the longest run (most logged lines) to extract this baseline from,
-    as it's likely to be the most complete/reliable record.
-    """
+def get_wiki_baseline_score(dataset, model_type, args, project_root):
     results_dir = os.path.join(project_root, "results", dataset)
-    if not os.path.exists(results_dir):
-        return 0.0
-        
-    # Find all run directories
-    runs = [d for d in os.listdir(results_dir) if os.path.isdir(os.path.join(results_dir, d))]
-    if not runs:
-        return 0.0
-        
-    # Find the longest run (most lines in log.jsonl)
-    best_run_dir = None
-    max_lines = -1
-
-    for run in runs:
-        run_path = os.path.join(results_dir, run)
-        log_path = os.path.join(run_path, "log.jsonl")
-        if os.path.exists(log_path):
-            try:
-                # Count lines efficiently
-                with open(log_path, 'rb') as f:
-                    lines = sum(1 for _ in f)
-                if lines > max_lines:
-                    max_lines = lines
-                    best_run_dir = run_path
-            except Exception:
-                continue
-    
-    if not best_run_dir:
-        return 0.0
-        
-    log_file = os.path.join(best_run_dir, "log.jsonl")
-    
-    critic_log_probs = []
+    baseline_dir = os.path.join(results_dir, "baseline")
+    os.makedirs(baseline_dir, exist_ok=True)
+    existing = find_wiki_metadata_entry(baseline_dir, dataset, required_stride=args.stride or 1)
+    if existing:
+        return existing.get("accuracy", existing.get("average_log_prob", 0.0))
     try:
-        with open(log_file, 'r') as f:
-            count = 0
-            for line in f:
-                if count >= 100:
-                    break
-                try:
-                    data = json.loads(line)
-                    if "Training Metrics" in data and "Critic Answer Log Probs" in data["Training Metrics"]:
-                        val = data["Training Metrics"]["Critic Answer Log Probs"]
-                        if val is not None and not (isinstance(val, float) and math.isnan(val)):
-                            critic_log_probs.append(val)
-                            count += 1
-                except json.JSONDecodeError:
-                    continue
-    except Exception as e:
-        print(f"Error reading log file {log_file}: {e}")
-        return 0.0
-        
-    if not critic_log_probs:
-        return 0.0
-        
-    return sum(critic_log_probs) / len(critic_log_probs)
+        base_model, _, tokenizer, device = load_model_for_evaluation(
+            use_base_model=True,
+            model_type=model_type,
+        )
+        hyper = {
+            "task_type": dataset,
+            "question_length": WIKI_DEFAULT_QUESTION_LENGTH,
+            "target_length": WIKI_DEFAULT_TARGET_LENGTH,
+        }
+        mean_log_prob, eval_meta = compute_wiki_logprob(
+            base_model,
+            tokenizer,
+            device,
+            hyper,
+            num_samples=WIKI_DEFAULT_NUM_SAMPLES,
+            stride=args.stride or 1,
+            start_index=WIKI_DEFAULT_START_INDEX,
+        )
+    finally:
+        del base_model
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    metadata = {
+        "adapter_name": "baseline",
+        "task_type": dataset,
+        "model_type": model_type,
+        "model_path": None,
+        "accuracy": mean_log_prob,
+        "metric": "wiki_log_prob",
+        "num_examples": eval_meta["num_samples"],
+        "timestamp": datetime.datetime.now().isoformat(),
+        "evaluation": eval_meta,
+    }
+    write_adapter_metadata(baseline_dir, metadata, eval_meta["stride"])
+    sync_run_dir(baseline_dir, project_root)
+    return mean_log_prob
 
 
 def get_baseline_score(dataset, run_dir, metadata_entries, args, project_root, force_skip_eval=False):
@@ -598,8 +643,9 @@ def main():
 
         model_type = detect_model_type(dataset_runs[0][2] if dataset_runs else None, sample_metadata)
 
+        inferred_model_type = model_type or args.model_type
         if dataset in WIKI_TASKS:
-            score = get_wiki_baseline_score(dataset, project_root)
+            score = get_wiki_baseline_score(dataset, inferred_model_type, args, project_root)
             wiki_table[dataset]["Baseline"] = score
         else:
             should_evaluate = dataset_runs and (not args.task_type or dataset == args.task_type)
@@ -613,7 +659,7 @@ def main():
         model_type = detect_model_type(path, metadata_entries)
 
         if dataset in WIKI_TASKS:
-            score = get_wiki_max_smoothed_logprob(path)
+            score = get_wiki_run_score(path, dataset, model_type or args.model_type, args, project_root)
             wiki_table[dataset][method] = score
         else:
             should_evaluate = True

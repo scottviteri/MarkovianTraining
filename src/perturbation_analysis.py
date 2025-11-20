@@ -9,7 +9,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from scipy.signal import savgol_filter
-from train import calculate_answer_log_probs
+from evaluation import calculate_answer_log_probs
+from typing import Optional
 from utils import find_latest_result, print_debug_info
 from utils import (
     construct_prompts, 
@@ -31,13 +32,17 @@ from evaluation import (
     evaluate_model_on_aqua,
     evaluate_model_on_mathqa,
     evaluate_model_on_numeric,
+    load_wiki_pairs,
 )
-from datasets import load_dataset
 from tqdm import tqdm
 import string
 from pathlib import Path
 from peft import PeftModel
 import glob
+import hashlib
+import datetime
+import shutil
+import subprocess
 
 
 def load_model_with_adapters(log_file_path, model_type, hyperparameters, adapter_index=None):
@@ -73,14 +78,14 @@ def load_model_with_adapters(log_file_path, model_type, hyperparameters, adapter
             # Sort by batch number to get the latest adapter
             def get_batch_number(adapter_path):
                 try:
-                    return int(os.path.basename(adapter_path).split('_')[-1])
+                    return int(os.path.basename(adapter_path).split("_")[-1])
                 except (ValueError, IndexError):
                     return 0
             
             adapter_dirs_sorted = sorted(adapter_dirs, key=get_batch_number)
             adapter_to_load = adapter_dirs_sorted[-1]
             print(f"Loading trained adapter from: {adapter_to_load}")
-            
+        
     else:
         print(f"No trained adapters found in {log_dir}, using base model")
     
@@ -196,6 +201,24 @@ def perturb_CoT(CoT, config):
 
 
 # Define perturbation configurations
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+PERTURB_S3_BUCKET = os.environ.get("PERTURB_S3_BUCKET")
+if PERTURB_S3_BUCKET:
+    PERTURB_S3_BUCKET = PERTURB_S3_BUCKET.rstrip("/")
+_S3_WARNING_PRINTED = False
+
+RUN_SYNC_PATTERNS = [
+    "markovian_comparison_accuracy/*.json",
+    "markovian_comparison_accuracy/*.png",
+    "checkpoint_scan/*.json",
+    "checkpoint_scan/*.png",
+    "adapter_*/perturb_metadata.json",
+]
+
+ADAPTER_SYNC_PATTERNS = [
+    "perturb_metadata.json",
+]
+
 PERTURBATION_SETS = {
     "delete": {
         "perturbations": {
@@ -239,6 +262,191 @@ PERTURBATION_SETS = {
         "description": "Random alphanumeric character replacement perturbations",
     },
 }
+
+
+def _perturb_metadata_path(adapter_dir: str) -> str:
+    return os.path.join(adapter_dir, "perturb_metadata.json")
+
+
+def _ensure_metadata_structure(data: dict, adapter_dir: str) -> dict:
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("adapter", os.path.basename(adapter_dir))
+    data.setdefault("records", {})
+    return data
+
+
+def load_perturb_metadata(adapter_dir: str) -> dict:
+    path = _perturb_metadata_path(adapter_dir)
+    if not os.path.exists(path):
+        return _ensure_metadata_structure({}, adapter_dir)
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    return _ensure_metadata_structure(data, adapter_dir)
+
+
+def save_perturb_metadata(adapter_dir: str, metadata: dict):
+    path = _perturb_metadata_path(adapter_dir)
+    os.makedirs(adapter_dir, exist_ok=True)
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+    os.replace(tmp_path, path)
+
+
+def build_perturb_metadata_key(
+    task_type: str,
+    perturb_type: str,
+    metric: str,
+    paired_role: str,
+    paired_adapter_index: int,
+    markovian_run: str,
+    non_markovian_run: str,
+) -> str:
+    payload = {
+        "task_type": task_type,
+        "perturb": perturb_type,
+        "metric": metric,
+        "paired_role": paired_role,
+        "paired_adapter_index": paired_adapter_index,
+        "markovian_run": os.path.basename(markovian_run),
+        "non_markovian_run": os.path.basename(non_markovian_run),
+    }
+    encoded = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return hashlib.sha1(encoded).hexdigest()
+
+
+def _record_satisfies(record: dict, required_stride: Optional[int]) -> bool:
+    if required_stride is None:
+        return True
+    record_stride = record.get("stride", 1)
+    return record_stride <= required_stride
+
+
+def metadata_has_record(metadata: dict, key: str, required_stride: Optional[int] = None) -> bool:
+    record = metadata.get("records", {}).get(key)
+    if not record:
+        return False
+    return _record_satisfies(record, required_stride)
+
+
+# Metadata cache to avoid repeated disk IO
+_PERTURB_METADATA_CACHE = {}
+_PULLED_ADAPTERS = set()
+_PULLED_RUN_DIRS = set()
+
+
+def safe_relpath(path: str, base_dir: str) -> str:
+    if not base_dir:
+        return path
+    try:
+        base_abs = os.path.abspath(base_dir)
+        path_abs = os.path.abspath(path)
+        common = os.path.commonpath([path_abs, base_abs])
+        if common == base_abs:
+            return os.path.relpath(path_abs, base_abs)
+    except ValueError:
+        pass
+    return path
+
+
+def _s3_uri_for(local_path: str) -> Optional[str]:
+    if not PERTURB_S3_BUCKET:
+        return None
+    rel_path = safe_relpath(local_path, PROJECT_ROOT).replace("\\", "/")
+    dest = f"{PERTURB_S3_BUCKET}/{rel_path}"
+    if dest.startswith("s3:/") and not dest.startswith("s3://"):
+        dest = dest.replace("s3:/", "s3://", 1)
+    return dest
+
+
+def _run_s3_sync(cmd: list[str]):
+    global _S3_WARNING_PRINTED
+    try:
+        subprocess.run(cmd, check=True)
+    except FileNotFoundError:
+        if not _S3_WARNING_PRINTED:
+            print("Warning: aws CLI not found; skipping S3 sync.")
+            _S3_WARNING_PRINTED = True
+    except subprocess.CalledProcessError as e:
+        print(f"S3 sync error: {e}")
+
+
+def _sync_to_s3(local_path: str, include_patterns: list[str]):
+    if not PERTURB_S3_BUCKET:
+        return
+    dest = _s3_uri_for(local_path)
+    if not dest:
+        return
+    include_args = ["--exclude", "*"]
+    for pattern in include_patterns:
+        include_args.extend(["--include", pattern])
+    cmd = ["aws", "s3", "sync", local_path, dest, *include_args]
+    _run_s3_sync(cmd)
+
+
+def _sync_from_s3(local_path: str, include_patterns: list[str]):
+    if not PERTURB_S3_BUCKET:
+        return
+    source = _s3_uri_for(local_path)
+    if not source:
+        return
+    include_args = ["--exclude", "*"]
+    for pattern in include_patterns:
+        include_args.extend(["--include", pattern])
+    os.makedirs(local_path, exist_ok=True)
+    cmd = ["aws", "s3", "sync", source, local_path, *include_args]
+    _run_s3_sync(cmd)
+
+
+def sync_run_dir_outputs(run_dir: str):
+    _sync_to_s3(run_dir, RUN_SYNC_PATTERNS)
+
+
+def sync_run_dir_from_s3(run_dir: str):
+    if run_dir in _PULLED_RUN_DIRS:
+        return
+    _sync_from_s3(run_dir, RUN_SYNC_PATTERNS)
+    _PULLED_RUN_DIRS.add(run_dir)
+
+
+def pull_adapter_metadata(adapter_dir: str):
+    if adapter_dir in _PULLED_ADAPTERS:
+        return
+    _sync_from_s3(adapter_dir, ADAPTER_SYNC_PATTERNS)
+    _PULLED_ADAPTERS.add(adapter_dir)
+
+
+def push_adapter_metadata(adapter_dir: str):
+    _sync_to_s3(adapter_dir, ADAPTER_SYNC_PATTERNS)
+
+
+def get_cached_metadata(adapter_dir: str) -> dict:
+    if adapter_dir and os.path.isdir(adapter_dir):
+        pull_adapter_metadata(adapter_dir)
+    if adapter_dir not in _PERTURB_METADATA_CACHE:
+        _PERTURB_METADATA_CACHE[adapter_dir] = load_perturb_metadata(adapter_dir)
+    return _PERTURB_METADATA_CACHE[adapter_dir]
+
+
+def persist_metadata_cache(adapter_dir: str):
+    data = _PERTURB_METADATA_CACHE.get(adapter_dir)
+    if data is not None:
+        save_perturb_metadata(adapter_dir, data)
+        push_adapter_metadata(adapter_dir)
+
+
+def infer_role_from_log_path(log_file_path: str) -> str:
+    run_dir = os.path.dirname(log_file_path)
+    basename = os.path.basename(run_dir).lower()
+    if "nonmarkovian" in basename:
+        return "NonMarkovian"
+    if "markovian" in basename:
+        return "Markovian"
+    return "Unknown"
 
 
 def get_output_paths(log_file, perturb_type, include_question=False):
@@ -1002,6 +1210,7 @@ def run_checkpoint_scan(
     task_type,
     num_samples=128,
     batch_size=8,
+    stride: int = 1,
     question_length=None,
     target_length=None,
 ):
@@ -1010,6 +1219,10 @@ def run_checkpoint_scan(
     """
     markovian_dir = os.path.dirname(markovian_log_file)
     non_markovian_dir = os.path.dirname(non_markovian_log_file)
+    sync_run_dir_from_s3(markovian_dir)
+    sync_run_dir_from_s3(non_markovian_dir)
+    markovian_role = infer_role_from_log_path(markovian_log_file)
+    non_markovian_role = infer_role_from_log_path(non_markovian_log_file)
     
     # Find common adapter indices
     m_adapters = glob.glob(os.path.join(markovian_dir, "adapter_*"))
@@ -1044,6 +1257,27 @@ def run_checkpoint_scan(
         
         # Suppress print output from sub-function
         # sys.stdout = open(os.devnull, 'w')
+        mark_adapter_dir = os.path.join(markovian_dir, f"adapter_{idx}")
+        non_adapter_dir = os.path.join(non_markovian_dir, f"adapter_{idx}")
+        if not (os.path.isdir(mark_adapter_dir) and os.path.isdir(non_adapter_dir)):
+            continue
+
+        metadata_key = build_perturb_metadata_key(
+            task_type=task_type,
+            perturb_type=perturb_type,
+            metric="accuracy",
+            paired_role=non_markovian_role,
+            paired_adapter_index=idx,
+            markovian_run=markovian_dir,
+            non_markovian_run=non_markovian_dir,
+        )
+
+        mark_metadata = get_cached_metadata(mark_adapter_dir)
+        non_metadata = get_cached_metadata(non_adapter_dir)
+        if metadata_has_record(mark_metadata, metadata_key, stride) and metadata_has_record(non_metadata, metadata_key, stride):
+            print(f"Skipping adapter_{idx}: perturbation metadata already satisfies coverage (stride={stride}).")
+            continue
+
         try:
             comparison_data, _, _ = run_qa_perturbation_accuracy(
                 markovian_log_file=markovian_log_file,
@@ -1057,7 +1291,8 @@ def run_checkpoint_scan(
                 question_length=question_length,
                 target_length=target_length,
                 markovian_adapter_index=idx, # Enforce same index
-                non_markovian_adapter_index=idx 
+                non_markovian_adapter_index=idx,
+                stride=stride,
             )
         finally:
             # sys.stdout = sys.__stdout__
@@ -1068,6 +1303,42 @@ def run_checkpoint_scan(
             "Batch Index": idx,  # Training batch index
             "Sensitivity Summary": summary
         })
+
+        timestamp = datetime.datetime.utcnow().isoformat()
+        record_common = {
+            "task_type": task_type,
+            "perturbation": perturb_type,
+            "metric": "accuracy",
+            "num_samples": num_samples,
+            "batch_size": batch_size,
+            "stride": stride,
+            "adapter_index": idx,
+            "paired_adapter_index": idx,
+            "summary": summary,
+            "timestamp": timestamp,
+            "scan_results_file": os.path.join("checkpoint_scan", f"scan_results_{perturb_type}.json"),
+            "scan_plot_file": os.path.join("checkpoint_scan", f"scan_plot_{perturb_type}.png"),
+        }
+
+        mark_record = {
+            **record_common,
+            "role": markovian_role,
+            "paired_role": non_markovian_role,
+            "paired_run": os.path.basename(non_markovian_dir),
+            "status": "completed",
+        }
+        non_record = {
+            **record_common,
+            "role": non_markovian_role,
+            "paired_role": markovian_role,
+            "paired_run": os.path.basename(markovian_dir),
+            "status": "completed",
+        }
+
+        mark_metadata["records"][metadata_key] = mark_record
+        non_metadata["records"][metadata_key] = non_record
+        persist_metadata_cache(mark_adapter_dir)
+        persist_metadata_cache(non_adapter_dir)
         
     # Save scan results
     output_dir = os.path.join(markovian_dir, "checkpoint_scan")
@@ -1076,8 +1347,16 @@ def run_checkpoint_scan(
     
     with open(output_file, "w") as f:
         json.dump(scan_results, f)
+
+    non_output_dir = os.path.join(non_markovian_dir, "checkpoint_scan")
+    os.makedirs(non_output_dir, exist_ok=True)
+    non_output_file = os.path.join(non_output_dir, os.path.basename(output_file))
+    if non_output_file != output_file:
+        shutil.copy2(output_file, non_output_file)
         
     print(f"Scan results saved to {output_file}")
+    sync_run_dir_outputs(markovian_dir)
+    sync_run_dir_outputs(non_markovian_dir)
     return scan_results
 
 
@@ -1343,38 +1622,6 @@ def _generate_actor_cots_for_questions(model, tokenizer, device, questions, hype
     return cot_texts
 
 
-def _load_wiki_pairs(tokenizer, question_length, target_length, num_samples):
-    """Load fresh (question, answer) pairs from Wikipedia dataset for wiki tasks."""
-    wiki_dataset = load_dataset("wikimedia/wikipedia", "20231101.en", split="train")
-    qa_pairs = []
-    idx = 0
-    # Skip indices used during certain training ranges to diversify
-    skip_start, skip_end = 15200, 22400
-    while len(qa_pairs) < num_samples and idx < len(wiki_dataset):
-        if skip_start <= idx < skip_end:
-            idx = skip_end
-            continue
-        article = wiki_dataset[idx]
-        idx += 1
-        text = article.get("text", "")
-        if not text:
-            continue
-        # Ensure enough tokens
-        tokens = tokenizer(text, truncation=False, return_tensors="pt").input_ids[0]
-        if len(tokens) < question_length + target_length:
-            continue
-        # Extract segments
-        question_chunk, _ = get_text_with_token_length(text, question_length, tokenizer)
-        if question_chunk is None:
-            continue
-        remaining = text[len(question_chunk):]
-        target_chunk, _ = get_text_with_token_length(remaining, target_length, tokenizer)
-        if target_chunk is None:
-            continue
-        qa_pairs.append((question_chunk, target_chunk))
-    return qa_pairs[:num_samples]
-
-
 def run_markovian_comparison_fresh(
     markovian_log_file,
     non_markovian_log_file,
@@ -1431,7 +1678,7 @@ def run_markovian_comparison_fresh(
     # Prepare fresh dataset QA pairs
     q_len = int(markovian_hyperparams.get("question_length", 512))
     t_len = int(markovian_hyperparams.get("target_length", 128))
-    qa_pairs = _load_wiki_pairs(tokenizer, q_len, t_len, num_samples)
+    qa_pairs = load_wiki_pairs(tokenizer, q_len, t_len, num_samples, start_index=10000)
     if not qa_pairs:
         raise RuntimeError("No suitable wiki samples found for fresh comparison.")
 
@@ -1793,7 +2040,7 @@ def run_qa_perturbation_accuracy(
     non_markovian_log_file,
     perturb_type,
     task_type,
-    num_samples=128,
+    num_samples=None,
     batch_size=8,
     evaluator="actor",
     adapter_index=None,
@@ -1801,6 +2048,7 @@ def run_qa_perturbation_accuracy(
     target_length=None,
     markovian_adapter_index=None,
     non_markovian_adapter_index=None,
+    stride: int = 1,
 ):
     """
     Run perturbation analysis measuring ACCURACY drop on QA tasks.
@@ -1810,9 +2058,18 @@ def run_qa_perturbation_accuracy(
 
     perturbations = PERTURBATION_SETS[perturb_type]["perturbations"]
 
+    markovian_dir = os.path.dirname(markovian_log_file)
+    non_markovian_dir = os.path.dirname(non_markovian_log_file)
+    sync_run_dir_from_s3(markovian_dir)
+    sync_run_dir_from_s3(non_markovian_dir)
+    markovian_role = infer_role_from_log_path(markovian_log_file)
+    non_markovian_role = infer_role_from_log_path(non_markovian_log_file)
+
     # Resolve adapter indices
     m_idx = markovian_adapter_index if markovian_adapter_index is not None else adapter_index
     nm_idx = non_markovian_adapter_index if non_markovian_adapter_index is not None else adapter_index
+    mark_adapter_dir = os.path.join(markovian_dir, f"adapter_{m_idx}") if m_idx is not None else None
+    non_adapter_dir = os.path.join(non_markovian_dir, f"adapter_{nm_idx}") if nm_idx is not None else None
 
     # Load hyperparameters
     with open(markovian_log_file, "r") as f:
@@ -1868,10 +2125,15 @@ def run_qa_perturbation_accuracy(
 
     if not qa_pairs:
         raise RuntimeError(f"No samples found for {task_type}")
-        
-    if len(qa_pairs) > num_samples:
+    
+    stride = max(1, int(stride or 1))
+    qa_pairs = qa_pairs[::stride]
+    if num_samples:
         qa_pairs = qa_pairs[:num_samples]
-    print(f"Loaded {len(qa_pairs)} examples.")
+    if not qa_pairs:
+        raise RuntimeError("No samples left after applying stride/num_samples filters.")
+    effective_num_samples = len(qa_pairs)
+    print(f"Loaded {effective_num_samples} examples with stride={stride}.")
 
     # Helper to select evaluation function
     def get_eval_func(tt):
@@ -1957,14 +2219,69 @@ def run_qa_perturbation_accuracy(
             comparison_data[i]["Effect Difference"][pert_name] = diff
 
     # Save results
-    output_dir = os.path.join(os.path.dirname(markovian_log_file), "markovian_comparison_accuracy")
+    output_dir = os.path.join(markovian_dir, "markovian_comparison_accuracy")
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f"comparison_results_accuracy_{perturb_type}.json")
     
     with open(output_path, "w") as f:
         json.dump(comparison_data, f)
         
+    non_output_dir = os.path.join(non_markovian_dir, "markovian_comparison_accuracy")
+    os.makedirs(non_output_dir, exist_ok=True)
+    non_output_path = os.path.join(non_output_dir, os.path.basename(output_path))
+    if non_output_path != output_path:
+        shutil.copy2(output_path, non_output_path)
+
+    if mark_adapter_dir and os.path.isdir(mark_adapter_dir) and non_adapter_dir and os.path.isdir(non_adapter_dir):
+        metadata_key = build_perturb_metadata_key(
+            task_type=task_type,
+            perturb_type=perturb_type,
+            metric="accuracy",
+            paired_role=non_markovian_role,
+            paired_adapter_index=nm_idx,
+            markovian_run=markovian_dir,
+            non_markovian_run=non_markovian_dir,
+        )
+        mark_metadata = get_cached_metadata(mark_adapter_dir)
+        non_metadata = get_cached_metadata(non_adapter_dir)
+        timestamp = datetime.datetime.utcnow().isoformat()
+        record_common = {
+            "task_type": task_type,
+            "perturbation": perturb_type,
+            "metric": "accuracy",
+            "num_samples": effective_num_samples,
+            "batch_size": batch_size,
+            "stride": stride,
+            "summary": compute_sensitivity_summary(comparison_data, perturb_type),
+            "timestamp": timestamp,
+            "comparison_results_file": os.path.join("markovian_comparison_accuracy", os.path.basename(output_path)),
+        }
+        mark_record = {
+            **record_common,
+            "adapter_index": m_idx,
+            "paired_adapter_index": nm_idx,
+            "role": markovian_role,
+            "paired_role": non_markovian_role,
+            "paired_run": os.path.basename(non_markovian_dir),
+            "status": "completed",
+        }
+        non_record = {
+            **record_common,
+            "adapter_index": nm_idx,
+            "paired_adapter_index": m_idx,
+            "role": non_markovian_role,
+            "paired_role": markovian_role,
+            "paired_run": os.path.basename(markovian_dir),
+            "status": "completed",
+        }
+        mark_metadata["records"][metadata_key] = mark_record
+        non_metadata["records"][metadata_key] = non_record
+        persist_metadata_cache(mark_adapter_dir)
+        persist_metadata_cache(non_adapter_dir)
+
     print(f"Accuracy perturbation analysis saved to {output_path}")
+    sync_run_dir_outputs(markovian_dir)
+    sync_run_dir_outputs(non_markovian_dir)
     return comparison_data, markovian_hyperparams, non_markovian_hyperparams
 
 
@@ -2198,6 +2515,7 @@ def main():
                     task_type=args.fresh_task_type,
                     num_samples=args.fresh_num_samples,
                     batch_size=args.batch_size,
+                    stride=args.stride,
                     question_length=args.fresh_question_length,
                     target_length=args.fresh_target_length,
                 )
@@ -2221,6 +2539,7 @@ def main():
                     target_length=args.fresh_target_length,
                     markovian_adapter_index=markovian_adapter_index,
                     non_markovian_adapter_index=non_markovian_adapter_index,
+                    stride=args.stride,
                 )
             else:
                 comparison_data, markovian_hyperparams, non_markovian_hyperparams = run_markovian_comparison_fresh(

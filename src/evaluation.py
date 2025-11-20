@@ -18,8 +18,210 @@ import random
 import filecmp
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from datasets import load_dataset
 
-from utils import construct_prompts, colored_print, Colors
+from utils import construct_prompts, colored_print, Colors, get_text_with_token_length, extract_answer
+
+
+def find_answer_start_position(input_ids, model_type):
+    """Find the starting position of the answer in the input_ids based on model type."""
+    if model_type == "mistral":
+        # Find "Answer:" token sequence
+        matching_indices = (
+            (input_ids[:-1] == 26307)
+            & (
+                (input_ids[1:] == 28747)
+                | (input_ids[1:] == 28705)
+                | (input_ids[1:] == 29871)
+            )
+        ).nonzero(as_tuple=True)[0]
+        pos = matching_indices[-1].item() + 2
+    elif model_type in ["llama", "llama3.2-1b", "phi-4"]:  # phi-4 uses the same token IDs as llama for "Answer:"
+        matching_indices = (
+            ((input_ids[:-1] == 16533) | (input_ids[:-1] == 22559))
+            & (input_ids[1:] == 25)
+        ).nonzero(as_tuple=True)[0]
+        pos = matching_indices[-1].item() + 2
+    elif model_type in ["qwen3", "qwen3-14b"]:
+        # Qwen2.5 and Qwen3 use same token IDs: " Answer" (21806) or "Answer" (16141) followed by ":" (25)
+        matching_indices = (
+            ((input_ids[:-1] == 21806) | (input_ids[:-1] == 16141))  # " Answer" or "Answer"
+            & (input_ids[1:] == 25)  # ":"
+        ).nonzero(as_tuple=True)[0]
+        
+        if len(matching_indices) > 0:
+            pos = matching_indices[-1].item() + 2
+        else:
+            # Fallback in case the exact pattern isn't found
+            colored_print("Warning", f"Could not find 'Answer:' in {model_type} output, using fallback position", Colors.YELLOW)
+            # Try to find just the colon
+            colon_indices = (input_ids == 25).nonzero(as_tuple=True)[0]
+            if len(colon_indices) > 0:
+                pos = colon_indices[-1].item() + 1
+            else:
+                # Worst case: use the last 20% of tokens
+                pos = int(len(input_ids) * 0.8)
+    elif model_type in ["gpt2", "tinystories"]:  # TinyStories uses same tokens as GPT2
+        matching_indices = (
+            (input_ids[:-1] == 23998)
+            & (input_ids[1:] == 25)
+        ).nonzero(as_tuple=True)[0]
+        pos = matching_indices[-1].item() + 2
+    elif model_type == "phi":
+        # Phi-3.5-mini tokenization: "Answer:" -> [673, 29901] or " Answer:" -> [29871, 673, 29901]
+        matching_indices = (
+            (input_ids[:-1] == 673)  # "Answer"
+            & (input_ids[1:] == 29901)  # ":"
+        ).nonzero(as_tuple=True)[0]
+        pos = matching_indices[-1].item() + 2
+    elif model_type in ["gemma-3", "gemma-3-small"]:
+        # For Gemma-3, we need to handle multiple potential tokens for "Answer"
+        # followed by colon token (236787)
+        matching_indices = (
+            (
+                (input_ids[:-1] == 25685)  # " Answer"
+                | (input_ids[:-1] == 7925)  # "Answer"
+                | (input_ids[:-1] == 14433)  # "answer"
+                | (input_ids[:-1] == 3890)  # " answer"
+            )
+            & (input_ids[1:] == 236787)  # ":"
+        ).nonzero(as_tuple=True)[0]
+        
+        if len(matching_indices) > 0:
+            pos = matching_indices[-1].item() + 2
+        else:
+            # Fallback in case the exact pattern isn't found
+            colored_print("Warning", "Could not find 'Answer:' in Gemma-3 output, using fallback position", Colors.YELLOW)
+            # Try to find a plausible position - the colon might be there
+            colon_indices = (input_ids == 236787).nonzero(as_tuple=True)[0]
+            if len(colon_indices) > 0:
+                pos = colon_indices[-1].item() + 1
+            else:
+                # Worst case: use the last 20% of tokens
+                pos = int(len(input_ids) * 0.8)
+    else:
+        raise ValueError("Unsupported model type")
+    return pos
+
+
+def calculate_answer_log_probs(
+    frozen_model,
+    tokenizer,
+    device,
+    questions,
+    reasoning,
+    answers,
+    hyperparameters,
+    include_question=False,
+):
+    """Calculate the log probabilities of the answers given the reasoning.
+
+    Args:
+        frozen_model: The critic model (frozen)
+        tokenizer: Tokenizer for the model
+        device: The device to run on
+        questions: List of question strings
+        reasoning: List of reasoning strings (from either actor or critic)
+        answers: List of answer strings
+        hyperparameters: Dictionary of hyperparameters
+        include_question: Whether to include the question in the prompt (default: False)
+
+    Returns:
+        tuple: (
+            mean_answer_logprobs,  # Average log prob of each answer token
+            answer_logprobs,       # Full sequence of answer token log probs
+            extracted_answers      # Only for GSM8K: extracted numerical answers
+        )
+    """
+    # Create prompts with reasoning (may have <Redacted> instead of actual question when include_question=False)
+    partial_prompts = [
+        construct_prompts(
+            question=q,
+            hyperparameters=hyperparameters,
+            reasoning=r,
+            include_question=include_question,
+        )
+        for q, r in zip(questions, reasoning)
+    ]
+
+    # Add answers to create full prompts
+    full_prompts = [x + y for x, y in zip(partial_prompts, answers)]
+
+    # Tokenize full prompts
+    full_prompt_tokens = tokenizer(
+        full_prompts,
+        padding=True,
+        return_tensors="pt",
+    ).to(device)
+
+    # For GSM8K, we also generate answers to extract numerical values
+    extracted_generated_answers = None
+    if hyperparameters["task_type"] == "gsm8k":
+        # Tokenize partial prompts (without answers) for generation
+        partial_prompt_tokens = tokenizer(partial_prompts, padding=True, return_tensors="pt").to(
+            device
+        )
+
+        # Generate answer tokens
+        max_answer_length = 15
+        with torch.no_grad():
+            generated_outputs = frozen_model.generate(
+                input_ids=partial_prompt_tokens.input_ids,
+                attention_mask=partial_prompt_tokens.attention_mask,
+                max_new_tokens=max_answer_length,
+                do_sample=False,
+                top_k=None,
+                top_p=None,
+                pad_token_id=tokenizer.pad_token_id,
+            )
+
+        # Decode and extract numerical answers
+        generated_answers = tokenizer.batch_decode(
+            generated_outputs[:, -max_answer_length - 1 :], skip_special_tokens=True
+        )
+        selected_answers = [x.split("\n")[-1] for x in generated_answers]
+        extracted_generated_answers = [extract_answer(ans) for ans in selected_answers]
+
+    # Find the starting positions of answers in the full prompts
+    answer_start_positions = [
+        find_answer_start_position(input_ids, hyperparameters["model_type"])
+        for input_ids in full_prompt_tokens.input_ids
+    ]
+
+    # Verify answer positions are correct
+    for i in range(len(answers)):
+        decoded_answer = tokenizer.decode(
+            full_prompt_tokens.input_ids[i][answer_start_positions[i] :]
+        ).strip()
+        expected_answer = answers[i].strip()
+        if (
+            decoded_answer[:3] != expected_answer[:3]
+            or decoded_answer[-3:] != expected_answer[-3:]
+        ):
+            colored_print("Answer mismatch at index", str(i), Colors.RED)
+
+    # Calculate log probabilities
+    with torch.no_grad():
+        model_logits = frozen_model(
+            input_ids=full_prompt_tokens.input_ids,
+            attention_mask=full_prompt_tokens.attention_mask,
+        ).logits
+
+    # Convert to log probabilities
+    log_probs = torch.nn.functional.log_softmax(model_logits, dim=-1)
+
+    # Get log probs for each answer token
+    answer_logprobs = [
+        log_probs[i, start - 1 : -1]
+        .gather(1, full_prompt_tokens.input_ids[i, start:].unsqueeze(-1))
+        .squeeze(-1)
+        for i, start in enumerate(answer_start_positions)
+    ]
+
+    # Calculate mean log prob per answer
+    mean_answer_logprobs = torch.stack([x.mean() for x in answer_logprobs])
+
+    return mean_answer_logprobs, extracted_generated_answers
 
 
 # Track which results files have already been reset during the current process
@@ -82,6 +284,102 @@ def write_adapter_metadata(adapter_dir: str, metadata: Dict[str, Any], stride: i
     with open(path, "w") as f:
         json.dump(metadata, f, indent=2)
     return path
+
+
+def load_wiki_pairs(
+    tokenizer,
+    question_length: int,
+    target_length: int,
+    num_samples: int,
+    start_index: int = 10000,
+    skip_range: Optional[Tuple[int, int]] = (15200, 22400),
+):
+    """Load fresh (context, continuation) pairs from Wikipedia, mirroring training rules."""
+    wiki_dataset = load_dataset("wikimedia/wikipedia", "20231101.en", split="train")
+    qa_pairs = []
+    idx = max(0, start_index)
+    skip_start, skip_end = skip_range if skip_range else (None, None)
+    while len(qa_pairs) < num_samples and idx < len(wiki_dataset):
+        if skip_start is not None and skip_end is not None and skip_start <= idx < skip_end:
+            idx = skip_end
+            continue
+        article = wiki_dataset[idx]
+        idx += 1
+        text = article.get("text", "")
+        if not text:
+            continue
+        tokens = tokenizer(text, truncation=False, return_tensors="pt").input_ids[0]
+        if len(tokens) < question_length + target_length:
+            continue
+        context, _ = get_text_with_token_length(text, question_length, tokenizer)
+        if context is None:
+            continue
+        remaining = text[len(context):]
+        target, _ = get_text_with_token_length(remaining, target_length, tokenizer)
+        if target is None:
+            continue
+        qa_pairs.append((context, target))
+    return qa_pairs[:num_samples]
+
+
+def compute_wiki_logprob(
+    model,
+    tokenizer,
+    device,
+    hyperparameters: Dict[str, Any],
+    *,
+    num_samples: int = 256,
+    stride: int = 1,
+    start_index: int = 10000,
+    question_length: Optional[int] = None,
+    target_length: Optional[int] = None,
+) -> Tuple[float, Dict[str, Any]]:
+    """Compute average log probability on Wikipedia continuations."""
+    question_length = int(question_length or hyperparameters.get("question_length", 512))
+    target_length = int(target_length or hyperparameters.get("target_length", 128))
+    stride = max(1, int(stride))
+    requested = num_samples * stride if num_samples else 256 * stride
+    pairs = load_wiki_pairs(
+        tokenizer,
+        question_length,
+        target_length,
+        requested,
+        start_index=start_index,
+    )
+    if not pairs:
+        raise RuntimeError("No Wikipedia samples available for evaluation.")
+    pairs = pairs[::stride]
+    if num_samples:
+        pairs = pairs[:num_samples]
+    if not pairs:
+        raise RuntimeError("No samples left after applying stride for wiki evaluation.")
+    questions, answers = zip(*pairs)
+    reasoning = [""] * len(pairs)
+    eval_hyper = {
+        **hyperparameters,
+        "task_type": hyperparameters.get("task_type", "wiki_continuation"),
+        "markovian": False,
+    }
+    model.eval()
+    log_probs, _, _ = calculate_answer_log_probs(
+        frozen_model=model,
+        tokenizer=tokenizer,
+        device=device,
+        questions=list(questions),
+        reasoning=reasoning,
+        answers=list(answers),
+        hyperparameters=eval_hyper,
+        include_question=True,
+    )
+    mean_log_prob = float(log_probs.mean().item())
+    metadata = {
+        "num_samples": len(pairs),
+        "stride": stride,
+        "start_index": start_index,
+        "question_length": question_length,
+        "target_length": target_length,
+    }
+    return mean_log_prob, metadata
 
 
 def _get_latest_backup_path(results_file: str) -> Optional[str]:
