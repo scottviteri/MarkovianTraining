@@ -22,8 +22,7 @@ from src.utils import load_model_for_evaluation
 from src.evaluation import compute_wiki_logprob, write_adapter_metadata
 
 
-S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET", "s3://scottviteri")
-S3_BUCKET = S3_BUCKET.rstrip("/") if S3_BUCKET else None
+DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET")
 METADATA_PATTERN = re.compile(r"eval_metadata(?:_stride(\d+))?\.json$")
 _S3_WARNING_PRINTED = False
 WIKI_DEFAULT_NUM_SAMPLES = 256
@@ -298,16 +297,20 @@ def safe_relpath(path, base_dir):
     return path
 
 
-def sync_run_dir(run_dir, project_root):
+def sync_run_dir(run_dir, project_root, enable_sync=False, bucket=None):
     global _S3_WARNING_PRINTED
-    if S3_BUCKET is None:
+    if not enable_sync:
+        return
+
+    bucket = bucket or DEFAULT_S3_BUCKET
+    if not bucket:
         if not _S3_WARNING_PRINTED:
-            print("Warning: SWEEP_S3_BUCKET not set; skipping S3 sync.")
+            print("Warning: S3 sync requested but no bucket configured.")
             _S3_WARNING_PRINTED = True
         return
 
     rel_path = safe_relpath(run_dir, project_root).replace("\\", "/")
-    s3_dest = f"{S3_BUCKET}/{rel_path}"
+    s3_dest = f"{bucket.rstrip('/')}/{rel_path}"
     if s3_dest.startswith("s3:/") and not s3_dest.startswith("s3://"):
         s3_dest = s3_dest.replace("s3:/", "s3://", 1)
     include_args = [
@@ -376,7 +379,16 @@ def get_wiki_baseline_score(dataset, model_type, args, project_root):
     return mean_log_prob
 
 
-def get_baseline_score(dataset, run_dir, metadata_entries, args, project_root, force_skip_eval=False):
+def get_baseline_score(
+    dataset,
+    run_dir,
+    metadata_entries,
+    args,
+    project_root,
+    force_skip_eval=False,
+    enable_s3=False,
+    s3_bucket=None,
+):
     """
     Get baseline (base model) score for the dataset.
     Runs evaluation if not present in logs.
@@ -404,21 +416,23 @@ def get_baseline_score(dataset, run_dir, metadata_entries, args, project_root, f
 
     # Run evaluation
     if not args.dry_run and not args.skip_eval and not force_skip_eval:
-        print(f"Evaluating baseline for {dataset}...")
+    print(f"Evaluating baseline for {dataset}...")
         eval_script = os.path.join(project_root, "src", "evaluation.py")
-        cmd = [
+    cmd = [
             "python", eval_script,
-            "--task_type", dataset,
-            "--model_type", model_type,
-            "--use_base_model"
-        ]
-        if args.num_samples:
-            cmd.extend(["--num_samples", str(args.num_samples)])
-        if args.stride:
-            cmd.extend(["--stride", str(args.stride)])
+        "--task_type", dataset,
+        "--model_type", model_type,
+        "--use_base_model"
+    ]
+    if args.num_samples:
+        cmd.extend(["--num_samples", str(args.num_samples)])
+    if args.stride:
+        cmd.extend(["--stride", str(args.stride)])
         if args.batch_size:
             cmd.extend(["--batch_size", str(args.batch_size)])
-            
+        if enable_s3 and s3_bucket:
+            cmd.append("--sync_metadata")
+            cmd.extend(["--s3_bucket", s3_bucket])
         try:
             subprocess.run(cmd, check=True, cwd=project_root)
         except subprocess.CalledProcessError as e:
@@ -436,7 +450,18 @@ def get_baseline_score(dataset, run_dir, metadata_entries, args, project_root, f
     
     return 0.0
 
-def get_max_adapter_score(run_dir, dataset, args, project_root, model_type_hint, metadata_entries_hint, missing_adapters_hint, force_skip_eval=False):
+def get_max_adapter_score(
+    run_dir,
+    dataset,
+    args,
+    project_root,
+    model_type_hint,
+    metadata_entries_hint,
+    missing_adapters_hint,
+    enable_s3=False,
+    s3_bucket=None,
+    force_skip_eval=False,
+):
     """
     Evaluate all adapters in a run directory and return the max accuracy.
     """
@@ -448,11 +473,11 @@ def get_max_adapter_score(run_dir, dataset, args, project_root, model_type_hint,
 
     model_type = model_type_hint or detect_model_type(run_dir, metadata_entries)
     results_file = os.path.join(run_dir, f"{dataset}_results_{model_type}.jsonl")
-
+    
     adapters = list_adapter_dirs(run_dir)
     if not adapters:
         if not force_skip_eval:
-            print(f"No adapters found in {run_dir}")
+        print(f"No adapters found in {run_dir}")
         return 0.0
 
     if missing_adapters and not args.dry_run and not args.skip_eval and not force_skip_eval:
@@ -461,20 +486,23 @@ def get_max_adapter_score(run_dir, dataset, args, project_root, model_type_hint,
             f"(missing metadata for {len(missing_adapters)} adapters)..."
         )
         eval_script = os.path.join(project_root, "src", "evaluation.py")
-        cmd = [
+    cmd = [
             "python", eval_script,
-            "--task_type", dataset,
-            "--run_dir", run_dir,
-            "--all_adapters",
-            "--model_type", model_type
-        ]
-        if args.num_samples:
-            cmd.extend(["--num_samples", str(args.num_samples)])
-        if args.stride:
-            cmd.extend(["--stride", str(args.stride)])
+        "--task_type", dataset,
+        "--run_dir", run_dir,
+        "--all_adapters",
+        "--model_type", model_type
+    ]
+    if args.num_samples:
+        cmd.extend(["--num_samples", str(args.num_samples)])
+    if args.stride:
+        cmd.extend(["--stride", str(args.stride)])
         if args.batch_size:
             cmd.extend(["--batch_size", str(args.batch_size)])
-            
+        if enable_s3 and s3_bucket:
+            cmd.append("--sync_metadata")
+            cmd.extend(["--s3_bucket", s3_bucket])
+        
         try:
             subprocess.run(cmd, check=True, cwd=project_root)
         except subprocess.CalledProcessError as e:
@@ -500,7 +528,7 @@ def get_max_adapter_score(run_dir, dataset, args, project_root, model_type_hint,
     for meta in metadata_entries:
         acc = metadata_accuracy(meta)
         if acc is None:
-            continue
+                    continue
         if acc > best_acc_value:
             best_acc_value = acc
             best_metadata = meta
@@ -536,7 +564,7 @@ def get_max_adapter_score(run_dir, dataset, args, project_root, model_type_hint,
             f"(Accuracy: {best_acc_value:.2%})"
         )
         print(f"  - Saved best adapter info to {best_info_path}")
-        sync_run_dir(run_dir, project_root)
+        sync_run_dir(run_dir, project_root, enable_s3, s3_bucket)
 
     return best_acc_value
 
@@ -552,7 +580,16 @@ def main():
     parser.add_argument("--run_dir", type=str, nargs="+", default=None, help="Specific run directory (or directories) to process. Overrides automatic scanning.")
     parser.add_argument("--shuffle", action="store_true", help="Process run directories in random order (useful for distributed workers)")
     parser.add_argument("--reverse", action="store_true", help="Process run directories in reverse order (useful for simple 2-machine parallelism)")
+    parser.add_argument("--s3_sync", action="store_true", help="Upload results/metadata to S3 (requires bucket)")
+    parser.add_argument("--s3_bucket", type=str, default=None, help="S3 bucket to use (overrides SWEEP_S3_BUCKET)")
     args = parser.parse_args()
+
+    resolved_s3_bucket = args.s3_bucket or DEFAULT_S3_BUCKET
+    if resolved_s3_bucket:
+        resolved_s3_bucket = resolved_s3_bucket.rstrip("/")
+    enable_s3_sync = bool(args.s3_sync and resolved_s3_bucket and not args.dry_run)
+    if args.s3_sync and not resolved_s3_bucket:
+        print("Warning: --s3_sync enabled but no bucket configured; skipping S3 uploads.")
 
     # Supported tasks in evaluation.py
     SUPPORTED_TASKS = ["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"]
@@ -562,7 +599,6 @@ def main():
     table = defaultdict(lambda: defaultdict(float))
     wiki_table = defaultdict(lambda: defaultdict(float))
     
-    # 1. Identify runs to process
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)  # Go up one level from scripts/
     
@@ -596,30 +632,30 @@ def main():
                 print(f"Error: Could not find results directory at {results_root} or ./results")
                 return
 
-        for task in os.listdir(results_root):
-            # Filter by task_type if specified
-            if args.task_type and task != args.task_type:
-                continue
+    for task in os.listdir(results_root):
+        # Filter by task_type if specified
+        if args.task_type and task != args.task_type:
+            continue
 
-            task_dir = os.path.join(results_root, task)
-            if not os.path.isdir(task_dir):
-                continue
-                
+        task_dir = os.path.join(results_root, task)
+        if not os.path.isdir(task_dir):
+            continue
+            
             if task not in SUPPORTED_TASKS and task not in WIKI_TASKS:
-                print(f"Skipping unsupported task: {task}")
-                continue
-                
-            # Find run directories
-            for item in os.listdir(task_dir):
-                path = os.path.join(task_dir, item)
-                if os.path.isdir(path):
-                    dataset, method_name = parse_run_dir(path)
-                    if dataset and method_name:
-                        # Filter by method if specified
-                        if args.method and method_name != args.method:
-                            continue
-                            
-                        run_dirs.append((dataset, method_name, path))
+            print(f"Skipping unsupported task: {task}")
+            continue
+            
+        # Find run directories
+        for item in os.listdir(task_dir):
+            path = os.path.join(task_dir, item)
+            if os.path.isdir(path):
+                dataset, method_name = parse_run_dir(path)
+                if dataset and method_name:
+                    # Filter by method if specified
+                    if args.method and method_name != args.method:
+                        continue
+                        
+                    run_dirs.append((dataset, method_name, path))
 
     # Shuffle or reverse run directories if requested
     if args.shuffle:
@@ -650,8 +686,17 @@ def main():
         else:
             should_evaluate = dataset_runs and (not args.task_type or dataset == args.task_type)
             run_dir_for_baseline = dataset_runs[0][2] if dataset_runs else os.path.join(project_root, "results", dataset)
-            score = get_baseline_score(dataset, run_dir_for_baseline, sample_metadata, args, project_root, force_skip_eval=not should_evaluate)
-            table[dataset]["Baseline"] = score
+            score = get_baseline_score(
+                dataset,
+                run_dir_for_baseline,
+                sample_metadata,
+                args,
+                project_root,
+                force_skip_eval=not should_evaluate,
+                enable_s3=enable_s3_sync,
+                s3_bucket=resolved_s3_bucket,
+            )
+        table[dataset]["Baseline"] = score
         
     # 3. Process Runs
     for dataset, method, path in run_dirs:
@@ -668,9 +713,20 @@ def main():
             if args.method and method != args.method:
                 should_evaluate = False
 
-            score = get_max_adapter_score(path, dataset, args, project_root, model_type, metadata_entries, missing_adapters, force_skip_eval=not should_evaluate)
+            score = get_max_adapter_score(
+                path,
+                dataset,
+                args,
+                project_root,
+                model_type,
+                metadata_entries,
+                missing_adapters,
+                enable_s3=enable_s3_sync,
+                s3_bucket=resolved_s3_bucket,
+                force_skip_eval=not should_evaluate,
+            )
             table[dataset].setdefault("Baseline", table[dataset].get("Baseline", 0.0))
-            table[dataset][method] = score
+        table[dataset][method] = score
 
     # 4. Generate Table
     df = pd.DataFrame.from_dict(table, orient='index')

@@ -15,6 +15,7 @@ import glob
 import shutil
 import datetime
 import random
+import subprocess
 import filecmp
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -227,6 +228,10 @@ def calculate_answer_log_probs(
 # Track which results files have already been reset during the current process
 _fresh_results_files: set[str] = set()
 METADATA_PATTERN = re.compile(r"eval_metadata(?:_stride(\d+))?\.json$")
+DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET")
+DEFAULT_SYNC_METADATA = os.environ.get("SWEEP_SYNC_METADATA", "").strip().lower() in {"1", "true", "yes"}
+_METADATA_SYNC_WARNED = False
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def metadata_filename_for_stride(stride: int) -> str:
@@ -380,6 +385,39 @@ def compute_wiki_logprob(
         "target_length": target_length,
     }
     return mean_log_prob, metadata
+def safe_relpath(path: str, base_dir: str) -> str:
+    if not base_dir:
+        return path
+    try:
+        path_abs = os.path.abspath(path)
+        base_abs = os.path.abspath(base_dir)
+        common = os.path.commonpath([path_abs, base_abs])
+        if common == base_abs:
+            return os.path.relpath(path_abs, base_abs)
+    except ValueError:
+        pass
+    return path
+
+
+def upload_metadata_file(local_path: str, run_dir: str, bucket: Optional[str], enabled: bool):
+    global _METADATA_SYNC_WARNED
+    if not enabled:
+        return
+    if not bucket:
+        if not _METADATA_SYNC_WARNED:
+            colored_print("Metadata", "S3 bucket not set; cannot upload metadata.", Colors.YELLOW)
+            _METADATA_SYNC_WARNED = True
+        return
+    rel_file = safe_relpath(local_path, PROJECT_ROOT).replace("\\", "/")
+    dest = f"{bucket.rstrip('/')}/{rel_file}"
+    try:
+        subprocess.run(["aws", "s3", "cp", local_path, dest], check=True)
+    except FileNotFoundError:
+        if not _METADATA_SYNC_WARNED:
+            colored_print("Metadata", "aws CLI not found; cannot upload metadata.", Colors.YELLOW)
+            _METADATA_SYNC_WARNED = True
+    except subprocess.CalledProcessError as e:
+        colored_print("Metadata", f"Failed to upload {local_path} to {dest}: {e}", Colors.YELLOW)
 
 
 def _get_latest_backup_path(results_file: str) -> Optional[str]:
@@ -431,10 +469,8 @@ def _ensure_fresh_results_file(results_file: str):
     _fresh_results_files.add(results_file)
 
 
-# ============================================================================
-# Helper Functions
-# ============================================================================
-
+# =====================================================================# Helper Functions
+# =====================================================================
 def get_default_eval_batch_size(train_batch_size: int) -> int:
     """Default evaluation batch size: floor(1.5x train batch size)."""
     return max(1, int(train_batch_size * 1.5))
@@ -890,10 +926,8 @@ def extract_letter_word_boundary(text: str) -> str:
     return "X"
 
 
-# ============================================================================
-# Core Generic Evaluation Function
-# ============================================================================
-
+# =====================================================================# Core Generic Evaluation Function
+# =====================================================================
 def evaluate_model_generic(
     actor_model: nn.Module,
     critic_model: nn.Module,
@@ -1150,10 +1184,8 @@ def evaluate_model_generic(
     return accuracy, results, haiku_metrics
 
 
-# ============================================================================
-# Task-Specific Evaluation Functions
-# ============================================================================
-
+# =====================================================================# Task-Specific Evaluation Functions
+# =====================================================================
 def evaluate_model_on_mcq(
     actor_model: nn.Module,
     critic_model: nn.Module,
@@ -1419,10 +1451,8 @@ def evaluate_model_on_gsm8k(
     return accuracy, results, haiku_metrics
 
 
-# ============================================================================
-# Save/Plotting Functions
-# ============================================================================
-
+# =====================================================================# Save/Plotting Functions
+# =====================================================================
 def plot_accuracy_over_batches(results_jsonl_path: str, save_path: str):
     """Plot accuracy vs. batch index from accumulated JSONL results and save one combined image.
     
@@ -1506,10 +1536,8 @@ def save_task_results(
     return results_file
 
 
-# ============================================================================
-# Batch Evaluation Functions
-# ============================================================================
-
+# =====================================================================# Batch Evaluation Functions
+# =====================================================================
 def find_checkpoints(results_dir: str) -> List[Tuple[int, str]]:
     """Find all checkpoint directories in results_dir.
     
@@ -1574,10 +1602,8 @@ def backup_existing_results(results_dir: str) -> List[str]:
     return backups
 
 
-# ============================================================================
-# CLI Interface
-# ============================================================================
-
+# =====================================================================# CLI Interface
+# =====================================================================
 def main():
     """Unified CLI for all evaluation tasks."""
     import argparse
@@ -1707,8 +1733,31 @@ def main():
         default=None,
         help="Specific MMLU subject to evaluate (default: all)"
     )
+    parser.add_argument(
+        "--sync_metadata",
+        action="store_true",
+        help="Upload adapter metadata to S3 after evaluation",
+    )
+    parser.add_argument(
+        "--s3_bucket",
+        type=str,
+        default=None,
+        help="S3 bucket to use for metadata uploads (overrides SWEEP_S3_BUCKET)",
+    )
     
     args = parser.parse_args()
+
+    metadata_bucket = args.s3_bucket or DEFAULT_S3_BUCKET
+    if metadata_bucket:
+        metadata_bucket = metadata_bucket.rstrip("/")
+    metadata_sync_requested = args.sync_metadata or DEFAULT_SYNC_METADATA
+    metadata_sync_enabled = bool(metadata_sync_requested and metadata_bucket)
+    if metadata_sync_requested and not metadata_bucket:
+        colored_print(
+            "Metadata",
+            "Metadata sync requested but no S3 bucket configured; uploads will be skipped.",
+            Colors.YELLOW,
+        )
     
     # Import utilities
     from utils import (
@@ -2034,6 +2083,7 @@ def main():
             stride_to_store = args.stride if args.stride else 1
             metadata_path = write_adapter_metadata(adapter_dir, metadata, stride_to_store)
             colored_print("Metadata", f"Wrote adapter metadata to {metadata_path}", Colors.CYAN)
+            upload_metadata_file(metadata_path, run_dir, metadata_bucket, metadata_sync_enabled)
 
 
 if __name__ == "__main__":
