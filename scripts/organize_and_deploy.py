@@ -310,12 +310,12 @@ MATRIX = {
 # Column definitions (Hyperparameter overrides for each column)
 COLUMNS = [
     ("Markovian", {"markovian": True, "model_type": "llama"}),
-    ("Non-Markovian", {"markovian": False}),
-    ("No Reward", {"actor_reward_weight": 0.0}),
-    ("PPO", {"use_ppo": True}),
-    ("Unnorm", {"normalize_loss": False}),
-    ("EMA", {"parallel": False}), 
-    ("EI", {"use_ei": 1.0}),
+    ("Non-Markovian", {"markovian": False, "model_type": "llama"}),
+    ("No Reward", {"actor_reward_weight": 0.0, "model_type": "llama"}),
+    ("PPO", {"use_ppo": True, "model_type": "llama"}),
+    ("Unnorm", {"normalize_loss": False, "model_type": "llama"}),
+    ("EMA", {"parallel": False, "model_type": "llama"}),
+    ("EI", {"use_ei": 1.0, "model_type": "llama"}),
 ]
 
 COLUMN_NAME_TO_INDEX = {name.lower(): idx for idx, (name, _) in enumerate(COLUMNS)}
