@@ -24,18 +24,61 @@ from utils import construct_prompts, colored_print, Colors
 
 # Track which results files have already been reset during the current process
 _fresh_results_files: set[str] = set()
+METADATA_PATTERN = re.compile(r"eval_metadata(?:_stride(\d+))?\.json$")
 
 
-def adapter_metadata_path(adapter_dir: str) -> str:
-    return os.path.join(adapter_dir, "eval_metadata.json")
+def metadata_filename_for_stride(stride: int) -> str:
+    stride = stride or 1
+    return f"eval_metadata_stride{stride}.json"
 
 
-def has_adapter_metadata(adapter_dir: str) -> bool:
-    return os.path.exists(adapter_metadata_path(adapter_dir))
+def adapter_metadata_path(adapter_dir: str, stride: int) -> str:
+    return os.path.join(adapter_dir, metadata_filename_for_stride(stride))
 
 
-def write_adapter_metadata(adapter_dir: str, metadata: Dict[str, Any]):
-    path = adapter_metadata_path(adapter_dir)
+def list_adapter_metadata_files(adapter_dir: str) -> List[str]:
+    pattern = os.path.join(adapter_dir, "eval_metadata*.json")
+    return glob.glob(pattern)
+
+
+def _load_metadata_file(path: str) -> Optional[Dict[str, Any]]:
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except Exception as e:
+        colored_print("Metadata", f"Failed to read {path}: {e}", Colors.YELLOW)
+        return None
+    stride = data.get("evaluation", {}).get("stride")
+    if stride is None:
+        match = METADATA_PATTERN.match(os.path.basename(path))
+        if match and match.group(1):
+            stride = int(match.group(1))
+        else:
+            stride = 1
+    data["_stride"] = int(stride)
+    data["_metadata_path"] = path
+    return data
+
+
+def get_cached_metadata(adapter_dir: str, requested_stride: int) -> Optional[Dict[str, Any]]:
+    entries = []
+    for path in list_adapter_metadata_files(adapter_dir):
+        data = _load_metadata_file(path)
+        if data is not None:
+            entries.append(data)
+    if not entries:
+        return None
+    entries.sort(key=lambda entry: entry["_stride"])
+    for entry in entries:
+        if entry["_stride"] <= requested_stride:
+            return entry
+    return None
+
+
+def write_adapter_metadata(adapter_dir: str, metadata: Dict[str, Any], stride: int):
+    metadata.setdefault("evaluation", {})
+    metadata["evaluation"]["stride"] = stride
+    path = adapter_metadata_path(adapter_dir, stride)
     with open(path, "w") as f:
         json.dump(metadata, f, indent=2)
     return path
@@ -1484,10 +1527,14 @@ def main():
             else:
                 batch_index = None
 
-            if adapter_dir and not args.force_eval and has_adapter_metadata(adapter_dir):
+            requested_stride = args.stride if args.stride else 1
+            cached_metadata = None
+            if adapter_dir and not args.force_eval:
+                cached_metadata = get_cached_metadata(adapter_dir, requested_stride)
+            if cached_metadata:
                 colored_print(
                     "Adapter Eval",
-                    f"Skipping {adapter_name} (metadata already exists)",
+                    f"Skipping {adapter_name} (stride {cached_metadata['_stride']} metadata available)",
                     Colors.CYAN,
                 )
                 continue
@@ -1686,7 +1733,8 @@ def main():
                 except ValueError:
                     metadata["results_file"] = results_file
 
-            metadata_path = write_adapter_metadata(adapter_dir, metadata)
+            stride_to_store = args.stride if args.stride else 1
+            metadata_path = write_adapter_metadata(adapter_dir, metadata, stride_to_store)
             colored_print("Metadata", f"Wrote adapter metadata to {metadata_path}", Colors.CYAN)
 
 
