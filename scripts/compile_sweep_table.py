@@ -387,6 +387,7 @@ def main():
     parser.add_argument("--task_type", type=str, default=None, help="Only process a specific task/dataset (e.g. gsm8k)")
     parser.add_argument("--method", type=str, default=None, help="Only process a specific method/hyperparameter (e.g. PPO, EI, Markovian)")
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size for evaluation")
+    parser.add_argument("--run_dir", type=str, nargs="+", default=None, help="Specific run directory (or directories) to process. Overrides automatic scanning.")
     parser.add_argument("--shuffle", action="store_true", help="Process run directories in random order (useful for distributed workers)")
     parser.add_argument("--s3_sync", type=str, default=None, help="S3 bucket URL (e.g. s3://my-bucket) to sync results to after processing each run")
     args = parser.parse_args()
@@ -399,46 +400,64 @@ def main():
     table = defaultdict(lambda: defaultdict(float))
     wiki_table = defaultdict(lambda: defaultdict(float))
     
-    # 1. Scan results directory
-    # Robustly find results directory relative to this script
+    # 1. Identify runs to process
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)  # Go up one level from scripts/
-    results_root = os.path.join(project_root, "results")
     
-    if not os.path.exists(results_root):
-        # Fallback to current directory if running from root
-        if os.path.exists("results"):
-            results_root = "results"
-            project_root = os.getcwd()
-        else:
-            print(f"Error: Could not find results directory at {results_root} or ./results")
-            return
-
     run_dirs = []
-    for task in os.listdir(results_root):
-        # Filter by task_type if specified
-        if args.task_type and task != args.task_type:
-            continue
+    
+    if args.run_dir:
+        # User provided specific directories
+        for r in args.run_dir:
+            # Handle relative paths
+            full_path = os.path.abspath(r)
+            if not os.path.isdir(full_path):
+                print(f"Warning: {r} is not a directory, skipping.")
+                continue
+                
+            dataset, method_name = parse_run_dir(full_path)
+            if not dataset or not method_name:
+                print(f"Warning: Could not parse dataset/method from {r}, skipping.")
+                continue
+                
+            run_dirs.append((dataset, method_name, full_path))
+    else:
+        # Automatic scanning of results directory
+        results_root = os.path.join(project_root, "results")
+        
+        if not os.path.exists(results_root):
+            # Fallback to current directory if running from root
+            if os.path.exists("results"):
+                results_root = "results"
+                project_root = os.getcwd()
+            else:
+                print(f"Error: Could not find results directory at {results_root} or ./results")
+                return
 
-        task_dir = os.path.join(results_root, task)
-        if not os.path.isdir(task_dir):
-            continue
-            
-        if task not in SUPPORTED_TASKS and task not in WIKI_TASKS:
-            print(f"Skipping unsupported task: {task}")
-            continue
-            
-        # Find run directories
-        for item in os.listdir(task_dir):
-            path = os.path.join(task_dir, item)
-            if os.path.isdir(path):
-                dataset, method_name = parse_run_dir(path)
-                if dataset and method_name:
-                    # Filter by method if specified
-                    if args.method and method_name != args.method:
-                        continue
-                        
-                    run_dirs.append((dataset, method_name, path))
+        for task in os.listdir(results_root):
+            # Filter by task_type if specified
+            if args.task_type and task != args.task_type:
+                continue
+
+            task_dir = os.path.join(results_root, task)
+            if not os.path.isdir(task_dir):
+                continue
+                
+            if task not in SUPPORTED_TASKS and task not in WIKI_TASKS:
+                print(f"Skipping unsupported task: {task}")
+                continue
+                
+            # Find run directories
+            for item in os.listdir(task_dir):
+                path = os.path.join(task_dir, item)
+                if os.path.isdir(path):
+                    dataset, method_name = parse_run_dir(path)
+                    if dataset and method_name:
+                        # Filter by method if specified
+                        if args.method and method_name != args.method:
+                            continue
+                            
+                        run_dirs.append((dataset, method_name, path))
 
     # Shuffle run directories if requested (for distributed processing)
     if args.shuffle:
