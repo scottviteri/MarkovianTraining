@@ -20,6 +20,8 @@ if [[ "$1" == "-h" || "$1" == "--help" ]]; then
 fi
 
 PARALLEL_JOBS=${1:-4}  # Default to 4 parallel jobs
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOCAL_REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CONFIG_FILE="$HOME/.ssh/config"
 REPO_DIR="~/MarkovianTraining"  # Tilde expands to remote user's home (root)
 
@@ -32,6 +34,25 @@ NC='\033[0m' # No Color
 
 echo -e "${BLUE}=== Syncing MarkovianTraining on all hosts ===${NC}"
 echo -e "${BLUE}Parallel jobs: $PARALLEL_JOBS${NC}\n"
+
+# First, update the local repository
+echo -e "${BLUE}=== Syncing local repository at ${LOCAL_REPO_DIR} ===${NC}"
+if [ ! -d "${LOCAL_REPO_DIR}/.git" ]; then
+    echo -e "${RED}Local directory ${LOCAL_REPO_DIR} is not a git repository, skipping local pull${NC}\n"
+else
+    pushd "${LOCAL_REPO_DIR}" >/dev/null
+    local_branch=$(git branch --show-current 2>/dev/null)
+    if [ "$local_branch" != "main" ]; then
+        echo -e "${YELLOW}Local branch is '${local_branch}' (not main); skipping local pull${NC}\n"
+    else
+        if git pull; then
+            echo -e "${GREEN}Local repository synced successfully${NC}\n"
+        else
+            echo -e "${RED}Local git pull failed${NC}\n"
+        fi
+    fi
+    popd >/dev/null
+fi
 
 # Extract host names from SSH config (lines starting with "Host " but not control settings)
 hosts=$(grep "^Host " "$CONFIG_FILE" | awk '{print $2}' | grep -v "ControlPersist")
