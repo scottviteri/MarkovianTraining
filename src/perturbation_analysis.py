@@ -2209,12 +2209,6 @@ def run_qa_perturbation_accuracy(
     with open(output_path, "w") as f:
         json.dump(comparison_data, f)
         
-    non_output_dir = os.path.join(non_markovian_dir, "markovian_comparison_accuracy")
-    os.makedirs(non_output_dir, exist_ok=True)
-    non_output_path = os.path.join(non_output_dir, os.path.basename(output_path))
-    if non_output_path != output_path:
-        shutil.copy2(output_path, non_output_path)
-
     if mark_adapter_dir and os.path.isdir(mark_adapter_dir) and non_adapter_dir and os.path.isdir(non_adapter_dir):
         metadata_key = build_perturb_metadata_key(
             task_type=task_type,
@@ -2256,6 +2250,8 @@ def run_qa_perturbation_accuracy(
             "paired_role": markovian_role,
             "paired_run": os.path.basename(markovian_dir),
             "status": "completed",
+            # Store reference to the file in the Markovian run to avoid duplication
+            "comparison_results_file": os.path.join("..", os.path.basename(markovian_dir), "markovian_comparison_accuracy", os.path.basename(output_path))
         }
         mark_metadata["records"][metadata_key] = mark_record
         non_metadata["records"][metadata_key] = non_record
