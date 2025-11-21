@@ -233,6 +233,7 @@ DEFAULT_SYNC_METADATA = os.environ.get("SWEEP_SYNC_METADATA", "").strip().lower(
 _METADATA_SYNC_WARNED = False
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WIKI_TASK_TYPES = {"wiki_continuation", "wiki_compression"}
+DEFAULT_WIKI_NUM_SAMPLES = 1024
 
 
 def is_wiki_task(task_type: str) -> bool:
@@ -272,7 +273,25 @@ def _load_metadata_file(path: str) -> Optional[Dict[str, Any]]:
     return data
 
 
-def get_cached_metadata(adapter_dir: str, requested_stride: int) -> Optional[Dict[str, Any]]:
+def _parse_metadata_num_samples(entry: Dict[str, Any]) -> Optional[int]:
+    evaluation_block = entry.get("evaluation") or {}
+    value = evaluation_block.get("num_samples")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
+
+
+def get_cached_metadata(
+    adapter_dir: str,
+    requested_stride: int,
+    requested_num_samples: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
     entries = []
     for path in list_adapter_metadata_files(adapter_dir):
         data = _load_metadata_file(path)
@@ -283,6 +302,10 @@ def get_cached_metadata(adapter_dir: str, requested_stride: int) -> Optional[Dic
     entries.sort(key=lambda entry: entry["_stride"])
     for entry in entries:
         if entry["_stride"] <= requested_stride:
+            if requested_num_samples is not None:
+                entry_num_samples = _parse_metadata_num_samples(entry)
+                if entry_num_samples is None or entry_num_samples < requested_num_samples:
+                    continue
             return entry
     return None
 
@@ -1927,7 +1950,11 @@ def main():
             requested_stride = args.stride if args.stride else 1
             cached_metadata = None
             if adapter_dir and not args.force_eval:
-                cached_metadata = get_cached_metadata(adapter_dir, requested_stride)
+                cached_metadata = get_cached_metadata(
+                    adapter_dir,
+                    requested_stride,
+                    effective_num_samples if wiki_mode else args.num_samples,
+                )
             if cached_metadata:
                 colored_print(
                     "Adapter Eval",
@@ -1985,6 +2012,9 @@ def main():
             return data, meta
         
         wiki_mode = is_wiki_task(args.task_type)
+        effective_num_samples = args.num_samples
+        if wiki_mode and effective_num_samples is None:
+            effective_num_samples = DEFAULT_WIKI_NUM_SAMPLES
         if wiki_mode:
             test_data: List[Tuple[str, str]] = []
             dataset_meta: Dict[str, Any] = {}
@@ -2063,7 +2093,7 @@ def main():
                 tokenizer=tokenizer,
                 device=device,
                 hyperparameters=hyperparameters,
-                num_samples=args.num_samples,
+                num_samples=effective_num_samples,
                 stride=args.stride or 1,
             )
             results = []

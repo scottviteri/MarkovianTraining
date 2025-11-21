@@ -17,6 +17,9 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET", "s3://scottviteri")
 METADATA_PATTERN = re.compile(r"eval_metadata(?:_stride(\d+))?\.json$")
 _S3_WARNING_PRINTED = False
+DEFAULT_WIKI_NUM_SAMPLES = 1024
+SUPPORTED_TASKS = ["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"]
+WIKI_TASKS = ["wiki_continuation", "wiki_compression"]
 
 def parse_run_dir(run_dir):
     """
@@ -112,34 +115,67 @@ def load_adapter_metadata_entries(adapter_dir):
     return entries
 
 
-def select_metadata_for_stride(entries, required_stride):
+def _metadata_num_samples(entry):
+    evaluation_info = entry.get("evaluation") or {}
+    value = evaluation_info.get("num_samples")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
+
+
+def select_metadata_for_stride(entries, required_stride, required_num_samples=None):
     if not entries:
         return None
+
+    def accuracy_value(entry):
+        acc = entry.get("accuracy")
+        return acc if isinstance(acc, (int, float)) else float("-inf")
+
     def sort_key(entry):
         stride = entry.get("_stride", float("inf"))
-        acc = entry.get("accuracy")
-        acc_value = acc if isinstance(acc, (int, float)) else float("-inf")
-        return (stride, -acc_value)
+        num_samples = _metadata_num_samples(entry)
+        num_key = -num_samples if isinstance(num_samples, (int, float)) else float("inf")
+        acc_value = accuracy_value(entry)
+        return (stride, num_key, -acc_value)
 
     entries = sorted(entries, key=sort_key)
     for entry in entries:
         stride = entry.get("_stride", 1)
-        if required_stride is None or stride <= required_stride:
-            return entry
+        if required_stride is not None and stride > required_stride:
+            continue
+        if required_num_samples is not None:
+            entry_num_samples = _metadata_num_samples(entry)
+            if entry_num_samples is None or entry_num_samples < required_num_samples:
+                continue
+        return entry
     return None
 
 
-def collect_adapter_metadata(adapter_dirs, required_stride):
+def collect_adapter_metadata(adapter_dirs, required_stride, required_num_samples=None):
     metadata_entries = []
     missing_adapters = []
     for adapter_dir in adapter_dirs:
         entries = load_adapter_metadata_entries(adapter_dir)
-        metadata = select_metadata_for_stride(entries, required_stride)
+        metadata = select_metadata_for_stride(entries, required_stride, required_num_samples)
         if metadata:
             metadata_entries.append(metadata)
         else:
             missing_adapters.append(adapter_dir)
     return metadata_entries, missing_adapters
+
+
+def resolve_required_num_samples(dataset, args):
+    if args.num_samples is not None:
+        return args.num_samples
+    if dataset in WIKI_TASKS:
+        return DEFAULT_WIKI_NUM_SAMPLES
+    return None
 
 
 
@@ -292,10 +328,14 @@ def adapter_metadata_exists_on_s3(adapter_dir, project_root, bucket):
     return False
 
 
-def adapter_metadata_ready(adapter_dir, required_stride):
+def adapter_metadata_ready(adapter_dir, required_stride, required_num_samples=None):
     if not adapter_dir or not os.path.isdir(adapter_dir):
         return False
-    metadata_entries, _ = collect_adapter_metadata([adapter_dir], required_stride)
+    metadata_entries, _ = collect_adapter_metadata(
+        [adapter_dir],
+        required_stride,
+        required_num_samples,
+    )
     return bool(metadata_entries)
 
 
@@ -387,7 +427,15 @@ def build_adapter_task_list(run_dirs):
     return tasks
 
 
-def evaluate_single_adapter(task, args, project_root, enable_s3_sync, s3_bucket, required_stride):
+def evaluate_single_adapter(
+    task,
+    args,
+    project_root,
+    enable_s3_sync,
+    s3_bucket,
+    required_stride,
+    required_num_samples=None,
+):
     dataset = task["dataset"]
     method = task["method"]
     adapter_dir = task["adapter_dir"]
@@ -409,8 +457,8 @@ def evaluate_single_adapter(task, args, project_root, enable_s3_sync, s3_bucket,
         cmd.extend(["--model_path", adapter_dir])
     if model_type:
         cmd.extend(["--model_type", model_type])
-    if args.num_samples:
-        cmd.extend(["--num_samples", str(args.num_samples)])
+    if required_num_samples is not None:
+        cmd.extend(["--num_samples", str(required_num_samples)])
     if args.stride:
         cmd.extend(["--stride", str(args.stride)])
     if args.batch_size:
@@ -426,7 +474,7 @@ def evaluate_single_adapter(task, args, project_root, enable_s3_sync, s3_bucket,
         print(f"Error evaluating adapter {task_label}: {e}")
         return False
 
-    if not adapter_metadata_ready(adapter_dir, required_stride):
+    if not adapter_metadata_ready(adapter_dir, required_stride, required_num_samples):
         print(f"Warning: Metadata still missing for {task_label} after evaluation.")
         return False
     return True
@@ -446,13 +494,14 @@ def process_adapter_tasks(adapter_tasks, args, project_root, enable_s3_sync, s3_
         adapter_dir = task["adapter_dir"]
         adapter_name = task["adapter_name"]
         task_label = f"{dataset}/{method}/{adapter_name}"
+        dataset_num_samples = resolve_required_num_samples(dataset, args)
 
         if args.task_type and dataset != args.task_type:
             continue
         if args.method and method != args.method:
             continue
 
-        local_ready = adapter_metadata_ready(adapter_dir, required_stride)
+        local_ready = adapter_metadata_ready(adapter_dir, required_stride, dataset_num_samples)
         remote_ready = False
         if enable_s3_sync:
             remote_ready = adapter_metadata_exists_on_s3(adapter_dir, project_root, s3_bucket)
@@ -464,12 +513,12 @@ def process_adapter_tasks(adapter_tasks, args, project_root, enable_s3_sync, s3_
 
         if remote_ready and not local_ready and enable_s3_sync:
             if pull_adapter_metadata(adapter_dir, project_root, enable_s3_sync, s3_bucket):
-                if adapter_metadata_ready(adapter_dir, required_stride):
+                if adapter_metadata_ready(adapter_dir, required_stride, dataset_num_samples):
                     reused_from_s3 += 1
                     print(f"Reused metadata from S3 for {task_label}; skipping evaluation.")
                     continue
 
-        if adapter_metadata_ready(adapter_dir, required_stride):
+        if adapter_metadata_ready(adapter_dir, required_stride, dataset_num_samples):
             continue
 
         if remote_ready and not enable_s3_sync:
@@ -482,7 +531,15 @@ def process_adapter_tasks(adapter_tasks, args, project_root, enable_s3_sync, s3_
             )
             continue
 
-        if evaluate_single_adapter(task, args, project_root, enable_s3_sync, s3_bucket, required_stride):
+        if evaluate_single_adapter(
+            task,
+            args,
+            project_root,
+            enable_s3_sync,
+            s3_bucket,
+            required_stride,
+            dataset_num_samples,
+        ):
             evaluated += 1
 
     if reused_from_s3:
@@ -516,8 +573,9 @@ def get_baseline_score(
     os.makedirs(baseline_dir, exist_ok=True)
 
     # Try to load metadata-based score first
-    existing_entries, _ = collect_adapter_metadata([baseline_dir], required_stride)
-    baseline_meta = select_metadata_for_stride(existing_entries, required_stride)
+    required_num_samples = resolve_required_num_samples(dataset, args)
+    existing_entries, _ = collect_adapter_metadata([baseline_dir], required_stride, required_num_samples)
+    baseline_meta = select_metadata_for_stride(existing_entries, required_stride, required_num_samples)
     if baseline_meta:
         acc = baseline_meta.get("accuracy")
         if isinstance(acc, (int, float)):
@@ -533,8 +591,8 @@ def get_baseline_score(
             "--model_type", model_type,
             "--use_base_model"
         ]
-        if args.num_samples:
-            cmd.extend(["--num_samples", str(args.num_samples)])
+        if required_num_samples is not None:
+            cmd.extend(["--num_samples", str(required_num_samples)])
         if args.stride:
             cmd.extend(["--stride", str(args.stride)])
         if args.batch_size:
@@ -549,8 +607,8 @@ def get_baseline_score(
             return 0.0
             
         # Re-load metadata after evaluation
-        existing_entries, _ = collect_adapter_metadata([baseline_dir], required_stride)
-        baseline_meta = select_metadata_for_stride(existing_entries, required_stride)
+        existing_entries, _ = collect_adapter_metadata([baseline_dir], required_stride, required_num_samples)
+        baseline_meta = select_metadata_for_stride(existing_entries, required_stride, required_num_samples)
         if baseline_meta:
             acc = baseline_meta.get("accuracy")
             if isinstance(acc, (int, float)):
@@ -569,15 +627,22 @@ def get_max_adapter_score(
     enable_s3=False,
     s3_bucket=None,
     force_skip_eval=False,
+    required_num_samples=None,
 ):
     """
     Evaluate all adapters in a run directory and return the max accuracy.
     """
     required_stride = args.stride if args.stride else 1
+    if required_num_samples is None:
+        required_num_samples = resolve_required_num_samples(dataset, args)
     metadata_entries = list(metadata_entries_hint) if metadata_entries_hint else []
     missing_adapters = list(missing_adapters_hint) if missing_adapters_hint else []
     if not metadata_entries:
-        metadata_entries, missing_adapters = collect_adapter_metadata(list_adapter_dirs(run_dir), required_stride)
+        metadata_entries, missing_adapters = collect_adapter_metadata(
+            list_adapter_dirs(run_dir),
+            required_stride,
+            required_num_samples,
+        )
 
     model_type = model_type_hint or detect_model_type(run_dir, metadata_entries)
     
@@ -600,8 +665,8 @@ def get_max_adapter_score(
             "--all_adapters",
             "--model_type", model_type
         ]
-        if args.num_samples:
-            cmd.extend(["--num_samples", str(args.num_samples)])
+        if required_num_samples is not None:
+            cmd.extend(["--num_samples", str(required_num_samples)])
         if args.stride:
             cmd.extend(["--stride", str(args.stride)])
         if args.batch_size:
@@ -615,7 +680,11 @@ def get_max_adapter_score(
         except subprocess.CalledProcessError as e:
             print(f"Error evaluating adapters for {run_dir}: {e}")
             # Continue to try reading whatever exists
-        metadata_entries, missing_adapters = collect_adapter_metadata(adapters, required_stride)
+        metadata_entries, missing_adapters = collect_adapter_metadata(
+            adapters,
+            required_stride,
+            required_num_samples,
+        )
     elif missing_adapters:
         print(
             f"Warning: Missing/insufficient metadata for {len(missing_adapters)} adapters in {run_dir} "
@@ -700,10 +769,6 @@ def main():
         print("Warning: --s3_sync enabled but no bucket configured; skipping S3 uploads.")
     required_stride = args.stride or 1
 
-    # Supported tasks in evaluation.py
-    SUPPORTED_TASKS = ["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"]
-    WIKI_TASKS = ["wiki_continuation", "wiki_compression"]
-    
     # Data structure: table[dataset][method] = score
     table = defaultdict(lambda: defaultdict(float))
     wiki_table = defaultdict(lambda: defaultdict(float))
@@ -798,9 +863,10 @@ def main():
 
         dataset_runs = dataset_to_runs.get(dataset, [])
         sample_metadata = []
+        dataset_num_samples = resolve_required_num_samples(dataset, args)
         for _, _, path in dataset_runs:
             adapters = list_adapter_dirs(path)
-            metadata_entries, _ = collect_adapter_metadata(adapters, required_stride)
+            metadata_entries, _ = collect_adapter_metadata(adapters, required_stride, dataset_num_samples)
             sample_metadata.extend(metadata_entries)
             if sample_metadata:
                 break
@@ -840,8 +906,9 @@ def main():
 
     for dataset in datasets:
         baseline_dir = os.path.join(project_root, "results", dataset, "baseline")
-        baseline_entries, _ = collect_adapter_metadata([baseline_dir], required_stride)
-        baseline_meta = select_metadata_for_stride(baseline_entries, required_stride)
+        dataset_num_samples = resolve_required_num_samples(dataset, args)
+        baseline_entries, _ = collect_adapter_metadata([baseline_dir], required_stride, dataset_num_samples)
+        baseline_meta = select_metadata_for_stride(baseline_entries, required_stride, dataset_num_samples)
         baseline_score = baseline_meta.get("accuracy", 0.0) if baseline_meta else 0.0
         if dataset in WIKI_TASKS:
             wiki_table[dataset]["Baseline"] = baseline_score
@@ -850,7 +917,12 @@ def main():
 
     # 3. Process Runs
     for dataset, method, path in run_dirs:
-        metadata_entries, missing_adapters = collect_adapter_metadata(list_adapter_dirs(path), required_stride)
+        dataset_num_samples = resolve_required_num_samples(dataset, args)
+        metadata_entries, missing_adapters = collect_adapter_metadata(
+            list_adapter_dirs(path),
+            required_stride,
+            dataset_num_samples,
+        )
         model_type = detect_model_type(path, metadata_entries)
 
         score = get_max_adapter_score(
@@ -864,6 +936,7 @@ def main():
             enable_s3=enable_s3_sync,
             s3_bucket=resolved_s3_bucket,
             force_skip_eval=True,
+            required_num_samples=dataset_num_samples,
         )
 
         if dataset in WIKI_TASKS:
