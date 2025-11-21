@@ -184,7 +184,7 @@ def find_wiki_metadata_entry(adapter_dir, dataset, required_stride=1):
     return None
 
 
-def evaluate_wiki_adapter(adapter_dir, run_dir, dataset, model_type, args, project_root):
+def evaluate_wiki_adapter(adapter_dir, run_dir, dataset, model_type, args, project_root, enable_s3=False, s3_bucket=None):
     required_stride = args.stride if args.stride else 1
     existing = find_wiki_metadata_entry(adapter_dir, dataset, required_stride=required_stride)
     if existing:
@@ -228,17 +228,17 @@ def evaluate_wiki_adapter(adapter_dir, run_dir, dataset, model_type, args, proje
         "evaluation": eval_meta,
     }
     write_adapter_metadata(adapter_dir, metadata, eval_meta["stride"])
-    sync_run_dir(run_dir, project_root)
+    sync_run_dir(run_dir, project_root, enable_s3, s3_bucket)
     return mean_log_prob
 
 
-def get_wiki_run_score(run_dir, dataset, model_type, args, project_root):
+def get_wiki_run_score(run_dir, dataset, model_type, args, project_root, enable_s3=False, s3_bucket=None):
     adapters = list_adapter_dirs(run_dir)
     if not adapters:
         return 0.0
     best_score = float("-inf")
     for adapter_dir in adapters:
-        score = evaluate_wiki_adapter(adapter_dir, run_dir, dataset, model_type, args, project_root)
+        score = evaluate_wiki_adapter(adapter_dir, run_dir, dataset, model_type, args, project_root, enable_s3, s3_bucket)
         if score is not None and score > best_score:
             best_score = score
     if best_score == float("-inf"):
@@ -334,7 +334,7 @@ def sync_run_dir(run_dir, project_root, enable_sync=False, bucket=None):
     except subprocess.CalledProcessError as e:
         print(f"Error syncing to S3: {e}")
 
-def get_wiki_baseline_score(dataset, model_type, args, project_root):
+def get_wiki_baseline_score(dataset, model_type, args, project_root, enable_s3=False, s3_bucket=None):
     results_dir = os.path.join(project_root, "results", dataset)
     baseline_dir = os.path.join(results_dir, "baseline")
     os.makedirs(baseline_dir, exist_ok=True)
@@ -376,7 +376,7 @@ def get_wiki_baseline_score(dataset, model_type, args, project_root):
         "evaluation": eval_meta,
     }
     write_adapter_metadata(baseline_dir, metadata, eval_meta["stride"])
-    sync_run_dir(baseline_dir, project_root)
+    sync_run_dir(baseline_dir, project_root, enable_s3, s3_bucket)
     return mean_log_prob
 
 
@@ -682,7 +682,7 @@ def main():
 
         inferred_model_type = model_type or args.model_type
         if dataset in WIKI_TASKS:
-            score = get_wiki_baseline_score(dataset, inferred_model_type, args, project_root)
+            score = get_wiki_baseline_score(dataset, inferred_model_type, args, project_root, enable_s3=enable_s3_sync, s3_bucket=resolved_s3_bucket)
             wiki_table[dataset]["Baseline"] = score
         else:
             should_evaluate = dataset_runs and (not args.task_type or dataset == args.task_type)
@@ -705,7 +705,7 @@ def main():
         model_type = detect_model_type(path, metadata_entries)
 
         if dataset in WIKI_TASKS:
-            score = get_wiki_run_score(path, dataset, model_type or args.model_type, args, project_root)
+            score = get_wiki_run_score(path, dataset, model_type or args.model_type, args, project_root, enable_s3=enable_s3_sync, s3_bucket=resolved_s3_bucket)
             wiki_table[dataset][method] = score
         else:
             should_evaluate = True
