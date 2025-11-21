@@ -17,6 +17,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
 
 from src.utils import load_model_for_evaluation
 from src.evaluation import compute_wiki_logprob, write_adapter_metadata
@@ -416,18 +417,18 @@ def get_baseline_score(
 
     # Run evaluation
     if not args.dry_run and not args.skip_eval and not force_skip_eval:
-    print(f"Evaluating baseline for {dataset}...")
+        print(f"Evaluating baseline for {dataset}...")
         eval_script = os.path.join(project_root, "src", "evaluation.py")
-    cmd = [
+        cmd = [
             "python", eval_script,
-        "--task_type", dataset,
-        "--model_type", model_type,
-        "--use_base_model"
-    ]
-    if args.num_samples:
-        cmd.extend(["--num_samples", str(args.num_samples)])
-    if args.stride:
-        cmd.extend(["--stride", str(args.stride)])
+            "--task_type", dataset,
+            "--model_type", model_type,
+            "--use_base_model"
+        ]
+        if args.num_samples:
+            cmd.extend(["--num_samples", str(args.num_samples)])
+        if args.stride:
+            cmd.extend(["--stride", str(args.stride)])
         if args.batch_size:
             cmd.extend(["--batch_size", str(args.batch_size)])
         if enable_s3 and s3_bucket:
@@ -477,8 +478,8 @@ def get_max_adapter_score(
     adapters = list_adapter_dirs(run_dir)
     if not adapters:
         if not force_skip_eval:
-        print(f"No adapters found in {run_dir}")
-        return 0.0
+            print(f"No adapters found in {run_dir}")
+            return 0.0
 
     if missing_adapters and not args.dry_run and not args.skip_eval and not force_skip_eval:
         print(
@@ -486,17 +487,17 @@ def get_max_adapter_score(
             f"(missing metadata for {len(missing_adapters)} adapters)..."
         )
         eval_script = os.path.join(project_root, "src", "evaluation.py")
-    cmd = [
+        cmd = [
             "python", eval_script,
-        "--task_type", dataset,
-        "--run_dir", run_dir,
-        "--all_adapters",
-        "--model_type", model_type
-    ]
-    if args.num_samples:
-        cmd.extend(["--num_samples", str(args.num_samples)])
-    if args.stride:
-        cmd.extend(["--stride", str(args.stride)])
+            "--task_type", dataset,
+            "--run_dir", run_dir,
+            "--all_adapters",
+            "--model_type", model_type
+        ]
+        if args.num_samples:
+            cmd.extend(["--num_samples", str(args.num_samples)])
+        if args.stride:
+            cmd.extend(["--stride", str(args.stride)])
         if args.batch_size:
             cmd.extend(["--batch_size", str(args.batch_size)])
         if enable_s3 and s3_bucket:
@@ -641,7 +642,7 @@ def main():
         if not os.path.isdir(task_dir):
             continue
             
-            if task not in SUPPORTED_TASKS and task not in WIKI_TASKS:
+        if task not in SUPPORTED_TASKS and task not in WIKI_TASKS:
             print(f"Skipping unsupported task: {task}")
             continue
             
