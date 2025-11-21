@@ -13,210 +13,12 @@ import pandas as pd
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
-
 DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET", "s3://scottviteri")
 METADATA_PATTERN = re.compile(r"eval_metadata(?:_stride(\d+))?\.json$")
 _S3_WARNING_PRINTED = False
 DEFAULT_WIKI_NUM_SAMPLES = 1024
 SUPPORTED_TASKS = ["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"]
 WIKI_TASKS = ["wiki_continuation", "wiki_compression"]
-
-def parse_run_dir(run_dir):
-    """
-    Extract dataset and method from run directory name.
-    Expected format: {dataset}_{method}_{timestamp}
-    """
-    basename = os.path.basename(run_dir)
-    parent = os.path.basename(os.path.dirname(run_dir))
-    
-    # Verify dataset matches parent
-    if not basename.startswith(parent + "_"):
-        return None, None
-    
-    # Extract method
-    # Format: dataset_Method_YYYYMMDD_HHMMSS
-    # We assume timestamp is the last two parts (date_time)
-    parts = basename.split('_')
-    if len(parts) < 4:
-        return None, None
-    
-    # Method is everything between dataset and timestamp
-    # parts[0] is dataset (or parts[0...k] if dataset has underscores?)
-    # Usually dataset name in folder matches dataset name in prefix.
-    # gsm8k -> gsm8k_...
-    # wiki_continuation -> wiki_continuation_...
-    
-    # Find where the timestamp starts (last 2 parts)
-    timestamp_start_idx = len(parts) - 2
-    
-    # Dataset part is likely the parent directory name
-    dataset_name = parent
-    
-    # Check if prefix matches
-    prefix = dataset_name + "_"
-    if not basename.startswith(prefix):
-        return None, None
-        
-    method_part = basename[len(prefix):].split('_')[:-2]
-    method = "_".join(method_part)
-    
-    return dataset_name, method
-
-def list_adapter_dirs(run_dir):
-    adapters = glob.glob(os.path.join(run_dir, "adapter_*"))
-    return sorted(
-        adapters,
-        key=lambda path: int(os.path.basename(path).split("_")[-1])
-        if os.path.basename(path).split("_")[-1].isdigit()
-        else os.path.basename(path),
-    )
-
-
-def metadata_filename_for_stride(stride):
-    stride = stride or 1
-    return f"eval_metadata_stride{stride}.json"
-
-
-def adapter_metadata_path(adapter_dir, stride):
-    return os.path.join(adapter_dir, metadata_filename_for_stride(stride))
-
-
-def parse_stride_from_metadata(data, path):
-    stride = (
-        data.get("evaluation", {}).get("stride")
-        if isinstance(data.get("evaluation"), dict)
-        else None
-    )
-    if stride is not None:
-        return int(stride)
-    match = METADATA_PATTERN.match(os.path.basename(path))
-    if match and match.group(1):
-        return int(match.group(1))
-    return 1
-
-
-def load_adapter_metadata_entries(adapter_dir):
-    entries = []
-    pattern = os.path.join(adapter_dir, "eval_metadata*.json")
-    for metadata_file in glob.glob(pattern):
-        try:
-            with open(metadata_file, "r") as f:
-                data = json.load(f)
-        except Exception as e:
-            print(f"Error reading metadata {metadata_file}: {e}")
-            continue
-        stride = parse_stride_from_metadata(data, metadata_file)
-        data["_metadata_path"] = metadata_file
-        data["_adapter_dir"] = adapter_dir
-        data["_stride"] = stride
-        if "adapter_name" not in data:
-            data["adapter_name"] = os.path.basename(adapter_dir)
-        entries.append(data)
-    return entries
-
-
-def _metadata_num_samples(entry):
-    evaluation_info = entry.get("evaluation") or {}
-    value = evaluation_info.get("num_samples")
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        try:
-            return int(float(value))
-        except (TypeError, ValueError):
-            return None
-
-
-def select_metadata_for_stride(entries, required_stride, required_num_samples=None):
-    if not entries:
-        return None
-
-    def accuracy_value(entry):
-        acc = entry.get("accuracy")
-        return acc if isinstance(acc, (int, float)) else float("-inf")
-
-    def sort_key(entry):
-        stride = entry.get("_stride", float("inf"))
-        num_samples = _metadata_num_samples(entry)
-        num_key = -num_samples if isinstance(num_samples, (int, float)) else float("inf")
-        acc_value = accuracy_value(entry)
-        return (stride, num_key, -acc_value)
-
-    entries = sorted(entries, key=sort_key)
-    for entry in entries:
-        stride = entry.get("_stride", 1)
-        if required_stride is not None and stride > required_stride:
-            continue
-        if required_num_samples is not None:
-            entry_num_samples = _metadata_num_samples(entry)
-            if entry_num_samples is None or entry_num_samples < required_num_samples:
-                continue
-        return entry
-    return None
-
-
-def collect_adapter_metadata(adapter_dirs, required_stride, required_num_samples=None):
-    metadata_entries = []
-    missing_adapters = []
-    for adapter_dir in adapter_dirs:
-        entries = load_adapter_metadata_entries(adapter_dir)
-        metadata = select_metadata_for_stride(entries, required_stride, required_num_samples)
-        if metadata:
-            metadata_entries.append(metadata)
-        else:
-            missing_adapters.append(adapter_dir)
-    return metadata_entries, missing_adapters
-
-
-def resolve_required_num_samples(dataset, args):
-    if args.num_samples is not None:
-        return args.num_samples
-    if dataset in WIKI_TASKS:
-        return DEFAULT_WIKI_NUM_SAMPLES
-    return None
-
-
-
-
-
-def detect_model_type_from_metadata(metadata_entries):
-    for meta in metadata_entries:
-        mt = meta.get("model_type")
-        if mt:
-            return mt
-    return None
-
-
-def detect_model_type_from_log(run_dir):
-    if not run_dir:
-        return None
-    log_path = os.path.join(run_dir, "log.jsonl")
-    if not os.path.exists(log_path):
-        return None
-    try:
-        with open(log_path, "r") as f:
-            first_line = f.readline().strip()
-            if first_line:
-                data = json.loads(first_line)
-                return data.get("model_type")
-    except Exception as e:
-        print(f"Warning: failed to parse {log_path}: {e}")
-    return None
-
-
-DEFAULT_MODEL_TYPE = os.environ.get("SWEEP_DEFAULT_MODEL_TYPE", "llama")
-
-
-def detect_model_type(run_dir, metadata_entries):
-    mt = detect_model_type_from_metadata(metadata_entries)
-    if mt:
-        return mt
-    mt = detect_model_type_from_log(run_dir)
-    if mt:
-        return mt
-    return DEFAULT_MODEL_TYPE
 
 
 def safe_relpath(path, base_dir):
@@ -241,751 +43,359 @@ def _s3_uri_for_path(path, project_root, bucket):
     return uri
 
 
-def sync_run_dir(run_dir, project_root, enable_sync=False, bucket=None):
-    global _S3_WARNING_PRINTED
-    if not enable_sync:
-        return
-
+def sync_file_to_s3(file_path, project_root, bucket=None):
+    """Sync a single file to S3."""
     bucket = bucket or DEFAULT_S3_BUCKET
-    if not bucket:
-        if not _S3_WARNING_PRINTED:
-            print("Warning: S3 sync requested but no bucket configured.")
-            _S3_WARNING_PRINTED = True
-        return
-
-    s3_dest = _s3_uri_for_path(run_dir, project_root, bucket)
-    include_args = [
-        "--exclude", "*",
-        "--include", "best_adapter.json",
-        "--include", "adapter_*/eval_metadata*.json",
-        "--include", "adapter_*/eval_results*.jsonl",
-    ]
-    print(f"Syncing {run_dir} -> {s3_dest}")
+    if not bucket: return
+    s3_dest = _s3_uri_for_path(file_path, project_root, bucket)
     try:
-        subprocess.run(
-            ["aws", "s3", "sync", run_dir, s3_dest, *include_args],
-            check=True,
-        )
-    except FileNotFoundError:
-        if not _S3_WARNING_PRINTED:
-            print("Error: aws CLI not found; cannot sync to S3.")
-            _S3_WARNING_PRINTED = True
-    except subprocess.CalledProcessError as e:
-        print(f"Error syncing to S3: {e}")
+        subprocess.run(["aws", "s3", "cp", file_path, s3_dest], check=True)
+    except Exception as e:
+        print(f"Warning: failed to upload {file_path} to {s3_dest}: {e}")
 
 
-def pull_run_metadata(run_dir, project_root, enable_sync=False, bucket=None):
-    if not enable_sync:
-        return
+def list_s3_runs(dataset, s3_results_prefix, method_filter=None):
+    """
+    Discover runs on S3.
+    Returns list of (dataset, method, s3_run_path) tuples.
+    """
+    if not s3_results_prefix:
+        return []
 
-    bucket = bucket or DEFAULT_S3_BUCKET
-    if not bucket:
-        return
-
-    s3_src = _s3_uri_for_path(run_dir, project_root, bucket)
-
-    include_args = [
-        "--exclude", "*",
-        "--include", "best_adapter.json",
-        "--include", "adapter_*/eval_metadata*.json",
-        "--include", "adapter_*/eval_results*.jsonl",
-    ]
-    try:
-        subprocess.run(
-            ["aws", "s3", "sync", s3_src, run_dir, *include_args],
-            check=True,
-        )
-    except subprocess.CalledProcessError:
-        # It's fine if the remote directory doesn't exist yet
-        pass
-    except FileNotFoundError:
-        print("Error: aws CLI not found; cannot pull metadata from S3.")
-
-
-def adapter_metadata_exists_on_s3(adapter_dir, project_root, bucket):
-    global _S3_WARNING_PRINTED
-    if not bucket:
-        return False
-    adapter_dir = os.path.abspath(adapter_dir)
-    s3_src = _s3_uri_for_path(adapter_dir, project_root, bucket)
+    prefix = s3_results_prefix.rstrip("/")
+    s3_path = f"{prefix}/{dataset}/"
     try:
         result = subprocess.run(
-            ["aws", "s3", "ls", f"{s3_src.rstrip('/')}/"],
-            check=True,
+            ["aws", "s3", "ls", s3_path],
             capture_output=True,
             text=True,
+            check=True,
         )
-    except FileNotFoundError:
-        if not _S3_WARNING_PRINTED:
-            print("Error: aws CLI not found; cannot query S3 metadata.")
-            _S3_WARNING_PRINTED = True
-        return False
     except subprocess.CalledProcessError:
-        return False
+        return []
+
+    discovered = []
+    method_filter_lower = method_filter.lower() if method_filter else None
+
     for line in result.stdout.splitlines():
-        if "eval_metadata" in line:
-            return True
-    return False
+        line = line.strip()
+        if not line.startswith("PRE "):
+            continue
+        run_name = line[4:].strip("/")
+        if not run_name:
+            continue
+            
+        # Parse method from run name {dataset}_{method}_{timestamp}
+        # Simple heuristic: matches parse_run_dir logic
+        if not run_name.startswith(dataset + "_"):
+            continue
+            
+        parts = run_name.split('_')
+        if len(parts) < 3:
+            continue
+            
+        # Method is middle part(s)
+        method_part = run_name[len(dataset)+1:].split('_')[:-2]
+        method = "_".join(method_part)
+        
+        if method_filter_lower and method_filter_lower not in method.lower():
+            continue
+            
+        discovered.append((dataset, method, run_name))
+        
+    return discovered
 
 
-def adapter_metadata_ready(adapter_dir, required_stride, required_num_samples=None):
-    if not adapter_dir or not os.path.isdir(adapter_dir):
-        return False
-    metadata_entries, _ = collect_adapter_metadata(
-        [adapter_dir],
-        required_stride,
-        required_num_samples,
-    )
-    return bool(metadata_entries)
+def list_s3_adapters(dataset, run_name, s3_results_prefix):
+    """
+    List adapter directories for a run on S3.
+    Returns list of adapter names (e.g. 'adapter_50').
+    """
+    prefix = s3_results_prefix.rstrip("/")
+    s3_path = f"{prefix}/{dataset}/{run_name}/"
+    try:
+        result = subprocess.run(
+            ["aws", "s3", "ls", s3_path],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return []
+
+    adapters = []
+    for line in result.stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("PRE adapter_"):
+            continue
+        adapter_name = line[4:].strip("/")
+        adapters.append(adapter_name)
+    return sorted(adapters, key=lambda x: int(x.split('_')[-1]) if x.split('_')[-1].isdigit() else x)
 
 
-def pull_adapter_metadata(adapter_dir, project_root, enable_sync=False, bucket=None):
-    global _S3_WARNING_PRINTED
-    if not enable_sync:
-        return False
+def check_s3_metadata(dataset, run_name, adapter_name, s3_results_prefix):
+    """
+    Check if evaluation metadata already exists on S3 for this adapter.
+    Returns (has_metadata, metadata_content_if_available)
+    """
+    prefix = s3_results_prefix.rstrip("/")
+    s3_adapter_path = f"{prefix}/{dataset}/{run_name}/{adapter_name}/"
+    
+    # List files in adapter dir
+    try:
+        result = subprocess.run(
+            ["aws", "s3", "ls", s3_adapter_path],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return False, None
 
-    bucket = bucket or DEFAULT_S3_BUCKET
-    if not bucket:
-        return False
+    has_metadata = False
+    for line in result.stdout.splitlines():
+        if "eval_metadata" in line and line.endswith(".json"):
+            has_metadata = True
+            break
+            
+    return has_metadata, None
 
-    adapter_dir = os.path.abspath(adapter_dir)
-    os.makedirs(adapter_dir, exist_ok=True)
-    s3_src = _s3_uri_for_path(adapter_dir, project_root, bucket)
+
+def download_adapter_metadata(dataset, run_name, adapter_name, project_root, s3_results_prefix):
+    """Download just metadata files for an adapter."""
+    prefix = s3_results_prefix.rstrip("/")
+    s3_path = f"{prefix}/{dataset}/{run_name}/{adapter_name}/"
+    local_path = os.path.join(project_root, "results", dataset, run_name, adapter_name)
+    os.makedirs(local_path, exist_ok=True)
+    
     include_args = [
         "--exclude", "*",
         "--include", "eval_metadata*.json",
-        "--include", "eval_results*.jsonl",
+        "--include", "eval_results*.jsonl"
     ]
-
+    
     try:
         subprocess.run(
-            ["aws", "s3", "sync", s3_src, adapter_dir, *include_args],
+            ["aws", "s3", "sync", s3_path, local_path, *include_args],
             check=True,
+            capture_output=True
         )
-        return True
-    except FileNotFoundError:
-        if not _S3_WARNING_PRINTED:
-            print("Error: aws CLI not found; cannot pull metadata from S3.")
-            _S3_WARNING_PRINTED = True
     except subprocess.CalledProcessError as e:
-        print(f"Warning: Failed to pull metadata for {adapter_dir} from {s3_src}: {e}")
-    return False
+        print(f"Warning: failed to download metadata from {s3_path}: {e}")
 
 
-def push_adapter_metadata(adapter_dir, project_root, enable_sync=False, bucket=None):
-    global _S3_WARNING_PRINTED
-    if not enable_sync:
-        return False
-    bucket = bucket or DEFAULT_S3_BUCKET
-    if not bucket:
-        return False
-    adapter_dir = os.path.abspath(adapter_dir)
-    s3_dest = _s3_uri_for_path(adapter_dir, project_root, bucket)
-    include_args = [
-        "--exclude", "*",
-        "--include", "eval_metadata*.json",
-        "--include", "eval_results*.jsonl",
-    ]
+def download_adapter_weights(dataset, run_name, adapter_name, project_root, s3_results_prefix):
+    """Download weights for a specific adapter."""
+    prefix = s3_results_prefix.rstrip("/")
+    s3_path = f"{prefix}/{dataset}/{run_name}/{adapter_name}/"
+    local_path = os.path.join(project_root, "results", dataset, run_name, adapter_name)
+    
+    print(f"Downloading weights for {adapter_name} from S3...")
     try:
         subprocess.run(
-            ["aws", "s3", "sync", adapter_dir, s3_dest, *include_args],
-            check=True,
+            ["aws", "s3", "sync", s3_path, local_path],
+            check=True
         )
         return True
-    except FileNotFoundError:
-        if not _S3_WARNING_PRINTED:
-            print("Error: aws CLI not found; cannot push metadata to S3.")
-            _S3_WARNING_PRINTED = True
     except subprocess.CalledProcessError as e:
-        print(f"Warning: Failed to push metadata for {adapter_dir} to {s3_dest}: {e}")
-    return False
+        print(f"Error downloading weights from {s3_path}: {e}")
+        return False
 
 
-def build_adapter_task_list(run_dirs):
-    tasks = []
-    seen_runs = set()
-    for dataset, method, run_dir in run_dirs:
-        abs_run_dir = os.path.abspath(run_dir)
-        if abs_run_dir in seen_runs:
-            continue
-        seen_runs.add(abs_run_dir)
-        adapter_dirs = list_adapter_dirs(abs_run_dir)
-        if not adapter_dirs:
-            continue
-        model_type = detect_model_type(abs_run_dir, [])
-        for adapter_dir in adapter_dirs:
-            tasks.append(
-                {
-                    "dataset": dataset,
-                    "method": method,
-                    "run_dir": abs_run_dir,
-                    "adapter_dir": adapter_dir,
-                    "adapter_name": os.path.basename(adapter_dir),
-                    "model_type": model_type,
-                }
+def load_local_metadata(adapter_dir):
+    """Load best metadata from a local adapter directory."""
+    pattern = os.path.join(adapter_dir, "eval_metadata*.json")
+    files = glob.glob(pattern)
+    if not files:
+        return None
+        
+    # Pick best stride/most samples
+    best_meta = None
+    best_score = (-1, -1, -float('inf')) # (stride, num_samples, accuracy)
+    
+    for fpath in files:
+        try:
+            with open(fpath, 'r') as f:
+                data = json.load(f)
+            
+            stride = data.get("evaluation", {}).get("stride", 1)
+            num_samples = data.get("evaluation", {}).get("num_samples", 0)
+            acc = data.get("accuracy", 0)
+            
+            score = (stride, num_samples, acc)
+            # Prefer lower stride (more detailed), then higher samples, then higher accuracy
+            # Actually for score comparison: 
+            # We want minimal stride (1 is best), max samples.
+            # Let's use simple heuristic: just take the one with most samples
+            
+            current_score = (
+                -stride, 
+                num_samples if num_samples is not None else 0,
+                acc if isinstance(acc, (int, float)) else 0
             )
-    return tasks
+            
+            if best_meta is None or current_score > best_score:
+                best_score = current_score
+                best_meta = data
+                best_meta["_metadata_path"] = fpath
+        except:
+            continue
+            
+    return best_meta
 
 
-def evaluate_single_adapter(
-    task,
-    args,
-    project_root,
-    enable_s3_sync,
-    s3_bucket,
-    required_stride,
-    required_num_samples=None,
-):
-    dataset = task["dataset"]
-    method = task["method"]
-    adapter_dir = task["adapter_dir"]
-    adapter_name = task["adapter_name"]
-    model_type = task.get("model_type")
-    task_label = f"{dataset}/{method}/{adapter_name}"
-    is_baseline = task.get("is_baseline", False)
+def get_model_type_from_s3(dataset, run_name, s3_results_prefix, project_root):
+    """Try to fetch log.jsonl to determine model type."""
+    prefix = s3_results_prefix.rstrip("/")
+    s3_log = f"{prefix}/{dataset}/{run_name}/log.jsonl"
+    local_run_dir = os.path.join(project_root, "results", dataset, run_name)
+    local_log = os.path.join(local_run_dir, "log.jsonl")
+    
+    if os.path.exists(local_log):
+        # read local
+        try:
+            with open(local_log, 'r') as f:
+                line = f.readline()
+                return json.loads(line).get("model_type", "llama")
+        except:
+            return "llama"
+            
+    # Try fetch
+    os.makedirs(local_run_dir, exist_ok=True)
+    try:
+        subprocess.run(["aws", "s3", "cp", s3_log, local_log], check=True, capture_output=True)
+        with open(local_log, 'r') as f:
+            line = f.readline()
+            return json.loads(line).get("model_type", "llama")
+    except:
+        return "llama" # Default
 
+
+def evaluate_adapter(dataset, run_name, adapter_name, project_root, args, s3_results_prefix, model_type):
+    """
+    Evaluate a specific adapter.
+    1. Download weights
+    2. Run eval
+    3. Upload metadata
+    """
+    local_adapter_dir = os.path.join(project_root, "results", dataset, run_name, adapter_name)
+    
+    # 1. Download weights
+    if not download_adapter_weights(dataset, run_name, adapter_name, project_root, s3_results_prefix):
+        return None
+
+    # 2. Run eval
+    print(f"Evaluating {dataset}/{run_name}/{adapter_name}...")
     eval_script = os.path.join(project_root, "src", "evaluation.py")
+    
     cmd = [
-        "python",
-        eval_script,
-        "--task_type",
-        dataset,
+        "python", eval_script,
+        "--task_type", dataset,
+        "--model_path", local_adapter_dir,
+        "--model_type", model_type,
     ]
-    if is_baseline:
-        cmd.append("--use_base_model")
-        if adapter_dir:
-            cmd.extend(["--adapter_metadata_dir", adapter_dir])
-        if adapter_name:
-            cmd.extend(["--adapter_metadata_name", adapter_name])
-    else:
-        cmd.extend(["--model_path", adapter_dir])
-    if model_type:
-        cmd.extend(["--model_type", model_type])
-    if required_num_samples is not None:
-        cmd.extend(["--num_samples", str(required_num_samples)])
+    
+    if args.num_samples:
+        cmd.extend(["--num_samples", str(args.num_samples)])
     if args.stride:
         cmd.extend(["--stride", str(args.stride)])
     if args.batch_size:
         cmd.extend(["--batch_size", str(args.batch_size)])
-    if args.force_eval:
-        cmd.append("--force_eval")
-    if enable_s3_sync and s3_bucket:
-        cmd.append("--sync_metadata")
-        cmd.extend(["--s3_bucket", s3_bucket])
-
-    print(f"Evaluating adapter {task_label} ...")
+        
     try:
         subprocess.run(cmd, check=True, cwd=project_root)
     except subprocess.CalledProcessError as e:
-        print(f"Error evaluating adapter {task_label}: {e}")
-        return False
-
-    if not adapter_metadata_ready(adapter_dir, required_stride, required_num_samples):
-        print(f"Warning: Metadata still missing for {task_label} after evaluation.")
-        return False
-    return True
-
-
-def process_adapter_tasks(adapter_tasks, args, project_root, enable_s3_sync, s3_bucket, required_stride, wiki_tasks):
-    if not adapter_tasks:
-        return
-
-    evaluated = 0
-    reused_from_s3 = 0
-    uploaded_to_s3 = 0
-
-    for task in adapter_tasks:
-        dataset = task["dataset"]
-        method = task["method"]
-        adapter_dir = task["adapter_dir"]
-        adapter_name = task["adapter_name"]
-        task_label = f"{dataset}/{method}/{adapter_name}"
-        dataset_num_samples = resolve_required_num_samples(dataset, args)
-
-        if args.task_type and dataset != args.task_type:
-            continue
-        if args.method and method != args.method:
-            continue
-
-        local_ready = adapter_metadata_ready(adapter_dir, required_stride, dataset_num_samples)
-        remote_ready = False
-        if enable_s3_sync:
-            remote_ready = adapter_metadata_exists_on_s3(adapter_dir, project_root, s3_bucket)
-
-        if args.force_eval:
-            local_ready = False
-            remote_ready = False
-
-        if local_ready and enable_s3_sync and not remote_ready:
-            if push_adapter_metadata(adapter_dir, project_root, enable_s3_sync, s3_bucket):
-                uploaded_to_s3 += 1
-                remote_ready = True
-
-        if remote_ready and not local_ready and enable_s3_sync:
-            if pull_adapter_metadata(adapter_dir, project_root, enable_s3_sync, s3_bucket):
-                if adapter_metadata_ready(adapter_dir, required_stride, dataset_num_samples) and not args.force_eval:
-                    reused_from_s3 += 1
-                    print(f"Reused metadata from S3 for {task_label}; skipping evaluation.")
-                    continue
-
-        if not args.force_eval and adapter_metadata_ready(adapter_dir, required_stride, dataset_num_samples):
-            continue
-
-        if remote_ready and not enable_s3_sync and not args.force_eval:
-            continue
-
-        if args.dry_run or args.skip_eval:
-            reason = "--dry_run" if args.dry_run else "--skip_eval"
-            print(
-                f"Metadata missing for {task_label} but {reason} is set; skipping evaluation."
-            )
-            continue
-
-        if evaluate_single_adapter(
-            task,
-            args,
-            project_root,
-            enable_s3_sync,
-            s3_bucket,
-            required_stride,
-            dataset_num_samples,
-        ):
-            evaluated += 1
-
-    if reused_from_s3:
-        print(f"Reused metadata from S3 for {reused_from_s3} adapters.")
-    if uploaded_to_s3:
-        print(f"Uploaded metadata to S3 for {uploaded_to_s3} adapters.")
-    if evaluated:
-        print(f"Evaluated {evaluated} adapters to fill missing metadata.")
-
-
-def get_baseline_score(
-    dataset,
-    run_dir,
-    metadata_entries,
-    args,
-    project_root,
-    force_skip_eval=False,
-    enable_s3=False,
-    s3_bucket=None,
-):
-    """
-    Get baseline (base model) score for the dataset.
-    Runs evaluation if not present in logs.
-    """
-    model_type = detect_model_type(run_dir, metadata_entries)
-    if not model_type:
-        print(f"Warning: could not determine model type for baseline {dataset}; skipping.")
-        return 0.0
-    required_stride = args.stride if args.stride else 1
-    baseline_dir = os.path.join(project_root, "results", dataset, "baseline")
-    os.makedirs(baseline_dir, exist_ok=True)
-
-    # Try to load metadata-based score first
-    required_num_samples = resolve_required_num_samples(dataset, args)
-    existing_entries, _ = collect_adapter_metadata([baseline_dir], required_stride, required_num_samples)
-    baseline_meta = select_metadata_for_stride(existing_entries, required_stride, required_num_samples)
-    if baseline_meta and not args.force_eval:
-        acc = baseline_meta.get("accuracy")
-        if isinstance(acc, (int, float)):
-            return acc
-
-    # Run evaluation
-    if not args.dry_run and not args.skip_eval and not force_skip_eval:
-        print(f"Evaluating baseline for {dataset}...")
-        eval_script = os.path.join(project_root, "src", "evaluation.py")
-        cmd = [
-            "python", eval_script,
-            "--task_type", dataset,
-            "--model_type", model_type,
-            "--use_base_model"
-        ]
-        if required_num_samples is not None:
-            cmd.extend(["--num_samples", str(required_num_samples)])
-        if args.stride:
-            cmd.extend(["--stride", str(args.stride)])
-        if args.batch_size:
-            cmd.extend(["--batch_size", str(args.batch_size)])
-        if args.force_eval:
-            cmd.append("--force_eval")
-        if enable_s3 and s3_bucket:
-            cmd.append("--sync_metadata")
-            cmd.extend(["--s3_bucket", s3_bucket])
-        try:
-            subprocess.run(cmd, check=True, cwd=project_root)
-        except subprocess.CalledProcessError as e:
-            print(f"Error evaluating baseline for {dataset}: {e}")
-            return 0.0
-            
-        # Re-load metadata after evaluation
-        existing_entries, _ = collect_adapter_metadata([baseline_dir], required_stride, required_num_samples)
-        baseline_meta = select_metadata_for_stride(existing_entries, required_stride, required_num_samples)
-        if baseline_meta:
-            acc = baseline_meta.get("accuracy")
-            if isinstance(acc, (int, float)):
-                return acc
-    
-    return 0.0
-
-def get_max_adapter_score(
-    run_dir,
-    dataset,
-    args,
-    project_root,
-    model_type_hint,
-    metadata_entries_hint,
-    missing_adapters_hint,
-    enable_s3=False,
-    s3_bucket=None,
-    force_skip_eval=False,
-    required_num_samples=None,
-):
-    """
-    Evaluate all adapters in a run directory and return the max accuracy.
-    """
-    required_stride = args.stride if args.stride else 1
-    if required_num_samples is None:
-        required_num_samples = resolve_required_num_samples(dataset, args)
-    metadata_entries = list(metadata_entries_hint) if metadata_entries_hint else []
-    missing_adapters = list(missing_adapters_hint) if missing_adapters_hint else []
-    if not metadata_entries:
-        metadata_entries, missing_adapters = collect_adapter_metadata(
-            list_adapter_dirs(run_dir),
-            required_stride,
-            required_num_samples,
-        )
-
-    model_type = model_type_hint or detect_model_type(run_dir, metadata_entries)
-    
-    adapters = list_adapter_dirs(run_dir)
-    if not adapters:
-        if not force_skip_eval:
-            print(f"No adapters found in {run_dir}")
-            return 0.0
-
-    if missing_adapters and not args.dry_run and not args.skip_eval and not force_skip_eval:
-        print(
-            f"Evaluating adapters in {os.path.basename(run_dir)} "
-            f"(missing metadata for {len(missing_adapters)} adapters)..."
-        )
-        eval_script = os.path.join(project_root, "src", "evaluation.py")
-        cmd = [
-            "python", eval_script,
-            "--task_type", dataset,
-            "--run_dir", run_dir,
-            "--all_adapters",
-            "--model_type", model_type
-        ]
-        if required_num_samples is not None:
-            cmd.extend(["--num_samples", str(required_num_samples)])
-        if args.stride:
-            cmd.extend(["--stride", str(args.stride)])
-        if args.batch_size:
-            cmd.extend(["--batch_size", str(args.batch_size)])
-        if enable_s3 and s3_bucket:
-            cmd.append("--sync_metadata")
-            cmd.extend(["--s3_bucket", s3_bucket])
+        print(f"Evaluation failed: {e}")
+        return None
         
-        try:
-            subprocess.run(cmd, check=True, cwd=project_root)
-        except subprocess.CalledProcessError as e:
-            print(f"Error evaluating adapters for {run_dir}: {e}")
-            # Continue to try reading whatever exists
-        metadata_entries, missing_adapters = collect_adapter_metadata(
-            adapters,
-            required_stride,
-            required_num_samples,
-        )
-    elif missing_adapters:
-        print(
-            f"Warning: Missing/insufficient metadata for {len(missing_adapters)} adapters in {run_dir} "
-            f"(evaluation skipped due to flags or higher-precision request)."
-        )
+    # 3. Sync metadata back
+    # We just sync the whole adapter folder's json/jsonl files
+    sync_file_to_s3(local_adapter_dir, project_root, args.s3_bucket)
+    
+    return load_local_metadata(local_adapter_dir)
 
-    if not metadata_entries:
-        print(f"No adapter metadata available in {run_dir}.")
-        return 0.0
-
-    def metadata_accuracy(meta):
-        acc = meta.get("accuracy")
-        return acc if isinstance(acc, (int, float)) else None
-
-    best_metadata = None
-    best_acc_value = float("-inf")
-    for meta in metadata_entries:
-        acc = metadata_accuracy(meta)
-        if acc is None:
-                    continue
-        if acc > best_acc_value:
-            best_acc_value = acc
-            best_metadata = meta
-
-    if best_metadata is None:
-        best_metadata = metadata_entries[0]
-        best_acc_value = metadata_accuracy(best_metadata) or 0.0
-
-    if not args.dry_run:
-        metadata_copy = {
-            k: v for k, v in best_metadata.items() if not k.startswith("_")
-        }
-        rel_metadata_path = safe_relpath(best_metadata["_metadata_path"], run_dir)
-        best_info = {
-            "adapter": metadata_copy.get("adapter_name"),
-            "accuracy": best_acc_value,
-            "model_path": metadata_copy.get("model_path"),
-            "model_type": metadata_copy.get("model_type"),
-            "task_type": metadata_copy.get("task_type", dataset),
-            "stride": best_metadata.get("_stride", metadata_copy.get("evaluation", {}).get("stride")),
-            "num_examples": metadata_copy.get("num_examples"),
-            "batch_index": metadata_copy.get("batch_index"),
-            "metadata_file": rel_metadata_path,
-            "metadata": metadata_copy,
-            "generated_at": datetime.datetime.now().isoformat(),
-        }
-
-        best_info_path = os.path.join(run_dir, "best_adapter.json")
-        with open(best_info_path, "w") as f:
-            json.dump(best_info, f, indent=2)
-        print(
-            f"  - Best adapter: {best_info.get('adapter')} "
-            f"(Accuracy: {best_acc_value:.2%})"
-        )
-        print(f"  - Saved best adapter info to {best_info_path}")
-        sync_run_dir(run_dir, project_root, enable_s3, s3_bucket)
-
-    return best_acc_value
 
 def main():
-    parser = argparse.ArgumentParser(description="Compile sweep results into a table")
-    parser.add_argument("--num_samples", type=int, help="Number of samples for evaluation")
-    parser.add_argument("--stride", type=int, default=1, help="Evaluate every nth example (1 = full test set)")
-    parser.add_argument("--dry_run", action="store_true", help="Simulate the sweep without writing files or syncing to S3")
-    parser.add_argument("--skip_eval", action="store_true", help="Do not launch new evaluations; rely solely on existing metadata")
-    parser.add_argument("--force_eval", action="store_true", help="Re-run evaluations even if metadata already exists")
-    parser.add_argument("--task_type", type=str, default=None, help="Only process a specific task/dataset (e.g. gsm8k)")
-    parser.add_argument("--method", type=str, default=None, help="Only process a specific method/hyperparameter (e.g. PPO, EI, Markovian)")
-    parser.add_argument("--batch_size", type=int, default=None, help="Batch size for evaluation")
-    parser.add_argument("--run_dir", type=str, nargs="+", default=None, help="Specific run directory (or directories) to process. Overrides automatic scanning.")
-    parser.add_argument("--shuffle", action="store_true", help="Process run directories in random order (useful for distributed workers)")
-    parser.add_argument("--reverse", action="store_true", help="Process run directories in reverse order (useful for simple 2-machine parallelism)")
-    parser.add_argument("--s3_sync", action="store_true", help="Upload results/metadata to S3 (requires bucket)")
-    parser.add_argument("--s3_bucket", type=str, default=None, help="S3 bucket to use (overrides SWEEP_S3_BUCKET)")
-    parser.add_argument("--sync_metadata_only", action="store_true", help="Only sync existing metadata to S3 and exit")
+    parser = argparse.ArgumentParser(description="Compile sweep results from S3")
+    parser.add_argument("--task_type", type=str, help="Limit to specific task")
+    parser.add_argument("--method", type=str, help="Limit to specific method")
+    parser.add_argument("--column", type=str, help="Alias for method")
+    parser.add_argument("--s3_bucket", type=str, default=None, help="S3 bucket")
+    parser.add_argument("--dry_run", action="store_true", help="Don't actually run evals")
+    parser.add_argument("--force_eval", action="store_true", help="Re-run existing evals")
+    parser.add_argument("--num_samples", type=int, help="Num samples for eval")
+    parser.add_argument("--stride", type=int, default=1)
+    parser.add_argument("--batch_size", type=int)
+    
     args = parser.parse_args()
-
-    resolved_s3_bucket = args.s3_bucket or DEFAULT_S3_BUCKET
-    if resolved_s3_bucket:
-        resolved_s3_bucket = resolved_s3_bucket.rstrip("/")
-    enable_s3_sync = bool(args.s3_sync and resolved_s3_bucket and not args.dry_run)
-    if args.s3_sync and not resolved_s3_bucket:
-        print("Warning: --s3_sync enabled but no bucket configured; skipping S3 uploads.")
-    required_stride = args.stride or 1
-
-    # Data structure: table[dataset][method] = score
-    table = defaultdict(lambda: defaultdict(float))
-    wiki_table = defaultdict(lambda: defaultdict(float))
     
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(script_dir)  # Go up one level from scripts/
+    method_filter = args.column or args.method
+    bucket = args.s3_bucket or DEFAULT_S3_BUCKET
+    s3_results_prefix = f"{bucket.rstrip('/')}/results"
+    project_root = PROJECT_ROOT
     
-    run_dirs = []
-    
-    if args.run_dir:
-        # User provided specific directories
-        for r in args.run_dir:
-            # Handle relative paths
-            full_path = os.path.abspath(r)
-            if not os.path.isdir(full_path):
-                print(f"Warning: {r} is not a directory, skipping.")
-                continue
-                
-            dataset, method_name = parse_run_dir(full_path)
-            if not dataset or not method_name:
-                print(f"Warning: Could not parse dataset/method from {r}, skipping.")
-                continue
-                
-            run_dirs.append((dataset, method_name, full_path))
+    # Determine tasks
+    if args.task_type:
+        tasks = [args.task_type]
     else:
-        # Automatic scanning of results directory
-        results_root = os.path.join(project_root, "results")
+        tasks = sorted(set(SUPPORTED_TASKS + WIKI_TASKS))
         
-        if not os.path.exists(results_root):
-            # Fallback to current directory if running from root
-            if os.path.exists("results"):
-                results_root = "results"
-                project_root = os.getcwd()
-            else:
-                print(f"Error: Could not find results directory at {results_root} or ./results")
-                return
-
-    for task in os.listdir(results_root):
-        # Filter by task_type if specified
-        if args.task_type and task != args.task_type:
-            continue
-
-        task_dir = os.path.join(results_root, task)
-        if not os.path.isdir(task_dir):
-            continue
+    # Shuffle tasks to reduce contention between workers
+    random.shuffle(tasks)
+        
+    results_table = defaultdict(lambda: defaultdict(float))
+    
+    for task in tasks:
+        print(f"\nScanning {task}...")
+        runs = list_s3_runs(task, s3_results_prefix, method_filter)
+        
+        # Also shuffle runs
+        random.shuffle(runs)
+        
+        for dataset, method, run_name in runs:
+            print(f"  Checking run: {run_name} ({method})")
             
-        if task not in SUPPORTED_TASKS and task not in WIKI_TASKS:
-            print(f"Skipping unsupported task: {task}")
-            continue
-            
-        # Find run directories
-        for item in os.listdir(task_dir):
-            path = os.path.join(task_dir, item)
-            if os.path.isdir(path):
-                dataset, method_name = parse_run_dir(path)
-                if dataset and method_name:
-                    # Filter by method if specified
-                    if args.method and method_name != args.method:
-                        continue
-                        
-                    run_dirs.append((dataset, method_name, path))
-
-    if args.sync_metadata_only:
-        if not enable_s3_sync:
-            print("Warning: --sync_metadata_only requested but --s3_sync is disabled; nothing to do.")
-            return
-        seen_paths = set()
-        for _, _, path in run_dirs:
-            norm_path = os.path.abspath(path)
-            if norm_path in seen_paths:
+            adapters = list_s3_adapters(dataset, run_name, s3_results_prefix)
+            if not adapters:
                 continue
-            print(f"Pushing metadata for {norm_path} ...")
-            sync_run_dir(norm_path, project_root, enable_s3_sync, resolved_s3_bucket)
-            seen_paths.add(norm_path)
-        print("Metadata sync complete.")
-        return
+                
+            model_type = get_model_type_from_s3(dataset, run_name, s3_results_prefix, project_root)
+            
+            best_acc = 0.0
+            
+            for adapter in adapters:
+                # Check if done
+                has_meta, _ = check_s3_metadata(dataset, run_name, adapter, s3_results_prefix)
+                
+                meta = None
+                if has_meta and not args.force_eval:
+                    # Download metadata only
+                    download_adapter_metadata(dataset, run_name, adapter, project_root, s3_results_prefix)
+                    local_path = os.path.join(project_root, "results", dataset, run_name, adapter)
+                    meta = load_local_metadata(local_path)
+                elif not args.dry_run:
+                    # Needs eval
+                    meta = evaluate_adapter(dataset, run_name, adapter, project_root, args, s3_results_prefix, model_type)
+                
+                if meta:
+                    acc = meta.get("accuracy", 0)
+                    if acc > best_acc:
+                        best_acc = acc
+                        
+            # Record score
+            if dataset in WIKI_TASKS:
+                results_table[dataset][method] = max(results_table[dataset][method], best_acc)
+            else:
+                results_table[dataset][method] = max(results_table[dataset][method], best_acc)
 
-    # 2. Prepare datasets and baselines
-    datasets = set(d[0] for d in run_dirs)
-    print(f"Found datasets: {datasets}")
-
-    dataset_to_runs = defaultdict(list)
-    for dataset, method, path in run_dirs:
-        dataset_to_runs[dataset].append((dataset, method, path))
-
-    baseline_tasks = []
-    for dataset in datasets:
-        baseline_dir = os.path.join(project_root, "results", dataset, "baseline")
-        os.makedirs(baseline_dir, exist_ok=True)
-        if enable_s3_sync:
-            pull_run_metadata(baseline_dir, project_root, enable_s3_sync, resolved_s3_bucket)
-
-        dataset_runs = dataset_to_runs.get(dataset, [])
-        sample_metadata = []
-        dataset_num_samples = resolve_required_num_samples(dataset, args)
-        for _, _, path in dataset_runs:
-            adapters = list_adapter_dirs(path)
-            metadata_entries, _ = collect_adapter_metadata(adapters, required_stride, dataset_num_samples)
-            sample_metadata.extend(metadata_entries)
-            if sample_metadata:
-                break
-
-        model_type = detect_model_type(dataset_runs[0][2] if dataset_runs else None, sample_metadata)
-        model_type = model_type or args.model_type or DEFAULT_MODEL_TYPE
-
-        baseline_tasks.append(
-            {
-                "dataset": dataset,
-                "method": "Baseline",
-                "run_dir": baseline_dir,
-                "adapter_dir": baseline_dir,
-                "adapter_name": "baseline",
-                "model_type": model_type,
-                "is_baseline": True,
-            }
-        )
-        
-    adapter_tasks = build_adapter_task_list(run_dirs)
-    adapter_tasks.extend(baseline_tasks)
-    if adapter_tasks:
-        print(f"\nQueued {len(adapter_tasks)} adapters for evaluation.")
-        if args.shuffle:
-            random.shuffle(adapter_tasks)
-        elif args.reverse:
-            adapter_tasks.reverse()
-        process_adapter_tasks(
-            adapter_tasks,
-            args,
-            project_root,
-            enable_s3_sync,
-            resolved_s3_bucket,
-            required_stride,
-            WIKI_TASKS,
-        )
-
-    for dataset in datasets:
-        baseline_dir = os.path.join(project_root, "results", dataset, "baseline")
-        dataset_num_samples = resolve_required_num_samples(dataset, args)
-        baseline_entries, _ = collect_adapter_metadata([baseline_dir], required_stride, dataset_num_samples)
-        baseline_meta = select_metadata_for_stride(baseline_entries, required_stride, dataset_num_samples)
-        baseline_score = baseline_meta.get("accuracy", 0.0) if baseline_meta else 0.0
-        if dataset in WIKI_TASKS:
-            wiki_table[dataset]["Baseline"] = baseline_score
-        else:
-            table[dataset]["Baseline"] = baseline_score
-
-    # 3. Process Runs
-    for dataset, method, path in run_dirs:
-        dataset_num_samples = resolve_required_num_samples(dataset, args)
-        metadata_entries, missing_adapters = collect_adapter_metadata(
-            list_adapter_dirs(path),
-            required_stride,
-            dataset_num_samples,
-        )
-        model_type = detect_model_type(path, metadata_entries)
-
-        score = get_max_adapter_score(
-            path,
-            dataset,
-            args,
-            project_root,
-            model_type,
-            metadata_entries,
-            missing_adapters,
-            enable_s3=enable_s3_sync,
-            s3_bucket=resolved_s3_bucket,
-            force_skip_eval=True,
-            required_num_samples=dataset_num_samples,
-        )
-
-        if dataset in WIKI_TASKS:
-            wiki_table[dataset][method] = score
-        else:
-            table[dataset].setdefault("Baseline", table[dataset].get("Baseline", 0.0))
-            table[dataset][method] = score
-
-    # 4. Generate Table
-    df = pd.DataFrame.from_dict(table, orient='index')
-    
-    # Add Mean Row for QA tasks
-    if not df.empty:
-        df.loc['Mean'] = df.mean()
-        
+    # Print tables
     print("\n" + "="*50)
-    print("Sweep Results Table (QA Tasks - Accuracy)")
+    print("Results Table")
     print("="*50)
-    print(df.to_markdown())
-    
-    # 5. Generate Wiki Table
-    if wiki_table:
-        df_wiki = pd.DataFrame.from_dict(wiki_table, orient='index')
-        print("\n" + "="*50)
-        print("Sweep Results Table (Wiki Tasks - Max Smoothed LogProb)")
-        print("="*50)
-        print(df_wiki.to_markdown())
-        
-        # Combine for CSV saving (if desired, though formats differ)
-        # For now, maybe save separate CSVs or append with a clear separator/index
-        df_wiki.to_csv("sweep_results_wiki.csv")
-        print("\nSaved wiki results to sweep_results_wiki.csv")
-    
-    # Save QA results to CSV
-    df.to_csv("sweep_results_table.csv")
-    print("Saved QA results to sweep_results_table.csv")
+    df = pd.DataFrame.from_dict(results_table, orient='index')
+    if not df.empty:
+        print(df.to_markdown())
+        df.to_csv("sweep_results_table.csv")
 
 if __name__ == "__main__":
     main()
