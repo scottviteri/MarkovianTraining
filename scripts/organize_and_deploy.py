@@ -181,7 +181,8 @@ def sanitize_role(role_name):
 def upload_run_to_s3(source_host, dataset, run, s3_run_name, s3_prefix, max_attempts=3):
     """Trigger aws s3 sync on source host to upload run to a named S3 folder."""
     source_path = f"{REMOTE_RESULTS_DIR}/{dataset}/{run}"
-    s3_path = f"{s3_prefix}/{s3_run_name}"
+    base_prefix = s3_prefix.rstrip("/")
+    s3_path = f"{base_prefix}/{dataset}/{s3_run_name}"
     cmd = (
         f"bash -lc 'aws s3 sync \"{source_path}\" \"{s3_path}\" --delete'"
     )
@@ -201,7 +202,8 @@ def upload_run_to_s3(source_host, dataset, run, s3_run_name, s3_prefix, max_atte
 def download_run_from_s3(target_host, dataset, s3_run_name, dest_run_name, s3_prefix, max_attempts=3):
     """Trigger aws s3 sync on target host to download run from S3 to a named destination."""
     dest_path = f"{REMOTE_RESULTS_DIR}/{dataset}/{dest_run_name}"
-    s3_path = f"{s3_prefix}/{s3_run_name}"
+    base_prefix = s3_prefix.rstrip("/")
+    s3_path = f"{base_prefix}/{dataset}/{s3_run_name}"
     cmd = (
         f"bash -lc 'mkdir -p \"{dest_path}\" && "
         f"aws s3 sync \"{s3_path}\" \"{dest_path}\" --delete'"
@@ -221,7 +223,7 @@ def download_run_from_s3(target_host, dataset, s3_run_name, dest_run_name, s3_pr
 
 def cleanup_old_s3_runs(dataset, role_slug, s3_prefix, keep_name):
     """Remove older S3 entries for the same dataset/role pair to enforce one-per-pair invariant."""
-    base_prefix = s3_prefix.rstrip("/")
+    base_prefix = f"{s3_prefix.rstrip('/')}/{dataset}"
     list_cmd = ["aws", "s3", "ls", f"{base_prefix}/"]
     try:
         result = subprocess.run(list_cmd, capture_output=True, text=True, check=False)
@@ -465,7 +467,7 @@ def process_s3(
     column_filters=None,
     skip_upload=False,
     skip_download=False,
-    s3_prefix="s3://scottviteri/dataset_hrmnsc",
+    s3_prefix="s3://scottviteri/results",
     s3_parallel=4,
     specified_targets=None,
 ):
@@ -595,8 +597,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--s3-prefix",
-        default="s3://scottviteri",
-        help="S3 prefix to use for temporary storage (default: s3://scottviteri/{dataset}).",
+        default="s3://scottviteri/results",
+        help="S3 prefix to use for temporary storage (default: s3://scottviteri/results).",
     )
     parser.add_argument(
         "--s3-parallel",
