@@ -232,6 +232,11 @@ DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET")
 DEFAULT_SYNC_METADATA = os.environ.get("SWEEP_SYNC_METADATA", "").strip().lower() in {"1", "true", "yes"}
 _METADATA_SYNC_WARNED = False
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WIKI_TASK_TYPES = {"wiki_continuation", "wiki_compression"}
+
+
+def is_wiki_task(task_type: str) -> bool:
+    return task_type in WIKI_TASK_TYPES
 
 
 def metadata_filename_for_stride(stride: int) -> str:
@@ -432,7 +437,7 @@ def compute_wiki_logprob(
     include_question = not markovian
     
     model.eval()
-    log_probs, _, _ = calculate_answer_log_probs(
+    log_probs, _ = calculate_answer_log_probs(
         model=model,
         tokenizer=tokenizer,
         device=device,
@@ -1663,7 +1668,7 @@ def main():
         "--task_type",
         type=str,
         required=True,
-        choices=["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"],
+        choices=["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic", "wiki_continuation", "wiki_compression"],
         help="Task to evaluate"
     )
     parser.add_argument(
@@ -1979,14 +1984,18 @@ def main():
                 raise FileNotFoundError(f"No data found for task {task_type}")
             return data, meta
         
-        test_data, dataset_meta = load_cli_dataset(args.task_type)
+        wiki_mode = is_wiki_task(args.task_type)
+        if wiki_mode:
+            test_data: List[Tuple[str, str]] = []
+            dataset_meta: Dict[str, Any] = {}
+        else:
+            test_data, dataset_meta = load_cli_dataset(args.task_type)
+            # Apply stride if specified
+            if args.stride > 1:
+                test_data = test_data[::args.stride]
+                print(f"Using stride={args.stride}, evaluating on {len(test_data)} examples")
         mmlu_subject: Optional[str] = dataset_meta.get("subject")
         arc_subset: Optional[str] = dataset_meta.get("subset")
-        
-        # Apply stride if specified
-        if args.stride > 1:
-            test_data = test_data[::args.stride]
-            print(f"Using stride={args.stride}, evaluating on {len(test_data)} examples")
         
         # Determine eval batch size
         eval_bs = args.batch_size if args.batch_size is not None else get_default_eval_batch_size(
@@ -1995,6 +2004,8 @@ def main():
         
         # Run evaluation based on task type
         haiku_metrics: Optional[Dict[str, Any]] = None
+        wiki_metadata: Optional[Dict[str, Any]] = None
+        num_examples: int = len(test_data) if not wiki_mode else 0
         
         if args.task_type == "gsm8k":
             accuracy, results, haiku_metrics = evaluate_model_on_gsm8k(
@@ -2046,8 +2057,22 @@ def main():
                 num_samples=args.num_samples,
                 enable_haiku_metric=args.haiku_metric,
             )
+        elif wiki_mode:
+            accuracy, wiki_metadata = compute_wiki_logprob(
+                model=actor_model,
+                tokenizer=tokenizer,
+                device=device,
+                hyperparameters=hyperparameters,
+                num_samples=args.num_samples,
+                stride=args.stride or 1,
+            )
+            results = []
+            num_examples = wiki_metadata.get("num_samples", 0)
         else:
             raise ValueError(f"Unsupported task type: {args.task_type}")
+        
+        if not wiki_mode:
+            num_examples = len(test_data)
         
         # Display Haiku metrics if available
         if haiku_metrics is not None:
@@ -2072,13 +2097,16 @@ def main():
         if args.answer_prompt_variant != "default":
             extra_metrics["answer_prompt_variant"] = args.answer_prompt_variant
         
+        if wiki_metadata:
+            extra_metrics.setdefault("wiki_metadata", wiki_metadata)
+        
         results_file = save_task_results(
             task_type=args.task_type,
             output_dir=model_dir,
             model_type=args.model_type,
             accuracy=accuracy,
             results=results,
-            num_examples=len(test_data),
+            num_examples=num_examples,
             checkpoint_path=checkpoint_path,
             batch_index=batch_index,
             subject=mmlu_subject if args.task_type == "mmlu" else None,
@@ -2086,24 +2114,37 @@ def main():
         )
         
         colored_print("Results", f"Appended to {results_file}", Colors.CYAN)
-
+        
         if adapter_dir:
+            reported_stride = (wiki_metadata or {}).get("stride")
+            if reported_stride is None:
+                reported_stride = args.stride if args.stride else 1
+            evaluation_info: Dict[str, Any] = {
+                "batch_size": None if wiki_mode else eval_bs,
+                "num_samples": num_examples if wiki_mode else args.num_samples,
+                "stride": reported_stride,
+                "answer_extraction_method": None if wiki_mode else args.answer_extraction_method,
+                "haiku_metric": args.haiku_metric,
+            }
+            if wiki_metadata:
+                evaluation_info.update(
+                    {
+                        "wiki_start_index": wiki_metadata.get("start_index"),
+                        "wiki_question_length": wiki_metadata.get("question_length"),
+                        "wiki_target_length": wiki_metadata.get("target_length"),
+                    }
+                )
+            
             metadata: Dict[str, Any] = {
                 "adapter_name": adapter_name or os.path.basename(adapter_dir),
                 "task_type": args.task_type,
                 "model_type": args.model_type,
                 "model_path": checkpoint_path,
                 "accuracy": accuracy,
-                "num_examples": len(test_data),
+                "num_examples": num_examples,
                 "batch_index": batch_index,
                 "timestamp": datetime.datetime.now().isoformat(),
-                "evaluation": {
-                    "batch_size": eval_bs,
-                    "num_samples": args.num_samples,
-                    "stride": args.stride,
-                    "answer_extraction_method": args.answer_extraction_method,
-                    "haiku_metric": args.haiku_metric,
-                },
+                "evaluation": evaluation_info,
             }
             if haiku_metrics is not None:
                 metadata["haiku_metrics"] = haiku_metrics
