@@ -298,6 +298,45 @@ def safe_relpath(path, base_dir):
     return path
 
 
+
+def pull_run_metadata(run_dir, project_root, enable_sync=False, bucket=None):
+    global _S3_WARNING_PRINTED
+    if not enable_sync:
+        return
+
+    bucket = bucket or DEFAULT_S3_BUCKET
+    if not bucket:
+        # Warning printed by sync_run_dir usually, avoiding double print here if possible
+        return
+
+    rel_path = safe_relpath(run_dir, project_root).replace("\", "/")
+    s3_src = f"{bucket.rstrip('/')}/{rel_path}"
+    if s3_src.startswith("s3:/") and not s3_src.startswith("s3://"):
+        s3_src = s3_src.replace("s3:/", "s3://", 1)
+    
+    # Sync from S3 to local, only metadata
+    include_args = [
+        "--exclude", "*",
+        "--include", "best_adapter.json",
+        "--include", "adapter_*/eval_metadata*.json",
+        "--include", "wiki_baseline_*.json",
+    ]
+    # Note: we do NOT sync results jsonl files down, as they are large and we rely on metadata
+    
+    print(f"Pulling metadata {s3_src} -> {run_dir}")
+    try:
+        subprocess.run(
+            ["aws", "s3", "sync", s3_src, run_dir, *include_args],
+            check=True,
+        )
+    except FileNotFoundError:
+        if not _S3_WARNING_PRINTED:
+            print("Error: aws CLI not found; cannot sync from S3.")
+            _S3_WARNING_PRINTED = True
+    except subprocess.CalledProcessError as e:
+        # It is normal to fail if the directory doesn't exist on S3 yet
+        pass
+
 def sync_run_dir(run_dir, project_root, enable_sync=False, bucket=None):
     global _S3_WARNING_PRINTED
     if not enable_sync:
@@ -338,6 +377,7 @@ def get_wiki_baseline_score(dataset, model_type, args, project_root, enable_s3=F
     results_dir = os.path.join(project_root, "results", dataset)
     baseline_dir = os.path.join(results_dir, "baseline")
     os.makedirs(baseline_dir, exist_ok=True)
+    pull_run_metadata(baseline_dir, project_root, enable_s3, s3_bucket)
     existing = find_wiki_metadata_entry(baseline_dir, dataset, required_stride=args.stride or 1)
     if existing:
         return existing.get("accuracy", existing.get("average_log_prob", 0.0))
@@ -687,6 +727,7 @@ def main():
         else:
             should_evaluate = dataset_runs and (not args.task_type or dataset == args.task_type)
             run_dir_for_baseline = dataset_runs[0][2] if dataset_runs else os.path.join(project_root, "results", dataset)
+            pull_run_metadata(run_dir_for_baseline, project_root, enable_s3_sync, resolved_s3_bucket)
             score = get_baseline_score(
                 dataset,
                 run_dir_for_baseline,
@@ -701,6 +742,7 @@ def main():
         
     # 3. Process Runs
     for dataset, method, path in run_dirs:
+        pull_run_metadata(path, project_root, enable_s3_sync, resolved_s3_bucket)
         metadata_entries, missing_adapters = collect_adapter_metadata(list_adapter_dirs(path), args.stride if args.stride else 1)
         model_type = detect_model_type(path, metadata_entries)
 
