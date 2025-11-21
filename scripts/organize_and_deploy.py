@@ -183,8 +183,14 @@ def upload_run_to_s3(source_host, dataset, run, s3_run_name, s3_prefix, max_atte
     source_path = f"{REMOTE_RESULTS_DIR}/{dataset}/{run}"
     base_prefix = s3_prefix.rstrip("/")
     s3_path = f"{base_prefix}/{dataset}/{s3_run_name}"
+    # Exclude evaluation artifacts from upload to prevent overwriting good metadata with partial/empty ones
+    excludes = (
+        "--exclude '*eval_metadata*.json' "
+        "--exclude '*eval_results*.jsonl' "
+        "--exclude 'best_adapter.json'"
+    )
     cmd = (
-        f"bash -lc 'aws s3 sync \"{source_path}\" \"{s3_path}\"'"
+        f"bash -lc 'aws s3 sync \"{source_path}\" \"{s3_path}\" {excludes}'"
     )
     print(f"    Uploading {dataset}/{run} from {source_host} to {s3_path} ...")
     for attempt in range(1, max_attempts + 1):
@@ -204,9 +210,15 @@ def download_run_from_s3(target_host, dataset, s3_run_name, dest_run_name, s3_pr
     dest_path = f"{REMOTE_RESULTS_DIR}/{dataset}/{dest_run_name}"
     base_prefix = s3_prefix.rstrip("/")
     s3_path = f"{base_prefix}/{dataset}/{s3_run_name}"
+    # Exclude evaluation artifacts from download to prevent overwriting existing metadata
+    excludes = (
+        "--exclude '*eval_metadata*.json' "
+        "--exclude '*eval_results*.jsonl' "
+        "--exclude 'best_adapter.json'"
+    )
     cmd = (
         f"bash -lc 'mkdir -p \"{dest_path}\" && "
-        f"aws s3 sync \"{s3_path}\" \"{dest_path}\"'"
+        f"aws s3 sync \"{s3_path}\" \"{dest_path}\" {excludes}'"
     )
     print(f"    Downloading {s3_path} to {target_host}:{dest_path} ...")
     for attempt in range(1, max_attempts + 1):
