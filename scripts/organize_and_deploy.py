@@ -184,7 +184,7 @@ def upload_run_to_s3(source_host, dataset, run, s3_run_name, s3_prefix, max_atte
     base_prefix = s3_prefix.rstrip("/")
     s3_path = f"{base_prefix}/{dataset}/{s3_run_name}"
     cmd = (
-        f"bash -lc 'aws s3 sync \"{source_path}\" \"{s3_path}\" --delete'"
+        f"bash -lc 'aws s3 sync \"{source_path}\" \"{s3_path}\"'"
     )
     print(f"    Uploading {dataset}/{run} from {source_host} to {s3_path} ...")
     for attempt in range(1, max_attempts + 1):
@@ -206,7 +206,7 @@ def download_run_from_s3(target_host, dataset, s3_run_name, dest_run_name, s3_pr
     s3_path = f"{base_prefix}/{dataset}/{s3_run_name}"
     cmd = (
         f"bash -lc 'mkdir -p \"{dest_path}\" && "
-        f"aws s3 sync \"{s3_path}\" \"{dest_path}\" --delete'"
+        f"aws s3 sync \"{s3_path}\" \"{dest_path}\"'"
     )
     print(f"    Downloading {s3_path} to {target_host}:{dest_path} ...")
     for attempt in range(1, max_attempts + 1):
@@ -510,9 +510,9 @@ def process_s3(
             upload_key = (source_host, dataset, best_run)
             
             pair_key = (dataset, role_slug)
-            if not skip_upload and pair_key not in cleaned_pairs:
-                cleanup_old_s3_runs(dataset, role_slug, s3_prefix, new_run_name)
-                cleaned_pairs.add(pair_key)
+            # if not skip_upload and pair_key not in cleaned_pairs:
+            #     cleanup_old_s3_runs(dataset, role_slug, s3_prefix, new_run_name)
+            #     cleaned_pairs.add(pair_key)
 
             if not skip_upload and upload_key not in uploaded_runs:
                 future = upload_executor.submit(
