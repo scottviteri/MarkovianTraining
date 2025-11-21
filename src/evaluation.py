@@ -225,13 +225,13 @@ def calculate_answer_log_probs(
     return mean_answer_logprobs, extracted_generated_answers
 
 
-# Track which results files have already been reset during the current process
-_fresh_results_files: set[str] = set()
+# Track adapter metadata files
 METADATA_PATTERN = re.compile(r"eval_metadata(?:_stride(\d+))?\.json$")
 DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET")
 DEFAULT_SYNC_METADATA = os.environ.get("SWEEP_SYNC_METADATA", "").strip().lower() in {"1", "true", "yes"}
 _METADATA_SYNC_WARNED = False
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WIKI_TASKS = {"wiki_continuation", "wiki_compression"}
 
 
 def metadata_filename_for_stride(stride: int) -> str:
@@ -338,12 +338,21 @@ def compute_wiki_logprob(
     start_index: int = 10000,
     question_length: Optional[int] = None,
     target_length: Optional[int] = None,
+    batch_size: int = 16,
 ) -> Tuple[float, Dict[str, Any]]:
-    """Compute average log probability on Wikipedia continuations."""
+    """Compute average log probability on Wikipedia continuations using CoT generation.
+    
+    This follows the Markovian pipeline:
+    1. Generate CoT/compression from context (Actor)
+    2. Compute log-prob of continuation given context + CoT (Actor)
+    """
     question_length = int(question_length or hyperparameters.get("question_length", 512))
     target_length = int(target_length or hyperparameters.get("target_length", 128))
     stride = max(1, int(stride))
+    
+    # Load more samples than needed to handle stride
     requested = num_samples * stride if num_samples else 256 * stride
+    
     pairs = load_wiki_pairs(
         tokenizer,
         question_length,
@@ -351,38 +360,91 @@ def compute_wiki_logprob(
         requested,
         start_index=start_index,
     )
+    
     if not pairs:
         raise RuntimeError("No Wikipedia samples available for evaluation.")
+        
+    # Apply stride
     pairs = pairs[::stride]
     if num_samples:
         pairs = pairs[:num_samples]
+        
     if not pairs:
         raise RuntimeError("No samples left after applying stride for wiki evaluation.")
-    questions, answers = zip(*pairs)
-    reasoning = [""] * len(pairs)
+        
+    model.eval()
+    
+    # Prepare batches
+    all_log_probs = []
+    
+    # Use hyperparameters for generation (same as training)
     eval_hyper = {
         **hyperparameters,
         "task_type": hyperparameters.get("task_type", "wiki_continuation"),
-        "markovian": False,
+        "markovian": False, # Use include_question=True instead
     }
-    model.eval()
-    log_probs, _, _ = calculate_answer_log_probs(
-        frozen_model=model,
-        tokenizer=tokenizer,
-        device=device,
-        questions=list(questions),
-        reasoning=reasoning,
-        answers=list(answers),
-        hyperparameters=eval_hyper,
-        include_question=True,
-    )
-    mean_log_prob = float(log_probs.mean().item())
+    
+    for i in tqdm(range(0, len(pairs), batch_size), desc="Evaluating Wiki"):
+        batch = pairs[i : i + batch_size]
+        questions, answers = zip(*batch)
+        
+        # Stage 1: Generate Reasoning (CoT / Compression)
+        reasoning_prompts = [
+            construct_prompts(question=q, hyperparameters=eval_hyper, reasoning=None)
+            for q in questions
+        ]
+        
+        inputs = tokenizer(
+            reasoning_prompts,
+            return_tensors="pt",
+            padding=True,
+        ).to(device)
+        
+        with torch.no_grad():
+            reasoning_outputs = model.generate(
+                input_ids=inputs.input_ids,
+                attention_mask=inputs.attention_mask,
+                max_new_tokens=hyperparameters.get("cot_length", 100),
+                min_new_tokens=hyperparameters.get("cot_length", 100),
+                do_sample=True,
+                temperature=hyperparameters.get("temperature", 1.0),
+                pad_token_id=tokenizer.pad_token_id,
+            )
+            
+        # Extract generated reasoning
+        # Slice off input tokens
+        generated_reasoning = tokenizer.batch_decode(
+            reasoning_outputs[:, inputs.input_ids.shape[1]:], 
+            skip_special_tokens=True
+        )
+        
+        # Stage 2: Compute Log Probs of Continuation
+        batch_log_probs, _ = calculate_answer_log_probs(
+            frozen_model=model,
+            tokenizer=tokenizer,
+            device=device,
+            questions=list(questions),
+            reasoning=generated_reasoning,
+            answers=list(answers),
+            hyperparameters=eval_hyper,
+            include_question=True,
+        )
+        
+        all_log_probs.append(batch_log_probs)
+
+    # Combine all batches
+    if not all_log_probs:
+        return 0.0, {}
+        
+    mean_log_prob = float(torch.cat(all_log_probs).mean().item())
+    
     metadata = {
         "num_samples": len(pairs),
         "stride": stride,
         "start_index": start_index,
         "question_length": question_length,
         "target_length": target_length,
+        "batch_size": batch_size,
     }
     return mean_log_prob, metadata
 def safe_relpath(path: str, base_dir: str) -> str:
@@ -418,55 +480,6 @@ def upload_metadata_file(local_path: str, run_dir: str, bucket: Optional[str], e
             _METADATA_SYNC_WARNED = True
     except subprocess.CalledProcessError as e:
         colored_print("Metadata", f"Failed to upload {local_path} to {dest}: {e}", Colors.YELLOW)
-
-
-def _get_latest_backup_path(results_file: str) -> Optional[str]:
-    """Return the most recent backup file for a results file, if any."""
-    directory = os.path.dirname(results_file)
-    base_name = os.path.basename(results_file)
-    pattern = os.path.join(directory, base_name.replace(".jsonl", "_backup_*.jsonl"))
-    backups = glob.glob(pattern)
-    if not backups:
-        return None
-    return max(backups, key=os.path.getmtime)
-
-
-def _maybe_backup_results_file(results_file: str) -> Optional[str]:
-    """Create a backup of an existing results file if needed.
-    
-    A new backup is written only when the current contents differ from the most
-    recent backup. The function returns the path to the backup that was created,
-    or None if no backup was required.
-    """
-    if not os.path.exists(results_file) or os.path.getsize(results_file) == 0:
-        return None
-    
-    latest_backup = _get_latest_backup_path(results_file)
-    if latest_backup and filecmp.cmp(results_file, latest_backup, shallow=False):
-        # Current contents match the latest backup; no need to duplicate it.
-        return None
-    
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    directory = os.path.dirname(results_file)
-    base_name = os.path.basename(results_file)
-    backup_name = base_name.replace(".jsonl", f"_backup_{timestamp}.jsonl")
-    backup_path = os.path.join(directory, backup_name)
-    shutil.copy2(results_file, backup_path)
-    return backup_path
-
-
-def _ensure_fresh_results_file(results_file: str):
-    """Truncate the results file once per process, creating backups when needed."""
-    if results_file in _fresh_results_files:
-        return
-    
-    if os.path.exists(results_file):
-        backup_path = _maybe_backup_results_file(results_file)
-        if backup_path:
-            colored_print("Backup", f"Created backup: {os.path.basename(backup_path)}", Colors.YELLOW)
-        # Start with a fresh file for the new evaluation run
-        open(results_file, "w").close()
-    _fresh_results_files.add(results_file)
 
 
 # =====================================================================# Helper Functions
@@ -1521,17 +1534,19 @@ def save_task_results(
     if extra_metrics:
         entry.update(extra_metrics)
     
-    results_file = os.path.join(output_dir, f"{task_type}_results_{model_type}.jsonl")
-    _ensure_fresh_results_file(results_file)
-    with open(results_file, "a") as f:
-        json.dump(entry, f)
-        f.write("\n")
+    evaluation_cfg = entry.get("evaluation") or {}
+    stride = evaluation_cfg.get("stride", 1)
+    timestamp = entry["timestamp"]
     
-    accuracy_plot_path: Optional[str] = None
-    if task_type == "gsm8k":
-        accuracy_plot_path = os.path.join(output_dir, "gsm8k_accuracy_over_batches.png")
-        plot_accuracy_over_batches(results_file, accuracy_plot_path)
-        print(f"Updated GSM8K accuracy plot at {accuracy_plot_path}")
+    if batch_index is not None:
+        filename = f"eval_results_stride{stride}_{timestamp}.jsonl"
+    else:
+        filename = f"baseline_results_{model_type}_{timestamp}.jsonl"
+    
+    os.makedirs(output_dir, exist_ok=True)
+    results_file = os.path.join(output_dir, filename)
+    with open(results_file, "w") as f:
+        json.dump(entry, f, indent=2)
     
     return results_file
 
@@ -1618,7 +1633,7 @@ def main():
         "--task_type",
         type=str,
         required=True,
-        choices=["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"],
+        choices=["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic", "wiki_continuation", "wiki_compression"],
         help="Task to evaluate"
     )
     parser.add_argument(
@@ -1934,75 +1949,108 @@ def main():
                 raise FileNotFoundError(f"No data found for task {task_type}")
             return data, meta
         
-        test_data, dataset_meta = load_cli_dataset(args.task_type)
-        mmlu_subject: Optional[str] = dataset_meta.get("subject")
-        arc_subset: Optional[str] = dataset_meta.get("subset")
+        is_wiki_task = args.task_type in WIKI_TASKS
+        dataset_meta: Dict[str, Any] = {}
+        mmlu_subject: Optional[str] = None
+        arc_subset: Optional[str] = None
+        num_eval_examples: int = 0
         
-        # Apply stride if specified
-        if args.stride > 1:
-            test_data = test_data[::args.stride]
-            print(f"Using stride={args.stride}, evaluating on {len(test_data)} examples")
-        
-        # Determine eval batch size
+        # Determine eval batch size (used for QA tasks)
         eval_bs = args.batch_size if args.batch_size is not None else get_default_eval_batch_size(
             hyperparameters.get("batch_size", 12)
         )
         
-        # Run evaluation based on task type
+        # Run evaluation
         haiku_metrics: Optional[Dict[str, Any]] = None
         
-        if args.task_type == "gsm8k":
-            accuracy, results, haiku_metrics = evaluate_model_on_gsm8k(
-                actor_model, critic_model, tokenizer, device,
-                test_data, hyperparameters,
-                num_samples=args.num_samples,
+        if is_wiki_task:
+            hyperparameters.setdefault("task_type", args.task_type)
+            hyperparameters.setdefault("model_type", args.model_type)
+            wiki_stride = args.stride if args.stride else 1
+            wiki_num_samples = args.num_samples or 256
+            wiki_start_index = hyperparameters.get("wiki_start_index", 10000)
+            mean_log_prob, eval_meta = compute_wiki_logprob(
+                actor_model,
+                tokenizer,
+                device,
+                hyperparameters,
+                num_samples=wiki_num_samples,
+                stride=wiki_stride,
+                start_index=wiki_start_index,
+                question_length=hyperparameters.get("question_length"),
+                target_length=hyperparameters.get("target_length"),
                 batch_size=eval_bs,
-                answer_extraction_method=args.answer_extraction_method,
-                enable_haiku_metric=args.haiku_metric,
             )
-        elif args.task_type == "mmlu":
-            accuracy, results, haiku_metrics = evaluate_model_on_mmlu(
-                actor_model, critic_model, tokenizer, device,
-                test_data, hyperparameters,
-                batch_size=eval_bs,
-                num_samples=args.num_samples,
-                enable_haiku_metric=args.haiku_metric,
-            )
-        elif args.task_type == "arc":
-            accuracy, results, haiku_metrics = evaluate_model_on_arc(
-                actor_model, critic_model, tokenizer, device,
-                test_data, hyperparameters,
-                batch_size=eval_bs,
-                num_samples=args.num_samples,
-                enable_haiku_metric=args.haiku_metric,
-            )
-        elif args.task_type == "aqua":
-            accuracy, results, haiku_metrics = evaluate_model_on_aqua(
-                actor_model, critic_model, tokenizer, device,
-                test_data, hyperparameters,
-                batch_size=eval_bs,
-                num_samples=args.num_samples,
-                enable_haiku_metric=args.haiku_metric,
-            )
-        elif args.task_type == "mathqa":
-            accuracy, results, haiku_metrics = evaluate_model_on_mathqa(
-                actor_model, critic_model, tokenizer, device,
-                test_data, hyperparameters,
-                batch_size=eval_bs,
-                num_samples=args.num_samples,
-                enable_haiku_metric=args.haiku_metric,
-            )
-        elif args.task_type in ["svamp", "arithmetic"]:
-            accuracy, results, haiku_metrics = evaluate_model_on_numeric(
-                actor_model, critic_model, tokenizer, device,
-                test_data, hyperparameters,
-                batch_size=eval_bs,
-                answer_extraction_method=args.answer_extraction_method,
-                num_samples=args.num_samples,
-                enable_haiku_metric=args.haiku_metric,
-            )
+            accuracy = mean_log_prob
+            num_eval_examples = eval_meta.get("num_samples", wiki_num_samples)
+            results = [{
+                "metric": "wiki_log_prob",
+                "value": mean_log_prob,
+                "evaluation": eval_meta,
+            }]
         else:
-            raise ValueError(f"Unsupported task type: {args.task_type}")
+            test_data, dataset_meta = load_cli_dataset(args.task_type)
+            mmlu_subject = dataset_meta.get("subject")
+            arc_subset = dataset_meta.get("subset")
+            
+            # Apply stride if specified
+            if args.stride > 1:
+                test_data = test_data[::args.stride]
+                print(f"Using stride={args.stride}, evaluating on {len(test_data)} examples")
+            
+            if args.task_type == "gsm8k":
+                accuracy, results, haiku_metrics = evaluate_model_on_gsm8k(
+                    actor_model, critic_model, tokenizer, device,
+                    test_data, hyperparameters,
+                    num_samples=args.num_samples,
+                    batch_size=eval_bs,
+                    answer_extraction_method=args.answer_extraction_method,
+                    enable_haiku_metric=args.haiku_metric,
+                )
+            elif args.task_type == "mmlu":
+                accuracy, results, haiku_metrics = evaluate_model_on_mmlu(
+                    actor_model, critic_model, tokenizer, device,
+                    test_data, hyperparameters,
+                    batch_size=eval_bs,
+                    num_samples=args.num_samples,
+                    enable_haiku_metric=args.haiku_metric,
+                )
+            elif args.task_type == "arc":
+                accuracy, results, haiku_metrics = evaluate_model_on_arc(
+                    actor_model, critic_model, tokenizer, device,
+                    test_data, hyperparameters,
+                    batch_size=eval_bs,
+                    num_samples=args.num_samples,
+                    enable_haiku_metric=args.haiku_metric,
+                )
+            elif args.task_type == "aqua":
+                accuracy, results, haiku_metrics = evaluate_model_on_aqua(
+                    actor_model, critic_model, tokenizer, device,
+                    test_data, hyperparameters,
+                    batch_size=eval_bs,
+                    num_samples=args.num_samples,
+                    enable_haiku_metric=args.haiku_metric,
+                )
+            elif args.task_type == "mathqa":
+                accuracy, results, haiku_metrics = evaluate_model_on_mathqa(
+                    actor_model, critic_model, tokenizer, device,
+                    test_data, hyperparameters,
+                    batch_size=eval_bs,
+                    num_samples=args.num_samples,
+                    enable_haiku_metric=args.haiku_metric,
+                )
+            elif args.task_type in ["svamp", "arithmetic"]:
+                accuracy, results, haiku_metrics = evaluate_model_on_numeric(
+                    actor_model, critic_model, tokenizer, device,
+                    test_data, hyperparameters,
+                    batch_size=eval_bs,
+                    answer_extraction_method=args.answer_extraction_method,
+                    num_samples=args.num_samples,
+                    enable_haiku_metric=args.haiku_metric,
+                )
+            else:
+                raise ValueError(f"Unsupported task type: {args.task_type}")
+            num_eval_examples = len(test_data)
         
         # Display Haiku metrics if available
         if haiku_metrics is not None:
@@ -2011,13 +2059,15 @@ def main():
         # Print results
         colored_print(f"{args.task_type.upper()} Accuracy", f"{accuracy:.2%}", Colors.GREEN if accuracy > 0.5 else Colors.YELLOW)
         
-        # Save results
-        model_dir = os.path.dirname(checkpoint_path) if checkpoint_path else f"results/{args.task_type}"
-        if checkpoint_path and os.path.isdir(checkpoint_path):
-            model_dir = os.path.dirname(checkpoint_path)
-        os.makedirs(model_dir, exist_ok=True)
+        # Determine directory for saving results/metadata
+        if adapter_dir:
+            results_dir = adapter_dir
+        else:
+            base_results_root = os.path.dirname(checkpoint_path) if checkpoint_path else os.path.join("results", args.task_type)
+            results_dir = os.path.join(base_results_root, "baseline")
+        os.makedirs(results_dir, exist_ok=True)
         
-        extra_metrics = {}
+        extra_metrics: Dict[str, Any] = {}
         if args.task_type == "arc" and arc_subset:
             extra_metrics["subset"] = arc_subset
         if haiku_metrics is not None:
@@ -2026,64 +2076,74 @@ def main():
             extra_metrics["haiku_num_calls"] = haiku_metrics["num_calls"]
         if args.answer_prompt_variant != "default":
             extra_metrics["answer_prompt_variant"] = args.answer_prompt_variant
+
+        evaluation_details = {
+            "batch_size": eval_bs if not is_wiki_task else None,
+            "num_samples": num_eval_examples,
+            "stride": args.stride if args.stride else 1,
+            "answer_extraction_method": args.answer_extraction_method,
+            "haiku_metric": args.haiku_metric,
+        }
+        extra_with_evaluation = dict(extra_metrics)
+        extra_with_evaluation["evaluation"] = evaluation_details
+        if is_wiki_task:
+            extra_with_evaluation["metric"] = "wiki_log_prob"
         
         results_file = save_task_results(
             task_type=args.task_type,
-            output_dir=model_dir,
+            output_dir=results_dir,
             model_type=args.model_type,
             accuracy=accuracy,
             results=results,
-            num_examples=len(test_data),
+            num_examples=num_eval_examples,
             checkpoint_path=checkpoint_path,
             batch_index=batch_index,
             subject=mmlu_subject if args.task_type == "mmlu" else None,
-            extra_metrics=extra_metrics or None,
+            extra_metrics=extra_with_evaluation or None,
         )
         
         colored_print("Results", f"Appended to {results_file}", Colors.CYAN)
 
-        if adapter_dir:
-            metadata: Dict[str, Any] = {
-                "adapter_name": adapter_name or os.path.basename(adapter_dir),
-                "task_type": args.task_type,
-                "model_type": args.model_type,
-                "model_path": checkpoint_path,
-                "accuracy": accuracy,
-                "num_examples": len(test_data),
-                "batch_index": batch_index,
-                "timestamp": datetime.datetime.now().isoformat(),
-                "evaluation": {
-                    "batch_size": eval_bs,
-                    "num_samples": args.num_samples,
-                    "stride": args.stride,
-                    "answer_extraction_method": args.answer_extraction_method,
-                    "haiku_metric": args.haiku_metric,
-                },
-            }
-            if haiku_metrics is not None:
-                metadata["haiku_metrics"] = haiku_metrics
+        # Build metadata for adapters or baseline
+        metadata_dir = adapter_dir or results_dir
+        adapter_name_for_metadata = adapter_name or ("baseline" if adapter_dir is None else os.path.basename(metadata_dir))
+        metadata: Dict[str, Any] = {
+            "adapter_name": adapter_name_for_metadata,
+            "task_type": args.task_type,
+            "model_type": args.model_type,
+            "model_path": checkpoint_path if adapter_dir else None,
+            "accuracy": accuracy,
+            "num_examples": num_eval_examples,
+            "batch_index": batch_index,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "evaluation": evaluation_details,
+        }
+        if haiku_metrics is not None:
+            metadata["haiku_metrics"] = haiku_metrics
+        if is_wiki_task:
+            metadata["metric"] = "wiki_log_prob"
 
-            if run_dir:
-                try:
-                    metadata["adapter_dir"] = os.path.relpath(adapter_dir, run_dir)
-                except ValueError:
-                    metadata["adapter_dir"] = adapter_dir
-            else:
+        if adapter_dir and run_dir:
+            try:
+                metadata["adapter_dir"] = os.path.relpath(adapter_dir, run_dir)
+            except ValueError:
                 metadata["adapter_dir"] = adapter_dir
+        else:
+            metadata["adapter_dir"] = metadata_dir
 
-            if results_file:
-                try:
-                    if run_dir:
-                        metadata["results_file"] = os.path.relpath(results_file, run_dir)
-                    else:
-                        metadata["results_file"] = results_file
-                except ValueError:
+        if results_file:
+            try:
+                if run_dir and adapter_dir:
+                    metadata["results_file"] = os.path.relpath(results_file, run_dir)
+                else:
                     metadata["results_file"] = results_file
+            except ValueError:
+                metadata["results_file"] = results_file
 
-            stride_to_store = args.stride if args.stride else 1
-            metadata_path = write_adapter_metadata(adapter_dir, metadata, stride_to_store)
-            colored_print("Metadata", f"Wrote adapter metadata to {metadata_path}", Colors.CYAN)
-            upload_metadata_file(metadata_path, run_dir, metadata_bucket, metadata_sync_enabled)
+        stride_to_store = args.stride if args.stride else 1
+        metadata_path = write_adapter_metadata(metadata_dir, metadata, stride_to_store)
+        colored_print("Metadata", f"Wrote adapter metadata to {metadata_path}", Colors.CYAN)
+        upload_metadata_file(metadata_path, run_dir if adapter_dir else metadata_dir, metadata_bucket, metadata_sync_enabled)
 
 
 if __name__ == "__main__":
