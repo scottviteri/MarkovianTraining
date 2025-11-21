@@ -23,7 +23,7 @@ from src.utils import load_model_for_evaluation
 from src.evaluation import compute_wiki_logprob, write_adapter_metadata
 
 
-DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET")
+DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET", "s3://scottviteri")
 METADATA_PATTERN = re.compile(r"eval_metadata(?:_stride(\d+))?\.json$")
 _S3_WARNING_PRINTED = False
 WIKI_DEFAULT_NUM_SAMPLES = 256
