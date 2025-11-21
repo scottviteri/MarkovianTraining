@@ -202,7 +202,7 @@ def perturb_CoT(CoT, config):
 
 # Define perturbation configurations
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-PERTURB_S3_BUCKET = os.environ.get("PERTURB_S3_BUCKET")
+PERTURB_S3_BUCKET = os.environ.get("PERTURB_S3_BUCKET", "s3://scottviteri")
 if PERTURB_S3_BUCKET:
     PERTURB_S3_BUCKET = PERTURB_S3_BUCKET.rstrip("/")
 _S3_WARNING_PRINTED = False
@@ -213,6 +213,9 @@ RUN_SYNC_PATTERNS = [
     "checkpoint_scan/*.json",
     "checkpoint_scan/*.png",
     "adapter_*/perturb_metadata.json",
+    "log.jsonl",
+    "best_adapter.json",
+    "adapter_*/*",
 ]
 
 ADAPTER_SYNC_PATTERNS = [
@@ -495,6 +498,11 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
 
     perturbations = PERTURBATION_SETS[perturb_type]["perturbations"]
 
+    # Ensure we have the latest data from S3
+    run_dir = os.path.dirname(log_file)
+    if run_dir:
+        sync_run_dir_from_s3(run_dir)
+
     # Process the log file to extract perturbation data
     with open(log_file, "r") as f:
         log_data = [json.loads(line) for line in f]
@@ -673,6 +681,11 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
         raise ValueError(f"Unknown perturbation type: {perturb_type}")
 
     perturbations = PERTURBATION_SETS[perturb_type]["perturbations"]
+
+    # Ensure we have the latest data from S3
+    run_dir = os.path.dirname(log_file)
+    if run_dir:
+        sync_run_dir_from_s3(run_dir)
 
     # Process the log file to extract perturbation data
     with open(log_file, "r") as f:
