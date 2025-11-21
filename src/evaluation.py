@@ -448,16 +448,8 @@ def compute_wiki_logprob(
     buffer: List[Tuple[str, str]] = []
     raw_index = 0
 
-    def flush_buffer(limit: Optional[int] = None):
-        nonlocal buffer, total_logprob, total_examples
-        if not buffer:
-            return
-        if limit is not None and limit < len(buffer):
-            chunk = buffer[:limit]
-            buffer = buffer[limit:]
-        else:
-            chunk = buffer
-            buffer = []
+    def process_chunk(chunk: List[Tuple[str, str]]):
+        nonlocal total_logprob, total_examples
         if not chunk:
             return
         questions = [q for q, _ in chunk]
@@ -481,6 +473,40 @@ def compute_wiki_logprob(
         )
         total_logprob += float(log_probs.sum().item())
         total_examples += len(chunk)
+
+    def flush_buffer(limit: Optional[int] = None):
+        nonlocal buffer
+        if not buffer:
+            return
+        if limit is not None and limit < len(buffer):
+            chunk = buffer[:limit]
+            buffer = buffer[limit:]
+        else:
+            chunk = buffer
+            buffer = []
+        if not chunk:
+            return
+        process_chunk(chunk)
+
+    if chunk_size == 1:
+        for pair in pair_iterator:
+            raw_index += 1
+            if (raw_index - 1) % stride != 0:
+                continue
+            process_chunk([pair])
+            if num_samples is not None and total_examples >= num_samples:
+                break
+        if total_examples == 0:
+            raise RuntimeError("No samples left after applying stride for wiki evaluation.")
+        mean_log_prob = total_logprob / total_examples
+        metadata = {
+            "num_samples": total_examples,
+            "stride": stride,
+            "start_index": start_index,
+            "question_length": question_length,
+            "target_length": target_length,
+        }
+        return mean_log_prob, metadata
 
     for pair in pair_iterator:
         raw_index += 1
