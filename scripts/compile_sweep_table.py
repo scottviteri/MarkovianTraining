@@ -43,15 +43,26 @@ def _s3_uri_for_path(path, project_root, bucket):
     return uri
 
 
-def sync_file_to_s3(file_path, project_root, bucket=None):
-    """Sync a single file to S3."""
+def upload_adapter_metadata(adapter_dir, project_root, bucket=None):
+    """Upload metadata files from an adapter directory to S3."""
     bucket = bucket or DEFAULT_S3_BUCKET
     if not bucket: return
-    s3_dest = _s3_uri_for_path(file_path, project_root, bucket)
+    s3_dest = _s3_uri_for_path(adapter_dir, project_root, bucket)
+    
+    include_args = [
+        "--exclude", "*",
+        "--include", "eval_metadata*.json",
+        "--include", "eval_results*.jsonl"
+    ]
+    
+    print(f"Uploading metadata for {os.path.basename(adapter_dir)} to S3...")
     try:
-        subprocess.run(["aws", "s3", "cp", file_path, s3_dest], check=True)
+        subprocess.run(
+            ["aws", "s3", "sync", adapter_dir, s3_dest, *include_args],
+            check=True
+        )
     except Exception as e:
-        print(f"Warning: failed to upload {file_path} to {s3_dest}: {e}")
+        print(f"Warning: failed to upload metadata to {s3_dest}: {e}")
 
 
 def list_s3_runs(dataset, s3_results_prefix, method_filter=None):
@@ -190,7 +201,7 @@ def download_adapter_weights(dataset, run_name, adapter_name, project_root, s3_r
     s3_path = f"{prefix}/{dataset}/{run_name}/{adapter_name}/"
     local_path = os.path.join(project_root, "results", dataset, run_name, adapter_name)
     
-    print(f"Downloading weights for {adapter_name} from S3...")
+    print(f"Syncing weights for {adapter_name} from S3...")
     try:
         subprocess.run(
             ["aws", "s3", "sync", s3_path, local_path],
@@ -245,30 +256,28 @@ def load_local_metadata(adapter_dir):
 
 
 def get_model_type_from_s3(dataset, run_name, s3_results_prefix, project_root):
-    """Try to fetch log.jsonl to determine model type."""
+    """Always fetch log.jsonl to determine model type. S3 is ground truth."""
     prefix = s3_results_prefix.rstrip("/")
     s3_log = f"{prefix}/{dataset}/{run_name}/log.jsonl"
     local_run_dir = os.path.join(project_root, "results", dataset, run_name)
     local_log = os.path.join(local_run_dir, "log.jsonl")
     
-    if os.path.exists(local_log):
-        # read local
-        try:
-            with open(local_log, 'r') as f:
-                line = f.readline()
-                return json.loads(line).get("model_type", "llama")
-        except:
-            return "llama"
-            
-    # Try fetch
+    # Always fetch from S3 - S3 is ground truth
     os.makedirs(local_run_dir, exist_ok=True)
     try:
         subprocess.run(["aws", "s3", "cp", s3_log, local_log], check=True, capture_output=True)
+    except subprocess.CalledProcessError:
+        raise FileNotFoundError(f"Could not find log.jsonl for run {run_name} at {s3_log} - required for model type inference. Ground truth is S3.")
+
+    try:
         with open(local_log, 'r') as f:
             line = f.readline()
-            return json.loads(line).get("model_type", "llama")
-    except:
-        return "llama" # Default
+            data = json.loads(line)
+            if "model_type" not in data:
+                raise ValueError(f"log.jsonl for {run_name} is missing 'model_type' field")
+            return data["model_type"]
+    except Exception as e:
+        raise ValueError(f"Failed to parse log.jsonl for {run_name}: {e}")
 
 
 def evaluate_adapter(dataset, run_name, adapter_name, project_root, args, s3_results_prefix, model_type):
@@ -295,6 +304,9 @@ def evaluate_adapter(dataset, run_name, adapter_name, project_root, args, s3_res
         "--model_type", model_type,
     ]
     
+    if args.force_eval:
+        cmd.append("--force_eval")
+    
     if args.num_samples:
         cmd.extend(["--num_samples", str(args.num_samples)])
     if args.stride:
@@ -309,8 +321,7 @@ def evaluate_adapter(dataset, run_name, adapter_name, project_root, args, s3_res
         return None
         
     # 3. Sync metadata back
-    # We just sync the whole adapter folder's json/jsonl files
-    sync_file_to_s3(local_adapter_dir, project_root, args.s3_bucket)
+    upload_adapter_metadata(local_adapter_dir, project_root, args.s3_bucket)
     
     return load_local_metadata(local_adapter_dir)
 
@@ -369,12 +380,14 @@ def main():
                 
                 meta = None
                 if has_meta and not args.force_eval:
+                    print(f"    Skipping {adapter} (metadata found on S3)")
                     # Download metadata only
                     download_adapter_metadata(dataset, run_name, adapter, project_root, s3_results_prefix)
                     local_path = os.path.join(project_root, "results", dataset, run_name, adapter)
                     meta = load_local_metadata(local_path)
                 elif not args.dry_run:
                     # Needs eval
+                    print(f"    Evaluating {adapter} (metadata missing)")
                     meta = evaluate_adapter(dataset, run_name, adapter, project_root, args, s3_results_prefix, model_type)
                 
                 if meta:

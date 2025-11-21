@@ -189,7 +189,7 @@ def calculate_answer_log_probs(
         for input_ids in full_prompt_tokens.input_ids
     ]
 
-    # Verify answer positions are correct
+        # Verify answer positions are correct
     for i in range(len(answers)):
         decoded_answer = tokenizer.decode(
             full_prompt_tokens.input_ids[i][answer_start_positions[i] :]
@@ -200,6 +200,13 @@ def calculate_answer_log_probs(
             or decoded_answer[-3:] != expected_answer[-3:]
         ):
             colored_print("Answer mismatch at index", str(i), Colors.RED)
+            print(f"  Model Type:     {hyperparameters.get('model_type', 'unknown')}")
+            print(f"  Start pos:      {answer_start_positions[i]}")
+            print(f"  Total tokens:   {len(full_prompt_tokens.input_ids[i])}")
+            print(f"  Expected start: {expected_answer[:20]!r}")
+            print(f"  Actual start:   {decoded_answer[:20]!r}")
+            print(f"  Expected end:   {expected_answer[-20:]!r}")
+            print(f"  Actual end:     {decoded_answer[-20:]!r}")
 
     # Calculate log probabilities
     with torch.no_grad():
