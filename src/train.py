@@ -1301,7 +1301,8 @@ def run_periodic_evaluation(state: TrainingState):
                 tokenizer=state.tokenizer,
                 device=state.device,
                 hyperparameters=state.hyperparameters,
-                num_samples=batch_size, # Use eval batch size to avoid OOM
+                num_samples=batch_size,  # Use eval batch size to avoid OOM
+                batch_size=batch_size,
             )
             results = [] # No detailed results for wiki logprob
         else:

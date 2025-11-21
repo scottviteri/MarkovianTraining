@@ -412,67 +412,103 @@ def compute_wiki_logprob(
     device,
     hyperparameters: Dict[str, Any],
     *,
-    num_samples: int = 256,
+    num_samples: Optional[int] = 256,
     stride: int = 1,
     start_index: int = 10000,
     question_length: Optional[int] = None,
     target_length: Optional[int] = None,
+    batch_size: Optional[int] = None,
 ) -> Tuple[float, Dict[str, Any]]:
     """Compute average log probability on Wikipedia continuations."""
     question_length = int(question_length or hyperparameters.get("question_length", 512))
     target_length = int(target_length or hyperparameters.get("target_length", 128))
     stride = max(1, int(stride))
-    requested = num_samples * stride if num_samples else 256 * stride
-    pairs = list(
-        load_wiki_pairs(
-            tokenizer,
-            question_length,
-            target_length,
-            requested,
-            start_index=start_index,
-        )
+    chunk_size = max(1, int(batch_size) if batch_size else 512)
+    requested = (num_samples if num_samples else 256) * stride
+    pair_iterator = load_wiki_pairs(
+        tokenizer,
+        question_length,
+        target_length,
+        requested,
+        start_index=start_index,
     )
-    if not pairs:
-        raise RuntimeError("No Wikipedia samples available for evaluation.")
-    pairs = pairs[::stride]
-    if num_samples:
-        pairs = pairs[:num_samples]
-    if not pairs:
-        raise RuntimeError("No samples left after applying stride for wiki evaluation.")
-    questions, answers = zip(*pairs)
-    
-    reasoning = generate_actor_reasoning(
-        actor_model=model,
-        tokenizer=tokenizer,
-        device=device,
-        questions=list(questions),
-        hyperparameters=hyperparameters,
-    )
-    
+
     eval_hyper = {
         **hyperparameters,
         "task_type": hyperparameters.get("task_type", "wiki_continuation"),
     }
-    
-    # Respect markovian flag from hyperparameters if present, else default to True (Markovian evaluation)
-    # If Markovian, we want P(Answer | CoT). If Non-Markovian, P(Answer | Question, CoT).
+
     markovian = eval_hyper.get("markovian", True)
     include_question = not markovian
-    
+
     model.eval()
-    log_probs, _ = calculate_answer_log_probs(
-        model=model,
-        tokenizer=tokenizer,
-        device=device,
-        questions=list(questions),
-        reasoning=reasoning,
-        answers=list(answers),
-        hyperparameters=eval_hyper,
-        include_question=include_question,
-    )
-    mean_log_prob = float(log_probs.mean().item())
+
+    total_logprob = 0.0
+    total_examples = 0
+    buffer: List[Tuple[str, str]] = []
+    raw_index = 0
+
+    def flush_buffer(limit: Optional[int] = None):
+        nonlocal buffer, total_logprob, total_examples
+        if not buffer:
+            return
+        if limit is not None and limit < len(buffer):
+            chunk = buffer[:limit]
+            buffer = buffer[limit:]
+        else:
+            chunk = buffer
+            buffer = []
+        if not chunk:
+            return
+        questions = [q for q, _ in chunk]
+        answers = [a for _, a in chunk]
+        reasoning = generate_actor_reasoning(
+            actor_model=model,
+            tokenizer=tokenizer,
+            device=device,
+            questions=questions,
+            hyperparameters=hyperparameters,
+        )
+        log_probs, _ = calculate_answer_log_probs(
+            model=model,
+            tokenizer=tokenizer,
+            device=device,
+            questions=questions,
+            reasoning=reasoning,
+            answers=answers,
+            hyperparameters=eval_hyper,
+            include_question=include_question,
+        )
+        total_logprob += float(log_probs.sum().item())
+        total_examples += len(chunk)
+
+    for pair in pair_iterator:
+        raw_index += 1
+        if (raw_index - 1) % stride != 0:
+            continue
+        buffer.append(pair)
+        flush_limit: Optional[int] = None
+        if num_samples is not None:
+            remaining = num_samples - total_examples
+            if remaining <= 0:
+                break
+            if len(buffer) >= remaining:
+                flush_limit = remaining
+        if len(buffer) >= chunk_size or flush_limit is not None:
+            flush_buffer(flush_limit)
+        if num_samples is not None and total_examples >= num_samples:
+            break
+
+    if buffer and (num_samples is None or total_examples < num_samples):
+        remaining = num_samples - total_examples if num_samples is not None else None
+        flush_buffer(remaining)
+
+    if total_examples == 0:
+        raise RuntimeError("No samples left after applying stride for wiki evaluation.")
+
+    mean_log_prob = total_logprob / total_examples
     metadata = {
-        "num_samples": len(pairs),
+        "num_samples": total_examples,
         "stride": stride,
         "start_index": start_index,
         "question_length": question_length,
@@ -1794,6 +1830,18 @@ def main():
         help="Run directory containing adapter_* folders (for --all_adapters)"
     )
     parser.add_argument(
+        "--adapter_metadata_dir",
+        type=str,
+        default=None,
+        help="Directory to write eval metadata when no adapter directory is available",
+    )
+    parser.add_argument(
+        "--adapter_metadata_name",
+        type=str,
+        default=None,
+        help="Adapter name to store in metadata when overriding the output directory",
+    )
+    parser.add_argument(
         "--arc_subset",
         type=str,
         choices=["ARC-Challenge", "ARC-Easy"],
@@ -1908,6 +1956,12 @@ def main():
     for checkpoint_path in model_paths:
         adapter_dir: Optional[str] = None
         adapter_name: Optional[str] = None
+        run_dir: Optional[str] = None
+
+        wiki_mode = is_wiki_task(args.task_type)
+        effective_num_samples = args.num_samples
+        if wiki_mode and effective_num_samples is None:
+            effective_num_samples = DEFAULT_WIKI_NUM_SAMPLES
 
         if checkpoint_path and os.path.isdir(checkpoint_path):
             basename = os.path.basename(checkpoint_path)
@@ -2011,10 +2065,8 @@ def main():
                 raise FileNotFoundError(f"No data found for task {task_type}")
             return data, meta
         
-        wiki_mode = is_wiki_task(args.task_type)
-        effective_num_samples = args.num_samples
-        if wiki_mode and effective_num_samples is None:
-            effective_num_samples = DEFAULT_WIKI_NUM_SAMPLES
+        # ensure wiki defaults set even for base model path
+        # (already done above, but keep comment for clarity)
         if wiki_mode:
             test_data: List[Tuple[str, str]] = []
             dataset_meta: Dict[str, Any] = {}
@@ -2095,6 +2147,7 @@ def main():
                 hyperparameters=hyperparameters,
                 num_samples=effective_num_samples,
                 stride=args.stride or 1,
+                batch_size=eval_bs,
             )
             results = []
             num_examples = wiki_metadata.get("num_samples", 0)
@@ -2148,13 +2201,18 @@ def main():
         
         colored_print("Results", f"Appended to {results_file}", Colors.CYAN)
         
-        if adapter_dir:
+        metadata_target_dir = adapter_dir or args.adapter_metadata_dir
+        if metadata_target_dir:
+            os.makedirs(metadata_target_dir, exist_ok=True)
             reported_stride = (wiki_metadata or {}).get("stride")
             if reported_stride is None:
                 reported_stride = args.stride if args.stride else 1
+            evaluation_num_samples = (
+                num_examples if wiki_mode else (args.num_samples or num_examples)
+            )
             evaluation_info: Dict[str, Any] = {
-                "batch_size": None if wiki_mode else eval_bs,
-                "num_samples": num_examples if wiki_mode else args.num_samples,
+                "batch_size": eval_bs,
+                "num_samples": evaluation_num_samples,
                 "stride": reported_stride,
                 "answer_extraction_method": None if wiki_mode else args.answer_extraction_method,
                 "haiku_metric": args.haiku_metric,
@@ -2169,7 +2227,9 @@ def main():
                 )
             
             metadata: Dict[str, Any] = {
-                "adapter_name": adapter_name or os.path.basename(adapter_dir),
+                "adapter_name": adapter_name
+                or args.adapter_metadata_name
+                or os.path.basename(os.path.normpath(metadata_target_dir)),
                 "task_type": args.task_type,
                 "model_type": args.model_type,
                 "model_path": checkpoint_path,
@@ -2182,17 +2242,19 @@ def main():
             if haiku_metrics is not None:
                 metadata["haiku_metrics"] = haiku_metrics
 
-            if run_dir:
+            if adapter_dir and run_dir:
                 try:
                     metadata["adapter_dir"] = os.path.relpath(adapter_dir, run_dir)
                 except ValueError:
                     metadata["adapter_dir"] = adapter_dir
-            else:
+            elif adapter_dir:
                 metadata["adapter_dir"] = adapter_dir
+            else:
+                metadata["adapter_dir"] = metadata_target_dir
 
             if results_file:
                 try:
-                    if run_dir:
+                    if adapter_dir and run_dir:
                         metadata["results_file"] = os.path.relpath(results_file, run_dir)
                     else:
                         metadata["results_file"] = results_file
@@ -2200,9 +2262,14 @@ def main():
                     metadata["results_file"] = results_file
 
             stride_to_store = args.stride if args.stride else 1
-            metadata_path = write_adapter_metadata(adapter_dir, metadata, stride_to_store)
+            metadata_path = write_adapter_metadata(metadata_target_dir, metadata, stride_to_store)
             colored_print("Metadata", f"Wrote adapter metadata to {metadata_path}", Colors.CYAN)
-            upload_metadata_file(metadata_path, run_dir, metadata_bucket, metadata_sync_enabled)
+            upload_metadata_file(
+                metadata_path,
+                (run_dir or metadata_target_dir),
+                metadata_bucket,
+                metadata_sync_enabled,
+            )
 
 
 if __name__ == "__main__":

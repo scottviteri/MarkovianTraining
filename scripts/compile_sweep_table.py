@@ -453,6 +453,10 @@ def evaluate_single_adapter(
     ]
     if is_baseline:
         cmd.append("--use_base_model")
+        if adapter_dir:
+            cmd.extend(["--adapter_metadata_dir", adapter_dir])
+        if adapter_name:
+            cmd.extend(["--adapter_metadata_name", adapter_name])
     else:
         cmd.extend(["--model_path", adapter_dir])
     if model_type:
@@ -463,6 +467,8 @@ def evaluate_single_adapter(
         cmd.extend(["--stride", str(args.stride)])
     if args.batch_size:
         cmd.extend(["--batch_size", str(args.batch_size)])
+    if args.force_eval:
+        cmd.append("--force_eval")
     if enable_s3_sync and s3_bucket:
         cmd.append("--sync_metadata")
         cmd.extend(["--s3_bucket", s3_bucket])
@@ -506,6 +512,10 @@ def process_adapter_tasks(adapter_tasks, args, project_root, enable_s3_sync, s3_
         if enable_s3_sync:
             remote_ready = adapter_metadata_exists_on_s3(adapter_dir, project_root, s3_bucket)
 
+        if args.force_eval:
+            local_ready = False
+            remote_ready = False
+
         if local_ready and enable_s3_sync and not remote_ready:
             if push_adapter_metadata(adapter_dir, project_root, enable_s3_sync, s3_bucket):
                 uploaded_to_s3 += 1
@@ -513,15 +523,15 @@ def process_adapter_tasks(adapter_tasks, args, project_root, enable_s3_sync, s3_
 
         if remote_ready and not local_ready and enable_s3_sync:
             if pull_adapter_metadata(adapter_dir, project_root, enable_s3_sync, s3_bucket):
-                if adapter_metadata_ready(adapter_dir, required_stride, dataset_num_samples):
+                if adapter_metadata_ready(adapter_dir, required_stride, dataset_num_samples) and not args.force_eval:
                     reused_from_s3 += 1
                     print(f"Reused metadata from S3 for {task_label}; skipping evaluation.")
                     continue
 
-        if adapter_metadata_ready(adapter_dir, required_stride, dataset_num_samples):
+        if not args.force_eval and adapter_metadata_ready(adapter_dir, required_stride, dataset_num_samples):
             continue
 
-        if remote_ready and not enable_s3_sync:
+        if remote_ready and not enable_s3_sync and not args.force_eval:
             continue
 
         if args.dry_run or args.skip_eval:
@@ -576,7 +586,7 @@ def get_baseline_score(
     required_num_samples = resolve_required_num_samples(dataset, args)
     existing_entries, _ = collect_adapter_metadata([baseline_dir], required_stride, required_num_samples)
     baseline_meta = select_metadata_for_stride(existing_entries, required_stride, required_num_samples)
-    if baseline_meta:
+    if baseline_meta and not args.force_eval:
         acc = baseline_meta.get("accuracy")
         if isinstance(acc, (int, float)):
             return acc
@@ -597,6 +607,8 @@ def get_baseline_score(
             cmd.extend(["--stride", str(args.stride)])
         if args.batch_size:
             cmd.extend(["--batch_size", str(args.batch_size)])
+        if args.force_eval:
+            cmd.append("--force_eval")
         if enable_s3 and s3_bucket:
             cmd.append("--sync_metadata")
             cmd.extend(["--s3_bucket", s3_bucket])
@@ -750,6 +762,7 @@ def main():
     parser.add_argument("--stride", type=int, default=1, help="Evaluate every nth example (1 = full test set)")
     parser.add_argument("--dry_run", action="store_true", help="Simulate the sweep without writing files or syncing to S3")
     parser.add_argument("--skip_eval", action="store_true", help="Do not launch new evaluations; rely solely on existing metadata")
+    parser.add_argument("--force_eval", action="store_true", help="Re-run evaluations even if metadata already exists")
     parser.add_argument("--task_type", type=str, default=None, help="Only process a specific task/dataset (e.g. gsm8k)")
     parser.add_argument("--method", type=str, default=None, help="Only process a specific method/hyperparameter (e.g. PPO, EI, Markovian)")
     parser.add_argument("--batch_size", type=int, default=None, help="Batch size for evaluation")
