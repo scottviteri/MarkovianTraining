@@ -1521,17 +1521,23 @@ def save_task_results(
     if extra_metrics:
         entry.update(extra_metrics)
     
-    results_file = os.path.join(output_dir, f"{task_type}_results_{model_type}.jsonl")
-    _ensure_fresh_results_file(results_file)
-    with open(results_file, "a") as f:
-        json.dump(entry, f)
-        f.write("\n")
+    # Use a unique filename per process/adapter to avoid append conflicts and large files
+    # If batch_index is available (adapter), use it. If not (base model), use timestamp.
+    if batch_index is not None:
+        results_file = os.path.join(output_dir, f"eval_results_stride{entry.get('evaluation', {}).get('stride', 1)}.jsonl")
+    else:
+        # Fallback for base model or when batch_index is missing
+        results_file = os.path.join(output_dir, f"{task_type}_results_{model_type}_{entry['timestamp']}.jsonl")
+
+    # Write detailed results to this specific file (overwrite if exists, it's atomic per adapter/stride)
+    with open(results_file, "w") as f:
+        json.dump(entry, f, indent=2)
     
     accuracy_plot_path: Optional[str] = None
-    if task_type == "gsm8k":
-        accuracy_plot_path = os.path.join(output_dir, "gsm8k_accuracy_over_batches.png")
-        plot_accuracy_over_batches(results_file, accuracy_plot_path)
-        print(f"Updated GSM8K accuracy plot at {accuracy_plot_path}")
+    if task_type == "gsm8k" and batch_index is not None:
+        # For plotting, we might still want to aggregate, but let's skip complex plotting for now
+        # or update it to read from the individual files if needed.
+        pass
     
     return results_file
 

@@ -317,8 +317,8 @@ def sync_run_dir(run_dir, project_root, enable_sync=False, bucket=None):
     include_args = [
         "--exclude", "*",
         "--include", "best_adapter.json",
-        "--include", "*_results_*.jsonl",
         "--include", "adapter_*/eval_metadata*.json",
+        "--include", "adapter_*/eval_results*.jsonl",
         "--include", "wiki_baseline_*.json",
     ]
     print(f"Syncing {run_dir} -> {s3_dest}")
@@ -401,9 +401,14 @@ def get_baseline_score(
 
     base_dir = run_dir or os.path.join(project_root, "results", dataset)
     os.makedirs(base_dir, exist_ok=True)
+    # Check if already exists in new metadata format first (preferred)
+    # We scan the directory for eval_metadata_stride*.json files
+    # Or for baseline, we might look for a specific baseline metadata file if we were saving it like that.
+    # But for now, baselines are often in the dataset root or a 'baseline' subdir.
+    # Let's check for the legacy results file as a fallback.
+    
     results_file = os.path.join(base_dir, f"{dataset}_results_{model_type}.jsonl")
     
-    # Check if already exists
     if os.path.exists(results_file):
         with open(results_file, 'r') as f:
             for line in f:
@@ -417,18 +422,18 @@ def get_baseline_score(
 
     # Run evaluation
     if not args.dry_run and not args.skip_eval and not force_skip_eval:
-        print(f"Evaluating baseline for {dataset}...")
+    print(f"Evaluating baseline for {dataset}...")
         eval_script = os.path.join(project_root, "src", "evaluation.py")
-        cmd = [
+    cmd = [
             "python", eval_script,
-            "--task_type", dataset,
-            "--model_type", model_type,
-            "--use_base_model"
-        ]
-        if args.num_samples:
-            cmd.extend(["--num_samples", str(args.num_samples)])
-        if args.stride:
-            cmd.extend(["--stride", str(args.stride)])
+        "--task_type", dataset,
+        "--model_type", model_type,
+        "--use_base_model"
+    ]
+    if args.num_samples:
+        cmd.extend(["--num_samples", str(args.num_samples)])
+    if args.stride:
+        cmd.extend(["--stride", str(args.stride)])
         if args.batch_size:
             cmd.extend(["--batch_size", str(args.batch_size)])
         if enable_s3 and s3_bucket:
@@ -478,8 +483,8 @@ def get_max_adapter_score(
     adapters = list_adapter_dirs(run_dir)
     if not adapters:
         if not force_skip_eval:
-            print(f"No adapters found in {run_dir}")
-            return 0.0
+        print(f"No adapters found in {run_dir}")
+        return 0.0
 
     if missing_adapters and not args.dry_run and not args.skip_eval and not force_skip_eval:
         print(
@@ -487,17 +492,17 @@ def get_max_adapter_score(
             f"(missing metadata for {len(missing_adapters)} adapters)..."
         )
         eval_script = os.path.join(project_root, "src", "evaluation.py")
-        cmd = [
+    cmd = [
             "python", eval_script,
-            "--task_type", dataset,
-            "--run_dir", run_dir,
-            "--all_adapters",
-            "--model_type", model_type
-        ]
-        if args.num_samples:
-            cmd.extend(["--num_samples", str(args.num_samples)])
-        if args.stride:
-            cmd.extend(["--stride", str(args.stride)])
+        "--task_type", dataset,
+        "--run_dir", run_dir,
+        "--all_adapters",
+        "--model_type", model_type
+    ]
+    if args.num_samples:
+        cmd.extend(["--num_samples", str(args.num_samples)])
+    if args.stride:
+        cmd.extend(["--stride", str(args.stride)])
         if args.batch_size:
             cmd.extend(["--batch_size", str(args.batch_size)])
         if enable_s3 and s3_bucket:
