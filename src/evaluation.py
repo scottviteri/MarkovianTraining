@@ -2079,7 +2079,10 @@ def main():
             colored_print("Haiku Metric", f"Accuracy: {haiku_metrics['accuracy']:.2%} | Cost: ${haiku_metrics['cost_usd']:.4f}", Colors.CYAN)
         
         # Print results
-        colored_print(f"{args.task_type.upper()} Accuracy", f"{accuracy:.2%}", Colors.GREEN if accuracy > 0.5 else Colors.YELLOW)
+        if wiki_mode:
+            colored_print(f"{args.task_type.upper()} Mean LogProb", f"{accuracy:.4f}", Colors.CYAN)
+        else:
+            colored_print(f"{args.task_type.upper()} Accuracy", f"{accuracy:.2%}", Colors.GREEN if accuracy > 0.5 else Colors.YELLOW)
         
         # Save results
         model_dir = os.path.dirname(checkpoint_path) if checkpoint_path else f"results/{args.task_type}"
