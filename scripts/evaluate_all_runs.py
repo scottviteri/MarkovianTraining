@@ -123,23 +123,46 @@ def evaluate_checkpoint(task_type: str, checkpoint_path: str) -> Dict:
                 if match:
                     haiku_accuracy = float(match.group(1)) / 100
         
-        # Also check results file
-        run_dir = os.path.dirname(checkpoint_path)
-        results_file = os.path.join(run_dir, f"{task_type}_results_llama.jsonl")
-        
-        if os.path.exists(results_file):
-            # Read last line
-            with open(results_file, 'r') as f:
-                lines = f.readlines()
-                if lines:
-                    try:
+        # Also check adapter-level metadata/results if available
+        run_dir = os.path.dirname(checkpoint_path) if checkpoint_path else None
+        adapter_dir = Path(checkpoint_path) if checkpoint_path and os.path.isdir(checkpoint_path) else None
+
+        def maybe_extract_from_metadata(meta_path: str):
+            nonlocal accuracy, haiku_accuracy
+            try:
+                with open(meta_path, "r") as f:
+                    data = json.load(f)
+                if accuracy is None:
+                    accuracy = data.get("accuracy")
+                if haiku_accuracy is None:
+                    haiku = data.get("haiku_metrics")
+                    if isinstance(haiku, dict):
+                        haiku_accuracy = haiku.get("accuracy")
+            except Exception:
+                pass
+
+        if adapter_dir:
+            metadata_files = sorted(adapter_dir.glob("eval_metadata*.json"))
+            for meta_file in metadata_files:
+                maybe_extract_from_metadata(str(meta_file))
+                if accuracy is not None:
+                    break
+
+        # Fallback to legacy shared results file if it exists
+        if run_dir and accuracy is None:
+            legacy_file = os.path.join(run_dir, f"{task_type}_results_llama.jsonl")
+            if os.path.exists(legacy_file):
+                try:
+                    with open(legacy_file, "r") as f:
+                        lines = f.readlines()
+                    if lines:
                         last_result = json.loads(lines[-1])
                         if accuracy is None:
                             accuracy = last_result.get("accuracy")
                         if haiku_accuracy is None:
                             haiku_accuracy = last_result.get("haiku_accuracy")
-                    except:
-                        pass
+                except Exception:
+                    pass
         
         return {
             "success": result.returncode == 0,

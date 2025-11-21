@@ -106,7 +106,7 @@ def find_answer_start_position(input_ids, model_type):
 
 
 def calculate_answer_log_probs(
-    frozen_model,
+    model,
     tokenizer,
     device,
     questions,
@@ -118,7 +118,7 @@ def calculate_answer_log_probs(
     """Calculate the log probabilities of the answers given the reasoning.
 
     Args:
-        frozen_model: The critic model (frozen)
+        model: The model to calculate log probs with (actor or critic)
         tokenizer: Tokenizer for the model
         device: The device to run on
         questions: List of question strings
@@ -166,7 +166,7 @@ def calculate_answer_log_probs(
         # Generate answer tokens
         max_answer_length = 15
         with torch.no_grad():
-            generated_outputs = frozen_model.generate(
+            generated_outputs = model.generate(
                 input_ids=partial_prompt_tokens.input_ids,
                 attention_mask=partial_prompt_tokens.attention_mask,
                 max_new_tokens=max_answer_length,
@@ -203,7 +203,7 @@ def calculate_answer_log_probs(
 
     # Calculate log probabilities
     with torch.no_grad():
-        model_logits = frozen_model(
+        model_logits = model(
             input_ids=full_prompt_tokens.input_ids,
             attention_mask=full_prompt_tokens.attention_mask,
         ).logits
@@ -299,12 +299,12 @@ def load_wiki_pairs(
     start_index: int = 10000,
     skip_range: Optional[Tuple[int, int]] = (15200, 22400),
 ):
-    """Load fresh (context, continuation) pairs from Wikipedia, mirroring training rules."""
+    """Yield fresh (context, continuation) pairs from Wikipedia, mirroring training rules."""
     wiki_dataset = load_dataset("wikimedia/wikipedia", "20231101.en", split="train")
-    qa_pairs = []
+    produced = 0
     idx = max(0, start_index)
     skip_start, skip_end = skip_range if skip_range else (None, None)
-    while len(qa_pairs) < num_samples and idx < len(wiki_dataset):
+    while produced < num_samples and idx < len(wiki_dataset):
         if skip_start is not None and skip_end is not None and skip_start <= idx < skip_end:
             idx = skip_end
             continue
@@ -323,8 +323,59 @@ def load_wiki_pairs(
         target, _ = get_text_with_token_length(remaining, target_length, tokenizer)
         if target is None:
             continue
-        qa_pairs.append((context, target))
-    return qa_pairs[:num_samples]
+        produced += 1
+        yield (context, target)
+
+
+def generate_actor_reasoning(
+    actor_model: nn.Module,
+    tokenizer,
+    device: torch.device,
+    questions: List[str],
+    hyperparameters: Dict[str, Any],
+) -> List[str]:
+    """Generate Chain-of-Thought sequences using the actor model (stage 1).
+    
+    Always samples with temperature and produces exactly `cot_length` tokens
+    (max_new_tokens == min_new_tokens == cot_length).
+    """
+    if not questions:
+        return []
+    
+    reasoning_prompts = [
+        construct_prompts(question=q, hyperparameters=hyperparameters)
+        for q in questions
+    ]
+    
+    inputs = tokenizer(
+        reasoning_prompts,
+        return_tensors="pt",
+        padding=True,
+    ).to(device)
+    
+    cot_length = int(hyperparameters.get("cot_length", 100))
+    temperature = float(hyperparameters.get("temperature", 1.0))
+    
+    generation_kwargs = dict(
+        input_ids=inputs.input_ids,
+        attention_mask=inputs.attention_mask,
+        max_new_tokens=cot_length,
+        min_new_tokens=cot_length,
+        do_sample=True,
+        temperature=temperature,
+        top_k=None,
+        top_p=None,
+        pad_token_id=tokenizer.pad_token_id,
+    )
+    
+    with torch.no_grad():
+        reasoning_outputs = actor_model.generate(**generation_kwargs)
+    
+    cot_texts = tokenizer.batch_decode(
+        reasoning_outputs[:, inputs.input_ids.shape[1]:],
+        skip_special_tokens=True,
+    )
+    return cot_texts
 
 
 def compute_wiki_logprob(
@@ -344,12 +395,14 @@ def compute_wiki_logprob(
     target_length = int(target_length or hyperparameters.get("target_length", 128))
     stride = max(1, int(stride))
     requested = num_samples * stride if num_samples else 256 * stride
-    pairs = load_wiki_pairs(
-        tokenizer,
-        question_length,
-        target_length,
-        requested,
-        start_index=start_index,
+    pairs = list(
+        load_wiki_pairs(
+            tokenizer,
+            question_length,
+            target_length,
+            requested,
+            start_index=start_index,
+        )
     )
     if not pairs:
         raise RuntimeError("No Wikipedia samples available for evaluation.")
@@ -359,22 +412,35 @@ def compute_wiki_logprob(
     if not pairs:
         raise RuntimeError("No samples left after applying stride for wiki evaluation.")
     questions, answers = zip(*pairs)
-    reasoning = [""] * len(pairs)
+    
+    reasoning = generate_actor_reasoning(
+        actor_model=model,
+        tokenizer=tokenizer,
+        device=device,
+        questions=list(questions),
+        hyperparameters=hyperparameters,
+    )
+    
     eval_hyper = {
         **hyperparameters,
         "task_type": hyperparameters.get("task_type", "wiki_continuation"),
-        "markovian": False,
     }
+    
+    # Respect markovian flag from hyperparameters if present, else default to True (Markovian evaluation)
+    # If Markovian, we want P(Answer | CoT). If Non-Markovian, P(Answer | Question, CoT).
+    markovian = eval_hyper.get("markovian", True)
+    include_question = not markovian
+    
     model.eval()
     log_probs, _, _ = calculate_answer_log_probs(
-        frozen_model=model,
+        model=model,
         tokenizer=tokenizer,
         device=device,
         questions=list(questions),
         reasoning=reasoning,
         answers=list(answers),
         hyperparameters=eval_hyper,
-        include_question=True,
+        include_question=include_question,
     )
     mean_log_prob = float(log_probs.mean().item())
     metadata = {
@@ -1016,33 +1082,12 @@ def evaluate_model_generic(
             cot_texts = precomputed_cots[i:i+batch_size]
         else:
             # Stage 1: Generate CoT with actor model
-            reasoning_prompts = [
-                construct_prompts(question=q, hyperparameters=hyperparameters)
-                for q in questions
-            ]
-            
-            inputs = tokenizer(
-                reasoning_prompts,
-                return_tensors="pt",
-                padding=True,
-            ).to(device)
-            
-            with torch.no_grad():
-                reasoning_outputs = actor_model.generate(
-                    input_ids=inputs.input_ids,
-                    attention_mask=inputs.attention_mask,
-                    max_new_tokens=hyperparameters.get("cot_length", 100),
-                    min_new_tokens=hyperparameters.get("cot_length", 100),
-                    do_sample=True,
-                    temperature=hyperparameters.get("temperature", 1.0),
-                    top_k=None,
-                    top_p=None,
-                    pad_token_id=tokenizer.pad_token_id,
-                )
-            
-            cot_texts = tokenizer.batch_decode(
-                reasoning_outputs[:, inputs.input_ids.shape[1]:], 
-                skip_special_tokens=True
+            cot_texts = generate_actor_reasoning(
+                actor_model=actor_model,
+                tokenizer=tokenizer,
+                device=device,
+                questions=list(questions),
+                hyperparameters=hyperparameters,
             )
         
         # Apply perturbation if requested

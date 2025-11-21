@@ -13,7 +13,6 @@ from evaluation import calculate_answer_log_probs
 from typing import Optional
 from utils import find_latest_result, print_debug_info
 from utils import (
-    construct_prompts, 
     get_text_with_token_length,
     load_gsm8k_dataset,
     load_math_dataset,
@@ -33,6 +32,7 @@ from evaluation import (
     evaluate_model_on_mathqa,
     evaluate_model_on_numeric,
     load_wiki_pairs,
+    generate_actor_reasoning,
 )
 from tqdm import tqdm
 import string
@@ -578,7 +578,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
 
         # Calculate Original log probs for Actor
         actor_log_prob, _ = calculate_answer_log_probs(
-            frozen_model=eval_model,
+            model=eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=[question],
@@ -593,7 +593,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
         # 1. Critic (if include_question=False)
         # 2. Actor with question (if include_question=True)
         comparison_log_prob, _ = calculate_answer_log_probs(
-            frozen_model=eval_model,
+            model=eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=[question],
@@ -612,7 +612,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
             # Perturb Actor CoT (always without question)
             perturbed_actor_CoT = perturb_CoT(actor_CoT, pert_config)
             actor_perturbed_log_prob, _ = calculate_answer_log_probs(
-                frozen_model=eval_model,
+                model=eval_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=[question],
@@ -626,7 +626,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
             # Perturb comparison CoT (either critic or actor-with-question)
             perturbed_critic_CoT = perturb_CoT(critic_CoT, pert_config) if not include_question else None
             comparison_perturbed_log_prob, _ = calculate_answer_log_probs(
-                frozen_model=eval_model,
+                model=eval_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=[question],
@@ -773,7 +773,7 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
         
         # Calculate Original log probs for Actor (all without question)
         actor_log_probs, _ = calculate_answer_log_probs(
-            frozen_model=eval_model,
+            model=eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=batch_questions,
@@ -790,7 +790,7 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
         # Calculate log probs for comparison (either critic or actor with question)
         comparison_reasoning = batch_actor_CoTs if include_question else batch_critic_CoTs
         comparison_log_probs, _ = calculate_answer_log_probs(
-            frozen_model=eval_model,
+            model=eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=batch_questions,
@@ -814,7 +814,7 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
             
             # Calculate perturbed actor log probs (without question)
             actor_perturbed_log_probs, _ = calculate_answer_log_probs(
-                frozen_model=frozen_model,
+                model=frozen_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=batch_questions,
@@ -838,7 +838,7 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
             
             # Calculate perturbed comparison log probs
             comparison_perturbed_log_probs, _ = calculate_answer_log_probs(
-                frozen_model=frozen_model,
+                model=frozen_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=batch_questions,
@@ -1509,7 +1509,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
         # Calculate original log probs for both models
         # Markovian: without question, using trained Markovian model
         markovian_original_logprobs, _ = calculate_answer_log_probs(
-            frozen_model=markovian_eval_model,
+            model=markovian_eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=questions,
@@ -1521,7 +1521,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
         
         # Non-Markovian: with question, using trained Non-Markovian model
         non_markovian_original_logprobs, _ = calculate_answer_log_probs(
-            frozen_model=non_markovian_eval_model,
+            model=non_markovian_eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=questions,
@@ -1543,7 +1543,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
             # Calculate perturbed log probs
             # Markovian: without question, using trained Markovian model
             markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
-                frozen_model=markovian_eval_model,
+                model=markovian_eval_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=questions,
@@ -1555,7 +1555,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
             
             # Non-Markovian: with question, using trained Non-Markovian model
             non_markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
-                frozen_model=non_markovian_eval_model,
+                model=non_markovian_eval_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=questions,
@@ -1595,31 +1595,14 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
 
 
 def _generate_actor_cots_for_questions(model, tokenizer, device, questions, hyperparameters):
-    """Generate actor chain-of-thought texts for a batch of questions using model.generate."""
-    prompts = [
-        construct_prompts(
-            question=q,
-            hyperparameters=hyperparameters,
-        )
-        for q in questions
-    ]
-    tokenized_inputs = tokenizer(prompts, padding=True, return_tensors="pt").to(device)
-    with torch.no_grad():
-        outputs = model.generate(
-            input_ids=tokenized_inputs.input_ids,
-            attention_mask=tokenized_inputs.attention_mask,
-            max_new_tokens=int(hyperparameters.get("cot_length", 50)),
-            min_new_tokens=int(hyperparameters.get("cot_length", 50)),
-            do_sample=True,
-            temperature=float(hyperparameters.get("temperature", 0.7)),
-            top_k=None,
-            top_p=None,
-            pad_token_id=tokenizer.pad_token_id,
-        )
-    cot_texts = tokenizer.batch_decode(
-        outputs[:, tokenized_inputs.input_ids.shape[1]:], skip_special_tokens=True
+    """Generate actor chain-of-thought texts for a batch of questions using shared helper."""
+    return generate_actor_reasoning(
+        actor_model=model,
+        tokenizer=tokenizer,
+        device=device,
+        questions=list(questions),
+        hyperparameters=hyperparameters,
     )
-    return cot_texts
 
 
 def run_markovian_comparison_fresh(
@@ -1678,7 +1661,7 @@ def run_markovian_comparison_fresh(
     # Prepare fresh dataset QA pairs
     q_len = int(markovian_hyperparams.get("question_length", 512))
     t_len = int(markovian_hyperparams.get("target_length", 128))
-    qa_pairs = load_wiki_pairs(tokenizer, q_len, t_len, num_samples, start_index=10000)
+    qa_pairs = list(load_wiki_pairs(tokenizer, q_len, t_len, num_samples, start_index=10000))
     if not qa_pairs:
         raise RuntimeError("No suitable wiki samples found for fresh comparison.")
 
@@ -1708,7 +1691,7 @@ def run_markovian_comparison_fresh(
 
         # Original log probs
         markovian_original_logprobs, _ = calculate_answer_log_probs(
-            frozen_model=markovian_eval_model,
+            model=markovian_eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=list(questions),
@@ -1718,7 +1701,7 @@ def run_markovian_comparison_fresh(
             include_question=False,
         )
         non_markovian_original_logprobs, _ = calculate_answer_log_probs(
-            frozen_model=non_markovian_eval_model,
+            model=non_markovian_eval_model,
             tokenizer=tokenizer,
             device=device,
             questions=list(questions),
@@ -1736,7 +1719,7 @@ def run_markovian_comparison_fresh(
             perturbed_non_markovian_cots = [perturb_CoT(cot, pert_config) for cot in actor_cots_non_markovian]
 
             markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
-                frozen_model=markovian_eval_model,
+                model=markovian_eval_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=list(questions),
@@ -1746,7 +1729,7 @@ def run_markovian_comparison_fresh(
                 include_question=False,
             )
             non_markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
-                frozen_model=non_markovian_eval_model,
+                model=non_markovian_eval_model,
                 tokenizer=tokenizer,
                 device=device,
                 questions=list(questions),

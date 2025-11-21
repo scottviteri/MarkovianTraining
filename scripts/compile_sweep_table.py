@@ -3,33 +3,20 @@ import glob
 import json
 import argparse
 import subprocess
-import math
 import random
 import datetime
 import re
-import sys
 from collections import defaultdict
 
 import pandas as pd
-import torch
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "src"))
-
-from src.utils import load_model_for_evaluation
-from src.evaluation import compute_wiki_logprob, write_adapter_metadata
 
 
 DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET", "s3://scottviteri")
 METADATA_PATTERN = re.compile(r"eval_metadata(?:_stride(\d+))?\.json$")
 _S3_WARNING_PRINTED = False
-WIKI_DEFAULT_NUM_SAMPLES = 256
-WIKI_DEFAULT_START_INDEX = 10000
-WIKI_DEFAULT_QUESTION_LENGTH = 512
-WIKI_DEFAULT_TARGET_LENGTH = 128
 
 def parse_run_dir(run_dir):
     """
@@ -156,94 +143,6 @@ def collect_adapter_metadata(adapter_dirs, required_stride):
 
 
 
-def read_run_hyperparameters(run_dir, default_task=None):
-    log_file = os.path.join(run_dir, "log.jsonl")
-    if not os.path.exists(log_file):
-        return None
-    try:
-        with open(log_file, "r") as f:
-            first_line = f.readline()
-            if not first_line:
-                return None
-            data = json.loads(first_line)
-            if default_task:
-                data.setdefault("task_type", default_task)
-            return data
-    except Exception:
-        return None
-
-
-def find_wiki_metadata_entry(adapter_dir, dataset, required_stride=1):
-    entries, _ = collect_adapter_metadata([adapter_dir], required_stride)
-    for entry in entries:
-        if entry.get("task_type") != dataset:
-            continue
-        if entry.get("metric") != "wiki_log_prob":
-            continue
-        return entry
-    return None
-
-
-def evaluate_wiki_adapter(adapter_dir, run_dir, dataset, model_type, args, project_root, enable_s3=False, s3_bucket=None):
-    required_stride = args.stride if args.stride else 1
-    existing = find_wiki_metadata_entry(adapter_dir, dataset, required_stride=required_stride)
-    if existing:
-        return existing.get("accuracy", existing.get("average_log_prob", 0.0))
-    hyper = read_run_hyperparameters(run_dir, default_task=dataset)
-    if hyper is None:
-        hyper = {
-            "task_type": dataset,
-            "question_length": WIKI_DEFAULT_QUESTION_LENGTH,
-            "target_length": WIKI_DEFAULT_TARGET_LENGTH,
-        }
-    try:
-        actor_model, _, tokenizer, device = load_model_for_evaluation(
-            model_path=adapter_dir,
-            model_type=model_type,
-        )
-        mean_log_prob, eval_meta = compute_wiki_logprob(
-            actor_model,
-            tokenizer,
-            device,
-            hyper,
-            num_samples=WIKI_DEFAULT_NUM_SAMPLES,
-            stride=required_stride,
-            start_index=WIKI_DEFAULT_START_INDEX,
-            question_length=hyper.get("question_length"),
-            target_length=hyper.get("target_length"),
-        )
-    finally:
-        del actor_model
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    metadata = {
-        "adapter_name": os.path.basename(adapter_dir),
-        "task_type": dataset,
-        "model_type": model_type,
-        "model_path": adapter_dir,
-        "accuracy": mean_log_prob,
-        "metric": "wiki_log_prob",
-        "num_examples": eval_meta["num_samples"],
-        "timestamp": datetime.datetime.now().isoformat(),
-        "evaluation": eval_meta,
-    }
-    write_adapter_metadata(adapter_dir, metadata, eval_meta["stride"])
-    sync_run_dir(run_dir, project_root, enable_s3, s3_bucket)
-    return mean_log_prob
-
-
-def get_wiki_run_score(run_dir, dataset, model_type, args, project_root, enable_s3=False, s3_bucket=None):
-    adapters = list_adapter_dirs(run_dir)
-    if not adapters:
-        return 0.0
-    best_score = float("-inf")
-    for adapter_dir in adapters:
-        score = evaluate_wiki_adapter(adapter_dir, run_dir, dataset, model_type, args, project_root, enable_s3, s3_bucket)
-        if score is not None and score > best_score:
-            best_score = score
-    if best_score == float("-inf"):
-        return 0.0
-    return best_score
 
 
 def detect_model_type_from_metadata(metadata_entries):
@@ -317,9 +216,8 @@ def sync_run_dir(run_dir, project_root, enable_sync=False, bucket=None):
     include_args = [
         "--exclude", "*",
         "--include", "best_adapter.json",
-        "--include", "*_results_*.jsonl",
         "--include", "adapter_*/eval_metadata*.json",
-        "--include", "wiki_baseline_*.json",
+        "--include", "adapter_*/eval_results*.jsonl",
     ]
     print(f"Syncing {run_dir} -> {s3_dest}")
     try:
@@ -334,51 +232,36 @@ def sync_run_dir(run_dir, project_root, enable_sync=False, bucket=None):
     except subprocess.CalledProcessError as e:
         print(f"Error syncing to S3: {e}")
 
-def get_wiki_baseline_score(dataset, model_type, args, project_root, enable_s3=False, s3_bucket=None):
-    results_dir = os.path.join(project_root, "results", dataset)
-    baseline_dir = os.path.join(results_dir, "baseline")
-    os.makedirs(baseline_dir, exist_ok=True)
-    existing = find_wiki_metadata_entry(baseline_dir, dataset, required_stride=args.stride or 1)
-    if existing:
-        return existing.get("accuracy", existing.get("average_log_prob", 0.0))
-    try:
-        base_model, _, tokenizer, device = load_model_for_evaluation(
-            use_base_model=True,
-            model_type=model_type,
-        )
-        hyper = {
-            "task_type": dataset,
-            "question_length": WIKI_DEFAULT_QUESTION_LENGTH,
-            "target_length": WIKI_DEFAULT_TARGET_LENGTH,
-        }
-        mean_log_prob, eval_meta = compute_wiki_logprob(
-            base_model,
-            tokenizer,
-            device,
-            hyper,
-            num_samples=WIKI_DEFAULT_NUM_SAMPLES,
-            stride=args.stride or 1,
-            start_index=WIKI_DEFAULT_START_INDEX,
-        )
-    finally:
-        del base_model
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    metadata = {
-        "adapter_name": "baseline",
-        "task_type": dataset,
-        "model_type": model_type,
-        "model_path": None,
-        "accuracy": mean_log_prob,
-        "metric": "wiki_log_prob",
-        "num_examples": eval_meta["num_samples"],
-        "timestamp": datetime.datetime.now().isoformat(),
-        "evaluation": eval_meta,
-    }
-    write_adapter_metadata(baseline_dir, metadata, eval_meta["stride"])
-    sync_run_dir(baseline_dir, project_root, enable_s3, s3_bucket)
-    return mean_log_prob
 
+def pull_run_metadata(run_dir, project_root, enable_sync=False, bucket=None):
+    if not enable_sync:
+        return
+
+    bucket = bucket or DEFAULT_S3_BUCKET
+    if not bucket:
+        return
+
+    rel_path = safe_relpath(run_dir, project_root).replace("\\", "/")
+    s3_src = f"{bucket.rstrip('/')}/{rel_path}"
+    if s3_src.startswith("s3:/") and not s3_src.startswith("s3://"):
+        s3_src = s3_src.replace("s3:/", "s3://", 1)
+
+    include_args = [
+        "--exclude", "*",
+        "--include", "best_adapter.json",
+        "--include", "adapter_*/eval_metadata*.json",
+        "--include", "adapter_*/eval_results*.jsonl",
+    ]
+    try:
+        subprocess.run(
+            ["aws", "s3", "sync", s3_src, run_dir, *include_args],
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        # It's fine if the remote directory doesn't exist yet
+        pass
+    except FileNotFoundError:
+        print("Error: aws CLI not found; cannot pull metadata from S3.")
 
 def get_baseline_score(
     dataset,
@@ -398,22 +281,17 @@ def get_baseline_score(
     if not model_type:
         print(f"Warning: could not determine model type for baseline {dataset}; skipping.")
         return 0.0
+    required_stride = args.stride if args.stride else 1
+    baseline_dir = os.path.join(project_root, "results", dataset, "baseline")
+    os.makedirs(baseline_dir, exist_ok=True)
 
-    base_dir = run_dir or os.path.join(project_root, "results", dataset)
-    os.makedirs(base_dir, exist_ok=True)
-    results_file = os.path.join(base_dir, f"{dataset}_results_{model_type}.jsonl")
-    
-    # Check if already exists
-    if os.path.exists(results_file):
-        with open(results_file, 'r') as f:
-            for line in f:
-                try:
-                    data = json.loads(line)
-                    # Look for entry with no model_path (base model)
-                    if data.get("model_path") is None and data.get("model_type") == model_type:
-                        return data.get("accuracy", 0.0)
-                except:
-                    continue
+    # Try to load metadata-based score first
+    existing_entries, _ = collect_adapter_metadata([baseline_dir], required_stride)
+    baseline_meta = select_metadata_for_stride(existing_entries, required_stride)
+    if baseline_meta:
+        acc = baseline_meta.get("accuracy")
+        if isinstance(acc, (int, float)):
+            return acc
 
     # Run evaluation
     if not args.dry_run and not args.skip_eval and not force_skip_eval:
@@ -440,14 +318,13 @@ def get_baseline_score(
             print(f"Error evaluating baseline for {dataset}: {e}")
             return 0.0
             
-        # Read result
-        if os.path.exists(results_file):
-             with open(results_file, 'r') as f:
-                lines = f.readlines()
-                for line in reversed(lines):
-                    data = json.loads(line)
-                    if data.get("model_path") is None:
-                        return data.get("accuracy", 0.0)
+        # Re-load metadata after evaluation
+        existing_entries, _ = collect_adapter_metadata([baseline_dir], required_stride)
+        baseline_meta = select_metadata_for_stride(existing_entries, required_stride)
+        if baseline_meta:
+            acc = baseline_meta.get("accuracy")
+            if isinstance(acc, (int, float)):
+                return acc
     
     return 0.0
 
@@ -473,7 +350,6 @@ def get_max_adapter_score(
         metadata_entries, missing_adapters = collect_adapter_metadata(list_adapter_dirs(run_dir), required_stride)
 
     model_type = model_type_hint or detect_model_type(run_dir, metadata_entries)
-    results_file = os.path.join(run_dir, f"{dataset}_results_{model_type}.jsonl")
     
     adapters = list_adapter_dirs(run_dir)
     if not adapters:
@@ -664,12 +540,25 @@ def main():
     elif args.reverse:
         run_dirs.reverse()
 
+    # Pull metadata/results from S3 before processing to ensure fixed-point behavior
+    if enable_s3_sync:
+        seen_paths = set()
+        for _, _, path in run_dirs:
+            norm_path = os.path.abspath(path)
+            if norm_path in seen_paths:
+                continue
+            pull_run_metadata(norm_path, project_root, enable_s3_sync, resolved_s3_bucket)
+            seen_paths.add(norm_path)
+
     # 2. Process Baselines (Batch 0)
     datasets = set(d[0] for d in run_dirs)
     print(f"Found datasets: {datasets}")
     
     for dataset in datasets:
         dataset_runs = [rd for rd in run_dirs if rd[0] == dataset]
+        baseline_dir = os.path.join(project_root, "results", dataset, "baseline")
+        if enable_s3_sync:
+            pull_run_metadata(baseline_dir, project_root, enable_s3_sync, resolved_s3_bucket)
         sample_metadata = []
         for _, _, path in dataset_runs:
             adapters = list_adapter_dirs(path)
@@ -681,53 +570,52 @@ def main():
         model_type = detect_model_type(dataset_runs[0][2] if dataset_runs else None, sample_metadata)
 
         inferred_model_type = model_type or args.model_type
+        should_evaluate = dataset_runs and (not args.task_type or dataset == args.task_type)
+        run_dir_for_baseline = dataset_runs[0][2] if dataset_runs else os.path.join(project_root, "results", dataset)
+        score = get_baseline_score(
+            dataset,
+            run_dir_for_baseline,
+            sample_metadata,
+            args,
+            project_root,
+            force_skip_eval=not should_evaluate,
+            enable_s3=enable_s3_sync,
+            s3_bucket=resolved_s3_bucket,
+        )
         if dataset in WIKI_TASKS:
-            score = get_wiki_baseline_score(dataset, inferred_model_type, args, project_root, enable_s3=enable_s3_sync, s3_bucket=resolved_s3_bucket)
             wiki_table[dataset]["Baseline"] = score
         else:
-            should_evaluate = dataset_runs and (not args.task_type or dataset == args.task_type)
-            run_dir_for_baseline = dataset_runs[0][2] if dataset_runs else os.path.join(project_root, "results", dataset)
-            score = get_baseline_score(
-                dataset,
-                run_dir_for_baseline,
-                sample_metadata,
-                args,
-                project_root,
-                force_skip_eval=not should_evaluate,
-                enable_s3=enable_s3_sync,
-                s3_bucket=resolved_s3_bucket,
-            )
-        table[dataset]["Baseline"] = score
+            table[dataset]["Baseline"] = score
         
     # 3. Process Runs
     for dataset, method, path in run_dirs:
         metadata_entries, missing_adapters = collect_adapter_metadata(list_adapter_dirs(path), args.stride if args.stride else 1)
         model_type = detect_model_type(path, metadata_entries)
 
+        should_evaluate = True
+        if args.task_type and dataset != args.task_type:
+            should_evaluate = False
+        if args.method and method != args.method:
+            should_evaluate = False
+
+        score = get_max_adapter_score(
+            path,
+            dataset,
+            args,
+            project_root,
+            model_type,
+            metadata_entries,
+            missing_adapters,
+            enable_s3=enable_s3_sync,
+            s3_bucket=resolved_s3_bucket,
+            force_skip_eval=not should_evaluate,
+        )
+
         if dataset in WIKI_TASKS:
-            score = get_wiki_run_score(path, dataset, model_type or args.model_type, args, project_root, enable_s3=enable_s3_sync, s3_bucket=resolved_s3_bucket)
             wiki_table[dataset][method] = score
         else:
-            should_evaluate = True
-            if args.task_type and dataset != args.task_type:
-                should_evaluate = False
-            if args.method and method != args.method:
-                should_evaluate = False
-
-            score = get_max_adapter_score(
-                path,
-                dataset,
-                args,
-                project_root,
-                model_type,
-                metadata_entries,
-                missing_adapters,
-                enable_s3=enable_s3_sync,
-                s3_bucket=resolved_s3_bucket,
-                force_skip_eval=not should_evaluate,
-            )
             table[dataset].setdefault("Baseline", table[dataset].get("Baseline", 0.0))
-        table[dataset][method] = score
+            table[dataset][method] = score
 
     # 4. Generate Table
     df = pd.DataFrame.from_dict(table, orient='index')

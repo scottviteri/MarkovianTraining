@@ -8,6 +8,7 @@ import math
 from constants import EI_SKIP_INITIAL
 import sys
 import glob
+from typing import Dict, Tuple
 from utils import moving_average
 
 
@@ -225,7 +226,9 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
     evaluation_data = {}  # Maps file_path -> {batch_index: accuracy}
     for file_path in file_paths:
         first_dir = os.path.dirname(os.path.abspath(file_path))
-        # Try different evaluation result file patterns
+        batch_to_acc = {}
+
+        # Try legacy shared files first
         eval_patterns = [
             os.path.join(first_dir, f"{task_type}_results_{model_type}.jsonl"),
             os.path.join(first_dir, f"{task_type}_results{model_type}.jsonl"),
@@ -239,7 +242,6 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                 break
         
         if eval_file:
-            batch_to_acc = {}
             try:
                 with open(eval_file, "r") as f:
                     for line in f:
@@ -251,9 +253,33 @@ def plot_combined_metrics(file_paths, host_names, window_size=10, output_file=No
                                 batch_to_acc[bi] = acc
                         except Exception:
                             continue
-                evaluation_data[file_path] = batch_to_acc
             except Exception:
-                pass
+                batch_to_acc = {}
+        
+        # If legacy file missing, fall back to adapter-level metadata
+        if not batch_to_acc:
+            adapter_dirs = sorted(glob.glob(os.path.join(first_dir, "adapter_*")))
+            batch_accuracy_with_stride: Dict[int, Tuple[int, float]] = {}
+            for adapter_dir in adapter_dirs:
+                for meta_path in glob.glob(os.path.join(adapter_dir, "eval_metadata*.json")):
+                    try:
+                        with open(meta_path, "r") as f:
+                            data = json.load(f)
+                    except Exception:
+                        continue
+                    bi = data.get("batch_index")
+                    acc = data.get("accuracy")
+                    stride = data.get("evaluation", {}).get("stride", 1)
+                    if bi is None or acc is None:
+                        continue
+                    prev = batch_accuracy_with_stride.get(bi)
+                    if prev is None or stride <= prev[0]:
+                        batch_accuracy_with_stride[bi] = (stride, acc)
+            if batch_accuracy_with_stride:
+                batch_to_acc = {k: v[1] for k, v in batch_accuracy_with_stride.items()}
+        
+        if batch_to_acc:
+            evaluation_data[file_path] = batch_to_acc
     
     has_evaluation_data = any(len(data) > 0 for data in evaluation_data.values())
     

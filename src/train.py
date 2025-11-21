@@ -22,6 +22,7 @@ from evaluation import (
     evaluate_model_on_aqua,
     evaluate_model_on_mathqa,
     evaluate_model_on_numeric,
+    compute_wiki_logprob,
     save_task_results,
     get_default_eval_batch_size,
     calculate_answer_log_probs,
@@ -1219,6 +1220,9 @@ def run_periodic_evaluation(state: TrainingState):
             return list(load_math_dataset(split="test")), meta
         if task_type == "arithmetic":
             return list(load_arithmetic_dataset(chunk_size=200, split="test")), meta
+        if task_type in ("wiki_compression", "wiki_continuation"):
+            # compute_wiki_logprob loads its own data, so return dummy list to pass check
+            return [1], meta
         colored_print("Evaluation", f"No evaluation implemented for task type: {task_type}", Colors.YELLOW)
         return [], meta
 
@@ -1289,6 +1293,17 @@ def run_periodic_evaluation(state: TrainingState):
                 state.hyperparameters,
                 batch_size=batch_size,
             )
+        elif task_type in ("wiki_compression", "wiki_continuation"):
+            # For wiki tasks, we evaluate the log probability of the target continuation
+            # compute_wiki_logprob handles data loading internally
+            accuracy, _ = compute_wiki_logprob(
+                model=state.actor_model,
+                tokenizer=state.tokenizer,
+                device=state.device,
+                hyperparameters=state.hyperparameters,
+                num_samples=batch_size, # Use eval batch size to avoid OOM
+            )
+            results = [] # No detailed results for wiki logprob
         else:
             colored_print("Evaluation", f"No evaluation implemented for task type: {task_type}", Colors.YELLOW)
             state.actor_model.train()
