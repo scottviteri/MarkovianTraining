@@ -496,7 +496,7 @@ def compute_wiki_logprob(
     *,
     num_samples: Optional[int] = 256,
     stride: int = 1,
-    start_index: int = 10000,
+    start_index: int = 11000,
     question_length: Optional[int] = None,
     target_length: Optional[int] = None,
     batch_size: Optional[int] = None,
