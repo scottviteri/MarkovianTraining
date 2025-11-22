@@ -354,7 +354,7 @@ def main():
     # Shuffle tasks to reduce contention between workers
     random.shuffle(tasks)
         
-    results_table = defaultdict(lambda: defaultdict(float))
+    results_table = defaultdict(lambda: defaultdict(lambda: -float('inf')))
     
     for task in tasks:
         print(f"\nScanning {task}...")
@@ -372,7 +372,7 @@ def main():
                 
             model_type = get_model_type_from_s3(dataset, run_name, s3_results_prefix, project_root)
             
-            best_acc = 0.0
+            best_acc = -float('inf')
             
             for adapter in adapters:
                 # Check if done
