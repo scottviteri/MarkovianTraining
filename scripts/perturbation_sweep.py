@@ -14,7 +14,7 @@ if PROJECT_ROOT not in sys.path:
 from src import perturbation_analysis as pa
 
 DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET", "s3://scottviteri")
-SUPPORTED_TASKS = ["gsm8k", "mmlu", "arc", "svamp", "arithmetic"]
+SUPPORTED_TASKS = ["gsm8k", "mmlu", "arc", "svamp", "arithmetic", "wiki_continuation", "wiki_compression"]
 
 def ls_s3_dirs(s3_path):
     """List subdirectories in an S3 path."""
@@ -175,7 +175,6 @@ def main():
     parser.add_argument("--limit", type=int, help="Limit number of tasks processed")
     parser.add_argument("--dry_run", action="store_true", help="Print tasks without executing")
     parser.add_argument("--force", action="store_true", help="Recompute even if metadata exists")
-    parser.add_argument("--seed", type=int, default=0, help="Random seed for shuffle")
     parser.add_argument("--s3_bucket", type=str, default=DEFAULT_S3_BUCKET, help="S3 bucket")
     args = parser.parse_args()
 
@@ -218,7 +217,6 @@ def main():
             markovian_adapter_index=job["adapter_index"],
             non_markovian_adapter_index=job["adapter_index"],
             stride=job["stride"],
-            sync_s3=False,  # We handled sync manually
         )
 
 if __name__ == "__main__":

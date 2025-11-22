@@ -2047,7 +2047,6 @@ def run_qa_perturbation_accuracy(
     markovian_adapter_index=None,
     non_markovian_adapter_index=None,
     stride: int = 1,
-    sync_s3: bool = True,
 ):
     """
     Run perturbation analysis measuring ACCURACY drop on QA tasks.
@@ -2059,9 +2058,11 @@ def run_qa_perturbation_accuracy(
 
     markovian_dir = os.path.dirname(markovian_log_file)
     non_markovian_dir = os.path.dirname(non_markovian_log_file)
-    if sync_s3:
-        sync_run_dir_from_s3(markovian_dir)
-        sync_run_dir_from_s3(non_markovian_dir)
+    # Use granular sync if possible, but these calls ensure directories exist
+    # The actual file content should have been synced by the caller if running from perturbation_sweep.py
+    # If running standalone, we might want to sync, but we're removing the flag.
+    # Assuming caller handles sync or files are local.
+    
     markovian_role = infer_role_from_log_path(markovian_log_file)
     non_markovian_role = infer_role_from_log_path(non_markovian_log_file)
 
@@ -2533,6 +2534,11 @@ def main():
                 )
                 plot_checkpoint_scan_results(scan_results, output_dir, perturb_type)
             return
+
+        # Sync run directories from S3 if needed (CLI usage assumed to want sync)
+        if args.markovian_log and args.non_markovian_log:
+            sync_run_dir_from_s3(os.path.dirname(args.markovian_log))
+            sync_run_dir_from_s3(os.path.dirname(args.non_markovian_log))
 
         for perturb_type in args.perturb:
             print(f"Running Fresh Markovian vs Non-Markovian comparison for {perturb_type} (Metric: {args.metric})...")
