@@ -442,6 +442,9 @@ def main():
                 
                 meta = load_local_metadata(local_baseline_dir)
                 if meta:
+                    ns = _parse_metadata_num_samples(meta)
+                    if ns is not None:
+                        print(f"    Baseline samples: {ns}")
                     acc = meta.get("accuracy", 0)
                     results_table[task]["baseline"] = acc
         except subprocess.CalledProcessError:
@@ -462,10 +465,16 @@ def main():
                 
                 meta = None
                 if has_meta and not args.force_eval:
-                     print(f"    Found metadata in {run_name} root")
                      download_adapter_metadata(dataset, run_name, "", project_root, s3_results_prefix)
                      local_path = os.path.join(project_root, "results", dataset, run_name)
                      meta = load_local_metadata(local_path)
+
+                     samples_msg = ""
+                     if meta:
+                         ns = _parse_metadata_num_samples(meta)
+                         if ns is not None:
+                             samples_msg = f", samples={ns}"
+                     print(f"    Found metadata in {run_name} root{samples_msg}")
                 elif not args.dry_run:
                     # Run baseline eval
                     print(f"    Evaluating baseline (metadata missing)")
@@ -498,11 +507,17 @@ def main():
                 meta = None
                 # Check for existing metadata
                 if has_meta and not args.force_eval:
-                    print(f"    Skipping {adapter} (metadata found on S3)")
                     # Download metadata only
                     download_adapter_metadata(dataset, run_name, adapter, project_root, s3_results_prefix)
                     local_path = os.path.join(project_root, "results", dataset, run_name, adapter)
                     meta = load_local_metadata(local_path)
+
+                    samples_msg = ""
+                    if meta:
+                        ns = _parse_metadata_num_samples(meta)
+                        if ns is not None:
+                            samples_msg = f", samples={ns}"
+                    print(f"    Skipping {adapter} (metadata found on S3{samples_msg})")
                     
                     # If metadata has low sample count and we want more, force re-eval
                     if meta and desired_task_samples:
