@@ -98,6 +98,10 @@ def list_s3_runs(dataset, s3_results_prefix, method_filter=None):
             
         # Parse method from run name {dataset}_{method}_{timestamp}
         # Simple heuristic: matches parse_run_dir logic
+        if run_name == "baseline":
+             discovered.append((dataset, "baseline", run_name))
+             continue
+
         if not run_name.startswith(dataset + "_"):
             continue
             
@@ -150,7 +154,10 @@ def check_s3_metadata(dataset, run_name, adapter_name, s3_results_prefix):
     Returns (has_metadata, metadata_content_if_available)
     """
     prefix = s3_results_prefix.rstrip("/")
-    s3_adapter_path = f"{prefix}/{dataset}/{run_name}/{adapter_name}/"
+    if adapter_name:
+        s3_adapter_path = f"{prefix}/{dataset}/{run_name}/{adapter_name}/"
+    else:
+        s3_adapter_path = f"{prefix}/{dataset}/{run_name}/"
     
     # List files in adapter dir
     try:
@@ -175,7 +182,10 @@ def check_s3_metadata(dataset, run_name, adapter_name, s3_results_prefix):
 def download_adapter_metadata(dataset, run_name, adapter_name, project_root, s3_results_prefix):
     """Download just metadata files for an adapter."""
     prefix = s3_results_prefix.rstrip("/")
-    s3_path = f"{prefix}/{dataset}/{run_name}/{adapter_name}/"
+    if adapter_name:
+        s3_path = f"{prefix}/{dataset}/{run_name}/{adapter_name}/"
+    else:
+        s3_path = f"{prefix}/{dataset}/{run_name}/"
     local_path = os.path.join(project_root, "results", dataset, run_name, adapter_name)
     os.makedirs(local_path, exist_ok=True)
     
@@ -198,7 +208,10 @@ def download_adapter_metadata(dataset, run_name, adapter_name, project_root, s3_
 def download_adapter_weights(dataset, run_name, adapter_name, project_root, s3_results_prefix):
     """Download weights for a specific adapter."""
     prefix = s3_results_prefix.rstrip("/")
-    s3_path = f"{prefix}/{dataset}/{run_name}/{adapter_name}/"
+    if adapter_name:
+        s3_path = f"{prefix}/{dataset}/{run_name}/{adapter_name}/"
+    else:
+        s3_path = f"{prefix}/{dataset}/{run_name}/"
     local_path = os.path.join(project_root, "results", dataset, run_name, adapter_name)
     
     print(f"Syncing weights for {adapter_name} from S3...")
@@ -408,6 +421,34 @@ def main():
         for dataset, method, run_name in runs:
             print(f"  Checking run: {run_name} ({method})")
             
+            if method == "baseline":
+                # For baseline, the run_name IS the adapter (kind of)
+                # Check if baseline ITSELF has metadata
+                has_meta, _ = check_s3_metadata(dataset, run_name, "", s3_results_prefix)
+                
+                meta = None
+                if has_meta and not args.force_eval:
+                     print(f"    Found metadata in {run_name} root")
+                     download_adapter_metadata(dataset, run_name, "", project_root, s3_results_prefix)
+                     local_path = os.path.join(project_root, "results", dataset, run_name)
+                     meta = load_local_metadata(local_path)
+                elif not args.dry_run:
+                    # Run baseline eval
+                    print(f"    Evaluating baseline (metadata missing)")
+                    # Need to know model_type. Can't get from log.jsonl because it doesn't exist for baseline.
+                    # Defaulting to llama if not found, or maybe we skip?
+                    # Let's assume llama for now or try to find a way to specify it. 
+                    # Actually, usually we know the model from context or we just use a default.
+                    # For now let's hardcode 'llama' or look for a way to map it. 
+                    # Given the repo structure, 'llama' seems to be the default base.
+                    default_model = "llama" 
+                    meta = evaluate_adapter(dataset, run_name, "", project_root, args, s3_results_prefix, default_model)
+
+                if meta:
+                    acc = meta.get("accuracy", 0)
+                    results_table[dataset][method] = max(results_table[dataset][method], acc)
+                continue
+
             adapters = list_s3_adapters(dataset, run_name, s3_results_prefix)
             if not adapters:
                 continue
