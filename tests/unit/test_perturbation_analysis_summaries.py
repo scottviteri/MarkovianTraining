@@ -14,12 +14,14 @@ def _sample_results():
     return [
         {
             "Batch Index": 0,
+            "metric_type": "accuracy",
             "Markovian Effects": {"Original": 0.8, "Delete20%": 0.1},
             "Non_Markovian Effects": {"Original": 0.6, "Delete20%": 0.05},
             "Effect Difference": {"Original": 0.2, "Delete20%": 0.05},
         },
         {
             "Batch Index": 1,
+            "metric_type": "accuracy",
             "Markovian Effects": {"Original": 0.6, "Delete20%": 0.2},
             "Non_Markovian Effects": {"Original": 0.5, "Delete20%": 0.15},
             "Effect Difference": {"Original": 0.1, "Delete20%": 0.05},
@@ -94,7 +96,7 @@ def test_build_dataset_perturbation_matrix(tmp_path: Path):
     assert pytest.approx(arc_cell["mean_difference"]) == 0.1
 
     assert matrix["dataset_average"]["gsm8k"]["num_runs"] == 1
-    assert matrix["overall_average"]["num_runs"] == 4
+    assert matrix["overall_average"]["num_runs"] == 2
 
 
 def test_build_dataset_matrix_with_aggregation(tmp_path: Path):
@@ -102,9 +104,27 @@ def test_build_dataset_matrix_with_aggregation(tmp_path: Path):
     gsm_dir = base_root / "gsm8k" / "run_markovian"
     (gsm_dir / "markovian_comparison_accuracy").mkdir(parents=True)
     results = _sample_results()
+    for entry in results:
+        entry["Markovian Effects"]["Delete40%"] = 0.0
+        entry["Non_Markovian Effects"]["Delete40%"] = 0.0
+        entry["Effect Difference"]["Delete40%"] = 0.0
+
+    # Adjust Delete20% values
+    results[0]["Markovian Effects"]["Delete20%"] = 0.45
+    results[0]["Non_Markovian Effects"]["Delete20%"] = 0.05
     results[0]["Effect Difference"]["Delete20%"] = 0.4
+
+    results[1]["Markovian Effects"]["Delete20%"] = 0.35
+    results[1]["Non_Markovian Effects"]["Delete20%"] = 0.15
     results[1]["Effect Difference"]["Delete20%"] = 0.2
+
+    # Add Delete40% entries
+    results[0]["Markovian Effects"]["Delete40%"] = 0.35
+    results[0]["Non_Markovian Effects"]["Delete40%"] = 0.05
     results[0]["Effect Difference"]["Delete40%"] = 0.3
+
+    results[1]["Markovian Effects"]["Delete40%"] = 0.15
+    results[1]["Non_Markovian Effects"]["Delete40%"] = 0.05
     results[1]["Effect Difference"]["Delete40%"] = 0.1
     (gsm_dir / "markovian_comparison_accuracy" / "comparison_results_accuracy_delete.json").write_text(
         json.dumps(results)
@@ -113,7 +133,7 @@ def test_build_dataset_matrix_with_aggregation(tmp_path: Path):
     matrix = build_dataset_perturbation_matrix(
         str(base_root), aggregate_perturbation_types=True
     )
-    assert matrix["degrees"] == ["Delete", "Original"]
+    assert matrix["degrees"] == ["Original", "Delete"]
     delete_cell = matrix["cells"]["gsm8k"]["Delete"]
     # Weighted mean across four entries: diffs = [0.4,0.2,0.3,0.1] -> mean 0.25
     assert pytest.approx(delete_cell["mean_difference"]) == 0.25
