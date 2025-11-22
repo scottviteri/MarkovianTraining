@@ -481,6 +481,7 @@ def main():
                 continue
 
             adapters = list_s3_adapters(dataset, run_name, s3_results_prefix)
+            random.shuffle(adapters)
             if not adapters:
                 continue
                 
