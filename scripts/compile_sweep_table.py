@@ -377,6 +377,56 @@ def evaluate_adapter(dataset, run_name, adapter_name, project_root, args, s3_res
     return load_local_metadata(local_adapter_dir)
 
 
+def generate_best_adapter_file(run_dir, best_meta, best_adapter_name):
+    """Generate best_adapter.json file in the run directory."""
+    if not best_meta or not run_dir:
+        return
+
+    metadata_path = best_meta.get("_metadata_path")
+    if metadata_path:
+        # Make path relative to run directory
+        try:
+            rel_metadata_path = os.path.relpath(metadata_path, run_dir)
+        except ValueError:
+            rel_metadata_path = os.path.basename(metadata_path)
+    else:
+        rel_metadata_path = None
+
+    # Extract useful fields
+    stride = best_meta.get("evaluation", {}).get("stride", 1)
+    num_examples = _parse_metadata_num_samples(best_meta)
+    batch_index = best_meta.get("batch_index")
+    
+    # If batch_index missing in top-level, try to parse from adapter name
+    if batch_index is None and best_adapter_name and "adapter_" in best_adapter_name:
+        try:
+            batch_index = int(best_adapter_name.split("_")[-1])
+        except ValueError:
+            pass
+
+    best_adapter_data = {
+        "adapter": best_adapter_name,
+        "accuracy": best_meta.get("accuracy"),
+        "model_path": best_meta.get("model_path"),
+        "model_type": best_meta.get("model_type"),
+        "task_type": best_meta.get("task_type"),
+        "stride": stride,
+        "num_examples": num_examples,
+        "batch_index": batch_index,
+        "metadata_file": rel_metadata_path,
+        "metadata": best_meta,
+        "generated_at": datetime.datetime.now().isoformat()
+    }
+
+    output_path = os.path.join(run_dir, "best_adapter.json")
+    try:
+        with open(output_path, "w") as f:
+            json.dump(best_adapter_data, f, indent=2)
+        print(f"    Generated best_adapter.json for {best_adapter_name} (acc: {best_meta.get('accuracy', 0):.2%})")
+    except Exception as e:
+        print(f"    Error writing best_adapter.json: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Compile sweep results from S3")
     parser.add_argument("--task_type", type=str, help="Limit to specific task")
@@ -388,6 +438,7 @@ def main():
     parser.add_argument("--num_samples", type=int, help="Num samples for eval")
     parser.add_argument("--stride", type=int, default=1)
     parser.add_argument("--batch_size", type=int)
+    parser.add_argument("--generate_best_adapter", action="store_true", help="Generate best_adapter.json for each run")
     
     args = parser.parse_args()
     
@@ -478,6 +529,10 @@ def main():
                 if meta:
                     acc = meta.get("accuracy", 0)
                     results_table[dataset][run_name] = max(results_table[dataset].get(run_name, -float('inf')), acc)
+                    
+                    if args.generate_best_adapter:
+                        local_run_path = os.path.join(project_root, "results", dataset, run_name)
+                        generate_best_adapter_file(local_run_path, meta, "baseline")
                 continue
 
             adapters = list_s3_adapters(dataset, run_name, s3_results_prefix)
@@ -492,6 +547,8 @@ def main():
                 continue
             
             best_acc = -float('inf')
+            best_meta = None
+            best_adapter_name = None
             
             for adapter in adapters:
                 # Check if done
@@ -533,12 +590,19 @@ def main():
 
                     if acc > best_acc:
                         best_acc = acc
+                        best_meta = meta
+                        best_adapter_name = adapter
                         
             # Record score
             if dataset in WIKI_TASKS:
                 results_table[dataset][method] = max(results_table[dataset][method], best_acc)
             else:
                 results_table[dataset][method] = max(results_table[dataset][method], best_acc)
+            
+            # Generate best adapter file if requested
+            if args.generate_best_adapter and best_meta:
+                local_run_path = os.path.join(project_root, "results", dataset, run_name)
+                generate_best_adapter_file(local_run_path, best_meta, best_adapter_name)
 
     # Print tables
     print("\n" + "="*50)
