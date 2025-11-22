@@ -377,10 +377,36 @@ def evaluate_adapter(dataset, run_name, adapter_name, project_root, args, s3_res
     return load_local_metadata(local_adapter_dir)
 
 
+def upload_best_adapter_file(run_dir, project_root, bucket=None):
+    """Upload best_adapter.json for a run directory to S3."""
+    bucket = bucket or DEFAULT_S3_BUCKET
+    if not bucket:
+        return
+
+    best_path = os.path.join(run_dir, "best_adapter.json")
+    if not os.path.exists(best_path):
+        return
+
+    s3_dest = _s3_uri_for_path(run_dir, project_root, bucket)
+    include_args = [
+        "--exclude", "*",
+        "--include", "best_adapter.json",
+    ]
+
+    print(f"    Uploading best_adapter.json for {os.path.basename(run_dir)} to {s3_dest}...")
+    try:
+        subprocess.run(
+            ["aws", "s3", "sync", run_dir, s3_dest, *include_args],
+            check=True,
+        )
+    except Exception as e:
+        print(f"    Warning: failed to upload best_adapter.json to {s3_dest}: {e}")
+
+
 def generate_best_adapter_file(run_dir, best_meta, best_adapter_name):
     """Generate best_adapter.json file in the run directory."""
     if not best_meta or not run_dir:
-        return
+        return False
 
     metadata_path = best_meta.get("_metadata_path")
     if metadata_path:
@@ -423,8 +449,10 @@ def generate_best_adapter_file(run_dir, best_meta, best_adapter_name):
         with open(output_path, "w") as f:
             json.dump(best_adapter_data, f, indent=2)
         print(f"    Generated best_adapter.json for {best_adapter_name} (acc: {best_meta.get('accuracy', 0):.2%})")
+        return True
     except Exception as e:
         print(f"    Error writing best_adapter.json: {e}")
+    return False
 
 
 def main():
@@ -532,7 +560,9 @@ def main():
                     
                     if args.generate_best_adapter:
                         local_run_path = os.path.join(project_root, "results", dataset, run_name)
-                        generate_best_adapter_file(local_run_path, meta, "baseline")
+                        generated = generate_best_adapter_file(local_run_path, meta, "baseline")
+                        if generated and not args.dry_run:
+                            upload_best_adapter_file(local_run_path, project_root, args.s3_bucket)
                 continue
 
             adapters = list_s3_adapters(dataset, run_name, s3_results_prefix)
@@ -602,7 +632,9 @@ def main():
             # Generate best adapter file if requested
             if args.generate_best_adapter and best_meta:
                 local_run_path = os.path.join(project_root, "results", dataset, run_name)
-                generate_best_adapter_file(local_run_path, best_meta, best_adapter_name)
+                generated = generate_best_adapter_file(local_run_path, best_meta, best_adapter_name)
+                if generated and not args.dry_run:
+                    upload_best_adapter_file(local_run_path, project_root, args.s3_bucket)
 
     # Print tables
     print("\n" + "="*50)
