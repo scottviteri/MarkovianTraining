@@ -434,6 +434,10 @@ def main():
                 
                 if meta:
                     acc = meta.get("accuracy", 0)
+                    num_samples = meta.get("evaluation", {}).get("num_samples", 0)
+                    if num_samples and num_samples < 100:
+                         print(f"    Warning: Low sample count ({num_samples}) for {run_name}/{adapter}")
+
                     if acc > best_acc:
                         best_acc = acc
                         
