@@ -127,7 +127,7 @@ sync_host() {
             # Git pull failed - show the actual error
             echo "STATUS: ERROR"
             echo "DETAILS:"
-            echo "$pull_output"
+            echo "$pull_output" | sed "s/^/$prefix /"
             echo "$prefix ✗ Git pull failed"
             exit 1
         fi
