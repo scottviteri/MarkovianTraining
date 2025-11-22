@@ -1211,6 +1211,15 @@ def generate_arithmetic_pairs(num_examples: int = 1000, allow_negative: bool = F
 
 def load_arithmetic_dataset(chunk_size: int = 500, split: str = "train", allow_negative: bool = False):
     """Yield arithmetic QA pairs similar to other dataset loaders."""
+    if chunk_size is None:
+        chunk_size = 500
+    try:
+        chunk_size = int(chunk_size)
+    except (TypeError, ValueError):
+        raise ValueError(f"chunk_size must be an integer, got {chunk_size!r}")
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+
     # For evaluation splits, generate exactly chunk_size examples once
     if split != "train":
         yield from generate_arithmetic_pairs(num_examples=chunk_size, allow_negative=allow_negative)

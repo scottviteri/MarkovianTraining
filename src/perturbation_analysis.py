@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import json
 import re
@@ -10,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from scipy.signal import savgol_filter
 from evaluation import calculate_answer_log_probs
-from typing import Optional, List, Tuple, Dict, Any, Callable
+from typing import Optional, List, Tuple, Dict, Any, Callable, Iterable
 from utils import find_latest_result, print_debug_info
 from utils import (
     get_text_with_token_length,
@@ -1805,54 +1806,287 @@ def plot_markovian_comparison_results(results, output_dir, perturb_type, window_
     plt.close()
 
 
-def analyze_markovian_comparison_summary(results, perturb_type):
+def summarize_markovian_comparison_results(results: List[Dict[str, Any]], perturb_type: str) -> List[Dict[str, Any]]:
     """
-    Print a summary analysis of the Markovian comparison results.
+    Produce structured summary rows for Markovian comparison outputs.
     
-    Args:
-        results: The comparison results data
-        perturb_type: The type of perturbation being analyzed
+    Each row captures mean sensitivity statistics for a single perturbation degree,
+    making it easy to collate across runs or serialize to tables.
     """
     if not results:
-        print("No results to analyze.")
-        return
-    
-    print(f"\n=== MARKOVIAN COMPARISON SUMMARY: {perturb_type.upper()} ===")
-    
-    perturbation_degrees = list(results[0]["Effect Difference"].keys())
+        return []
+
+    perturbation_degrees = list(results[0]["Markovian Effects"].keys())
     baseline_name = f"{perturb_type.title().replace('_', '')}0%"
-    analysis_degrees = [deg for deg in perturbation_degrees if deg != baseline_name]
-    
-    for degree in analysis_degrees:
+
+    summary_rows = []
+    for degree in perturbation_degrees:
         markovian_effects = [entry["Markovian Effects"][degree] for entry in results]
         non_markovian_effects = [entry["Non_Markovian Effects"][degree] for entry in results]
         effect_differences = [entry["Effect Difference"][degree] for entry in results]
-        
-        # Calculate statistics
-        mean_markovian = np.mean(markovian_effects)
-        mean_non_markovian = np.mean(non_markovian_effects)
-        mean_difference = np.mean(effect_differences)
-        std_difference = np.std(effect_differences)
-        
-        # Count how often each model is more sensitive
-        markovian_more_sensitive = sum(1 for diff in effect_differences if diff > 0)
-        non_markovian_more_sensitive = sum(1 for diff in effect_differences if diff < 0)
-        
+
+        if not effect_differences:
+            continue
+
+        markovian_mean = float(np.mean(markovian_effects))
+        non_markovian_mean = float(np.mean(non_markovian_effects))
+        difference_mean = float(np.mean(effect_differences))
+        difference_std = float(np.std(effect_differences))
+        markovian_more = sum(1 for diff in effect_differences if diff > 0)
+        non_markovian_more = sum(1 for diff in effect_differences if diff < 0)
+
+        summary_rows.append(
+            {
+                "perturbation": perturb_type,
+                "degree": degree,
+                "markovian_mean": markovian_mean,
+                "non_markovian_mean": non_markovian_mean,
+                "mean_difference": difference_mean,
+                "difference_std": difference_std,
+                "markovian_more_sensitive": markovian_more,
+                "non_markovian_more_sensitive": non_markovian_more,
+                "num_examples": len(effect_differences),
+                "is_baseline": degree == baseline_name or degree.lower() == "original",
+            }
+        )
+
+    return summary_rows
+
+
+def _weighted_mean_and_std(values: List[float], stds: List[float], weights: List[float]) -> Tuple[float, float]:
+    """Return weighted mean and population std using per-sample variances."""
+    if not values:
+        return 0.0, 0.0
+
+    total_weight = sum(weights)
+    if total_weight == 0:
+        total_weight = float(len(values))
+        weights = [1.0] * len(values)
+
+    mean = sum(v * w for v, w in zip(values, weights)) / total_weight
+    second_moment = sum(w * ((s ** 2) + (v ** 2)) for v, s, w in zip(values, stds, weights)) / total_weight
+    variance = max(0.0, second_moment - mean ** 2)
+    return mean, math.sqrt(variance)
+
+
+def _aggregate_report_rows(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not rows:
+        return None
+
+    weights = [float(row.get("num_examples") or 0) for row in rows]
+    if not any(weights):
+        weights = [1.0] * len(rows)
+
+    diff_vals = [float(row.get("mean_difference", 0.0)) for row in rows]
+    diff_stds = [float(row.get("difference_std", 0.0)) for row in rows]
+    mark_vals = [float(row.get("markovian_mean", 0.0)) for row in rows]
+    non_vals = [float(row.get("non_markovian_mean", 0.0)) for row in rows]
+    zero_stds = [0.0] * len(rows)
+
+    mean_difference, difference_std = _weighted_mean_and_std(diff_vals, diff_stds, weights)
+    markovian_mean, _ = _weighted_mean_and_std(mark_vals, zero_stds, weights)
+    non_markovian_mean, _ = _weighted_mean_and_std(non_vals, zero_stds, weights)
+
+    return {
+        "mean_difference": mean_difference,
+        "difference_std": difference_std,
+        "markovian_mean": markovian_mean,
+        "non_markovian_mean": non_markovian_mean,
+        "num_examples": int(sum(weights)),
+        "num_runs": len(rows),
+    }
+
+
+def _degree_sort_key(label: str) -> Tuple[str, int, str]:
+    if not label:
+        return ("", 0, "")
+    lower = label.lower()
+    if lower == "original":
+        return ("", 0, label)
+    prefix_match = re.match(r"([A-Za-z_]+)", label)
+    prefix = prefix_match.group(1).lower() if prefix_match else lower
+    number_match = re.search(r"(\d+)", label)
+    number = int(number_match.group(1)) if number_match else 0
+    return (prefix, number, label)
+
+
+def _normalize_degree_label(label: str, aggregate_types: bool) -> str:
+    if not label:
+        return label
+    if not aggregate_types:
+        return label
+    if label.lower() == "original":
+        return "Original"
+    normalized = re.sub(r"(\d+%?)$", "", label).rstrip("_")
+    return normalized or label
+
+
+def analyze_markovian_comparison_summary(results, perturb_type):
+    """
+    Print a summary analysis of the Markovian comparison results.
+    """
+    summary_rows = summarize_markovian_comparison_results(results, perturb_type)
+    if not summary_rows:
+        print("No results to analyze.")
+        return
+
+    print(f"\n=== MARKOVIAN COMPARISON SUMMARY: {perturb_type.upper()} ===")
+
+    for row in summary_rows:
+        degree = row["degree"]
+        mean_markovian = row["markovian_mean"]
+        mean_non_markovian = row["non_markovian_mean"]
+        mean_difference = row["mean_difference"]
+        std_difference = row["difference_std"]
+        markovian_more_sensitive = row["markovian_more_sensitive"]
+        non_markovian_more_sensitive = row["non_markovian_more_sensitive"]
+        total = row["num_examples"]
+
         print(f"\n{degree}:")
         print(f"  Mean Markovian Effect: {mean_markovian:.4f}")
         print(f"  Mean Non-Markovian Effect: {mean_non_markovian:.4f}")
         print(f"  Mean Difference (M - NM): {mean_difference:.4f} ± {std_difference:.4f}")
-        print(f"  Markovian more sensitive: {markovian_more_sensitive}/{len(results)} cases")
-        print(f"  Non-Markovian more sensitive: {non_markovian_more_sensitive}/{len(results)} cases")
-        
+        print(f"  Markovian more sensitive: {markovian_more_sensitive}/{total} cases")
+        print(f"  Non-Markovian more sensitive: {non_markovian_more_sensitive}/{total} cases")
+
         if mean_difference > 0:
             print(f"  → Overall: Markovian model is MORE sensitive to {degree} perturbations")
         elif mean_difference < 0:
             print(f"  → Overall: Non-Markovian model is MORE sensitive to {degree} perturbations")
         else:
             print(f"  → Overall: Similar sensitivity to {degree} perturbations")
+
+    print("\n" + "=" * 60)
+
+
+def build_dataset_perturbation_matrix(
+    base_dir: str,
+    metric: str = "accuracy",
+    perturbations: Optional[Iterable[str]] = None,
+    aggregate_perturbation_types: bool = False,
+) -> Dict[str, Any]:
+    """
+    Aggregate mean difference/std stats into a dataset x perturbation matrix.
     
-    print("\n" + "="*60)
+    Returns:
+        {
+            "datasets": [...],
+            "degrees": [...],
+            "cells": {dataset: {degree: {...}}},
+            "dataset_average": {dataset: {...}},
+            "degree_average": {degree: {...}},
+            "overall_average": {...},
+        }
+    """
+    report_rows = generate_markovian_comparison_report(
+        base_dir=base_dir,
+        metric=metric,
+        perturbations=perturbations,
+        aggregate_perturbation_types=aggregate_perturbation_types,
+    )
+    datasets = sorted({row.get("task") for row in report_rows if row.get("task")})
+    degrees = sorted({row["degree"] for row in report_rows}, key=_degree_sort_key)
+
+    cells: Dict[str, Dict[str, Optional[Dict[str, Any]]]] = {ds: {} for ds in datasets}
+    dataset_avg: Dict[str, Optional[Dict[str, Any]]] = {}
+    degree_avg: Dict[str, Optional[Dict[str, Any]]] = {}
+
+    for dataset in datasets:
+        dataset_rows = [row for row in report_rows if row.get("task") == dataset]
+        dataset_avg[dataset] = _aggregate_report_rows(dataset_rows)
+        for degree in degrees:
+            degree_rows = [row for row in dataset_rows if row["degree"] == degree]
+            cells[dataset][degree] = _aggregate_report_rows(degree_rows)
+
+    for degree in degrees:
+        degree_rows = [row for row in report_rows if row["degree"] == degree]
+        degree_avg[degree] = _aggregate_report_rows(degree_rows)
+
+    overall_avg = _aggregate_report_rows(report_rows)
+
+    return {
+        "datasets": datasets,
+        "degrees": degrees,
+        "cells": cells,
+        "dataset_average": dataset_avg,
+        "degree_average": degree_avg,
+        "overall_average": overall_avg,
+    }
+
+
+def generate_markovian_comparison_report(
+    base_dir: str,
+    metric: str = "accuracy",
+    perturbations: Optional[Iterable[str]] = None,
+    aggregate_perturbation_types: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Traverse result directories and collate Markovian comparison summaries
+    into a tabular-friendly list of dictionaries.
+    
+    Args:
+        base_dir: Root directory containing task subdirectories (e.g., 'results').
+        metric: Comparison metric subdirectory (default: 'accuracy').
+        perturbations: Optional iterable of perturbation names to keep.
+    
+    Returns:
+        List of summary rows enriched with task/run metadata.
+    """
+    base_dir = os.path.abspath(base_dir)
+    comparison_dir_name = f"markovian_comparison_{metric}"
+    filename_prefix = f"comparison_results_{metric}_"
+    glob_pattern = os.path.join(
+        base_dir, "**", comparison_dir_name, f"{filename_prefix}*.json"
+    )
+
+    matched_files = glob.glob(glob_pattern, recursive=True)
+    if not matched_files:
+        return []
+
+    allowed = set(perturbations) if perturbations else None
+    report_rows: List[Dict[str, Any]] = []
+
+    for file_path in matched_files:
+        perturb_type = os.path.basename(file_path)[len(filename_prefix) : -5]
+        if allowed and perturb_type not in allowed:
+            continue
+
+        try:
+            with open(file_path, "r") as f:
+                results = json.load(f)
+        except Exception as exc:
+            print(f"Warning: failed to read {file_path}: {exc}")
+            continue
+
+        summary_rows = summarize_markovian_comparison_results(results, perturb_type)
+        if not summary_rows:
+            continue
+
+        run_dir = os.path.dirname(os.path.dirname(file_path))
+        relative = os.path.relpath(run_dir, base_dir)
+        parts = [p for p in relative.split(os.sep) if p not in {".", ""}]
+
+        task = parts[0] if len(parts) >= 1 else None
+        run_name = parts[1] if len(parts) >= 2 else os.path.basename(run_dir)
+
+        for row in summary_rows:
+            row["degree"] = _normalize_degree_label(row["degree"], aggregate_perturbation_types)
+            record = {
+                "task": task,
+                "run": run_name,
+                **row,
+            }
+            report_rows.append(record)
+
+    return sorted(
+        report_rows,
+        key=lambda r: (
+            r.get("task") or "",
+            r.get("run") or "",
+            r.get("perturbation") or "",
+            r.get("degree") or "",
+        ),
+    )
 
 
 
