@@ -111,7 +111,7 @@ def list_s3_runs(dataset, s3_results_prefix, method_filter=None):
             
         # Parse method from run name {dataset}_{method}_{timestamp}
         # Simple heuristic: matches parse_run_dir logic
-        if run_name == "baseline":
+        if run_name == "baseline" or run_name.startswith("baseline_"):
              discovered.append((dataset, "baseline", run_name))
              continue
 
@@ -295,32 +295,33 @@ def _parse_metadata_num_samples(entry: Dict[str, Any]) -> Optional[int]:
             return None
 
 
-def get_model_type_from_s3(dataset, run_name, s3_results_prefix, project_root):
-    """Always fetch log.jsonl to determine model type. S3 is ground truth."""
+def get_run_hyperparameters(dataset, run_name, s3_results_prefix, project_root):
+    """Fetch log.jsonl and return full hyperparameter dict."""
     prefix = s3_results_prefix.rstrip("/")
     s3_log = f"{prefix}/{dataset}/{run_name}/log.jsonl"
     local_run_dir = os.path.join(project_root, "results", dataset, run_name)
     local_log = os.path.join(local_run_dir, "log.jsonl")
     
-    # Always fetch from S3 - S3 is ground truth
     os.makedirs(local_run_dir, exist_ok=True)
     try:
         subprocess.run(["aws", "s3", "cp", s3_log, local_log], check=True, capture_output=True)
-    except subprocess.CalledProcessError:
-        raise FileNotFoundError(f"Could not find log.jsonl for run {run_name} at {s3_log} - required for model type inference. Ground truth is S3.")
-
-    try:
         with open(local_log, 'r') as f:
             line = f.readline()
             data = json.loads(line)
-            if "model_type" not in data:
-                raise ValueError(f"log.jsonl for {run_name} is missing 'model_type' field")
-            return data["model_type"]
-    except Exception as e:
-        raise ValueError(f"Failed to parse log.jsonl for {run_name}: {e}")
+            return data
+    except Exception:
+        return {}
 
 
-def evaluate_adapter(dataset, run_name, adapter_name, project_root, args, s3_results_prefix, model_type):
+def get_model_type_from_s3(dataset, run_name, s3_results_prefix, project_root):
+    """Always fetch log.jsonl to determine model type. S3 is ground truth."""
+    data = get_run_hyperparameters(dataset, run_name, s3_results_prefix, project_root)
+    if "model_type" in data:
+        return data["model_type"]
+    raise FileNotFoundError(f"Could not find log.jsonl or model_type for run {run_name}")
+
+
+def evaluate_adapter(dataset, run_name, adapter_name, project_root, args, s3_results_prefix, model_type, extra_args=None):
     """
     Evaluate a specific adapter.
     1. Download weights
@@ -353,6 +354,9 @@ def evaluate_adapter(dataset, run_name, adapter_name, project_root, args, s3_res
         cmd.extend(["--stride", str(args.stride)])
     if args.batch_size:
         cmd.extend(["--batch_size", str(args.batch_size)])
+    
+    if extra_args:
+        cmd.extend(extra_args)
         
     try:
         subprocess.run(cmd, check=True, cwd=project_root)
@@ -406,50 +410,6 @@ def main():
             else:
                 desired_task_samples = TASK_TEST_SET_SIZES.get(task)
         
-        # 1. Check for baseline
-        baseline_dir = f"{s3_results_prefix}/{task}/baseline/"
-        try:
-            # Check if eval_metadata exists in baseline dir
-            result = subprocess.run(
-                ["aws", "s3", "ls", baseline_dir],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            has_baseline = False
-            for line in result.stdout.splitlines():
-                if "eval_metadata" in line and line.endswith(".json"):
-                    has_baseline = True
-                    break
-            
-            if has_baseline:
-                print(f"  Checking run: baseline (baseline)")
-                # Download baseline metadata
-                local_baseline_dir = os.path.join(project_root, "results", task, "baseline")
-                os.makedirs(local_baseline_dir, exist_ok=True)
-                
-                # Use download_adapter_metadata but adapt paths
-                s3_baseline_path = baseline_dir
-                include_args = [
-                    "--exclude", "*",
-                    "--include", "eval_metadata*.json"
-                ]
-                subprocess.run(
-                    ["aws", "s3", "sync", s3_baseline_path, local_baseline_dir, *include_args],
-                    check=True,
-                    capture_output=True
-                )
-                
-                meta = load_local_metadata(local_baseline_dir)
-                if meta:
-                    ns = _parse_metadata_num_samples(meta)
-                    if ns is not None:
-                        print(f"    Baseline samples: {ns}")
-                    acc = meta.get("accuracy", 0)
-                    results_table[task]["baseline"] = acc
-        except subprocess.CalledProcessError:
-            pass # No baseline found
-            
         runs = list_s3_runs(task, s3_results_prefix, method_filter)
         
         # Also shuffle runs
@@ -476,27 +436,52 @@ def main():
                              samples_msg = f", samples={ns}"
                      print(f"    Found metadata in {run_name} root{samples_msg}")
                 elif not args.dry_run:
-                    # Run baseline eval
                     print(f"    Evaluating baseline (metadata missing)")
-                    # Need to know model_type. Can't get from log.jsonl because it doesn't exist for baseline.
-                    # Defaulting to llama if not found, or maybe we skip?
-                    # Let's assume llama for now or try to find a way to specify it. 
-                    # Actually, usually we know the model from context or we just use a default.
-                    # For now let's hardcode 'llama' or look for a way to map it. 
-                    # Given the repo structure, 'llama' seems to be the default base.
-                    default_model = "llama" 
-                    meta = evaluate_adapter(dataset, run_name, "", project_root, args, s3_results_prefix, default_model)
+                    
+                    # Find sibling run to get hyperparameters
+                    sibling_params = {}
+                    for _, other_method, other_run in runs:
+                        if other_method != "baseline":
+                            sibling_params = get_run_hyperparameters(dataset, other_run, s3_results_prefix, project_root)
+                            if sibling_params:
+                                print(f"    Using hyperparameters from sibling: {other_run}")
+                                break
+                    
+                    # Determine model type
+                    if "qwen" in run_name.lower():
+                        model_type = "qwen3-14b" # Default qwen variant
+                    elif "llama" in run_name.lower():
+                        model_type = "llama"
+                    else:
+                        model_type = sibling_params.get("model_type", "llama")
+
+                    # Build extra args
+                    extra_args = ["--use_base_model"]
+                    if "cot_length" in sibling_params:
+                        extra_args.extend(["--cot_length", str(sibling_params["cot_length"])])
+                    if "temperature" in sibling_params:
+                        extra_args.extend(["--temperature", str(sibling_params["temperature"])])
+                    
+                    # Ensure we write metadata to the baseline directory
+                    local_baseline_dir = os.path.join(project_root, "results", dataset, run_name)
+                    extra_args.extend(["--adapter_metadata_dir", local_baseline_dir])
+
+                    meta = evaluate_adapter(dataset, run_name, "", project_root, args, s3_results_prefix, model_type, extra_args=extra_args)
 
                 if meta:
                     acc = meta.get("accuracy", 0)
-                    results_table[dataset][method] = max(results_table[dataset][method], acc)
+                    results_table[dataset][run_name] = max(results_table[dataset].get(run_name, -float('inf')), acc)
                 continue
 
             adapters = list_s3_adapters(dataset, run_name, s3_results_prefix)
             if not adapters:
                 continue
                 
-            model_type = get_model_type_from_s3(dataset, run_name, s3_results_prefix, project_root)
+            try:
+                model_type = get_model_type_from_s3(dataset, run_name, s3_results_prefix, project_root)
+            except FileNotFoundError:
+                print(f"    Skipping {run_name} (missing log.jsonl)")
+                continue
             
             best_acc = -float('inf')
             
