@@ -207,15 +207,10 @@ _S3_WARNING_PRINTED = False
 RUN_SYNC_PATTERNS = [
     "markovian_comparison_accuracy/*.json",
     "markovian_comparison_accuracy/*.png",
-    "checkpoint_scan/*.json",
-    "checkpoint_scan/*.png",
-    "adapter_*/perturb_metadata.json",
-    "log.jsonl",
-    "best_adapter.json",
-    "adapter_*/*",
+    "perturb_metadata.json",
 ]
 
-ADAPTER_SYNC_PATTERNS = [
+PERTURB_METADATA_PATTERNS = [
     "perturb_metadata.json",
 ]
 
@@ -264,33 +259,33 @@ PERTURBATION_SETS = {
 }
 
 
-def _perturb_metadata_path(adapter_dir: str) -> str:
-    return os.path.join(adapter_dir, "perturb_metadata.json")
+def _perturb_metadata_path(run_dir: str) -> str:
+    return os.path.join(run_dir, "perturb_metadata.json")
 
 
-def _ensure_metadata_structure(data: dict, adapter_dir: str) -> dict:
+def _ensure_metadata_structure(data: dict, run_dir: str) -> dict:
     if not isinstance(data, dict):
         data = {}
-    data.setdefault("adapter", os.path.basename(adapter_dir))
+    data.setdefault("run", os.path.basename(run_dir))
     data.setdefault("records", {})
     return data
 
 
-def load_perturb_metadata(adapter_dir: str) -> dict:
-    path = _perturb_metadata_path(adapter_dir)
+def load_perturb_metadata(run_dir: str) -> dict:
+    path = _perturb_metadata_path(run_dir)
     if not os.path.exists(path):
-        return _ensure_metadata_structure({}, adapter_dir)
+        return _ensure_metadata_structure({}, run_dir)
     try:
         with open(path, "r") as f:
             data = json.load(f)
     except Exception:
         data = {}
-    return _ensure_metadata_structure(data, adapter_dir)
+    return _ensure_metadata_structure(data, run_dir)
 
 
-def save_perturb_metadata(adapter_dir: str, metadata: dict):
-    path = _perturb_metadata_path(adapter_dir)
-    os.makedirs(adapter_dir, exist_ok=True)
+def save_perturb_metadata(run_dir: str, metadata: dict):
+    path = _perturb_metadata_path(run_dir)
+    os.makedirs(run_dir, exist_ok=True)
     tmp_path = path + ".tmp"
     with open(tmp_path, "w") as f:
         json.dump(metadata, f, indent=2)
@@ -363,7 +358,7 @@ def metadata_has_record(metadata: dict, key: str, required_stride: Optional[int]
 
 # Metadata cache to avoid repeated disk IO
 _PERTURB_METADATA_CACHE = {}
-_PULLED_ADAPTERS = set()
+_PULLED_PERTURB_DIRS = set()
 _PULLED_RUN_DIRS = set()
 
 
@@ -441,30 +436,30 @@ def sync_run_dir_from_s3(run_dir: str):
     _PULLED_RUN_DIRS.add(run_dir)
 
 
-def pull_adapter_metadata(adapter_dir: str):
-    if adapter_dir in _PULLED_ADAPTERS:
+def pull_perturb_metadata(run_dir: str):
+    if run_dir in _PULLED_PERTURB_DIRS:
         return
-    _sync_from_s3(adapter_dir, ADAPTER_SYNC_PATTERNS)
-    _PULLED_ADAPTERS.add(adapter_dir)
+    _sync_from_s3(run_dir, PERTURB_METADATA_PATTERNS)
+    _PULLED_PERTURB_DIRS.add(run_dir)
 
 
-def push_adapter_metadata(adapter_dir: str):
-    _sync_to_s3(adapter_dir, ADAPTER_SYNC_PATTERNS)
+def push_perturb_metadata(run_dir: str):
+    _sync_to_s3(run_dir, PERTURB_METADATA_PATTERNS)
 
 
-def get_cached_metadata(adapter_dir: str) -> dict:
-    if adapter_dir and os.path.isdir(adapter_dir):
-        pull_adapter_metadata(adapter_dir)
-    if adapter_dir not in _PERTURB_METADATA_CACHE:
-        _PERTURB_METADATA_CACHE[adapter_dir] = load_perturb_metadata(adapter_dir)
-    return _PERTURB_METADATA_CACHE[adapter_dir]
+def get_cached_metadata(run_dir: str) -> dict:
+    if run_dir and os.path.isdir(run_dir):
+        pull_perturb_metadata(run_dir)
+    if run_dir not in _PERTURB_METADATA_CACHE:
+        _PERTURB_METADATA_CACHE[run_dir] = load_perturb_metadata(run_dir)
+    return _PERTURB_METADATA_CACHE[run_dir]
 
 
-def persist_metadata_cache(adapter_dir: str):
-    data = _PERTURB_METADATA_CACHE.get(adapter_dir)
+def persist_metadata_cache(run_dir: str):
+    data = _PERTURB_METADATA_CACHE.get(run_dir)
     if data is not None:
-        save_perturb_metadata(adapter_dir, data)
-        push_adapter_metadata(adapter_dir)
+        save_perturb_metadata(run_dir, data)
+        push_perturb_metadata(run_dir)
 
 
 def infer_role_from_log_path(log_file_path: str) -> str:
@@ -2071,7 +2066,7 @@ def run_qa_perturbation_accuracy(
     with open(output_path, "w") as f:
         json.dump(comparison_data, f)
         
-    if mark_adapter_dir and os.path.isdir(mark_adapter_dir) and non_adapter_dir and os.path.isdir(non_adapter_dir):
+    if os.path.isdir(markovian_dir) and os.path.isdir(non_markovian_dir):
         metadata_key = build_perturb_metadata_key(
             task_type=task_type,
             perturb_type=perturb_type,
@@ -2081,8 +2076,8 @@ def run_qa_perturbation_accuracy(
             markovian_run=markovian_dir,
             non_markovian_run=non_markovian_dir,
         )
-        mark_metadata = get_cached_metadata(mark_adapter_dir)
-        non_metadata = get_cached_metadata(non_adapter_dir)
+        mark_metadata = get_cached_metadata(markovian_dir)
+        non_metadata = get_cached_metadata(non_markovian_dir)
         timestamp = datetime.datetime.utcnow().isoformat()
         record_common = {
             "task_type": task_type,
@@ -2117,8 +2112,8 @@ def run_qa_perturbation_accuracy(
         }
         mark_metadata["records"][metadata_key] = mark_record
         non_metadata["records"][metadata_key] = non_record
-        persist_metadata_cache(mark_adapter_dir)
-        persist_metadata_cache(non_adapter_dir)
+        persist_metadata_cache(markovian_dir)
+        persist_metadata_cache(non_markovian_dir)
 
     print(f"Accuracy perturbation analysis saved to {output_path}")
     sync_run_dir_outputs(markovian_dir)

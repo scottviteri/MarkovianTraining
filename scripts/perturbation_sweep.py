@@ -127,11 +127,6 @@ def build_tasks(datasets, perturbations, args):
         mark_best_idx = read_best_adapter_index(mark_run_path)
         non_best_idx = read_best_adapter_index(non_run_path)
 
-        mark_adapter_dir = os.path.join(mark_run_path, f"adapter_{mark_best_idx}")
-        non_adapter_dir = os.path.join(non_run_path, f"adapter_{non_best_idx}")
-        os.makedirs(mark_adapter_dir, exist_ok=True)
-        os.makedirs(non_adapter_dir, exist_ok=True)
-
         for perturb in perturbations:
             metadata_key = pa.build_perturb_metadata_key(
                 task_type=dataset,
@@ -143,8 +138,8 @@ def build_tasks(datasets, perturbations, args):
                 non_markovian_run=non_run_path,
             )
 
-            mark_meta = pa.get_cached_metadata(mark_adapter_dir)
-            non_meta = pa.get_cached_metadata(non_adapter_dir)
+            mark_meta = pa.get_cached_metadata(mark_run_path)
+            non_meta = pa.get_cached_metadata(non_run_path)
 
             already_done = (
                 pa.metadata_has_record(mark_meta, metadata_key, args.stride)
