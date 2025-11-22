@@ -2421,7 +2421,7 @@ def main():
     parser.add_argument(
         "--fresh_num_samples",
         type=int,
-        default=128,
+        default=1024,
         help="Number of fresh samples to evaluate in fresh comparison",
     )
     parser.add_argument(
