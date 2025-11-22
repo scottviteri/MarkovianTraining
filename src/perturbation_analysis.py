@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from scipy.signal import savgol_filter
 from evaluation import calculate_answer_log_probs
-from typing import Optional
+from typing import Optional, List, Tuple, Dict, Any, Callable
 from utils import find_latest_result, print_debug_info
 from utils import (
     get_text_with_token_length,
@@ -31,6 +31,7 @@ from evaluation import (
     evaluate_model_on_aqua,
     evaluate_model_on_mathqa,
     evaluate_model_on_numeric,
+    evaluate_wiki_logprob,
     load_wiki_pairs,
     generate_actor_reasoning,
 )
@@ -2031,6 +2032,7 @@ def analyze_markovian_comparison_summary(results, perturb_type):
     print("\n" + "="*60)
 
 
+
 def run_qa_perturbation_accuracy(
     markovian_log_file,
     non_markovian_log_file,
@@ -2045,6 +2047,7 @@ def run_qa_perturbation_accuracy(
     markovian_adapter_index=None,
     non_markovian_adapter_index=None,
     stride: int = 1,
+    sync_s3: bool = True,
 ):
     """
     Run perturbation analysis measuring ACCURACY drop on QA tasks.
@@ -2056,8 +2059,9 @@ def run_qa_perturbation_accuracy(
 
     markovian_dir = os.path.dirname(markovian_log_file)
     non_markovian_dir = os.path.dirname(non_markovian_log_file)
-    sync_run_dir_from_s3(markovian_dir)
-    sync_run_dir_from_s3(non_markovian_dir)
+    if sync_s3:
+        sync_run_dir_from_s3(markovian_dir)
+        sync_run_dir_from_s3(non_markovian_dir)
     markovian_role = infer_role_from_log_path(markovian_log_file)
     non_markovian_role = infer_role_from_log_path(non_markovian_log_file)
 
@@ -2116,6 +2120,12 @@ def run_qa_perturbation_accuracy(
         qa_pairs = list(load_arc_dataset(split="validation"))
     elif task_type == "arithmetic":
         qa_pairs = list(load_arithmetic_dataset(chunk_size=num_samples, split="test"))
+    elif task_type == "wiki_continuation":
+        q_len = int(markovian_hyperparams.get("question_length", 512))
+        t_len = int(markovian_hyperparams.get("target_length", 128))
+        # Use a dummy tokenizer just to get the pairs if needed, or use the one we loaded
+        # Here we use the tokenizer from load_model_with_adapters
+        qa_pairs = list(load_wiki_pairs(tokenizer, q_len, t_len, num_samples if num_samples else 128, start_index=10000))
     else:
         raise ValueError(f"Unsupported task type for QA perturbation: {task_type}")
 
@@ -2139,6 +2149,7 @@ def run_qa_perturbation_accuracy(
         if tt == "aqua": return evaluate_model_on_aqua
         if tt == "mathqa": return evaluate_model_on_mathqa
         if tt in ["svamp", "math", "arithmetic"]: return evaluate_model_on_numeric
+        if tt in ["wiki_continuation", "wiki_compression"]: return evaluate_wiki_logprob
         return evaluate_model_on_numeric 
 
     eval_func = get_eval_func(task_type)
@@ -2167,9 +2178,9 @@ def run_qa_perturbation_accuracy(
     for i in range(len(qa_pairs)):
         comparison_data.append({
             "Batch Index": i,
-            "Markovian Effects": {"Original": int(m_results[i]["correct"])},
-            "Non_Markovian Effects": {"Original": int(nm_results[i]["correct"])},
-            "Effect Difference": {"Original": int(m_results[i]["correct"]) - int(nm_results[i]["correct"])}
+            "Markovian Effects": {"Original": float(m_results[i]["correct"])},
+            "Non_Markovian Effects": {"Original": float(nm_results[i]["correct"])},
+            "Effect Difference": {"Original": float(m_results[i]["correct"]) - float(nm_results[i]["correct"])}
         })
 
     # 2. Run Perturbations
@@ -2200,12 +2211,21 @@ def run_qa_perturbation_accuracy(
         )
         
         for i in range(len(qa_pairs)):
-            m_orig = int(m_results[i]["correct"])
-            m_pert = int(m_pert_results[i]["correct"])
-            m_sensitivity = m_orig - m_pert
+            # For Wiki, 'correct' might be float or LogProb, but assuming evaluate_model_on_numeric returns binary or near-binary
+            # Actually, for wiki_continuation, we usually care about LogProbs, not accuracy.
+            # But if metric="accuracy" was requested, we treat it as such (maybe exact match?)
+            # If wiki_continuation uses 'compute_wiki_logprob' inside evaluation.py, we might need a different flow.
+            # Checking evaluate_model_on_numeric: it uses 'extract_answer' and compares.
+            # Wiki continuation doesn't have a single answer.
             
-            nm_orig = int(nm_results[i]["correct"])
-            nm_pert = int(nm_pert_results[i]["correct"])
+            # For the sake of "accuracy" mode sweeping:
+            m_orig = float(m_results[i].get("correct", 0))
+            m_pert = float(m_pert_results[i].get("correct", 0))
+            
+            nm_orig = float(nm_results[i].get("correct", 0))
+            nm_pert = float(nm_pert_results[i].get("correct", 0))
+
+            m_sensitivity = m_orig - m_pert
             nm_sensitivity = nm_orig - nm_pert
             
             diff = m_sensitivity - nm_sensitivity

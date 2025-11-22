@@ -19,6 +19,7 @@ import subprocess
 import filecmp
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import numpy as np
 from datasets import load_dataset
 
 from utils import construct_prompts, colored_print, Colors, get_text_with_token_length, extract_answer
@@ -413,6 +414,80 @@ def generate_actor_reasoning(
     return cot_texts
 
 
+
+def evaluate_wiki_logprob(
+    actor_model: nn.Module,
+    critic_model: nn.Module,
+    tokenizer: Any,
+    device: torch.device,
+    test_data: List[Tuple[str, str]],
+    hyperparameters: Dict[str, Any],
+    batch_size: int = 16,
+    num_samples: Optional[int] = None,
+    precomputed_cots: Optional[List[str]] = None,
+    perturbation_fn: Optional[Callable[[str], str]] = None,
+    **kwargs
+) -> Tuple[float, List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """
+    Evaluate Wikipedia continuation using log probabilities of the target text.
+    Returns 'accuracy' as mean log prob, and stores individual log probs in 'correct'.
+    
+    Note: Matches signature of evaluate_model_generic for compatibility.
+    """
+    if num_samples and num_samples < len(test_data):
+        test_data = test_data[:num_samples]
+        if precomputed_cots:
+            precomputed_cots = precomputed_cots[:num_samples]
+            
+    results = []
+    all_logprobs = []
+    
+    for i in tqdm(range(0, len(test_data), batch_size), desc="Evaluating Wiki Logprobs"):
+        batch = test_data[i:i+batch_size]
+        questions, answers = zip(*batch)
+        
+        if precomputed_cots:
+            cot_texts = precomputed_cots[i:i+batch_size]
+        else:
+            cot_texts = generate_actor_reasoning(
+                actor_model=actor_model,
+                tokenizer=tokenizer,
+                device=device,
+                questions=list(questions),
+                hyperparameters=hyperparameters,
+            )
+            
+        if perturbation_fn:
+            cot_texts = [perturbation_fn(cot) for cot in cot_texts]
+            
+        # Calculate log probs of the target (answers) given context (questions) + CoT
+        # We use actor_model for this calculation as requested
+        log_probs, _ = calculate_answer_log_probs(
+            model=actor_model,
+            tokenizer=tokenizer,
+            device=device,
+            questions=list(questions),
+            reasoning=cot_texts,
+            answers=list(answers),
+            hyperparameters=hyperparameters,
+            include_question=not hyperparameters.get("markovian", True)
+        )
+        
+        for q, cot, ans, lp in zip(questions, cot_texts, answers, log_probs):
+            lp_val = lp.item()
+            all_logprobs.append(lp_val)
+            results.append({
+                "question": q,
+                "reasoning": cot,
+                "answer": ans,
+                "correct": lp_val, # Store logprob in 'correct' field
+                "log_prob": lp_val
+            })
+            
+    mean_logprob = float(np.mean(all_logprobs)) if all_logprobs else 0.0
+    return mean_logprob, results, None
+
+
 def compute_wiki_logprob(
     model,
     tokenizer,
@@ -426,12 +501,21 @@ def compute_wiki_logprob(
     target_length: Optional[int] = None,
     batch_size: Optional[int] = None,
 ) -> Tuple[float, Dict[str, Any]]:
-    """Compute average log probability on Wikipedia continuations."""
+    """Compute average log probability on Wikipedia continuations.
+    
+    This function handles data loading/streaming internally and delegates
+    the actual evaluation to evaluate_wiki_logprob.
+    """
     question_length = int(question_length or hyperparameters.get("question_length", 512))
     target_length = int(target_length or hyperparameters.get("target_length", 128))
     stride = max(1, int(stride))
-    chunk_size = max(1, int(batch_size) if batch_size else 512)
+    batch_size_val = max(1, int(batch_size) if batch_size else 512)
     requested = (num_samples if num_samples else 256) * stride
+    
+    # Load all pairs at once (since evaluate_wiki_logprob expects a list)
+    # Note: This changes memory behavior slightly but unifies logic
+    # Given typical batch sizes (512) and text lengths, this fits in memory
+    
     pair_iterator = load_wiki_pairs(
         tokenizer,
         question_length,
@@ -439,109 +523,36 @@ def compute_wiki_logprob(
         requested,
         start_index=start_index,
     )
-
-    eval_hyper = {
-        **hyperparameters,
-        "task_type": hyperparameters.get("task_type", "wiki_continuation"),
-    }
-
-    markovian = eval_hyper.get("markovian", True)
-    include_question = not markovian
-
-    model.eval()
-
-    total_logprob = 0.0
-    total_examples = 0
-    buffer: List[Tuple[str, str]] = []
+    
+    # Collect all samples that match stride criteria
+    test_data = []
     raw_index = 0
-
-    def process_chunk(chunk: List[Tuple[str, str]]):
-        nonlocal total_logprob, total_examples
-        if not chunk:
-            return
-        questions = [q for q, _ in chunk]
-        answers = [a for _, a in chunk]
-        reasoning = generate_actor_reasoning(
-            actor_model=model,
-            tokenizer=tokenizer,
-            device=device,
-            questions=questions,
-            hyperparameters=hyperparameters,
-        )
-        log_probs, _ = calculate_answer_log_probs(
-            model=model,
-            tokenizer=tokenizer,
-            device=device,
-            questions=questions,
-            reasoning=reasoning,
-            answers=answers,
-            hyperparameters=eval_hyper,
-            include_question=include_question,
-        )
-        total_logprob += float(log_probs.sum().item())
-        total_examples += len(chunk)
-
-    def flush_buffer(limit: Optional[int] = None):
-        nonlocal buffer
-        if not buffer:
-            return
-        if limit is not None and limit < len(buffer):
-            chunk = buffer[:limit]
-            buffer = buffer[limit:]
-        else:
-            chunk = buffer
-            buffer = []
-        if not chunk:
-            return
-        process_chunk(chunk)
-
-    if chunk_size == 1:
-        for pair in pair_iterator:
-            raw_index += 1
-            if (raw_index - 1) % stride != 0:
-                continue
-            process_chunk([pair])
-            if num_samples is not None and total_examples >= num_samples:
-                break
-        if total_examples == 0:
-            raise RuntimeError("No samples left after applying stride for wiki evaluation.")
-        mean_log_prob = total_logprob / total_examples
-        metadata = {
-            "num_samples": total_examples,
-            "stride": stride,
-            "start_index": start_index,
-            "question_length": question_length,
-            "target_length": target_length,
-        }
-        return mean_log_prob, metadata
-
     for pair in pair_iterator:
         raw_index += 1
         if (raw_index - 1) % stride != 0:
             continue
-        buffer.append(pair)
-        flush_limit: Optional[int] = None
-        if num_samples is not None:
-            remaining = num_samples - total_examples
-            if remaining <= 0:
-                break
-            if len(buffer) >= remaining:
-                flush_limit = remaining
-        if len(buffer) >= chunk_size or flush_limit is not None:
-            flush_buffer(flush_limit)
-        if num_samples is not None and total_examples >= num_samples:
+        test_data.append(pair)
+        if num_samples is not None and len(test_data) >= num_samples:
             break
-
-    if buffer and (num_samples is None or total_examples < num_samples):
-        remaining = num_samples - total_examples if num_samples is not None else None
-        flush_buffer(remaining)
-
-    if total_examples == 0:
+            
+    if not test_data:
         raise RuntimeError("No samples left after applying stride for wiki evaluation.")
-
-    mean_log_prob = total_logprob / total_examples
+        
+    # Delegate to the unified evaluator
+    # Note: we pass None for critic_model as it's not used by evaluate_wiki_logprob
+    mean_log_prob, _, _ = evaluate_wiki_logprob(
+        actor_model=model,
+        critic_model=None, 
+        tokenizer=tokenizer,
+        device=device,
+        test_data=test_data,
+        hyperparameters=hyperparameters,
+        batch_size=batch_size_val,
+        num_samples=len(test_data)
+    )
+    
     metadata = {
-        "num_samples": total_examples,
+        "num_samples": len(test_data),
         "stride": stride,
         "start_index": start_index,
         "question_length": question_length,

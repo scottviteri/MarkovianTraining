@@ -12,7 +12,7 @@ def main():
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for evaluation")
     args = parser.parse_args()
 
-    datasets = ["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"]
+    datasets = ["gsm8k", "mmlu", "arc", "svamp", "arithmetic", "wiki_continuation"]
     perturbations = ["delete", "truncate_back", "truncate_front", "digit_replace", "char_replace"]
     perturb_str = " ".join(perturbations)
     
