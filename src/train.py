@@ -386,7 +386,7 @@ def calculate_advantages(
     reward_model = state.actor_model if use_actor_rewards else state.critic_model
     reward_reasoning = reasoning_output.actor_reasoning if use_actor_rewards else reasoning_output.actor_reasoning
     
-    actor_answer_logprobs, extracted_answers = calculate_answer_log_probs(
+    actor_answer_logprobs, _, extracted_answers = calculate_answer_log_probs(
         reward_model,
         state.tokenizer,
         state.device,
@@ -403,7 +403,7 @@ def calculate_advantages(
             # OPTIMIZATION: In parallel mode, calculate critic answer log prob only once
             colored_print("Critic Answer Optimization", "Computing single critic answer and replicating", Colors.GREEN)
             
-            critic_answer_logprob_single, _ = calculate_answer_log_probs(
+            critic_answer_logprob_single, _, _ = calculate_answer_log_probs(
                 state.critic_model,  # Always use critic for baseline
                 state.tokenizer,
                 state.device,
@@ -419,7 +419,7 @@ def calculate_advantages(
             critic_answer_logprobs = critic_answer_logprob_single.repeat(batch_size)
         else:
             # Normal mode: calculate for all
-            critic_answer_logprobs, _ = calculate_answer_log_probs(
+            critic_answer_logprobs, _, _ = calculate_answer_log_probs(
                 state.critic_model,  # Always use critic for baseline
                 state.tokenizer,
                 state.device,

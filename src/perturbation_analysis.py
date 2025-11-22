@@ -586,7 +586,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
         }
 
         # Calculate Original log probs for Actor
-        actor_log_prob, _ = calculate_answer_log_probs(
+        actor_log_prob, _, _ = calculate_answer_log_probs(
             model=eval_model,
             tokenizer=tokenizer,
             device=device,
@@ -601,7 +601,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
         # Calculate log probs for either:
         # 1. Critic (if include_question=False)
         # 2. Actor with question (if include_question=True)
-        comparison_log_prob, _ = calculate_answer_log_probs(
+        comparison_log_prob, _, _ = calculate_answer_log_probs(
             model=eval_model,
             tokenizer=tokenizer,
             device=device,
@@ -620,7 +620,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
 
             # Perturb Actor CoT (always without question)
             perturbed_actor_CoT = perturb_CoT(actor_CoT, pert_config)
-            actor_perturbed_log_prob, _ = calculate_answer_log_probs(
+            actor_perturbed_log_prob, _, _ = calculate_answer_log_probs(
                 model=eval_model,
                 tokenizer=tokenizer,
                 device=device,
@@ -634,7 +634,7 @@ def run_perturbations(log_file, perturb_type, include_question=False, stride=1, 
 
             # Perturb comparison CoT (either critic or actor-with-question)
             perturbed_critic_CoT = perturb_CoT(critic_CoT, pert_config) if not include_question else None
-            comparison_perturbed_log_prob, _ = calculate_answer_log_probs(
+            comparison_perturbed_log_prob, _, _ = calculate_answer_log_probs(
                 model=eval_model,
                 tokenizer=tokenizer,
                 device=device,
@@ -786,7 +786,7 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
         ]
         
         # Calculate Original log probs for Actor (all without question)
-        actor_log_probs, _ = calculate_answer_log_probs(
+        actor_log_probs, _, _ = calculate_answer_log_probs(
             model=eval_model,
             tokenizer=tokenizer,
             device=device,
@@ -803,7 +803,7 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
         
         # Calculate log probs for comparison (either critic or actor with question)
         comparison_reasoning = batch_actor_CoTs if include_question else batch_critic_CoTs
-        comparison_log_probs, _ = calculate_answer_log_probs(
+        comparison_log_probs, _, _ = calculate_answer_log_probs(
             model=eval_model,
             tokenizer=tokenizer,
             device=device,
@@ -827,7 +827,7 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
             perturbed_actor_CoTs = [perturb_CoT(cot, pert_config) for cot in batch_actor_CoTs]
             
             # Calculate perturbed actor log probs (without question)
-            actor_perturbed_log_probs, _ = calculate_answer_log_probs(
+            actor_perturbed_log_probs, _, _ = calculate_answer_log_probs(
                 model=frozen_model,
                 tokenizer=tokenizer,
                 device=device,
@@ -851,7 +851,7 @@ def run_perturbations_batched(log_file, perturb_type, include_question=False, st
                 perturbed_comparison_CoTs = [perturb_CoT(cot, pert_config) for cot in batch_critic_CoTs]
             
             # Calculate perturbed comparison log probs
-            comparison_perturbed_log_probs, _ = calculate_answer_log_probs(
+            comparison_perturbed_log_probs, _, _ = calculate_answer_log_probs(
                 model=frozen_model,
                 tokenizer=tokenizer,
                 device=device,
@@ -1522,7 +1522,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
         
         # Calculate original log probs for both models
         # Markovian: without question, using trained Markovian model
-        markovian_original_logprobs, _ = calculate_answer_log_probs(
+        markovian_original_logprobs, _, _ = calculate_answer_log_probs(
             model=markovian_eval_model,
             tokenizer=tokenizer,
             device=device,
@@ -1534,7 +1534,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
         )
         
         # Non-Markovian: with question, using trained Non-Markovian model
-        non_markovian_original_logprobs, _ = calculate_answer_log_probs(
+        non_markovian_original_logprobs, _, _ = calculate_answer_log_probs(
             model=non_markovian_eval_model,
             tokenizer=tokenizer,
             device=device,
@@ -1556,7 +1556,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
             
             # Calculate perturbed log probs
             # Markovian: without question, using trained Markovian model
-            markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
+            markovian_perturbed_logprobs, _, _ = calculate_answer_log_probs(
                 model=markovian_eval_model,
                 tokenizer=tokenizer,
                 device=device,
@@ -1568,7 +1568,7 @@ def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb
             )
             
             # Non-Markovian: with question, using trained Non-Markovian model
-            non_markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
+            non_markovian_perturbed_logprobs, _, _ = calculate_answer_log_probs(
                 model=non_markovian_eval_model,
                 tokenizer=tokenizer,
                 device=device,
@@ -1704,7 +1704,7 @@ def run_markovian_comparison_fresh(
             })
 
         # Original log probs
-        markovian_original_logprobs, _ = calculate_answer_log_probs(
+        markovian_original_logprobs, _, _ = calculate_answer_log_probs(
             model=markovian_eval_model,
             tokenizer=tokenizer,
             device=device,
@@ -1714,7 +1714,7 @@ def run_markovian_comparison_fresh(
             hyperparameters=markovian_hyperparams,
             include_question=False,
         )
-        non_markovian_original_logprobs, _ = calculate_answer_log_probs(
+        non_markovian_original_logprobs, _, _ = calculate_answer_log_probs(
             model=non_markovian_eval_model,
             tokenizer=tokenizer,
             device=device,
@@ -1732,7 +1732,7 @@ def run_markovian_comparison_fresh(
             perturbed_markovian_cots = [perturb_CoT(cot, pert_config) for cot in actor_cots_markovian]
             perturbed_non_markovian_cots = [perturb_CoT(cot, pert_config) for cot in actor_cots_non_markovian]
 
-            markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
+            markovian_perturbed_logprobs, _, _ = calculate_answer_log_probs(
                 model=markovian_eval_model,
                 tokenizer=tokenizer,
                 device=device,
@@ -1742,7 +1742,7 @@ def run_markovian_comparison_fresh(
                 hyperparameters=markovian_hyperparams,
                 include_question=False,
             )
-            non_markovian_perturbed_logprobs, _ = calculate_answer_log_probs(
+            non_markovian_perturbed_logprobs, _, _ = calculate_answer_log_probs(
                 model=non_markovian_eval_model,
                 tokenizer=tokenizer,
                 device=device,

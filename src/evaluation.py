@@ -196,9 +196,19 @@ def calculate_answer_log_probs(
             full_prompt_tokens.input_ids[i][answer_start_positions[i] :]
         ).strip()
         expected_answer = answers[i].strip()
+        
+        # Relaxed check: normalize whitespace for comparison
+        # This handles tokenizer artifacts where spaces might be dropped or added
+        decoded_norm = decoded_answer.replace(" ", "").replace("\n", "")
+        expected_norm = expected_answer.replace(" ", "").replace("\n", "")
+        
+        # Check start and end, handling short strings
+        start_len = min(10, len(expected_norm))
+        end_len = min(10, len(expected_norm))
+        
         if (
-            decoded_answer[:3] != expected_answer[:3]
-            or decoded_answer[-3:] != expected_answer[-3:]
+            decoded_norm[:start_len] != expected_norm[:start_len]
+            or decoded_norm[-end_len:] != expected_norm[-end_len:]
         ):
             colored_print("Answer mismatch at index", str(i), Colors.RED)
             print(f"  Model Type:     {hyperparameters.get('model_type', 'unknown')}")
@@ -230,7 +240,7 @@ def calculate_answer_log_probs(
     # Calculate mean log prob per answer
     mean_answer_logprobs = torch.stack([x.mean() for x in answer_logprobs])
 
-    return mean_answer_logprobs, extracted_generated_answers
+    return mean_answer_logprobs, answer_logprobs, extracted_generated_answers
 
 
 # Track which results files have already been reset during the current process
@@ -462,7 +472,7 @@ def evaluate_wiki_logprob(
             
         # Calculate log probs of the target (answers) given context (questions) + CoT
         # We use actor_model for this calculation as requested
-        log_probs, _ = calculate_answer_log_probs(
+        log_probs, _, _ = calculate_answer_log_probs(
             model=actor_model,
             tokenizer=tokenizer,
             device=device,
