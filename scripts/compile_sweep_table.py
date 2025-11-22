@@ -284,6 +284,13 @@ def load_local_metadata(adapter_dir):
 def _parse_metadata_num_samples(entry: Dict[str, Any]) -> Optional[int]:
     evaluation_block = entry.get("evaluation") or {}
     value = evaluation_block.get("num_samples")
+    
+    # Fallback to top-level keys for older metadata or different formats
+    if value is None:
+        value = entry.get("num_samples")
+    if value is None:
+        value = entry.get("num_examples")
+
     if value is None:
         return None
     try:
