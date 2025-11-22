@@ -7,6 +7,7 @@ import random
 import datetime
 import re
 from collections import defaultdict
+from typing import Dict, Any, Optional
 
 import pandas as pd
 
@@ -268,6 +269,20 @@ def load_local_metadata(adapter_dir):
     return best_meta
 
 
+def _parse_metadata_num_samples(entry: Dict[str, Any]) -> Optional[int]:
+    evaluation_block = entry.get("evaluation") or {}
+    value = evaluation_block.get("num_samples")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return None
+
+
 def get_model_type_from_s3(dataset, run_name, s3_results_prefix, project_root):
     """Always fetch log.jsonl to determine model type. S3 is ground truth."""
     prefix = s3_results_prefix.rstrip("/")
@@ -462,15 +477,25 @@ def main():
                 has_meta, _ = check_s3_metadata(dataset, run_name, adapter, s3_results_prefix)
                 
                 meta = None
+                # Check for existing metadata
                 if has_meta and not args.force_eval:
                     print(f"    Skipping {adapter} (metadata found on S3)")
                     # Download metadata only
                     download_adapter_metadata(dataset, run_name, adapter, project_root, s3_results_prefix)
                     local_path = os.path.join(project_root, "results", dataset, run_name, adapter)
                     meta = load_local_metadata(local_path)
-                elif not args.dry_run:
+                    
+                    # If metadata has low sample count and we want more, force re-eval
+                    if meta and args.num_samples:
+                        current_samples = _parse_metadata_num_samples(meta)
+                        if current_samples is not None and current_samples < args.num_samples:
+                            print(f"    Re-evaluating {adapter} (low sample count: {current_samples} < {args.num_samples})")
+                            # Force eval by setting meta to None so we fall through to the eval block
+                            meta = None 
+                            
+                if meta is None and not args.dry_run:
                     # Needs eval
-                    print(f"    Evaluating {adapter} (metadata missing)")
+                    print(f"    Evaluating {adapter} (metadata missing or insufficient samples)")
                     meta = evaluate_adapter(dataset, run_name, adapter, project_root, args, s3_results_prefix, model_type)
                 
                 if meta:
