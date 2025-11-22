@@ -20,6 +20,18 @@ _S3_WARNING_PRINTED = False
 DEFAULT_WIKI_NUM_SAMPLES = 1024
 SUPPORTED_TASKS = ["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"]
 WIKI_TASKS = ["wiki_continuation", "wiki_compression"]
+# Ground-truth test/validation set sizes pulled from the scripted dataset loaders.
+# These reflect the exact number of evaluation examples consumed by src/evaluation.py
+# when --num_samples is omitted, as of 2025-11-22.
+TASK_TEST_SET_SIZES = {
+    "gsm8k": 1319,       # openai/gsm8k (test split)
+    "mmlu": 1531,        # cais/mmlu (validation split)
+    "arc": 294,          # ai2_arc ARC-Challenge (validation split, filtered to A-D choices)
+    "svamp": 300,        # SVAMP test split
+    "aqua": 254,         # AQuA-RAT test split
+    "mathqa": 2985,      # MathQA test split
+    "arithmetic": 200,   # synthetic evaluation set generated in evaluation.py (chunk_size default)
+}
 
 
 def safe_relpath(path, base_dir):
@@ -386,6 +398,13 @@ def main():
     
     for task in tasks:
         print(f"\nScanning {task}...")
+        is_wiki_task = task in WIKI_TASKS
+        desired_task_samples = args.num_samples
+        if desired_task_samples is None:
+            if is_wiki_task:
+                desired_task_samples = DEFAULT_WIKI_NUM_SAMPLES
+            else:
+                desired_task_samples = TASK_TEST_SET_SIZES.get(task)
         
         # 1. Check for baseline
         baseline_dir = f"{s3_results_prefix}/{task}/baseline/"
@@ -486,10 +505,10 @@ def main():
                     meta = load_local_metadata(local_path)
                     
                     # If metadata has low sample count and we want more, force re-eval
-                    if meta and args.num_samples:
+                    if meta and desired_task_samples:
                         current_samples = _parse_metadata_num_samples(meta)
-                        if current_samples is not None and current_samples < args.num_samples:
-                            print(f"    Re-evaluating {adapter} (low sample count: {current_samples} < {args.num_samples})")
+                        if current_samples is not None and current_samples < desired_task_samples:
+                            print(f"    Re-evaluating {adapter} (low sample count: {current_samples} < {desired_task_samples})")
                             # Force eval by setting meta to None so we fall through to the eval block
                             meta = None 
                             
