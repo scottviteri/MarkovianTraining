@@ -133,28 +133,24 @@ def find_best_run_for_task(task_type, role):
     # Look for best_adapter.json
     best_adapter_path = os.path.join(latest_dir, "best_adapter.json")
     if not os.path.exists(best_adapter_path):
-        print(f"Warning: best_adapter.json not found in {latest_dir}. Using latest available log file and adapter.")
-        # Fallback: use log.jsonl and None for adapter_index (defaults to latest)
-        log_path = os.path.join(latest_dir, "log.jsonl")
-        return log_path, None
+        raise FileNotFoundError(
+            f"best_adapter.json not found in {latest_dir}. "
+            "Sync results or re-run evaluation to produce this file before continuing."
+        )
         
     try:
         with open(best_adapter_path, "r") as f:
             data = json.load(f)
-            batch_index = data.get("batch_index")
-            # Check if it's a valid integer (it might be 0)
-            if batch_index is not None:
-                print(f"Found best adapter for {role} at batch index {batch_index}")
-                log_path = os.path.join(latest_dir, "log.jsonl")
-                return log_path, batch_index
-            else:
-                print(f"Warning: batch_index not found in {best_adapter_path}")
     except Exception as e:
-        print(f"Error reading best_adapter.json: {e}")
-        
-    # Fallback
+        raise RuntimeError(f"Failed to read {best_adapter_path}: {e}") from e
+
+    batch_index = data.get("batch_index")
+    if batch_index is None:
+        raise ValueError(f"'batch_index' missing in {best_adapter_path}.")
+    
+    print(f"Found best adapter for {role} at batch index {batch_index}")
     log_path = os.path.join(latest_dir, "log.jsonl")
-    return log_path, None
+    return log_path, batch_index
 
 
 def perturb_CoT(CoT, config):
@@ -1257,7 +1253,24 @@ def run_checkpoint_scan(
         
     print(f"Found {len(common_idxs)} common checkpoints to scan: {common_idxs}")
     
-    scan_results = []
+    output_dir = os.path.join(markovian_dir, "checkpoint_scan")
+    os.makedirs(output_dir, exist_ok=True)
+    output_file = os.path.join(output_dir, f"scan_results_{perturb_type}.json")
+    existing_results = []
+    existing_results_path = output_file
+    if os.path.exists(existing_results_path):
+        try:
+            with open(existing_results_path, "r") as f:
+                existing_results = json.load(f)
+        except Exception as e:
+            print(f"Warning: Could not parse existing scan results at {existing_results_path}: {e}. Ignoring cached results.")
+            existing_results = []
+    existing_entries = {
+        entry.get("Batch Index"): entry
+        for entry in existing_results
+        if isinstance(entry, dict) and entry.get("Batch Index") is not None
+    }
+    processed_any = False
     
     for idx in tqdm(common_idxs, desc="Scanning checkpoints"):
         # Run eval for this checkpoint
@@ -1313,10 +1326,11 @@ def run_checkpoint_scan(
             pass
             
         summary = compute_sensitivity_summary(comparison_data, perturb_type)
-        scan_results.append({
+        existing_entries[idx] = {
             "Batch Index": idx,  # Training batch index
             "Sensitivity Summary": summary
-        })
+        }
+        processed_any = True
 
         timestamp = datetime.datetime.utcnow().isoformat()
         record_common = {
@@ -1354,11 +1368,15 @@ def run_checkpoint_scan(
         persist_metadata_cache(mark_adapter_dir)
         persist_metadata_cache(non_adapter_dir)
         
-    # Save scan results
-    output_dir = os.path.join(markovian_dir, "checkpoint_scan")
-    os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, f"scan_results_{perturb_type}.json")
-    
+    if not processed_any:
+        if existing_results:
+            print("No new checkpoints processed; keeping existing scan results.")
+            return existing_results
+        print("No checkpoints processed; no scan results to save.")
+        return []
+
+    scan_results = [existing_entries[idx] for idx in sorted(existing_entries.keys())]
+
     with open(output_file, "w") as f:
         json.dump(scan_results, f)
 
@@ -2485,19 +2503,25 @@ def main():
     if (args.fresh_comparison or args.markovian_comparison) and (not args.markovian_log or not args.non_markovian_log):
         if target_task:
             print(f"Attempting to auto-detect logs for task: {target_task}")
-            if not args.markovian_log:
-                 log, idx = find_best_run_for_task(target_task, "Markovian")
-                 if log:
-                     print(f"  Markovian: {log} (adapter {idx})")
-                     args.markovian_log = log
-                     if idx is not None: markovian_adapter_index = idx
-            
-            if not args.non_markovian_log:
-                 log, idx = find_best_run_for_task(target_task, "NonMarkovian")
-                 if log:
-                     print(f"  NonMarkovian: {log} (adapter {idx})")
-                     args.non_markovian_log = log
-                     if idx is not None: non_markovian_adapter_index = idx
+            try:
+                if not args.markovian_log:
+                    log, idx = find_best_run_for_task(target_task, "Markovian")
+                    if log:
+                        print(f"  Markovian: {log} (adapter {idx})")
+                        args.markovian_log = log
+                        if idx is not None:
+                            markovian_adapter_index = idx
+                
+                if not args.non_markovian_log:
+                    log, idx = find_best_run_for_task(target_task, "NonMarkovian")
+                    if log:
+                        print(f"  NonMarkovian: {log} (adapter {idx})")
+                        args.non_markovian_log = log
+                        if idx is not None:
+                            non_markovian_adapter_index = idx
+            except (FileNotFoundError, RuntimeError, ValueError) as e:
+                print(f"Auto-detection error: {e}")
+                return
 
     # Handle fresh datapoint comparison mode
     if args.fresh_comparison:
