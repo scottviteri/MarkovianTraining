@@ -19,6 +19,52 @@ from src import perturbation_analysis as pa
 DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET", "s3://scottviteri")
 SUPPORTED_TASKS = ["gsm8k", "mmlu", "arc", "svamp", "arithmetic", "wiki_continuation"]
 
+
+def _get_record(metadata, key):
+    return metadata.get("records", {}).get(key)
+
+
+def _record_meets_sample_requirement(record, requested_samples):
+    if not requested_samples:
+        return True
+    if not record:
+        return False
+    return int(record.get("num_samples", 0)) >= int(requested_samples)
+
+
+def _metadata_sample_stats(metadata):
+    records = metadata.get("records", {})
+    values = []
+    for record in records.values():
+        value = record.get("num_samples")
+        if value is None:
+            continue
+        try:
+            values.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    if not values:
+        return None
+    return min(values), max(values)
+
+
+def _log_metadata_sample_info(role, run_path, metadata, target_samples):
+    target_display = target_samples if target_samples is not None else "default"
+    meta_path = os.path.join(run_path, "perturb_metadata.json")
+    if not os.path.exists(meta_path):
+        print(f"  {role}: no perturb_metadata.json (target={target_display})")
+        return
+    stats = _metadata_sample_stats(metadata)
+    if not stats:
+        print(f"  {role}: metadata missing num_samples (target={target_display})")
+        return
+    min_samples, max_samples = stats
+    if min_samples == max_samples:
+        sample_text = str(max_samples)
+    else:
+        sample_text = f"{min_samples}-{max_samples}"
+    print(f"  {role}: metadata num_samples={sample_text} (target={target_display})")
+
 def ls_s3_dirs(s3_path):
     """List subdirectories in an S3 path."""
     try:
@@ -103,8 +149,11 @@ def read_best_adapter_index(run_path):
 def build_tasks(datasets, perturbations, args):
     tasks = []
     bucket = args.s3_bucket
-    
-    for dataset in datasets:
+
+    datasets_to_scan = list(datasets)
+    random.shuffle(datasets_to_scan)
+
+    for dataset in datasets_to_scan:
         print(f"Scanning {dataset} on S3...")
         mark_run_path = find_role_run_s3(dataset, "Markovian", bucket)
         non_run_path = find_role_run_s3(dataset, "NonMarkovian", bucket)
@@ -126,8 +175,14 @@ def build_tasks(datasets, perturbations, args):
         
         mark_best_idx = read_best_adapter_index(mark_run_path)
         non_best_idx = read_best_adapter_index(non_run_path)
+        mark_meta = pa.get_cached_metadata(mark_run_path)
+        non_meta = pa.get_cached_metadata(non_run_path)
+        _log_metadata_sample_info("Markovian", mark_run_path, mark_meta, args.fresh_num_samples)
+        _log_metadata_sample_info("NonMarkovian", non_run_path, non_meta, args.fresh_num_samples)
+        dataset_perturbations = list(perturbations)
+        random.shuffle(dataset_perturbations)
 
-        for perturb in perturbations:
+        for perturb in dataset_perturbations:
             metadata_key = pa.build_perturb_metadata_key(
                 task_type=dataset,
                 perturb_type=perturb,
@@ -138,14 +193,34 @@ def build_tasks(datasets, perturbations, args):
                 non_markovian_run=non_run_path,
             )
 
-            mark_meta = pa.get_cached_metadata(mark_run_path)
-            non_meta = pa.get_cached_metadata(non_run_path)
+            mark_record = _get_record(mark_meta, metadata_key)
+            non_record = _get_record(non_meta, metadata_key)
 
             already_done = (
                 pa.metadata_has_record(mark_meta, metadata_key, args.stride)
                 and pa.metadata_has_record(non_meta, metadata_key, args.stride)
             )
-            if already_done and not args.force:
+            sample_requirement_met = (
+                _record_meets_sample_requirement(mark_record, args.fresh_num_samples)
+                and _record_meets_sample_requirement(non_record, args.fresh_num_samples)
+            )
+            refresh_reason = None
+            if (
+                args.fresh_num_samples
+                and already_done
+                and not sample_requirement_met
+            ):
+                mark_samples = int(mark_record.get("num_samples", 0)) if mark_record else 0
+                non_samples = int(non_record.get("num_samples", 0)) if non_record else 0
+                refresh_reason = (
+                    f"metadata num_samples Markovian={mark_samples}, "
+                    f"NonMarkovian={non_samples}, required>={args.fresh_num_samples}"
+                )
+                print(
+                    f"Scheduling refresh for {dataset}/{perturb}: {refresh_reason}"
+                )
+
+            if already_done and sample_requirement_met and not args.force:
                 continue
 
             tasks.append({
@@ -160,6 +235,9 @@ def build_tasks(datasets, perturbations, args):
                 "mark_run_name": mark_run_name,
                 "non_run_name": non_run_name,
                 "stride": args.stride,
+                "fresh_num_samples": args.fresh_num_samples,
+                "needs_sample_refresh": bool(refresh_reason),
+                "sample_refresh_reason": refresh_reason,
             })
     return tasks
 
@@ -173,6 +251,11 @@ def main():
     parser.add_argument("--limit", type=int, help="Limit number of tasks processed")
     parser.add_argument("--dry_run", action="store_true", help="Print tasks without executing")
     parser.add_argument("--force", action="store_true", help="Recompute even if metadata exists")
+    parser.add_argument(
+        "--fresh_num_samples",
+        type=int,
+        help="Number of fresh samples to evaluate; re-run metadata if prior runs used fewer",
+    )
     parser.add_argument("--s3_bucket", type=str, default=DEFAULT_S3_BUCKET, help="S3 bucket")
     args = parser.parse_args()
 
@@ -202,6 +285,8 @@ def main():
             print(f"[DRY] {msg}")
             continue
         print(msg)
+        if job.get("sample_refresh_reason"):
+            print(f"  Reason: {job['sample_refresh_reason']}")
         
         # Download adapter weights specifically
         download_adapter_weights(job['dataset'], job['mark_run_name'], job['mark_index'], args.s3_bucket)
@@ -212,13 +297,16 @@ def main():
             non_markovian_log_file=job["non_markovian_log"],
             perturb_type=job["perturb"],
             task_type=job["dataset"],
-            num_samples=None,
+            num_samples=job.get("fresh_num_samples"),
             batch_size=args.batch_size,
             evaluator="actor",
             markovian_adapter_index=job["mark_index"],
             non_markovian_adapter_index=job["non_index"],
             stride=job["stride"],
         )
+        if job.get("needs_sample_refresh"):
+            pa.persist_metadata_cache(job["mark_run_path"])
+            pa.persist_metadata_cache(job["non_run_path"])
 
 if __name__ == "__main__":
     main()
