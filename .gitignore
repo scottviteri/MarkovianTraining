@@ -29,6 +29,7 @@ light_eval.log
 TRAINING_ANALYSIS.md
 TRAINING_SUMMARY.txt
 summarize_results.py
+sweep_results_table.csv
 
 # Appendix LaTeX build artifacts (keep source and final PDF)
 LatexFolder/appendix.aux
