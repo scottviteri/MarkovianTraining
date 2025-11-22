@@ -297,6 +297,34 @@ def save_perturb_metadata(adapter_dir: str, metadata: dict):
     os.replace(tmp_path, path)
 
 
+def load_best_adapter_index(run_dir: str) -> Optional[int]:
+    """
+    Read best_adapter.json inside run_dir and return its adapter index, if available.
+    """
+    best_path = os.path.join(run_dir, "best_adapter.json")
+    if not os.path.exists(best_path):
+        return None
+    try:
+        with open(best_path, "r") as f:
+            data = json.load(f)
+    except Exception as exc:
+        print(f"Warning: failed to read {best_path}: {exc}")
+        return None
+
+    adapter_name = data.get("adapter")
+    batch_index = data.get("batch_index")
+
+    if isinstance(batch_index, int):
+        return batch_index
+
+    if isinstance(adapter_name, str):
+        suffix = adapter_name.split("_")[-1]
+        if suffix.isdigit():
+            return int(suffix)
+
+    return None
+
+
 def build_perturb_metadata_key(
     task_type: str,
     perturb_type: str,
@@ -1203,224 +1231,6 @@ def compute_sensitivity_summary(results, perturb_type):
     return summary
 
 
-def load_scan_results(output_dir, perturb_type):
-    """Load previously saved scan results."""
-    output_file = os.path.join(output_dir, f"scan_results_{perturb_type}.json")
-    if not os.path.exists(output_file):
-        print(f"Scan results file not found: {output_file}")
-        return None
-    with open(output_file, "r") as f:
-        return json.load(f)
-
-
-def run_checkpoint_scan(
-    markovian_log_file,
-    non_markovian_log_file,
-    perturb_type,
-    task_type,
-    num_samples=128,
-    batch_size=8,
-    stride: int = 1,
-    question_length=None,
-    target_length=None,
-):
-    """
-    Iterate over ALL matching adapters in the log directories and compute fresh sensitivity.
-    """
-    markovian_dir = os.path.dirname(markovian_log_file)
-    non_markovian_dir = os.path.dirname(non_markovian_log_file)
-    sync_run_dir_from_s3(markovian_dir)
-    sync_run_dir_from_s3(non_markovian_dir)
-    markovian_role = infer_role_from_log_path(markovian_log_file)
-    non_markovian_role = infer_role_from_log_path(non_markovian_log_file)
-    
-    # Find common adapter indices
-    m_adapters = glob.glob(os.path.join(markovian_dir, "adapter_*"))
-    nm_adapters = glob.glob(os.path.join(non_markovian_dir, "adapter_*"))
-    
-    def get_idx(p):
-        try: return int(p.split("_")[-1])
-        except: return None
-        
-    m_idxs = set(get_idx(p) for p in m_adapters if get_idx(p) is not None)
-    nm_idxs = set(get_idx(p) for p in nm_adapters if get_idx(p) is not None)
-    
-    common_idxs = sorted(list(m_idxs.intersection(nm_idxs)))
-    
-    if not common_idxs:
-        print("No common adapter indices found between the two runs.")
-        return
-        
-    print(f"Found {len(common_idxs)} common checkpoints to scan: {common_idxs}")
-    
-    output_dir = os.path.join(markovian_dir, "checkpoint_scan")
-    os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, f"scan_results_{perturb_type}.json")
-    existing_results = []
-    existing_results_path = output_file
-    if os.path.exists(existing_results_path):
-        try:
-            with open(existing_results_path, "r") as f:
-                existing_results = json.load(f)
-        except Exception as e:
-            print(f"Warning: Could not parse existing scan results at {existing_results_path}: {e}. Ignoring cached results.")
-            existing_results = []
-    existing_entries = {
-        entry.get("Batch Index"): entry
-        for entry in existing_results
-        if isinstance(entry, dict) and entry.get("Batch Index") is not None
-    }
-    processed_any = False
-    
-    for idx in tqdm(common_idxs, desc="Scanning checkpoints"):
-        # Run eval for this checkpoint
-        # Note: We use 'accuracy' metric logic if task is QA, or log prob if not.
-        # Assuming QA task based on context.
-        # Using run_qa_perturbation_accuracy logic but simplified or calling it directly.
-        
-        # To avoid reloading base model constantly, ideally we'd refactor.
-        # For now, we'll call run_qa_perturbation_accuracy which loads everything.
-        # It is slow but robust.
-        
-        # Suppress print output from sub-function
-        # sys.stdout = open(os.devnull, 'w')
-        mark_adapter_dir = os.path.join(markovian_dir, f"adapter_{idx}")
-        non_adapter_dir = os.path.join(non_markovian_dir, f"adapter_{idx}")
-        if not (os.path.isdir(mark_adapter_dir) and os.path.isdir(non_adapter_dir)):
-            continue
-
-        metadata_key = build_perturb_metadata_key(
-            task_type=task_type,
-            perturb_type=perturb_type,
-            metric="accuracy",
-            paired_role=non_markovian_role,
-            paired_adapter_index=idx,
-            markovian_run=markovian_dir,
-            non_markovian_run=non_markovian_dir,
-        )
-
-        mark_metadata = get_cached_metadata(mark_adapter_dir)
-        non_metadata = get_cached_metadata(non_adapter_dir)
-        if metadata_has_record(mark_metadata, metadata_key, stride) and metadata_has_record(non_metadata, metadata_key, stride):
-            print(f"Skipping adapter_{idx}: perturbation metadata already satisfies coverage (stride={stride}).")
-            continue
-
-        try:
-            comparison_data, _, _ = run_qa_perturbation_accuracy(
-                markovian_log_file=markovian_log_file,
-                non_markovian_log_file=non_markovian_log_file,
-                perturb_type=perturb_type,
-                task_type=task_type,
-                num_samples=num_samples,
-                batch_size=batch_size,
-                evaluator="actor",
-                adapter_index=idx,
-                question_length=question_length,
-                target_length=target_length,
-                markovian_adapter_index=idx, # Enforce same index
-                non_markovian_adapter_index=idx,
-                stride=stride,
-            )
-        finally:
-            # sys.stdout = sys.__stdout__
-            pass
-            
-        summary = compute_sensitivity_summary(comparison_data, perturb_type)
-        existing_entries[idx] = {
-            "Batch Index": idx,  # Training batch index
-            "Sensitivity Summary": summary
-        }
-        processed_any = True
-
-        timestamp = datetime.datetime.utcnow().isoformat()
-        record_common = {
-            "task_type": task_type,
-            "perturbation": perturb_type,
-            "metric": "accuracy",
-            "num_samples": num_samples,
-            "batch_size": batch_size,
-            "stride": stride,
-            "adapter_index": idx,
-            "paired_adapter_index": idx,
-            "summary": summary,
-            "timestamp": timestamp,
-            "scan_results_file": os.path.join("checkpoint_scan", f"scan_results_{perturb_type}.json"),
-            "scan_plot_file": os.path.join("checkpoint_scan", f"scan_plot_{perturb_type}.png"),
-        }
-
-        mark_record = {
-            **record_common,
-            "role": markovian_role,
-            "paired_role": non_markovian_role,
-            "paired_run": os.path.basename(non_markovian_dir),
-            "status": "completed",
-        }
-        non_record = {
-            **record_common,
-            "role": non_markovian_role,
-            "paired_role": markovian_role,
-            "paired_run": os.path.basename(markovian_dir),
-            "status": "completed",
-        }
-
-        mark_metadata["records"][metadata_key] = mark_record
-        non_metadata["records"][metadata_key] = non_record
-        persist_metadata_cache(mark_adapter_dir)
-        persist_metadata_cache(non_adapter_dir)
-        
-    if not processed_any:
-        if existing_results:
-            print("No new checkpoints processed; keeping existing scan results.")
-            return existing_results
-        print("No checkpoints processed; no scan results to save.")
-        return []
-
-    scan_results = [existing_entries[idx] for idx in sorted(existing_entries.keys())]
-
-    with open(output_file, "w") as f:
-        json.dump(scan_results, f)
-
-    non_output_dir = os.path.join(non_markovian_dir, "checkpoint_scan")
-    os.makedirs(non_output_dir, exist_ok=True)
-    non_output_file = os.path.join(non_output_dir, os.path.basename(output_file))
-    if non_output_file != output_file:
-        shutil.copy2(output_file, non_output_file)
-        
-    print(f"Scan results saved to {output_file}")
-    sync_run_dir_outputs(markovian_dir)
-    sync_run_dir_outputs(non_markovian_dir)
-    return scan_results
-
-
-def plot_checkpoint_scan_results(scan_results, output_dir, perturb_type):
-    """
-    Plot Sensitivity vs Training Batch from scan results.
-    """
-    if not scan_results:
-        return
-
-    batches = [r["Batch Index"] for r in scan_results]
-    degrees = list(scan_results[0]["Sensitivity Summary"].keys())
-    
-    plt.figure(figsize=(12, 6))
-    colors = plt.cm.tab10(np.linspace(0, 1, len(degrees)))
-    
-    for i, degree in enumerate(degrees):
-        values = [r["Sensitivity Summary"][degree] for r in scan_results]
-        plt.plot(batches, values, marker='o', label=degree, color=colors[i])
-        
-    plt.xlabel("Training Batch")
-    plt.ylabel("Mean Sensitivity Difference\n(Markovian - Non-Markovian)")
-    plt.title(f"Sensitivity Differential Evolution: {perturb_type}")
-    plt.legend()
-    plt.grid(True)
-    
-    output_file = os.path.join(output_dir, f"scan_plot_{perturb_type}.png")
-    plt.savefig(output_file)
-    print(f"Scan plot saved to {output_file}")
-    plt.close()
-
-
 def run_markovian_comparison(markovian_log_file, non_markovian_log_file, perturb_type, stride=1, max_index=None, save_interval=10, batch_size=8, evaluator="actor", adapter_index=None, markovian_adapter_index=None, non_markovian_adapter_index=None):
     """
     Compare perturbation sensitivity between Markovian and Non-Markovian models.
@@ -2168,7 +1978,7 @@ def run_qa_perturbation_accuracy(
         if tt == "aqua": return evaluate_model_on_aqua
         if tt == "mathqa": return evaluate_model_on_mathqa
         if tt in ["svamp", "math", "arithmetic"]: return evaluate_model_on_numeric
-        if tt in ["wiki_continuation", "wiki_compression"]: return evaluate_wiki_logprob
+        if tt == "wiki_continuation": return evaluate_wiki_logprob
         return evaluate_model_on_numeric 
 
     eval_func = get_eval_func(task_type)
@@ -2377,7 +2187,7 @@ def main():
         "--fresh_task_type",
         type=str,
         default="wiki_continuation",
-        help="Task type for fresh comparison (e.g., wiki_continuation, wiki_compression)",
+        help="Task type for fresh comparison (e.g., wiki_continuation)",
     )
     parser.add_argument(
         "--fresh_num_samples",
@@ -2477,17 +2287,6 @@ def main():
         help="Regenerate individual markovian comparison plots with new parameters before combining (for --combine_all_plots)"
     )
 
-    parser.add_argument(
-        "--sweep_checkpoints",
-        action="store_true",
-        help="Iterate over all common checkpoints and plot sensitivity evolution (requires --fresh_comparison)"
-    )
-    parser.add_argument(
-        "--plot_scan_only",
-        action="store_true",
-        help="Only plot from existing checkpoint sweep results (requires --sweep_checkpoints)"
-    )
-
     args = parser.parse_args()
 
     if args.all:
@@ -2523,6 +2322,18 @@ def main():
                 print(f"Auto-detection error: {e}")
                 return
 
+    # Default to best adapters defined in best_adapter.json when explicit indices not supplied
+    if args.markovian_log and markovian_adapter_index is None:
+        best_idx = load_best_adapter_index(os.path.dirname(args.markovian_log))
+        if best_idx is not None:
+            print(f"Using best Markovian adapter index {best_idx} from best_adapter.json")
+            markovian_adapter_index = best_idx
+    if args.non_markovian_log and non_markovian_adapter_index is None:
+        best_idx = load_best_adapter_index(os.path.dirname(args.non_markovian_log))
+        if best_idx is not None:
+            print(f"Using best Non-Markovian adapter index {best_idx} from best_adapter.json")
+            non_markovian_adapter_index = best_idx
+
     # Handle fresh datapoint comparison mode
     if args.fresh_comparison:
         if not args.markovian_log or not args.non_markovian_log:
@@ -2532,33 +2343,6 @@ def main():
             print("Error: --fresh_comparison requires --perturb argument")
             return
             
-        # Checkpoint Sweep Mode
-        if args.sweep_checkpoints:
-            for perturb_type in args.perturb:
-                output_dir = os.path.join(os.path.dirname(args.markovian_log), "checkpoint_scan")
-                
-                if args.plot_scan_only:
-                    print(f"Plotting existing scan results for {perturb_type}...")
-                    scan_results = load_scan_results(output_dir, perturb_type)
-                    if scan_results:
-                        plot_checkpoint_scan_results(scan_results, output_dir, perturb_type)
-                    continue
-
-                print(f"Running Checkpoint Sweep for {perturb_type}...")
-                scan_results = run_checkpoint_scan(
-                    markovian_log_file=args.markovian_log,
-                    non_markovian_log_file=args.non_markovian_log,
-                    perturb_type=perturb_type,
-                    task_type=args.fresh_task_type,
-                    num_samples=args.fresh_num_samples,
-                    batch_size=args.batch_size,
-                    stride=args.stride,
-                    question_length=args.fresh_question_length,
-                    target_length=args.fresh_target_length,
-                )
-                plot_checkpoint_scan_results(scan_results, output_dir, perturb_type)
-            return
-
         # Sync run directories from S3 if needed (CLI usage assumed to want sync)
         if args.markovian_log and args.non_markovian_log:
             sync_run_dir_from_s3(os.path.dirname(args.markovian_log))

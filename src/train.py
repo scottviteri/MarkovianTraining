@@ -64,10 +64,10 @@ def get_default_eval_batch_size(train_batch_size: int) -> int:
 
 def get_default_train_batch_size(task_type: str) -> int:
     """Default TRAINING batch size by task type in one place.
-    - wiki_compression/wiki_continuation: 16
+    - wiki_continuation: 16
     - others: 12
     """
-    if task_type in ("wiki_compression", "wiki_continuation"):
+    if task_type == "wiki_continuation":
         return 16
     return 12
 
@@ -983,7 +983,7 @@ def log_batch_results(
     ) / len(batch_data.answers)
 
     # Print the question/context and actor reasoning (always shown)
-    if state.hyperparameters["task_type"] in ["wiki_compression", "wiki_continuation"]:
+    if state.hyperparameters["task_type"] == "wiki_continuation":
         colored_print("Context:", q, Colors.BLUE)
         colored_print("Actor Reasoning:", actor_reasoning_text, Colors.YELLOW)
     else:  # arithmetic or gsm8k
@@ -1220,7 +1220,7 @@ def run_periodic_evaluation(state: TrainingState):
             return list(load_math_dataset(split="test")), meta
         if task_type == "arithmetic":
             return list(load_arithmetic_dataset(chunk_size=200, split="test")), meta
-        if task_type in ("wiki_compression", "wiki_continuation"):
+        if task_type == "wiki_continuation":
             # compute_wiki_logprob loads its own data, so return dummy list to pass check
             return [1], meta
         colored_print("Evaluation", f"No evaluation implemented for task type: {task_type}", Colors.YELLOW)
@@ -1293,7 +1293,7 @@ def run_periodic_evaluation(state: TrainingState):
                 state.hyperparameters,
                 batch_size=batch_size,
             )
-        elif task_type in ("wiki_compression", "wiki_continuation"):
+        elif task_type == "wiki_continuation":
             # For wiki tasks, we evaluate the log probability of the target continuation
             # compute_wiki_logprob handles data loading internally
             accuracy, _ = compute_wiki_logprob(
@@ -1797,7 +1797,6 @@ class TrainingConfig:
         # Determine task-specific default CoT length if not explicitly provided
         cot_defaults = {
             "wiki_continuation": 50,
-            "wiki_compression": 50,
             "gsm8k": 100,
             "arithmetic": 150,
             "mmlu": 150,
@@ -1870,7 +1869,6 @@ if __name__ == "__main__":
             "svamp",
             "aqua",
             "arc",
-            "wiki_compression",
             "wiki_continuation",
         ],
         help="Task type (default: wiki_continuation)",

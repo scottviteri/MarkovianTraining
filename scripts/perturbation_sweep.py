@@ -8,13 +8,16 @@ import json
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+SRC_DIR = os.path.join(PROJECT_ROOT, "src")
+
+for path in (PROJECT_ROOT, SRC_DIR):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 from src import perturbation_analysis as pa
 
 DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET", "s3://scottviteri")
-SUPPORTED_TASKS = ["gsm8k", "mmlu", "arc", "svamp", "arithmetic", "wiki_continuation", "wiki_compression"]
+SUPPORTED_TASKS = ["gsm8k", "mmlu", "arc", "svamp", "arithmetic", "wiki_continuation"]
 
 def ls_s3_dirs(s3_path):
     """List subdirectories in an S3 path."""
@@ -25,8 +28,8 @@ def ls_s3_dirs(s3_path):
             text=True,
             check=True,
         )
-    except subprocess.CalledProcessError:
-        return []
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(f"Failed to list S3 path {s3_path}") from exc
     
     dirs = []
     for line in result.stdout.splitlines():
@@ -48,26 +51,13 @@ def find_role_run_s3(dataset, role, bucket):
         candidates = [r for r in candidates if "NonMarkovian" not in r]
         
     if not candidates:
-        return None
+        raise FileNotFoundError(f"No {role} runs found for dataset '{dataset}' in {bucket}")
     
     candidates.sort()
     latest_run_name = candidates[-1]
     
     # Return local path structure
     return os.path.join(PROJECT_ROOT, "results", dataset, latest_run_name)
-
-def list_s3_adapter_indices(dataset, run_name, bucket):
-    prefix = f"{bucket.rstrip('/')}/results"
-    s3_path = f"{prefix}/{dataset}/{run_name}/"
-    dirs = ls_s3_dirs(s3_path)
-    
-    indices = []
-    for d in dirs:
-        if d.startswith("adapter_"):
-            parts = d.split("_")
-            if len(parts) > 1 and parts[-1].isdigit():
-                indices.append(int(parts[-1]))
-    return sorted(indices)
 
 def download_file(s3_path, local_path):
     if os.path.exists(local_path):
@@ -82,13 +72,33 @@ def download_adapter_weights(dataset, run_name, adapter_idx, bucket):
     local_path = os.path.join(PROJECT_ROOT, "results", dataset, run_name, adapter_name)
     
     print(f"Syncing weights for {run_name}/{adapter_name} from S3...")
+    subprocess.run(
+        ["aws", "s3", "sync", s3_path, local_path],
+        check=True
+    )
+
+
+def read_best_adapter_index(run_path):
+    best_path = os.path.join(run_path, "best_adapter.json")
+    if not os.path.exists(best_path):
+        raise FileNotFoundError(f"Expected best_adapter.json in {run_path}")
     try:
-        subprocess.run(
-            ["aws", "s3", "sync", s3_path, local_path],
-            check=True
-        )
-    except subprocess.CalledProcessError as e:
-        print(f"Error downloading weights: {e}")
+        with open(best_path, "r") as f:
+            data = json.load(f)
+    except Exception as exc:
+        raise ValueError(f"Could not parse {best_path}") from exc
+
+    batch_index = data.get("batch_index")
+    if isinstance(batch_index, int):
+        return batch_index
+
+    adapter_name = data.get("adapter")
+    if isinstance(adapter_name, str):
+        suffix = adapter_name.split("_")[-1]
+        if suffix.isdigit():
+            return int(suffix)
+
+    raise ValueError(f"best_adapter.json at {best_path} is missing batch_index/adapter info")
 
 def build_tasks(datasets, perturbations, args):
     tasks = []
@@ -98,11 +108,9 @@ def build_tasks(datasets, perturbations, args):
         print(f"Scanning {dataset} on S3...")
         mark_run_path = find_role_run_s3(dataset, "Markovian", bucket)
         non_run_path = find_role_run_s3(dataset, "NonMarkovian", bucket)
+        os.makedirs(mark_run_path, exist_ok=True)
+        os.makedirs(non_run_path, exist_ok=True)
         
-        if not mark_run_path or not non_run_path:
-            print(f"[Skip] Missing Markovian/NonMarkovian runs for {dataset}")
-            continue
-            
         mark_run_name = os.path.basename(mark_run_path)
         non_run_name = os.path.basename(non_run_path)
         
@@ -110,59 +118,54 @@ def build_tasks(datasets, perturbations, args):
         s3_prefix = f"{bucket.rstrip('/')}/results"
         download_file(f"{s3_prefix}/{dataset}/{mark_run_name}/log.jsonl", os.path.join(mark_run_path, "log.jsonl"))
         download_file(f"{s3_prefix}/{dataset}/{non_run_name}/log.jsonl", os.path.join(non_run_path, "log.jsonl"))
+        download_file(f"{s3_prefix}/{dataset}/{mark_run_name}/best_adapter.json", os.path.join(mark_run_path, "best_adapter.json"))
+        download_file(f"{s3_prefix}/{dataset}/{non_run_name}/best_adapter.json", os.path.join(non_run_path, "best_adapter.json"))
         
-        mark_indices = list_s3_adapter_indices(dataset, mark_run_name, bucket)
-        non_indices = list_s3_adapter_indices(dataset, non_run_name, bucket)
-        
-        common = sorted(set(mark_indices).intersection(non_indices))
-        if not common:
-            print(f"[Skip] No common adapter indices for {dataset}")
-            continue
-            
         mark_log = os.path.join(mark_run_path, "log.jsonl")
         non_log = os.path.join(non_run_path, "log.jsonl")
         
-        for idx in common:
-            # Check metadata using pa logic (which will sync metadata if needed)
-            mark_adapter_dir = os.path.join(mark_run_path, f"adapter_{idx}")
-            non_adapter_dir = os.path.join(non_run_path, f"adapter_{idx}")
-            os.makedirs(mark_adapter_dir, exist_ok=True)
-            os.makedirs(non_adapter_dir, exist_ok=True)
-            
-            for perturb in perturbations:
-                metadata_key = pa.build_perturb_metadata_key(
-                    task_type=dataset,
-                    perturb_type=perturb,
-                    metric="accuracy",
-                    paired_role="NonMarkovian",
-                    paired_adapter_index=idx,
-                    markovian_run=mark_run_path,
-                    non_markovian_run=non_run_path,
-                )
-                
-                # This implicitly calls pull_adapter_metadata via pa
-                mark_meta = pa.get_cached_metadata(mark_adapter_dir)
-                non_meta = pa.get_cached_metadata(non_adapter_dir)
-                
-                already_done = (
-                    pa.metadata_has_record(mark_meta, metadata_key, args.stride)
-                    and pa.metadata_has_record(non_meta, metadata_key, args.stride)
-                )
-                if already_done and not args.force:
-                    continue
-                    
-                tasks.append({
-                    "dataset": dataset,
-                    "perturb": perturb,
-                    "adapter_index": idx,
-                    "markovian_log": mark_log,
-                    "non_markovian_log": non_log,
-                    "mark_run_path": mark_run_path,
-                    "non_run_path": non_run_path,
-                    "mark_run_name": mark_run_name,
-                    "non_run_name": non_run_name,
-                    "stride": args.stride,
-                })
+        mark_best_idx = read_best_adapter_index(mark_run_path)
+        non_best_idx = read_best_adapter_index(non_run_path)
+
+        mark_adapter_dir = os.path.join(mark_run_path, f"adapter_{mark_best_idx}")
+        non_adapter_dir = os.path.join(non_run_path, f"adapter_{non_best_idx}")
+        os.makedirs(mark_adapter_dir, exist_ok=True)
+        os.makedirs(non_adapter_dir, exist_ok=True)
+
+        for perturb in perturbations:
+            metadata_key = pa.build_perturb_metadata_key(
+                task_type=dataset,
+                perturb_type=perturb,
+                metric="accuracy",
+                paired_role="NonMarkovian",
+                paired_adapter_index=non_best_idx,
+                markovian_run=mark_run_path,
+                non_markovian_run=non_run_path,
+            )
+
+            mark_meta = pa.get_cached_metadata(mark_adapter_dir)
+            non_meta = pa.get_cached_metadata(non_adapter_dir)
+
+            already_done = (
+                pa.metadata_has_record(mark_meta, metadata_key, args.stride)
+                and pa.metadata_has_record(non_meta, metadata_key, args.stride)
+            )
+            if already_done and not args.force:
+                continue
+
+            tasks.append({
+                "dataset": dataset,
+                "perturb": perturb,
+                "mark_index": mark_best_idx,
+                "non_index": non_best_idx,
+                "markovian_log": mark_log,
+                "non_markovian_log": non_log,
+                "mark_run_path": mark_run_path,
+                "non_run_path": non_run_path,
+                "mark_run_name": mark_run_name,
+                "non_run_name": non_run_name,
+                "stride": args.stride,
+            })
     return tasks
 
 def main():
@@ -196,15 +199,18 @@ def main():
     print(f"Processing {len(tasks)} tasks...")
 
     for job in tasks:
-        msg = f"[{job['dataset']}] adapter_{job['adapter_index']} perturb={job['perturb']}"
+        msg = (
+            f"[{job['dataset']}] Markovian adapter_{job['mark_index']} vs "
+            f"NonMarkovian adapter_{job['non_index']} perturb={job['perturb']}"
+        )
         if args.dry_run:
             print(f"[DRY] {msg}")
             continue
         print(msg)
         
         # Download adapter weights specifically
-        download_adapter_weights(job['dataset'], job['mark_run_name'], job['adapter_index'], args.s3_bucket)
-        download_adapter_weights(job['dataset'], job['non_run_name'], job['adapter_index'], args.s3_bucket)
+        download_adapter_weights(job['dataset'], job['mark_run_name'], job['mark_index'], args.s3_bucket)
+        download_adapter_weights(job['dataset'], job['non_run_name'], job['non_index'], args.s3_bucket)
         
         pa.run_qa_perturbation_accuracy(
             markovian_log_file=job["markovian_log"],
@@ -214,8 +220,8 @@ def main():
             num_samples=None,
             batch_size=args.batch_size,
             evaluator="actor",
-            markovian_adapter_index=job["adapter_index"],
-            non_markovian_adapter_index=job["adapter_index"],
+            markovian_adapter_index=job["mark_index"],
+            non_markovian_adapter_index=job["non_index"],
             stride=job["stride"],
         )
 

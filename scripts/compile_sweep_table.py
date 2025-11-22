@@ -19,7 +19,7 @@ METADATA_PATTERN = re.compile(r"eval_metadata(?:_stride(\d+))?\.json$")
 _S3_WARNING_PRINTED = False
 DEFAULT_WIKI_NUM_SAMPLES = 1024
 SUPPORTED_TASKS = ["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic"]
-WIKI_TASKS = ["wiki_continuation", "wiki_compression"]
+WIKI_TASKS = ["wiki_continuation"]
 # Ground-truth test/validation set sizes pulled from the scripted dataset loaders.
 # These reflect the exact number of evaluation examples consumed by src/evaluation.py
 # when --num_samples is omitted, as of 2025-11-22.

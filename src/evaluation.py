@@ -250,7 +250,7 @@ DEFAULT_S3_BUCKET = os.environ.get("SWEEP_S3_BUCKET")
 DEFAULT_SYNC_METADATA = os.environ.get("SWEEP_SYNC_METADATA", "").strip().lower() in {"1", "true", "yes"}
 _METADATA_SYNC_WARNED = False
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-WIKI_TASK_TYPES = {"wiki_continuation", "wiki_compression"}
+WIKI_TASK_TYPES = {"wiki_continuation"}
 DEFAULT_WIKI_NUM_SAMPLES = 1024
 
 
@@ -1786,7 +1786,7 @@ def main():
         "--task_type",
         type=str,
         required=True,
-        choices=["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic", "wiki_continuation", "wiki_compression"],
+        choices=["gsm8k", "mmlu", "arc", "svamp", "aqua", "mathqa", "arithmetic", "wiki_continuation"],
         help="Task to evaluate"
     )
     parser.add_argument(

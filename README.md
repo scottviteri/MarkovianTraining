@@ -75,7 +75,6 @@ python src/train.py [options]
                        # - gsm8k: Grade school math dataset
                        # - mmlu: Massive multitask language understanding
                        # - arc: AI2 ARC (Challenge/Easy) science MCQ
-                       # - wiki_compression: Wikipedia compression tasks
                        # - wiki_continuation: Wikipedia continuation tasks
 ```
 

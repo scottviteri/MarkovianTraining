@@ -88,7 +88,7 @@ for task_dir in "$RESULTS_DIR"/*; do
     task=$(basename "$task_dir")
     
     # Skip wiki tasks (not about exact accuracy)
-    if [[ "$task" == "wiki_continuation" || "$task" == "wiki_compression" || "$task" == "wiki_"* ]]; then
+    if [[ "$task" == "wiki_continuation" || "$task" == "wiki_"* ]]; then
         echo -e "${YELLOW}Skipping $task (wiki task)${NC}"
         continue
     fi

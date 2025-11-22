@@ -31,7 +31,6 @@ def test_get_answer_format_for_task_mappings():
     assert get_answer_format_for_task("gsm8k") == "numeric"
     assert get_answer_format_for_task("mmlu") == "A-D"
     assert get_answer_format_for_task("mathqa") == "A-E"
-    assert get_answer_format_for_task("wiki_compression") is None
 
 
 def test_extract_answer_handles_multiple_formats():

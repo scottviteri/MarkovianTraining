@@ -103,13 +103,10 @@ def print_debug_info(
     extracted_generated_answers=None,
 ):
     """Print debug information with consistent coloring and formatting."""
-    if task_type == "wiki_compression":
-        colored_print("Full Text:", q, Colors.BLUE)
-        colored_print("Compression:", reasoning_text_first, Colors.YELLOW)
-    elif task_type == "wiki_continuation":
+    if task_type == "wiki_continuation":
         colored_print("Context:", q, Colors.BLUE)
         colored_print("Helpful Text:", reasoning_text_first, Colors.YELLOW)
-    else:  # arithmetic or gsm8k
+    else:
         colored_print("Question:", q, Colors.BLUE)
         colored_print("Reasoning:", reasoning_text_first, Colors.YELLOW)
 
@@ -218,13 +215,7 @@ def construct_prompts(
     format_type = tokens["format_type"]
 
     # Construct base prompt
-    if task_type == "wiki_compression":
-        base_prompt = (
-            f"You will need to reconstruct the following {hyperparameters['target_length']} tokens, which you will need to reconstruct given {hyperparameters['cot_length']} memory tokens which you can write for yourself."
-            f"Feel free to be creative in your chosen compression strategy!\n\nFull Text:"
-        )
-        prompt_type = "Compression:"
-    elif task_type == "wiki_continuation":
+    if task_type == "wiki_continuation":
         base_prompt = f"Compress your understanding of this text into {hyperparameters['cot_length']} tokens, then predict the next {hyperparameters['target_length']} tokens.\n\nText:"
         prompt_type = "Reasoning Bottleneck:"
     elif task_type == "arithmetic":
@@ -1346,7 +1337,7 @@ def generate_question_answer_batches(
                 repeated_batch = [unique_qa] * batch_size
                 yield repeated_batch
 
-        elif task_type in ["wiki_compression", "wiki_continuation"]:
+        elif task_type == "wiki_continuation":
             # For wiki tasks, generate unique examples and repeat each
             colored_print("Wiki Parallel", "Loading Wikipedia dataset for parallel mode...", Colors.CYAN)
             wiki_dataset = load_dataset("wikimedia/wikipedia", "20231101.en", split="train")
@@ -1462,7 +1453,7 @@ def generate_question_answer_batches(
                     dataset_iter = load_mmlu_dataset(chunk_size=chunk_size, split=split, subject=subject)
                     qa_pair = next(dataset_iter)
                     debug_batch.append(qa_pair)
-        elif task_type in ["wiki_compression", "wiki_continuation"]:
+        elif task_type == "wiki_continuation":
             print("Loading Wikipedia dataset...")
             wiki_dataset = load_dataset("wikimedia/wikipedia", "20231101.en", split="train")
             article_idx = 0
@@ -1572,7 +1563,7 @@ def generate_question_answer_batches(
                 yield debug_batch
         
         # For non-wiki tasks, check if we have a valid debug_batch and yield it if so
-        if debug_batch is not None and task_type not in ["wiki_compression", "wiki_continuation"]:
+        if debug_batch is not None and task_type != "wiki_continuation":
             print(f"Created debug batch for {task_type}, will use it for all {num_batches} batches")
             for _ in range(num_batches):
                 yield debug_batch
@@ -1688,7 +1679,7 @@ def generate_question_answer_batches(
                     batch.append(qa_pair)
             yield batch
 
-    elif task_type in ["wiki_compression", "wiki_continuation"]:
+    elif task_type == "wiki_continuation":
         print("Loading Wikipedia dataset...")
         wiki_dataset = load_dataset("wikimedia/wikipedia", "20231101.en", split="train")
         article_idx = 0
