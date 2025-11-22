@@ -508,6 +508,11 @@ def compute_wiki_logprob(
     """
     question_length = int(question_length or hyperparameters.get("question_length", 512))
     target_length = int(target_length or hyperparameters.get("target_length", 128))
+
+    # Ensure these are in hyperparameters for construct_prompts
+    hyperparameters["question_length"] = question_length
+    hyperparameters["target_length"] = target_length
+
     stride = max(1, int(stride))
     batch_size_val = max(1, int(batch_size) if batch_size else 512)
     requested = (num_samples if num_samples else 256) * stride
