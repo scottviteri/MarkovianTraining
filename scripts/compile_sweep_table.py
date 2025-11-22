@@ -358,6 +358,48 @@ def main():
     
     for task in tasks:
         print(f"\nScanning {task}...")
+        
+        # 1. Check for baseline
+        baseline_dir = f"{s3_results_prefix}/{task}/baseline/"
+        try:
+            # Check if eval_metadata exists in baseline dir
+            result = subprocess.run(
+                ["aws", "s3", "ls", baseline_dir],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            has_baseline = False
+            for line in result.stdout.splitlines():
+                if "eval_metadata" in line and line.endswith(".json"):
+                    has_baseline = True
+                    break
+            
+            if has_baseline:
+                print(f"  Checking run: baseline (baseline)")
+                # Download baseline metadata
+                local_baseline_dir = os.path.join(project_root, "results", task, "baseline")
+                os.makedirs(local_baseline_dir, exist_ok=True)
+                
+                # Use download_adapter_metadata but adapt paths
+                s3_baseline_path = baseline_dir
+                include_args = [
+                    "--exclude", "*",
+                    "--include", "eval_metadata*.json"
+                ]
+                subprocess.run(
+                    ["aws", "s3", "sync", s3_baseline_path, local_baseline_dir, *include_args],
+                    check=True,
+                    capture_output=True
+                )
+                
+                meta = load_local_metadata(local_baseline_dir)
+                if meta:
+                    acc = meta.get("accuracy", 0)
+                    results_table[task]["baseline"] = acc
+        except subprocess.CalledProcessError:
+            pass # No baseline found
+            
         runs = list_s3_runs(task, s3_results_prefix, method_filter)
         
         # Also shuffle runs
