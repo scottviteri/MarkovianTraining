@@ -205,14 +205,19 @@ if PERTURB_S3_BUCKET:
     PERTURB_S3_BUCKET = PERTURB_S3_BUCKET.rstrip("/")
 _S3_WARNING_PRINTED = False
 
+PERTURB_METADATA_FILENAME = "perturb_metadata.json"
+PERTURB_METADATA_DIRNAME = "perturb_metadata"
+
 RUN_SYNC_PATTERNS = [
     "markovian_comparison_accuracy/*.json",
     "markovian_comparison_accuracy/*.png",
-    "perturb_metadata.json",
+    f"{PERTURB_METADATA_FILENAME}",
+    f"{PERTURB_METADATA_DIRNAME}/*.json",
 ]
 
 PERTURB_METADATA_PATTERNS = [
-    "perturb_metadata.json",
+    f"{PERTURB_METADATA_FILENAME}",
+    f"{PERTURB_METADATA_DIRNAME}/*.json",
 ]
 
 PERTURBATION_SETS = {
@@ -261,7 +266,63 @@ PERTURBATION_SETS = {
 
 
 def _perturb_metadata_path(run_dir: str) -> str:
-    return os.path.join(run_dir, "perturb_metadata.json")
+    return os.path.join(run_dir, PERTURB_METADATA_FILENAME)
+
+
+def _perturb_metadata_dir(run_dir: str) -> str:
+    return os.path.join(run_dir, PERTURB_METADATA_DIRNAME)
+
+
+def _perturb_record_path(run_dir: str, metadata_key: str) -> str:
+    safe_key = f"{metadata_key}.json"
+    return os.path.join(_perturb_metadata_dir(run_dir), safe_key)
+
+
+def _ensure_metadata_records_dir(run_dir: str) -> str:
+    path = _perturb_metadata_dir(run_dir)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _list_metadata_record_files(run_dir: str) -> List[str]:
+    dir_path = _ensure_metadata_records_dir(run_dir)
+    try:
+        return [
+            os.path.join(dir_path, name)
+            for name in os.listdir(dir_path)
+            if name.endswith(".json")
+        ]
+    except FileNotFoundError:
+        return []
+
+
+def _write_metadata_record_file(run_dir: str, metadata_key: str, record: dict):
+    dir_path = _ensure_metadata_records_dir(run_dir)
+    path = _perturb_record_path(run_dir, metadata_key)
+    tmp_path = path + ".tmp"
+    payload = {**record, "_metadata_key": metadata_key}
+    with open(tmp_path, "w") as f:
+        json.dump(payload, f, indent=2)
+    os.replace(tmp_path, path)
+
+
+def _maybe_migrate_legacy_metadata(run_dir: str):
+    """
+    Legacy support: convert monolithic perturb_metadata.json into per-record files.
+    """
+    record_files = _list_metadata_record_files(run_dir)
+    if record_files:
+        return
+    legacy_path = _perturb_metadata_path(run_dir)
+    if not os.path.exists(legacy_path):
+        return
+    try:
+        with open(legacy_path, "r") as f:
+            legacy_data = json.load(f)
+    except Exception:
+        return
+    for metadata_key, record in legacy_data.get("records", {}).items():
+        _write_metadata_record_file(run_dir, metadata_key, record)
 
 
 def _ensure_metadata_structure(data: dict, run_dir: str) -> dict:
@@ -273,14 +334,21 @@ def _ensure_metadata_structure(data: dict, run_dir: str) -> dict:
 
 
 def load_perturb_metadata(run_dir: str) -> dict:
-    path = _perturb_metadata_path(run_dir)
-    if not os.path.exists(path):
-        return _ensure_metadata_structure({}, run_dir)
-    try:
-        with open(path, "r") as f:
-            data = json.load(f)
-    except Exception:
-        data = {}
+    _maybe_migrate_legacy_metadata(run_dir)
+    records = {}
+    for record_path in _list_metadata_record_files(run_dir):
+        filename = os.path.basename(record_path)
+        metadata_key = filename[:-5]  # strip .json
+        try:
+            with open(record_path, "r") as f:
+                record = json.load(f)
+        except Exception:
+            record = {}
+        if isinstance(record, dict):
+            record = dict(record)
+            record.setdefault("_metadata_key", metadata_key)
+            records[metadata_key] = record
+    data = {"records": records}
     return _ensure_metadata_structure(data, run_dir)
 
 
@@ -291,6 +359,14 @@ def save_perturb_metadata(run_dir: str, metadata: dict):
     with open(tmp_path, "w") as f:
         json.dump(metadata, f, indent=2)
     os.replace(tmp_path, path)
+
+
+def update_metadata_record(run_dir: str, metadata_key: str, record: dict):
+    metadata = get_cached_metadata(run_dir)
+    metadata.setdefault("records", {})
+    metadata["records"][metadata_key] = record
+    _write_metadata_record_file(run_dir, metadata_key, record)
+    push_perturb_metadata(run_dir)
 
 
 def load_best_adapter_index(run_dir: str) -> Optional[int]:
@@ -437,11 +513,13 @@ def sync_run_dir_from_s3(run_dir: str):
     _PULLED_RUN_DIRS.add(run_dir)
 
 
-def pull_perturb_metadata(run_dir: str):
-    if run_dir in _PULLED_PERTURB_DIRS:
+def pull_perturb_metadata(run_dir: str, force: bool = False):
+    if not force and run_dir in _PULLED_PERTURB_DIRS:
         return
     _sync_from_s3(run_dir, PERTURB_METADATA_PATTERNS)
     _PULLED_PERTURB_DIRS.add(run_dir)
+    if force and run_dir in _PERTURB_METADATA_CACHE:
+        del _PERTURB_METADATA_CACHE[run_dir]
 
 
 def push_perturb_metadata(run_dir: str):
@@ -1217,7 +1295,10 @@ def compute_sensitivity_summary(results, perturb_type):
         
     perturbation_degrees = list(results[0]["Effect Difference"].keys())
     baseline_name = f"{perturb_type.title().replace('_', '')}0%"
-    analysis_degrees = [deg for deg in perturbation_degrees if deg != baseline_name]
+    analysis_degrees = [
+        deg for deg in perturbation_degrees
+        if deg != baseline_name and deg.lower() != "original"
+    ]
     
     summary = {}
     for degree in analysis_degrees:
@@ -1821,6 +1902,10 @@ def summarize_markovian_comparison_results(results: List[Dict[str, Any]], pertur
 
     summary_rows = []
     for degree in perturbation_degrees:
+        is_baseline = degree == baseline_name or degree.lower() == "original"
+        if is_baseline:
+            continue
+        
         markovian_effects = [entry["Markovian Effects"][degree] for entry in results]
         non_markovian_effects = [entry["Non_Markovian Effects"][degree] for entry in results]
         effect_differences = [entry["Effect Difference"][degree] for entry in results]
@@ -1846,7 +1931,7 @@ def summarize_markovian_comparison_results(results: List[Dict[str, Any]], pertur
                 "markovian_more_sensitive": markovian_more,
                 "non_markovian_more_sensitive": non_markovian_more,
                 "num_examples": len(effect_differences),
-                "is_baseline": degree == baseline_name or degree.lower() == "original",
+                "is_baseline": is_baseline,
             }
         )
 
@@ -2236,9 +2321,9 @@ def run_qa_perturbation_accuracy(
     for i in range(len(qa_pairs)):
         comparison_data.append({
             "Batch Index": i,
-            "Markovian Effects": {"Original": float(m_results[i]["correct"])},
-            "Non_Markovian Effects": {"Original": float(nm_results[i]["correct"])},
-            "Effect Difference": {"Original": float(m_results[i]["correct"]) - float(nm_results[i]["correct"])}
+            "Markovian Effects": {},
+            "Non_Markovian Effects": {},
+            "Effect Difference": {}
         })
 
     # 2. Run Perturbations
@@ -2282,7 +2367,7 @@ def run_qa_perturbation_accuracy(
             
             nm_orig = float(nm_results[i].get("correct", 0))
             nm_pert = float(nm_pert_results[i].get("correct", 0))
-
+            
             m_sensitivity = m_orig - m_pert
             nm_sensitivity = nm_orig - nm_pert
             
@@ -2310,8 +2395,6 @@ def run_qa_perturbation_accuracy(
             markovian_run=markovian_dir,
             non_markovian_run=non_markovian_dir,
         )
-        mark_metadata = get_cached_metadata(markovian_dir)
-        non_metadata = get_cached_metadata(non_markovian_dir)
         timestamp = datetime.datetime.utcnow().isoformat()
         record_common = {
             "task_type": task_type,
@@ -2344,10 +2427,8 @@ def run_qa_perturbation_accuracy(
             # Store reference to the file in the Markovian run to avoid duplication
             "comparison_results_file": os.path.join("..", os.path.basename(markovian_dir), "markovian_comparison_accuracy", os.path.basename(output_path))
         }
-        mark_metadata["records"][metadata_key] = mark_record
-        non_metadata["records"][metadata_key] = non_record
-        persist_metadata_cache(markovian_dir)
-        persist_metadata_cache(non_markovian_dir)
+        update_metadata_record(markovian_dir, metadata_key, mark_record)
+        update_metadata_record(non_markovian_dir, metadata_key, non_record)
 
     print(f"Accuracy perturbation analysis saved to {output_path}")
     sync_run_dir_outputs(markovian_dir)

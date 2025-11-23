@@ -50,9 +50,9 @@ def _metadata_sample_stats(metadata):
 
 def _log_metadata_sample_info(role, run_path, metadata, target_samples):
     target_display = target_samples if target_samples is not None else "default"
-    meta_path = os.path.join(run_path, "perturb_metadata.json")
-    if not os.path.exists(meta_path):
-        print(f"  {role}: no perturb_metadata.json (target={target_display})")
+    records = metadata.get("records", {}) if metadata else {}
+    if not records:
+        print(f"  {role}: no perturbation records (target={target_display})")
         return
     stats = _metadata_sample_stats(metadata)
     if not stats:
@@ -291,6 +291,8 @@ def main():
         # Download adapter weights specifically
         download_adapter_weights(job['dataset'], job['mark_run_name'], job['mark_index'], args.s3_bucket)
         download_adapter_weights(job['dataset'], job['non_run_name'], job['non_index'], args.s3_bucket)
+        pa.pull_perturb_metadata(job["mark_run_path"], force=True)
+        pa.pull_perturb_metadata(job["non_run_path"], force=True)
         
         pa.run_qa_perturbation_accuracy(
             markovian_log_file=job["markovian_log"],
@@ -304,9 +306,6 @@ def main():
             non_markovian_adapter_index=job["non_index"],
             stride=job["stride"],
         )
-        if job.get("needs_sample_refresh"):
-            pa.persist_metadata_cache(job["mark_run_path"])
-            pa.persist_metadata_cache(job["non_run_path"])
 
 if __name__ == "__main__":
     main()
