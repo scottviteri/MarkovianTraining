@@ -293,6 +293,31 @@ def main():
         download_adapter_weights(job['dataset'], job['non_run_name'], job['non_index'], args.s3_bucket)
         pa.pull_perturb_metadata(job["mark_run_path"], force=True)
         pa.pull_perturb_metadata(job["non_run_path"], force=True)
+
+        metadata_key = pa.build_perturb_metadata_key(
+            task_type=job["dataset"],
+            perturb_type=job["perturb"],
+            metric="accuracy",
+            paired_role="NonMarkovian",
+            paired_adapter_index=job["non_index"],
+            markovian_run=job["mark_run_path"],
+            non_markovian_run=job["non_run_path"],
+        )
+        mark_meta = pa.get_cached_metadata(job["mark_run_path"])
+        non_meta = pa.get_cached_metadata(job["non_run_path"])
+        mark_record = _get_record(mark_meta, metadata_key)
+        non_record = _get_record(non_meta, metadata_key)
+        already_done = (
+            pa.metadata_has_record(mark_meta, metadata_key, job["stride"])
+            and pa.metadata_has_record(non_meta, metadata_key, job["stride"])
+        )
+        sample_requirement_met = (
+            _record_meets_sample_requirement(mark_record, job.get("fresh_num_samples"))
+            and _record_meets_sample_requirement(non_record, job.get("fresh_num_samples"))
+        )
+        if already_done and sample_requirement_met and not args.force:
+            print("  Skipping: metadata updated by another worker.")
+            continue
         
         pa.run_qa_perturbation_accuracy(
             markovian_log_file=job["markovian_log"],
