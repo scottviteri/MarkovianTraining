@@ -33,20 +33,14 @@ def test_summarize_markovian_comparison_results_returns_means():
     summary_rows = summarize_markovian_comparison_results(
         _sample_results(), perturb_type="delete"
     )
-    assert len(summary_rows) == 2
+    assert len(summary_rows) == 1
 
-    original_row = next(row for row in summary_rows if row["degree"] == "Original")
     delete_row = next(row for row in summary_rows if row["degree"] == "Delete20%")
-
-    assert pytest.approx(original_row["markovian_mean"]) == 0.7
-    assert pytest.approx(original_row["non_markovian_mean"]) == 0.55
-    assert pytest.approx(original_row["mean_difference"]) == 0.15
-    assert original_row["num_examples"] == 2
-
     assert pytest.approx(delete_row["markovian_mean"]) == 0.15
     assert pytest.approx(delete_row["non_markovian_mean"]) == 0.1
     assert pytest.approx(delete_row["mean_difference"]) == 0.05
     assert delete_row["is_baseline"] is False
+    assert all(row["degree"] != "Original" for row in summary_rows)
 
 
 def test_generate_markovian_comparison_report_reads_files(tmp_path: Path):
@@ -58,7 +52,7 @@ def test_generate_markovian_comparison_report_reads_files(tmp_path: Path):
     file_path.write_text(json.dumps(_sample_results()))
 
     report = generate_markovian_comparison_report(str(tmp_path / "results"))
-    assert len(report) == 2
+    assert len(report) == 1
 
     first_row = report[0]
     assert first_row["task"] == "gsm8k"
@@ -87,7 +81,7 @@ def test_build_dataset_perturbation_matrix(tmp_path: Path):
 
     matrix = build_dataset_perturbation_matrix(str(base_root))
     assert matrix["datasets"] == ["arc", "gsm8k"]
-    assert "Delete20%" in matrix["degrees"]
+    assert matrix["degrees"] == ["Delete20%"]
 
     gsm_cell = matrix["cells"]["gsm8k"]["Delete20%"]
     assert pytest.approx(gsm_cell["mean_difference"]) == 0.05
@@ -133,7 +127,7 @@ def test_build_dataset_matrix_with_aggregation(tmp_path: Path):
     matrix = build_dataset_perturbation_matrix(
         str(base_root), aggregate_perturbation_types=True
     )
-    assert matrix["degrees"] == ["Original", "Delete"]
+    assert matrix["degrees"] == ["Delete"]
     delete_cell = matrix["cells"]["gsm8k"]["Delete"]
     # Weighted mean across four entries: diffs = [0.4,0.2,0.3,0.1] -> mean 0.25
     assert pytest.approx(delete_cell["mean_difference"]) == 0.25

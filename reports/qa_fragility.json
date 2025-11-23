@@ -1,0 +1,255 @@
+{
+  "metric": "accuracy",
+  "datasets": [
+    {
+      "dataset": "arc",
+      "label": "Arc",
+      "cells": {
+        "CharReplace": {
+          "mean_difference": 0.354421768707483,
+          "difference_std": 0.6537938775761482,
+          "markovian_mean": 0.42448979591836733,
+          "non_markovian_mean": 0.07006802721088436,
+          "num_examples": 1470,
+          "num_runs": 5
+        },
+        "Delete": {
+          "mean_difference": 0.5197278911564626,
+          "difference_std": 0.6509688703574575,
+          "markovian_mean": 0.48027210884353744,
+          "non_markovian_mean": -0.03945578231292517,
+          "num_examples": 1470,
+          "num_runs": 5
+        },
+        "DigitReplace": {
+          "mean_difference": -0.003401360544217687,
+          "difference_std": 0.05822191417899213,
+          "markovian_mean": -0.0006802721088435374,
+          "non_markovian_mean": 0.0027210884353741495,
+          "num_examples": 1470,
+          "num_runs": 5
+        },
+        "TruncateBack": {
+          "mean_difference": 0.1836734693877551,
+          "difference_std": 0.6326750051054983,
+          "markovian_mean": 0.254421768707483,
+          "non_markovian_mean": 0.0707482993197279,
+          "num_examples": 1470,
+          "num_runs": 5
+        },
+        "TruncateFront": {
+          "mean_difference": 0.49047619047619045,
+          "difference_std": 0.6564005469258348,
+          "markovian_mean": 0.4891156462585034,
+          "non_markovian_mean": -0.0013605442176870754,
+          "num_examples": 1470,
+          "num_runs": 5
+        }
+      },
+      "average": {
+        "mean_difference": 0.3089795918367347,
+        "difference_std": 0.6129339886263764,
+        "markovian_mean": 0.3295238095238095,
+        "non_markovian_mean": 0.02054421768707483,
+        "num_examples": 7350,
+        "num_runs": 25
+      }
+    },
+    {
+      "dataset": "arithmetic",
+      "label": "Arithmetic",
+      "cells": {
+        "CharReplace": {
+          "mean_difference": -0.023828125,
+          "difference_std": 0.41010025659463367,
+          "markovian_mean": 0.8505859375,
+          "non_markovian_mean": 0.8744140625,
+          "num_examples": 5120,
+          "num_runs": 5
+        },
+        "Delete": null,
+        "DigitReplace": {
+          "mean_difference": -0.018,
+          "difference_std": 0.4875202559894306,
+          "markovian_mean": 0.792,
+          "non_markovian_mean": 0.81,
+          "num_examples": 2500,
+          "num_runs": 5
+        },
+        "TruncateBack": null,
+        "TruncateFront": null
+      },
+      "average": {
+        "mean_difference": -0.021916010498687664,
+        "difference_std": 0.4370234601903968,
+        "markovian_mean": 0.8313648293963255,
+        "non_markovian_mean": 0.8532808398950131,
+        "num_examples": 7620,
+        "num_runs": 10
+      }
+    },
+    {
+      "dataset": "gsm8k",
+      "label": "Gsm8K",
+      "cells": {
+        "CharReplace": null,
+        "Delete": null,
+        "DigitReplace": null,
+        "TruncateBack": null,
+        "TruncateFront": {
+          "mean_difference": 0.0150390625,
+          "difference_std": 0.532872887374767,
+          "markovian_mean": 0.2421875,
+          "non_markovian_mean": 0.2271484375,
+          "num_examples": 5120,
+          "num_runs": 5
+        }
+      },
+      "average": {
+        "mean_difference": 0.0150390625,
+        "difference_std": 0.532872887374767,
+        "markovian_mean": 0.2421875,
+        "non_markovian_mean": 0.2271484375,
+        "num_examples": 5120,
+        "num_runs": 5
+      }
+    },
+    {
+      "dataset": "mmlu",
+      "label": "Mmlu",
+      "cells": {
+        "CharReplace": null,
+        "Delete": null,
+        "DigitReplace": {
+          "mean_difference": -0.00234375,
+          "difference_std": 0.19663769179874316,
+          "markovian_mean": 0.005859375,
+          "non_markovian_mean": 0.008203125,
+          "num_examples": 5120,
+          "num_runs": 5
+        },
+        "TruncateBack": {
+          "mean_difference": 0.128125,
+          "difference_std": 0.6364498089991072,
+          "markovian_mean": 0.143359375,
+          "non_markovian_mean": 0.015234375,
+          "num_examples": 5120,
+          "num_runs": 5
+        },
+        "TruncateFront": null
+      },
+      "average": {
+        "mean_difference": 0.062890625,
+        "difference_std": 0.47552381043130676,
+        "markovian_mean": 0.074609375,
+        "non_markovian_mean": 0.01171875,
+        "num_examples": 10240,
+        "num_runs": 10
+      }
+    },
+    {
+      "dataset": "svamp",
+      "label": "Svamp",
+      "cells": {
+        "CharReplace": {
+          "mean_difference": 0.174,
+          "difference_std": 0.6248125052098963,
+          "markovian_mean": 0.24,
+          "non_markovian_mean": 0.066,
+          "num_examples": 1500,
+          "num_runs": 5
+        },
+        "Delete": {
+          "mean_difference": 0.19866666666666666,
+          "difference_std": 0.6297075158798373,
+          "markovian_mean": 0.25866666666666666,
+          "non_markovian_mean": 0.06,
+          "num_examples": 1500,
+          "num_runs": 5
+        },
+        "DigitReplace": {
+          "mean_difference": 0.04066666666666666,
+          "difference_std": 0.5443769119114277,
+          "markovian_mean": 0.26,
+          "non_markovian_mean": 0.21933333333333332,
+          "num_examples": 1500,
+          "num_runs": 5
+        },
+        "TruncateBack": {
+          "mean_difference": 0.03866666666666667,
+          "difference_std": 0.5097432905122168,
+          "markovian_mean": 0.06733333333333333,
+          "non_markovian_mean": 0.028666666666666667,
+          "num_examples": 1500,
+          "num_runs": 5
+        },
+        "TruncateFront": {
+          "mean_difference": 0.078,
+          "difference_std": 0.5290708837197526,
+          "markovian_mean": 0.12466666666666666,
+          "non_markovian_mean": 0.04666666666666667,
+          "num_examples": 1500,
+          "num_runs": 5
+        }
+      },
+      "average": {
+        "mean_difference": 0.106,
+        "difference_std": 0.5737281586256683,
+        "markovian_mean": 0.19013333333333332,
+        "non_markovian_mean": 0.08413333333333334,
+        "num_examples": 7500,
+        "num_runs": 25
+      }
+    }
+  ],
+  "column_average": {
+    "CharReplace": {
+      "mean_difference": 0.0815822002472188,
+      "difference_std": 0.5278587184838955,
+      "markovian_mean": 0.6599505562422744,
+      "non_markovian_mean": 0.5783683559950556,
+      "num_examples": 8090,
+      "num_runs": 3
+    },
+    "Delete": {
+      "mean_difference": 0.3575757575757576,
+      "difference_std": 0.6601332753546716,
+      "markovian_mean": 0.36835016835016837,
+      "non_markovian_mean": 0.010774410774410777,
+      "num_examples": 2970,
+      "num_runs": 2
+    },
+    "DigitReplace": {
+      "mean_difference": -9.4428706326724e-05,
+      "difference_std": 0.3428756778483857,
+      "markovian_mean": 0.22653446647780925,
+      "non_markovian_mean": 0.22662889518413598,
+      "num_examples": 10590,
+      "num_runs": 4
+    },
+    "TruncateBack": {
+      "mean_difference": 0.12163164400494438,
+      "difference_std": 0.6158510308910622,
+      "markovian_mean": 0.14944375772558716,
+      "non_markovian_mean": 0.02781211372064277,
+      "num_examples": 8090,
+      "num_runs": 3
+    },
+    "TruncateFront": {
+      "mean_difference": 0.11310259579728059,
+      "difference_std": 0.5848849236382475,
+      "markovian_mean": 0.26526576019777504,
+      "non_markovian_mean": 0.15216316440049443,
+      "num_examples": 8090,
+      "num_runs": 3
+    }
+  },
+  "overall_average": {
+    "mean_difference": 0.09569125033042558,
+    "difference_std": 0.5377525821843032,
+    "markovian_mean": 0.32215173143008197,
+    "non_markovian_mean": 0.22646048109965636,
+    "num_examples": 37830,
+    "num_runs": 5
+  }
+}

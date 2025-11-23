@@ -220,6 +220,15 @@ PERTURB_METADATA_PATTERNS = [
     f"{PERTURB_METADATA_DIRNAME}/*.json",
 ]
 
+DEFAULT_FRAGILITY_QA_DATASETS = ["arc", "arithmetic", "gsm8k", "mmlu", "svamp"]
+DEFAULT_FRAGILITY_PERTURBATIONS = [
+    "CharReplace",
+    "Delete",
+    "DigitReplace",
+    "TruncateBack",
+    "TruncateFront",
+]
+
 PERTURBATION_SETS = {
     "delete": {
         "perturbations": {
@@ -2118,8 +2127,8 @@ def generate_markovian_comparison_report(
         List of summary rows enriched with task/run metadata.
     """
     base_dir = os.path.abspath(base_dir)
-    comparison_dir_name = f"markovian_comparison_{metric}"
-    filename_prefix = f"comparison_results_{metric}_"
+    comparison_dir_name = f"markovian_comparison_accuracy"
+    filename_prefix = f"comparison_results_accuracy_"
     glob_pattern = os.path.join(
         base_dir, "**", comparison_dir_name, f"{filename_prefix}*.json"
     )
@@ -2172,6 +2181,116 @@ def generate_markovian_comparison_report(
             r.get("degree") or "",
         ),
     )
+
+
+def _format_dataset_label(dataset: str) -> str:
+    if not dataset:
+        return ""
+    return dataset.replace("_", " ").title()
+
+
+def _format_fragility_cell(
+    cell: Optional[Dict[str, Any]],
+    multiplier: float = 100.0,
+    precision: int = 3,
+) -> str:
+    if not cell:
+        return "-"
+    mean = float(cell.get("mean_difference", 0.0)) * multiplier
+    fmt = f"{{:+0.{precision}f}}"
+    return fmt.format(mean)
+
+
+def build_fragility_rows(
+    matrix: Dict[str, Any],
+    datasets: List[str],
+    perturbations: List[str],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
+    """Prepare dataset rows, column averages, and overall summary for fragility tables."""
+    rows = []
+    dataset_avgs = []
+
+    for dataset in datasets:
+        cell_map = matrix["cells"].get(dataset, {})
+        dataset_avg = matrix["dataset_average"].get(dataset)
+        rows.append(
+            {
+                "dataset": dataset,
+                "label": _format_dataset_label(dataset),
+                "cells": {pert: cell_map.get(pert) for pert in perturbations},
+                "average": dataset_avg,
+            }
+        )
+        if dataset_avg:
+            dataset_avgs.append(dataset_avg)
+
+    column_averages: Dict[str, Any] = {}
+    for pert in perturbations:
+        column_cells = [
+            matrix["cells"].get(dataset, {}).get(pert)
+            for dataset in datasets
+            if matrix["cells"].get(dataset, {}).get(pert)
+        ]
+        column_averages[pert] = (
+            _aggregate_report_rows(column_cells) if column_cells else None
+        )
+
+    overall = _aggregate_report_rows([avg for avg in dataset_avgs if avg])
+    return rows, column_averages, overall
+
+
+def format_fragility_markdown(
+    rows: List[Dict[str, Any]],
+    column_averages: Dict[str, Any],
+    overall: Optional[Dict[str, Any]],
+    perturbations: List[str],
+    multiplier: float = 100.0,
+    precision: int = 3,
+    summary_label: Optional[str] = "Overall",
+) -> str:
+    header = ["Dataset", *perturbations, "Average"]
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join(["---"] * len(header)) + " |",
+    ]
+
+    for row in rows:
+        cells = [
+            _format_fragility_cell(row["cells"].get(pert), multiplier, precision)
+            for pert in perturbations
+        ]
+        avg_value = _format_fragility_cell(row["average"], multiplier, precision)
+        lines.append(
+            "| "
+            + " | ".join([row["label"]] + cells + [avg_value])
+            + " |"
+        )
+
+    if summary_label:
+        summary_cells = [
+            _format_fragility_cell(column_averages.get(pert), multiplier, precision)
+            for pert in perturbations
+        ]
+        summary_avg = _format_fragility_cell(overall, multiplier, precision)
+        lines.append(
+            "| " + " | ".join([summary_label] + summary_cells + [summary_avg]) + " |"
+        )
+    return "\n".join(lines)
+
+
+def _fragility_cell_to_dict(cell: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not cell:
+        return None
+    payload = {
+        "mean_difference": float(cell.get("mean_difference", 0.0)),
+        "difference_std": float(cell.get("difference_std", 0.0)),
+        "markovian_mean": float(cell.get("markovian_mean", 0.0)),
+        "non_markovian_mean": float(cell.get("non_markovian_mean", 0.0)),
+        "num_examples": int(cell.get("num_examples", 0)),
+    }
+    if "num_runs" in cell:
+        payload["num_runs"] = int(cell.get("num_runs") or 0)
+    return payload
 
 
 
@@ -2596,6 +2715,44 @@ def main():
         action="store_true",
         help="Regenerate individual markovian comparison plots with new parameters before combining (for --combine_all_plots)"
     )
+    parser.add_argument(
+        "--generate_report",
+        type=str,
+        help="Write generate_markovian_comparison_report output to the given JSON file and exit",
+    )
+    parser.add_argument(
+        "--report_base_dir",
+        type=str,
+        default="results",
+        help="Base directory to scan when generating reports (default: results)",
+    )
+    parser.add_argument(
+        "--report_aggregate_types",
+        action="store_true",
+        help="Aggregate perturbation degrees by perturbation type in generated reports",
+    )
+    parser.add_argument(
+        "--fragility_matrix_output",
+        type=str,
+        help="Aggregate perturbation sensitivity into a fragility matrix and save to this file",
+    )
+    parser.add_argument(
+        "--fragility_metric",
+        choices=["accuracy", "log_prob"],
+        default="accuracy",
+        help="Metric to use when building fragility matrix (default: accuracy)",
+    )
+    parser.add_argument(
+        "--fragility_datasets",
+        nargs="+",
+        help="Datasets to include in the fragility matrix (default: QA set for accuracy, wiki_continuation for log_prob)",
+    )
+    parser.add_argument(
+        "--fragility_format",
+        choices=["markdown", "json"],
+        default="markdown",
+        help="Output format for fragility matrix (default: markdown)",
+    )
 
     args = parser.parse_args()
 
@@ -2810,6 +2967,94 @@ def main():
             exclude_perturbations=args.exclude_perturbations,
             legend_font_size=args.legend_font_size
         )
+        return
+
+    if args.generate_report:
+        base_dir = os.path.abspath(args.report_base_dir or "results")
+        perturb_filter = args.perturb if args.perturb else None
+        report_rows = generate_markovian_comparison_report(
+            base_dir=base_dir,
+            metric=args.metric,
+            perturbations=perturb_filter,
+            aggregate_perturbation_types=args.report_aggregate_types,
+        )
+        output_path = os.path.abspath(args.generate_report)
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        with open(output_path, "w") as f:
+            json.dump(report_rows, f, indent=2)
+        print(f"Wrote {len(report_rows)} comparison rows to {output_path}")
+        return
+
+    if args.fragility_matrix_output:
+        base_dir = os.path.abspath(args.report_base_dir or "results")
+        perturb_filter = args.perturb if args.perturb else None
+        matrix = build_dataset_perturbation_matrix(
+            base_dir=base_dir,
+            metric=args.fragility_metric,
+            perturbations=perturb_filter,
+            aggregate_perturbation_types=True,
+        )
+        datasets = (
+            args.fragility_datasets
+            if args.fragility_datasets
+            else (
+                DEFAULT_FRAGILITY_QA_DATASETS
+                if args.fragility_metric == "accuracy"
+                else ["wiki_continuation"]
+            )
+        )
+        perturbations = DEFAULT_FRAGILITY_PERTURBATIONS
+
+        rows, column_avgs, overall = build_fragility_rows(
+            matrix, datasets, perturbations
+        )
+
+        output_path = os.path.abspath(args.fragility_matrix_output)
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+
+        if args.fragility_format == "json":
+            payload = {
+                "metric": args.fragility_metric,
+                "datasets": [
+                    {
+                        "dataset": row["dataset"],
+                        "label": row["label"],
+                        "cells": {
+                            pert: _fragility_cell_to_dict(row["cells"].get(pert))
+                            for pert in perturbations
+                        },
+                        "average": _fragility_cell_to_dict(row["average"]),
+                    }
+                    for row in rows
+                ],
+                "column_average": {
+                    pert: _fragility_cell_to_dict(column_avgs.get(pert))
+                    for pert in perturbations
+                },
+                "overall_average": _fragility_cell_to_dict(overall),
+            }
+            with open(output_path, "w") as f:
+                json.dump(payload, f, indent=2)
+        else:
+            multiplier = 100.0 if args.fragility_metric == "accuracy" else 1.0
+            summary_label = None if len(rows) <= 1 else "Overall"
+            markdown = format_fragility_markdown(
+                rows,
+                column_avgs,
+                overall,
+                perturbations,
+                multiplier=multiplier,
+                summary_label=summary_label,
+            )
+            if args.fragility_metric == "log_prob":
+                markdown = "> Units: Δlog P (Markovian drop − Non-Markovian drop, nats)\n\n" + markdown
+            with open(output_path, "w") as f:
+                f.write(markdown + "\n")
+        print(f"Fragility matrix written to {output_path}")
         return
 
     if args.collate:

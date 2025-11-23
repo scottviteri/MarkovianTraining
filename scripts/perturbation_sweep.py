@@ -148,6 +148,7 @@ def read_best_adapter_index(run_path):
 
 def build_tasks(datasets, perturbations, args):
     tasks = []
+    monitor = {}
     bucket = args.s3_bucket
 
     datasets_to_scan = list(datasets)
@@ -179,6 +180,11 @@ def build_tasks(datasets, perturbations, args):
         non_meta = pa.get_cached_metadata(non_run_path)
         _log_metadata_sample_info("Markovian", mark_run_path, mark_meta, args.fresh_num_samples)
         _log_metadata_sample_info("NonMarkovian", non_run_path, non_meta, args.fresh_num_samples)
+        monitor_entry = monitor.setdefault(dataset, {
+            "mark_run": mark_run_name,
+            "non_run": non_run_name,
+            "rows": [],
+        })
         dataset_perturbations = list(perturbations)
         random.shuffle(dataset_perturbations)
 
@@ -205,9 +211,10 @@ def build_tasks(datasets, perturbations, args):
                 and _record_meets_sample_requirement(non_record, args.fresh_num_samples)
             )
             refresh_reason = None
-            if (
+            if not already_done:
+                refresh_reason = "missing stride-aligned metadata"
+            elif (
                 args.fresh_num_samples
-                and already_done
                 and not sample_requirement_met
             ):
                 mark_samples = int(mark_record.get("num_samples", 0)) if mark_record else 0
@@ -219,6 +226,17 @@ def build_tasks(datasets, perturbations, args):
                 print(
                     f"Scheduling refresh for {dataset}/{perturb}: {refresh_reason}"
                 )
+
+            status = "ready" if not refresh_reason else "pending"
+            monitor_entry["rows"].append({
+                "perturb": perturb,
+                "mark_samples": mark_record.get("num_samples") if mark_record else None,
+                "non_samples": non_record.get("num_samples") if non_record else None,
+                "status": status,
+                "mark_timestamp": mark_record.get("timestamp") if mark_record else None,
+                "non_timestamp": non_record.get("timestamp") if non_record else None,
+                "refresh_reason": refresh_reason,
+            })
 
             if already_done and sample_requirement_met and not args.force:
                 continue
@@ -239,7 +257,37 @@ def build_tasks(datasets, perturbations, args):
                 "needs_sample_refresh": bool(refresh_reason),
                 "sample_refresh_reason": refresh_reason,
             })
-    return tasks
+    return tasks, monitor
+
+
+def print_health_monitor(monitor, args):
+    target_display = args.fresh_num_samples if args.fresh_num_samples else "default"
+    total = 0
+    pending = 0
+    for dataset in sorted(monitor.keys()):
+        info = monitor[dataset]
+        rows = sorted(info["rows"], key=lambda r: r["perturb"])
+        if not rows:
+            continue
+        print(f"\n=== {dataset} (target={target_display}, stride={args.stride}) ===")
+        print(f"Markovian run: {info['mark_run']} | Non-Markovian run: {info['non_run']}")
+        header = f"{'Perturb':<20} {'Mark':>8} {'NonMark':>8} {'Status':>10} {'Updated':>22}"
+        print(header)
+        print("-" * len(header))
+        for row in rows:
+            total += 1
+            if row["status"] != "ready":
+                pending += 1
+            mark_val = row["mark_samples"] if row["mark_samples"] is not None else "-"
+            non_val = row["non_samples"] if row["non_samples"] is not None else "-"
+            timestamp = row["mark_timestamp"] or row["non_timestamp"] or "-"
+            print(f"{row['perturb']:<20} {mark_val:>8} {non_val:>8} {row['status']:>10} {timestamp:>22}")
+            if row.get("refresh_reason") and row["status"] != "ready":
+                print(f"    reason: {row['refresh_reason']}")
+    if total:
+        print(f"\nPending perturbations: {pending}/{total}")
+    else:
+        print("\nNo perturbation metadata available yet.")
 
 def main():
     parser = argparse.ArgumentParser(description="Sweep perturbation accuracy across datasets/adapters")
@@ -256,6 +304,11 @@ def main():
         type=int,
         help="Number of fresh samples to evaluate; re-run metadata if prior runs used fewer",
     )
+    parser.add_argument(
+        "--health_monitor",
+        action="store_true",
+        help="Only print per-perturb sample coverage and exit",
+    )
     parser.add_argument("--s3_bucket", type=str, default=DEFAULT_S3_BUCKET, help="S3 bucket")
     args = parser.parse_args()
 
@@ -263,7 +316,11 @@ def main():
     if args.all or not perturbations:
         perturbations = list(pa.PERTURBATION_SETS.keys())
 
-    tasks = build_tasks(args.datasets, perturbations, args)
+    tasks, monitor = build_tasks(args.datasets, perturbations, args)
+    if args.health_monitor:
+        print_health_monitor(monitor, args)
+        print(f"\nPending perturbations: {len(tasks)}")
+        return
     if not tasks:
         print("No tasks to process.")
         return
