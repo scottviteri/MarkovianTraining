@@ -65,8 +65,8 @@ def run_cross_model_evaluation(log_files, stride=1, debug_freq=100, max_index=No
             else:
                 raise ValueError("Unsupported model type")
 
-            # Load the evaluation model
-            frozen_model, tokenizer, device = load_model(results["evaluator_model"])
+            # Load the evaluation model (use the frozen critic model for scoring)
+            _, frozen_model, tokenizer, device = load_model(results["evaluator_model"])
 
             # Filter entries and validate required fields
             entries = []
@@ -628,6 +628,8 @@ def main():
 
     args = parser.parse_args()
 
+    results_file_for_plot = None
+
     if args.collate:
         print(f"Collating results from {len(args.collate)} runs...")
         collate_cross_model_results(args.collate, args.output_dir)
@@ -674,15 +676,19 @@ def main():
             max_index=args.max_index,
             critic_model_type=args.critic_model
         )
-        save_evaluation_results(results, log_file)
+        results_file_for_plot = save_evaluation_results(results, log_file)
+    else:
+        # When plotting only, assume the provided log_file already points to evaluation results
+        results_file_for_plot = log_file
 
     # Handle single critic plotting
     if not args.process_only:
         try:
-            results = load_evaluation_results(log_file)
+            plot_source = results_file_for_plot or log_file
+            results = load_evaluation_results(plot_source)
             plot_cross_model_comparison(
                 results, 
-                log_file, 
+                plot_source, 
                 window_size=args.window_size,
                 max_index=args.max_index,
                 show_log_probs=args.show_log_probs,
