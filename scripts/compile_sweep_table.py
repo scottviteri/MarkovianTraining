@@ -6,6 +6,7 @@ import subprocess
 import random
 import datetime
 import re
+import math
 from collections import defaultdict
 from typing import Dict, Any, Optional
 
@@ -32,6 +33,22 @@ TASK_TEST_SET_SIZES = {
     "mathqa": 2985,      # MathQA test split
     "arithmetic": 200,   # synthetic evaluation set generated in evaluation.py (chunk_size default)
 }
+
+
+def _binomial_ci(p: float, n: Optional[int], z: float = 1.96) -> Optional[tuple[float, float]]:
+    """
+    Compute a normal-approximation binomial confidence interval for accuracy.
+    
+    Returns (lower, upper) or None if n is missing/invalid.
+    """
+    if n is None or n <= 0:
+        return None
+    # Clamp p into [0,1] to avoid numerical issues from bad metadata
+    p_clamped = max(0.0, min(1.0, float(p)))
+    se = math.sqrt(p_clamped * (1.0 - p_clamped) / n)
+    lo = max(0.0, p_clamped - z * se)
+    hi = min(1.0, p_clamped + z * se)
+    return lo, hi
 
 
 def safe_relpath(path, base_dir):
@@ -484,7 +501,38 @@ def main():
     # Shuffle tasks to reduce contention between workers
     random.shuffle(tasks)
         
-    results_table = defaultdict(lambda: defaultdict(lambda: -float('inf')))
+    # Store per-dataset, per-method summaries as:
+    #   results_table[dataset][method] = {
+    #       "accuracy": best_accuracy,
+    #       "num_samples": effective_sample_count or None,
+    #   }
+    results_table: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
+
+    def update_results_table(
+        dataset: str,
+        key: str,
+        acc: float,
+        meta: Optional[Dict[str, Any]],
+        is_wiki_task: bool,
+    ):
+        """
+        Update results_table[dataset][key] if this accuracy is better.
+        
+        For QA tasks we also retain num_samples so we can print binomial CIs.
+        For wiki tasks we keep only the point estimate (log-probability units),
+        since accuracy is a mean log-prob rather than a Bernoulli rate.
+        """
+        if meta is None:
+            num_samples = None
+        else:
+            num_samples = None if is_wiki_task else _parse_metadata_num_samples(meta)
+
+        existing = results_table[dataset].get(key)
+        if existing is None or acc > existing.get("accuracy", -float("inf")):
+            results_table[dataset][key] = {
+                "accuracy": float(acc),
+                "num_samples": num_samples,
+            }
     
     for task in tasks:
         print(f"\nScanning {task}...")
@@ -556,7 +604,13 @@ def main():
 
                 if meta:
                     acc = meta.get("accuracy", 0)
-                    results_table[dataset][run_name] = max(results_table[dataset].get(run_name, -float('inf')), acc)
+                    update_results_table(
+                        dataset=dataset,
+                        key=run_name,
+                        acc=acc,
+                        meta=meta,
+                        is_wiki_task=is_wiki_task,
+                    )
                     
                     if args.generate_best_adapter:
                         local_run_path = os.path.join(project_root, "results", dataset, run_name)
@@ -623,11 +677,15 @@ def main():
                         best_meta = meta
                         best_adapter_name = adapter
                         
-            # Record score
-            if dataset in WIKI_TASKS:
-                results_table[dataset][method] = max(results_table[dataset][method], best_acc)
-            else:
-                results_table[dataset][method] = max(results_table[dataset][method], best_acc)
+            # Record score for this dataset/method
+            if best_meta is not None and best_acc > -float("inf"):
+                update_results_table(
+                    dataset=dataset,
+                    key=method,
+                    acc=best_acc,
+                    meta=best_meta,
+                    is_wiki_task=is_wiki_task,
+                )
             
             # Generate best adapter file if requested
             if args.generate_best_adapter and best_meta:
@@ -640,7 +698,21 @@ def main():
     print("\n" + "="*50)
     print("Results Table")
     print("="*50)
-    df = pd.DataFrame.from_dict(results_table, orient='index')
+    # Build a human-readable table with confidence intervals where possible.
+    pretty_table: Dict[str, Dict[str, str]] = {}
+    for dataset, methods in results_table.items():
+        pretty_table[dataset] = {}
+        for method, stats in methods.items():
+            acc = stats.get("accuracy", float("nan"))
+            n = stats.get("num_samples")
+            ci = _binomial_ci(acc, n)
+            if ci is not None:
+                lo, hi = ci
+                pretty_table[dataset][method] = f"{acc:.3f} [{lo:.3f}, {hi:.3f}]"
+            else:
+                pretty_table[dataset][method] = f"{acc:.3f}"
+
+    df = pd.DataFrame.from_dict(pretty_table, orient='index')
     if not df.empty:
         print(df.to_markdown())
         df.to_csv("sweep_results_table.csv")

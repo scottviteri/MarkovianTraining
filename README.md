@@ -2,7 +2,7 @@
 
 This project implements and evaluates Markovian Transformers for informative language modeling, focusing on chain-of-thought (CoT) reasoning through reinforcement learning. The codebase supports the research presented in "Markovian Transformers for Informative Language Modeling" and provides comprehensive tools for training, evaluation, and analysis of language models using Group Relative Policy Optimization (GRPO) and related techniques.
 
-## 🎯 Key Features
+##  Key Features
 
 - **Markovian vs Non-Markovian Training**: Compare P(answer|CoT) vs P(answer|question,CoT) reward formulations
 - **Group Relative Policy Optimization (GRPO)**: Parallel sampling with standardized batch baselines
@@ -11,7 +11,7 @@ This project implements and evaluates Markovian Transformers for informative lan
 - **Advanced Evaluation Tools**: Cross-model evaluation, visualization, and analysis capabilities
 - **Actor Reward Gradients**: Novel training approach using actor model for rewards
 
-## 🚀 Installation
+##  Installation
 
 ### Standard Installation
 ```bash
@@ -28,7 +28,7 @@ pip install "transformers==4.46.3" wandb scipy datasets==2.14.6 torchtyping==0.1
 pip install "transformers==4.46.3" wandb scipy datasets==2.14.6 torchtyping==0.1.4 && pip install peft einops apache_beam==2.51.0 matplotlib && pip install "numpy<2" --force-reinstall && pip install -U flash-attn --no-build-isolation && pip install openai bitsandbytes==0.41.3 scipy scikit-learn
 ```
 
-## 🧪 Testing
+##  Testing
 
 The automated suite has been rebuilt around the current `utils/`, `train/`, and `evaluation/` stacks:
 
@@ -49,7 +49,7 @@ To skip the heavier GPT-2 integration tests:
 pytest -m "not slow"
 ```
 
-## 📊 Evaluation System
+##  Evaluation System
 
 The project includes a comprehensive evaluation framework with multiple answer extraction methods and validation metrics. See **[EVALUATION_GUIDE.md](EVALUATION_GUIDE.md)** for detailed documentation on:
 
@@ -59,7 +59,7 @@ The project includes a comprehensive evaluation framework with multiple answer e
 - Evaluation metrics and validation (including Haiku gold-standard)
 - Cost tracking and best practices
 
-## 📖 Training
+##  Training
 
 ### Main Training Script (`src/train.py`)
 
@@ -81,12 +81,12 @@ python src/train.py [options]
 #### Model Selection (11 Supported Models)
 ```bash
 --model_type <type>    # Choose from:
-                       # 🚀 High Performance (8-12B):
+                       #  High Performance (8-12B):
                        # - llama (meta-llama/Llama-3.1-8B-Instruct) [default]
                        # - mistral (mistralai/Mistral-7B-Instruct-v0.2)
                        # - gemma-3 (google/gemma-3-12b-it)
                        #
-                       # ⚡ Medium Performance (1-4B):
+                       #  Medium Performance (1-4B):
                        # - qwen3 (Qwen/Qwen3-4B)
                        # - qwen3-14b (Qwen/Qwen3-14B)
                        # - phi (microsoft/Phi-3.5-mini-instruct)
@@ -94,7 +94,7 @@ python src/train.py [options]
                        # - llama3.2-1b (meta-llama/Llama-3.2-1B-Instruct)
                        # - gemma-3-small (google/gemma-3-1b-it)
                        #
-                       # 💡 Testing/Development (<1B):
+                       #  Testing/Development (<1B):
                        # - gpt2 (openai-community/gpt2)
                        # - tinystories (roneneldan/TinyStories)
 ```
@@ -148,7 +148,7 @@ python src/train.py --task_type arithmetic --model_type gpt2 --num_batches 100
 python src/train.py --task_type mmlu --model_type qwen3 --cot_length 150
 ```
 
-## 📊 Evaluation
+##  Evaluation
 
 ### Unified Evaluation CLI
 All evaluation tasks are now consolidated in a single `evaluation.py` script:
@@ -303,7 +303,7 @@ extracted = extract_answer(answer_text, method="llm", answer_format="numeric")
 3. **Validation**: Use LLM extraction on critical evaluations or when debugging failures
 4. **Cost Management**: LLM extraction is ~$0.00001 per sample, very affordable for validation sets
 
-## 🔬 Perturbation Analysis
+##  Perturbation Analysis
 
 Comprehensive robustness evaluation framework for analyzing model sensitivity to CoT perturbations:
 
@@ -338,7 +338,7 @@ python src/perturbation_analysis.py --log_file results/gsm8k/20241201_143022/log
 --save_interval <int>      # Save intermediate results frequency
 ```
 
-## 📈 Visualization and Analysis
+##  Visualization and Analysis
 
 ### Training Metrics Visualization
 ```bash
@@ -376,38 +376,38 @@ python src/create_gp_smoothed_plot.py --input results/gsm8k/20241201_143022/log.
 python src/analyze_base_logprobs.py --model_type llama --context_lengths 50,100,200,400 --output base_analysis.png
 ```
 
-## 📁 Results Structure
+##  Results Structure
 
 ```
 results/
-├── <task_type>/
-│   └── <timestamp>/
-│       ├── adapter_0/          # LoRA adapter checkpoints
-│       ├── adapter_500/
-│       ├── adapter_1000/
-│       ├── log.jsonl          # Training metrics
-│       └── evaluations/       # Evaluation results
-├── samples/                   # Example log files for reference
-│   ├── sample_llama_gsm8k_log.jsonl
-│   └── sample_llama_wiki_log.jsonl
-├── perturbation_analysis/     # Perturbation analysis results
-│   ├── delete_results.json
-│   ├── truncate_results.json
-│   └── comparison_plots/
-└── cross_model_evaluation/    # Cross-model comparison results
++-- <task_type>/
+|   `-- <timestamp>/
+|       +-- adapter_0/          # LoRA adapter checkpoints
+|       +-- adapter_500/
+|       +-- adapter_1000/
+|       +-- log.jsonl          # Training metrics
+|       `-- evaluations/       # Evaluation results
++-- samples/                   # Example log files for reference
+|   +-- sample_llama_gsm8k_log.jsonl
+|   `-- sample_llama_wiki_log.jsonl
++-- perturbation_analysis/     # Perturbation analysis results
+|   +-- delete_results.json
+|   +-- truncate_results.json
+|   `-- comparison_plots/
+`-- cross_model_evaluation/    # Cross-model comparison results
 
 LatexFolder/                   # Paper and official figures
-├── Figures/                   # All publication-ready figures
-│   ├── combined_markovian_comparison_plots.png
-│   ├── average_perturbation_results_plot_smooth40.png
-│   ├── gsm8k_multiple_critics_comparison.png
-│   ├── cross_model_evaluation.png
-│   ├── legacy_cross_model/   # Legacy analysis figures
-│   └── ...                    # Additional paper figures
-├── anonymous-submission-latex-2026.tex  # Main paper
-├── appendix.tex              # Supplementary material
-├── ReproducibilityChecklist/ # AAAI reproducibility requirements
-└── *.pdf                     # Compiled papers
++-- Figures/                   # All publication-ready figures
+|   +-- combined_markovian_comparison_plots.png
+|   +-- average_perturbation_results_plot_smooth40.png
+|   +-- gsm8k_multiple_critics_comparison.png
+|   +-- cross_model_evaluation.png
+|   +-- legacy_cross_model/   # Legacy analysis figures
+|   `-- ...                    # Additional paper figures
++-- anonymous-submission-latex-2026.tex  # Main paper
++-- appendix.tex              # Supplementary material
++-- ReproducibilityChecklist/ # AAAI reproducibility requirements
+`-- *.pdf                     # Compiled papers
 ```
 
 ### Training Log Structure
@@ -422,7 +422,7 @@ Each `log.jsonl` contains:
   - Expert Iteration thresholds and active sample counts
   - Gradient norms and weight verification
 
-## 🔧 Model Architecture Details
+##  Model Architecture Details
 
 ### LoRA Configuration
 - **Rank (r)**: 8 (configurable via `--lora_rank`)
@@ -443,19 +443,19 @@ Each `log.jsonl` contains:
 - **Gradient Accumulation**: Configurable steps before update
 - **Batch Processing**: Optimized for parallel sampling
 
-## 🏛️ Supported Models Authentication
+##  Supported Models Authentication
 
-### 🔐 Gated Models (Require HuggingFace Login)
+###  Gated Models (Require HuggingFace Login)
 1. **Llama 3.1 8B**: Visit https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct
 2. **Llama 3.2 1B**: Visit https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct  
 3. **Mistral 7B**: Visit https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2
 4. **Gemma 3 12B**: Visit https://google/gemma-3-12b-it
 5. **Gemma 3 1B**: Visit https://google/gemma-3-1b-it
 
-### ✅ Open Access Models
+### [OK] Open Access Models
 - GPT-2, TinyStories, Qwen3 variants, Phi variants
 
-## 📚 Advanced Usage
+##  Advanced Usage
 
 ### Markovian vs Non-Markovian Training
 ```bash
@@ -484,7 +484,7 @@ python src/train.py --task_type gsm8k --actor_reward_weight 1.0
 python src/train.py --task_type gsm8k --use_ei 1.5
 ```
 
-## 🔍 Research Applications
+##  Research Applications
 
 This codebase supports research into:
 - **Markovian language modeling**: Information bottleneck through CoT
@@ -493,7 +493,7 @@ This codebase supports research into:
 - **Cross-model generalization**: Transfer of reasoning patterns
 - **Reward formulation**: Markovian vs Non-Markovian objectives
 
-## 📄 Dependencies
+##  Dependencies
 
 **Core Requirements:**
 - Python 3.10+
@@ -512,7 +512,7 @@ This codebase supports research into:
 - flash-attention (for memory efficiency)
 - openai (for GPT evaluation baselines)
 
-## 🎯 Quick Start Examples
+##  Quick Start Examples
 
 ```bash
 # 1. Quick test with small model
