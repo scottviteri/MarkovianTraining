@@ -81,7 +81,7 @@ For instance, Llama's CoT on arithmetic tasks changed dramatically after trainin
 A key insight is that an \emph{informative} CoT can also serve as a \emph{recipient-specific explanation or compression} of the model's hidden knowledge: it distills the essential reasoning into text that another recipient (e.g.\ a different model or a human) can use to predict the same outcome. Our experiments confirm that the learned CoTs generalize across interpreters, suggesting that these textual explanations genuinely encode transferable problem-solving steps rather than model-specific quirks (Section~\ref{subsec:interp}) and aligning with the explanation-theoretic view formalized in Section~\ref{subsec:explanation_objective}.
 
 \paragraph{Algorithmic view of explanations.}
-Informally, we treat a CoT $B$ for a question--answer pair $(A,C)$ as a candidate explanation: a ``good'' explanation is a short intermediate description that makes the correct answer easy to compute from the question. In Section~\ref{subsec:explanation_objective} we formalize this idea using a Levin-style resource-bounded complexity objective~\citep{Levin1973}, and show that our Markovian design can be viewed as searching, within a bounded CoT space, for such explanations.
+Informally, we treat a CoT $B$ for a question--answer pair $(A,C)$ as a candidate explanation: a ``good'' explanation is a short intermediate description that makes the correct answer easy to compute from the question. In Section~\ref{subsec:explanation_objective} we relate this idea to a Levin-style, resource-bounded complexity perspective~\citep{Levin1973} and a minimum description length view, showing that our Markovian design can be interpreted as searching, within a bounded CoT space, for such explanations.
 
 \paragraph{Contributions.}
 \begin{enumerate}
@@ -265,7 +265,7 @@ where $\theta$ parameterizes the trainable pair. Maximizing $J(\theta)$ ensures 
 
 The informativeness objective $J(\theta)$ can also be understood through an explanation-theoretic lens that makes precise what we mean by a ``good'' CoT. Consider a question--answer or continuation instance, and write $A$ for the input text (question or past context), $C$ for the target text (answer or future continuation), and $B$ for the CoT state produced by the update function $u_\theta$.
 
-Informally, following Levin's notion of resource-bounded Kolmogorov complexity~\citep{Levin1973}, an ideal explanation $B$ for $(A,C)$ should (i) make $C$ easy to compute, (ii) be easy to compute from $A$, and (iii) be simple in its own right. We interpret our loss components in a minimum description length spirit: the negative log-probability $-\log \pi_\theta(C\mid B)$ plays the role of a description length for $C$ given $B$, while using the frozen pre-trained model $u'$ as a prior over CoTs makes $-\log u'(B\mid A)$ a description length for $B$ given $A$. Together with the Markovian factorization $A \to B \to C$ and a hard length cap on $B$, this perspective suggests that training searches over short textual states $B$ that serve as good explanations of $C$ given $A$, without requiring $B$ to be as complex as the full input (since irrelevant aspects of $A$ can be dropped).
+Informally, inspired by Levin's notion of resource-bounded Kolmogorov complexity~\citep{Levin1973} as a notion of `easiness', an ideal explanation $B$ for $(A,C)$ should (i) make $C$ easy to compute, (ii) be easy to compute from $A$, and (iii) be simple in its own right. We do not attempt to model Levin complexity directly; instead, we interpret our loss components in a minimum description length spirit: the negative log-probability $-\log \pi_\theta(C\mid B)$ plays the role of a description length for $C$ given $B$, while using the frozen pre-trained model $u'$ as a prior over CoTs makes $-\log u'(B\mid A)$ a description length for $B$ given $A$. Together with the Markovian factorization $A \to B \to C$ and a hard length cap on $B$, this perspective suggests that training searches over short textual states $B$ that serve as good explanations of $C$ given $A$, without requiring $B$ to be as complex as the full input (since irrelevant aspects of $A$ can be dropped).
 
 \section{Methods}
 \label{sec:method}
@@ -442,11 +442,9 @@ Experiments across arithmetic, GSM8K, and Wikipedia show that it is possible to 
 \subsection{Algorithmic Ablations}
 \label{subsec:ablations}
 
-To justify our architectural and training choices, we compare our full Markovian training recipe against several baselines and ablations. Table~\ref{tab:ablations} summarizes the results across multiple datasets.
-
 \begin{table}[h]
     \centering
-    \caption{Algorithmic ablations (Accuracy). \textbf{Markovian} uses our full GRPO-style training with actor-reward gradients. \textbf{No Reward Grad} removes the $\nabla_\theta R_\theta$ term. \textbf{EI} (Expert Iteration) replaces GRPO with rejection sampling. \textbf{Non-Markovian} allows the answer predictor to see the original question (an upper bound). Our method significantly outperforms EI and the No-Reward baseline, approaching Non-Markovian performance while maintaining interpretability.}
+    \caption{Algorithmic ablations (accuracy). \textbf{Markovian} uses our full GRPO-style training with actor-reward gradients; \textbf{No Reward Grad} removes the $\nabla_\theta R_\theta$ term; \textbf{EI} (Expert Iteration) replaces GRPO with rejection sampling; \textbf{Non-Markovian} allows the answer predictor to see the original question (upper bound).}
     \label{tab:ablations}
     \small
     \begin{tabular}{lccccc}
@@ -464,14 +462,14 @@ To justify our architectural and training choices, we compare our full Markovian
     \end{tabular}
 \end{table}
 
-\textbf{Algorithmic ablations.} Parallel training with batch-standardized advantages (GRPO-style) consistently outperforms Expert Iteration (EI) and shows that actor-reward gradients matter: for example, on Arithmetic Markovian training achieves 98.0\% versus EI's 76.0\%, and removing the chain-rule term ($\nabla_\theta R_\theta$) reduces performance from 98.0\% to 81.0\%. Similar trends hold on GSM8K, ARC-Challenge, MMLU, and SVAMP, where our full Markovian recipe approaches the Non-Markovian upper bound while preserving the interpretability benefits of the bottleneck.
+\textbf{Algorithmic ablations.} Across datasets, Markovian training is competitive with or better than the ablations and approaches the Non-Markovian upper bound (Table~\ref{tab:ablations}); full sweeps appear in Appendix~\ref{app:multi_model}.
 
-We currently verify interpretability on myopic QA and continuation settings. A direct human study could further validate whether CoTs are genuinely human-interpretable beyond our model-centric proxies (fragility and cross-model transfer); we view these metrics as pragmatic but imperfect stand-ins for full faithfulness.
+We currently verify interpretability on QA and continuation settings using perturbation fragility and cross-model transfer; direct human studies of CoTs remain future work.
 
 
 \clearpage
 \section{Reproducibility Statement}
-We provide all source code, training and evaluation scripts, and detailed instructions in the README, including the main training loop (\texttt{src/train.py}) and analysis scripts for fragility and cross-model interpretability. Our implementation supports a range of public HuggingFace models with LoRA fine-tuning (e.g., Llama 3.1 8B, Qwen3 4B, Mistral 7B, Phi 3.5, GPT-2, Gemma-3, TinyStories) and the full set of datasets used in this paper (arithmetic, GSM8K, MMLU, SVAMP, ARC-Challenge, and Wikipedia continuation). With these materials, researchers should be able to reproduce our results, including the performance improvements on GSM8K and the perturbation analyses demonstrating CoT reliance.
+We provide all source code, training and evaluation scripts, and detailed instructions in the README, including the main training loop (\texttt{src/train.py}) and analysis scripts for fragility and cross-model interpretability. Our implementation supports a range of public HuggingFace models with LoRA fine-tuning (e.g., Llama 3.1 8B, Qwen3 4B, Mistral 7B, Phi 3.5, GPT-2, Gemma-3, TinyStories) and the full set of datasets used in this paper (arithmetic, GSM8K, MMLU, SVAMP, ARC-Challenge, and Wikipedia continuation). With these materials, researchers should be able to reproduce our results, including the performance improvements on GSM8K and the perturbation analyses demonstrating CoT reliance. The total cost of training on H100s and H200s cost a total of about \$20K, and each training run takes about 10 hrs.
 
 
 \bibliography{iclr2026_conference}
