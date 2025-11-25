@@ -597,6 +597,35 @@ We also verify that the fragility property holds across architectures. Figure~\r
     \label{fig:faith_mistral}
 \end{figure}
 
+\subsection{Full Algorithmic Results with Confidence Intervals}
+
+For completeness, Table~\ref{tab:full_sweep_results} reports the full sweep of optimization variants across datasets, with one block for mean accuracies (and wiki log-likelihoods) and one block for the corresponding half-widths of bootstrap confidence intervals. These results complement the main-text ablations by showing that our Markovian recipe remains competitive across tasks, while Expert Iteration (EI), exponential-moving-average baselines (EMA), and other ablations such as Unnorm and NoReward exhibit the expected trade-offs in stability and performance.
+
+\begin{table*}[ht]
+    \centering
+    \caption{Full sweep results across optimization variants. Top: mean accuracy or normalized log-likelihood (Wiki); bottom: approximate half-widths of bootstrap confidence intervals for the accuracy rows. Column abbreviations: EI = Expert Iteration; Mk = Markovian; BL = Llama baseline; Q3 = Qwen3 Markovian; Un = Unnorm; EM = EMA; NM = Non-Markovian; BQ = Qwen3 baseline; NR = NoReward.}
+    \label{tab:full_sweep_results}
+    \setlength{\tabcolsep}{3pt}
+    \begin{tabular}{lccccccccc}
+        \toprule
+        \textbf{Dataset} & \textbf{EI} & \textbf{Mk} & \textbf{BL} & \textbf{Q3} & \textbf{Un} & \textbf{EM} & \textbf{NM} & \textbf{BQ} & \textbf{NR} \\
+        \midrule
+        ARC & 0.656 & 0.799 & 0.361 & 0.850 & 0.748 & 0.265 & 0.786 & 0.398 & 0.793 \\
+        Wiki & -2.279 & -2.564 & -3.200 & -3.012 & -2.703 & -3.331 & -2.900 & -3.031 & -2.647 \\
+        SVAMP & 0.400 & 0.423 & 0.180 & 0.317 & 0.433 & 0.000 & 0.433 & 0.283 & 0.407 \\
+        MMLU & 0.532 & 0.555 & 0.214 & 0.605 & 0.628 & 0.238 & 0.687 & 0.318 & 0.466 \\
+        GSM8K & 0.616 & 0.571 & 0.196 & 0.716 & 0.562 & 0.000 & 0.633 & 0.130 & 0.622 \\
+        Arith. & 0.760 & 0.980 & 0.010 & 0.005 & 0.990 & 0.970 & 0.970 & 0.000 & 0.810 \\
+        \midrule
+        ARC (CI hw) & 0.055 & 0.046 & 0.055 & 0.041 & 0.050 & 0.051 & 0.047 & 0.056 & 0.047 \\
+        SVAMP (CI hw) & 0.055 & 0.056 & 0.043 & 0.053 & 0.056 & 0.000 & 0.056 & 0.051 & 0.056 \\
+        MMLU (CI hw) & 0.025 & 0.025 & 0.021 & 0.025 & 0.025 & 0.022 & 0.023 & 0.023 & 0.025 \\
+        GSM8K (CI hw) & 0.027 & 0.027 & 0.022 & 0.025 & 0.027 & 0.000 & 0.026 & 0.019 & 0.026 \\
+        Arith. (CI hw) & 0.059 & 0.019 & 0.012 & 0.008 & 0.012 & 0.024 & 0.024 & 0.000 & 0.054 \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
 \section{Additional Training Dynamics}
 \label{app:additional_figures}
 This section presents additional training curves. Fig~\ref{fig:wikiloss} shows training progress on the Wikipedia continuation task, and Fig~\ref{fig:cross_model_reward} shows the normalized reward for multiple models.
