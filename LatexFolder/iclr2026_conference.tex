@@ -56,7 +56,7 @@ Stanford, CA 94305, USA \\
 \newcommand{\fix}{\marginpar{FIX}}
 \newcommand{\new}{\marginpar{NEW}}
 
-%\iclrfinalcopy % Uncomment for camera-ready version, but NOT for submission.
+\iclrfinalcopy % Uncomment for camera-ready version, but NOT for submission.
 \begin{document}
 
 
@@ -471,6 +471,9 @@ We currently verify interpretability on QA and continuation settings using pertu
 \section{Reproducibility Statement}
 We provide all source code, training and evaluation scripts, and detailed instructions in the README, including the main training loop (\texttt{src/train.py}) and analysis scripts for fragility and cross-model interpretability. Our implementation supports a range of public HuggingFace models with LoRA fine-tuning (e.g., Llama 3.1 8B, Qwen3 4B, Mistral 7B, Phi 3.5, GPT-2, Gemma-3, TinyStories) and the full set of datasets used in this paper (arithmetic, GSM8K, MMLU, SVAMP, ARC-Challenge, and Wikipedia continuation). With these materials, researchers should be able to reproduce our results, including the performance improvements on GSM8K and the perturbation analyses demonstrating CoT reliance. The total cost of training on H100s and H200s cost a total of about \$20K, and each training run takes about 10 hrs.
 
+
+\subsubsection*{Acknowledgments}
+Max Lamparth is supported through a grant from Coefficient Giving (formerly Open Philanthropy) and Stanford's Hoover Institution Tech Policy Accelerator at the time of publication. Max Lamparth was supported by the Stanford Center for AI Safety, the Center for International Security and Cooperation, and the Stanford Existential Risk Initiative for the initial phase of this project.
 
 \bibliography{iclr2026_conference}
 \bibliographystyle{iclr2026_conference}
