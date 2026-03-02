@@ -11,18 +11,17 @@
 \citation{lanham2023measuring}
 \@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
 \newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
-\citation{Levin1973}
+\citation{LiVitanyi2019}
+\citation{dubey2024llama3herdmodels}
+\citation{jiang2023mistral}
 \citation{wei2022chain,nye2022show}
 \citation{eric_star2022,zelikman2024quietstar,deepseekai2025}
+\@writefile{toc}{\contentsline {paragraph}{Autoencoder analogy, time-bounded complexity, and cross-model generalization.}{2}{section*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Contributions.}{2}{section*.2}\protected@file@percent }
 \citation{lanham2023measuring,turpin2023language}
 \citation{zhou2023understanding}
 \citation{paul2024makingreasoningmatter}
 \citation{ferreira2025truthful}
-\@writefile{toc}{\contentsline {paragraph}{Recipient-Specific Compression.}{2}{section*.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Algorithmic view of explanations.}{2}{section*.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Contributions.}{2}{section*.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {2}Related Work}{2}{section.2}\protected@file@percent }
-\newlabel{sec:related_work}{{2}{2}{Related Work}{section.2}{}}
 \citation{rumelhart1986learning}
 \citation{gu2022efficientlymodelinglongsequences}
 \citation{gu2024mamba}
@@ -31,24 +30,24 @@
 \citation{karl2017deepvariationalbayesfilters}
 \citation{krishnan2015deepkalmanfilters}
 \citation{DBLP:journals/corr/ChungKDGCB15}
-\citation{lyu2023faithful}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Markovian training as an autoencoder-style reasoning bottleneck. Left: Single time-step process from Question to CoT to Answer, creating a text-based bottleneck where the CoT must capture all information needed for answer prediction. Right: Causal structure showing the generation of states from observations and previous states using the state update function $u_\theta (s'|o,s)$, and the prediction of observations from states using the policy $\pi _\theta (o|s)$. This architecture forces reasoning through an interpretable text bottleneck, but prevents direct backpropagation, necessitating RL-based gradient estimation.}}{3}{figure.caption.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Markovian training as an autoencoder-style reasoning bottleneck. \textbf  {Left:} Single time-step process from Question to CoT to Answer, creating a bandwidth bottleneck where the CoT must capture all information needed for answer prediction. \textbf  {Right:} Causal structure showing the generation of states from observations and previous states using the state update function $u_\theta (s'|o,s)$, and the prediction of observations from states using the policy $\pi _\theta (o|s)$. The discrete text bottleneck prevents direct backpropagation, necessitating RL-based gradient estimation.}}{3}{figure.caption.3}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
-\newlabel{fig:training-method-causal-final}{{1}{3}{Markovian training as an autoencoder-style reasoning bottleneck. Left: Single time-step process from Question to CoT to Answer, creating a text-based bottleneck where the CoT must capture all information needed for answer prediction. Right: Causal structure showing the generation of states from observations and previous states using the state update function $u_\theta (s'|o,s)$, and the prediction of observations from states using the policy $\pi _\theta (o|s)$. This architecture forces reasoning through an interpretable text bottleneck, but prevents direct backpropagation, necessitating RL-based gradient estimation}{figure.caption.4}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces (a) \textbf  {Accuracy comparison.} Markovian models (Mkv) maintain competitive performance with Non-Markovian upper bounds despite the strict information bottleneck. (b) \textbf  {Wiki perturbation sensitivity} (positive = Mkv more fragile). Markovian models are significantly more sensitive to CoT corruption (higher $\Delta \ln P$), confirming the CoT is causally load-bearing.}}{3}{figure.caption.5}\protected@file@percent }
-\newlabel{fig:loss}{{2}{3}{(a) \textbf {Accuracy comparison.} Markovian models (Mkv) maintain competitive performance with Non-Markovian upper bounds despite the strict information bottleneck. (b) \textbf {Wiki perturbation sensitivity} (positive = Mkv more fragile). Markovian models are significantly more sensitive to CoT corruption (higher $\Delta \ln P$), confirming the CoT is causally load-bearing}{figure.caption.5}{}}
+\newlabel{fig:training-method-causal-final}{{1}{3}{Markovian training as an autoencoder-style reasoning bottleneck. \textbf {Left:} Single time-step process from Question to CoT to Answer, creating a bandwidth bottleneck where the CoT must capture all information needed for answer prediction. \textbf {Right:} Causal structure showing the generation of states from observations and previous states using the state update function $u_\theta (s'|o,s)$, and the prediction of observations from states using the policy $\pi _\theta (o|s)$. The discrete text bottleneck prevents direct backpropagation, necessitating RL-based gradient estimation}{figure.caption.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces \textbf  {Left: Accuracy comparison.} Markovian models (Mkv) maintain competitive performance with Non-Markovian counterparts despite the strict information bottleneck. \textbf  {Right: Wiki perturbation sensitivity} (positive = Mkv more fragile). Markovian models are consistently more sensitive to CoT corruption (higher $\Delta \ln P$), confirming the CoT is causally load-bearing.}}{3}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:loss}{{2}{3}{\textbf {Left: Accuracy comparison.} Markovian models (Mkv) maintain competitive performance with Non-Markovian counterparts despite the strict information bottleneck. \textbf {Right: Wiki perturbation sensitivity} (positive = Mkv more fragile). Markovian models are consistently more sensitive to CoT corruption (higher $\Delta \ln P$), confirming the CoT is causally load-bearing}{figure.caption.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Related Work}{3}{section.2}\protected@file@percent }
+\newlabel{sec:related_work}{{2}{3}{Related Work}{section.2}{}}
+\citation{lyu2023faithful}
 \@writefile{toc}{\contentsline {section}{\numberline {3}Markovian Language Models and Informativeness}{4}{section.3}\protected@file@percent }
 \newlabel{sec:MLM}{{3}{4}{Markovian Language Models and Informativeness}{section.3}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Markovian Language Models (MLM)}{4}{subsection.3.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Data-Generating Distribution and Reward}{4}{subsection.3.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Informativeness Objective}{4}{subsection.3.3}\protected@file@percent }
-\citation{Levin1973}
-\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Explanation-Theoretic Objective}{5}{subsection.3.4}\protected@file@percent }
-\newlabel{subsec:explanation_objective}{{3.4}{5}{Explanation-Theoretic Objective}{subsection.3.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Informativeness Objective}{5}{subsection.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Coding-Theoretic Interpretation of the Loss}{5}{subsection.3.4}\protected@file@percent }
+\newlabel{subsec:explanation_objective}{{3.4}{5}{Coding-Theoretic Interpretation of the Loss}{subsection.3.4}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {4}Methods}{5}{section.4}\protected@file@percent }
 \newlabel{sec:method}{{4}{5}{Methods}{section.4}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Implementation as Question-Answer Pairs}{5}{subsection.4.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Compression viewpoint.}{5}{section*.6}\protected@file@percent }
 \citation{shao2024deepseekmath}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Policy Gradient with GRPO-Style Baseline}{6}{subsection.4.2}\protected@file@percent }
 \newlabel{subsec:grpo}{{4.2}{6}{Policy Gradient with GRPO-Style Baseline}{subsection.4.2}{}}
@@ -56,8 +55,8 @@
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.2}GRPO-Style Baseline with Local Subtraction}{6}{subsubsection.4.2.2}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.3}Parallel Sampling Strategy}{6}{subsubsection.4.2.3}\protected@file@percent }
 \newlabel{subsubsec:parallel}{{4.2.3}{6}{Parallel Sampling Strategy}{subsubsection.4.2.3}{}}
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.4}Implementation: Two-Term Loss Function}{6}{subsubsection.4.2.4}\protected@file@percent }
-\newlabel{subsubsec:actor_rewards}{{4.2.4}{6}{Implementation: Two-Term Loss Function}{subsubsection.4.2.4}{}}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {4.2.4}Implementation: Loss Function}{6}{subsubsection.4.2.4}\protected@file@percent }
+\newlabel{subsubsec:actor_rewards}{{4.2.4}{6}{Implementation: Loss Function}{subsubsection.4.2.4}{}}
 \citation{cobbe2021gsm8k}
 \citation{hendrycks2020mmlu}
 \citation{patel2021svamp}
@@ -70,57 +69,62 @@
 \newlabel{sec:experiments}{{5}{7}{Experiments}{section.5}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Question–Answer Tasks (GSM8K, MMLU, SVAMP, ARC, Arithmetic)}{7}{subsection.5.1}\protected@file@percent }
 \newlabel{subsec:qa}{{5.1}{7}{Question–Answer Tasks (GSM8K, MMLU, SVAMP, ARC, Arithmetic)}{subsection.5.1}{}}
-\@writefile{toc}{\contentsline {paragraph}{CoT length defaults.}{7}{section*.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{CoT length defaults.}{7}{section*.5}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Wikipedia Continuation}{7}{subsection.5.2}\protected@file@percent }
 \newlabel{subsec:wikipedia}{{5.2}{7}{Wikipedia Continuation}{subsection.5.2}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Perturbation fragility on Wikipedia continuation. Entries report $\Delta \ln P =$ (Markovian drop $-$ Non-Markovian drop), where the Markovian drop is $\ln \pi _\theta (\text  {ans} \mid \text  {CoT}^{\text  {M}}) - \ln \pi _\theta (\text  {ans} \mid \setbox \z@ \hbox {\mathsurround \z@ $\textstyle \text  {CoT}$}\mathaccent "0365{\text  {CoT}}^{\text  {M}})$ and the Non-Markovian drop is $\ln \pi _{\theta '}(\text  {ans} \mid q,\text  {CoT}^{\text  {NM}}) - \ln \pi _{\theta '}(\text  {ans} \mid q,\setbox \z@ \hbox {\mathsurround \z@ $\textstyle \text  {CoT}$}\mathaccent "0365{\text  {CoT}}^{\text  {NM}})$. Here $\theta $ denotes the Markovian checkpoint that must answer from the CoT alone, while $\theta '$ is the Non-Markovian checkpoint that additionally conditions on the question $q$. Values are averaged over 1{,}024 held-out examples per perturbation type and severity. Positive values mean the Markovian actor relies more on intact CoTs. Row means summarize severity-wise fragility, while the column-mean row highlights which perturbation families disrupt Markovian reasoning the most (delete and truncate operations produce the largest gaps).}}{8}{table.caption.8}\protected@file@percent }
-\newlabel{tab:markovian_comparison}{{1}{8}{Perturbation fragility on Wikipedia continuation. Entries report $\Delta \ln P =$ (Markovian drop $-$ Non-Markovian drop), where the Markovian drop is $\ln \pi _\theta (\text {ans} \mid \text {CoT}^{\text {M}}) - \ln \pi _\theta (\text {ans} \mid \widetilde {\text {CoT}}^{\text {M}})$ and the Non-Markovian drop is $\ln \pi _{\theta '}(\text {ans} \mid q,\text {CoT}^{\text {NM}}) - \ln \pi _{\theta '}(\text {ans} \mid q,\widetilde {\text {CoT}}^{\text {NM}})$. Here $\theta $ denotes the Markovian checkpoint that must answer from the CoT alone, while $\theta '$ is the Non-Markovian checkpoint that additionally conditions on the question $q$. Values are averaged over 1{,}024 held-out examples per perturbation type and severity. Positive values mean the Markovian actor relies more on intact CoTs. Row means summarize severity-wise fragility, while the column-mean row highlights which perturbation families disrupt Markovian reasoning the most (delete and truncate operations produce the largest gaps)}{table.caption.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Perturbation fragility on Wikipedia continuation. Entries report $\Delta \ln P =$ (Markovian drop $-$ Non-Markovian drop), where the Markovian drop is $\ln \pi _\theta (\text  {ans} \mid \text  {CoT}^{\text  {M}}) - \ln \pi _\theta (\text  {ans} \mid \setbox \z@ \hbox {\mathsurround \z@ $\textstyle \text  {CoT}$}\mathaccent "0365{\text  {CoT}}^{\text  {M}})$ and the Non-Markovian drop is $\ln \pi _{\theta '}(\text  {ans} \mid q,\text  {CoT}^{\text  {NM}}) - \ln \pi _{\theta '}(\text  {ans} \mid q,\setbox \z@ \hbox {\mathsurround \z@ $\textstyle \text  {CoT}$}\mathaccent "0365{\text  {CoT}}^{\text  {NM}})$. Here $\theta $ denotes the Markovian checkpoint that must answer from the CoT alone, while $\theta '$ is the Non-Markovian checkpoint that additionally conditions on the question $q$. Values are averaged over 1{,}024 held-out examples per perturbation type and severity. Positive values mean the Markovian actor relies more on intact CoTs. Row means summarize severity-wise fragility, while the column-mean row highlights which perturbation families disrupt Markovian reasoning the most (delete and character-replace operations produce the largest gaps).}}{8}{table.caption.6}\protected@file@percent }
+\newlabel{tab:markovian_comparison}{{1}{8}{Perturbation fragility on Wikipedia continuation. Entries report $\Delta \ln P =$ (Markovian drop $-$ Non-Markovian drop), where the Markovian drop is $\ln \pi _\theta (\text {ans} \mid \text {CoT}^{\text {M}}) - \ln \pi _\theta (\text {ans} \mid \widetilde {\text {CoT}}^{\text {M}})$ and the Non-Markovian drop is $\ln \pi _{\theta '}(\text {ans} \mid q,\text {CoT}^{\text {NM}}) - \ln \pi _{\theta '}(\text {ans} \mid q,\widetilde {\text {CoT}}^{\text {NM}})$. Here $\theta $ denotes the Markovian checkpoint that must answer from the CoT alone, while $\theta '$ is the Non-Markovian checkpoint that additionally conditions on the question $q$. Values are averaged over 1{,}024 held-out examples per perturbation type and severity. Positive values mean the Markovian actor relies more on intact CoTs. Row means summarize severity-wise fragility, while the column-mean row highlights which perturbation families disrupt Markovian reasoning the most (delete and character-replace operations produce the largest gaps)}{table.caption.6}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Markovian vs Non-Markovian Perturbation Sensitivity}{8}{subsection.5.3}\protected@file@percent }
 \newlabel{subsec:markovian_sensitivity}{{5.3}{8}{Markovian vs Non-Markovian Perturbation Sensitivity}{subsection.5.3}{}}
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {5.3.1}Experimental Design}{8}{subsubsection.5.3.1}\protected@file@percent }
 \citation{abdin2024phi3technicalreporthighly}
+\citation{jiang2023mistral}
+\citation{radford2019language}
 \@writefile{toc}{\contentsline {subsubsection}{\numberline {5.3.2}Results Summary}{9}{subsubsection.5.3.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces QA Tasks Fragility (Accuracy $\Delta $). Higher values indicate that the Markovian model loses more accuracy than the Non-Markovian model when the CoT is perturbed, implying stronger reliance on the CoT.}}{9}{table.caption.7}\protected@file@percent }
+\newlabel{tab:qa_fragility_detailed}{{2}{9}{QA Tasks Fragility (Accuracy $\Delta $). Higher values indicate that the Markovian model loses more accuracy than the Non-Markovian model when the CoT is perturbed, implying stronger reliance on the CoT}{table.caption.7}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Interpretability of CoT Generations}{9}{subsection.5.4}\protected@file@percent }
 \newlabel{subsec:interp}{{5.4}{9}{Interpretability of CoT Generations}{subsection.5.4}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Cross-model evaluation comparing how different models (Mistral, GPT2, and Phi 3.5 Mini Instruct) utilize Llama 8B's CoT on GSM8K. Results are averaged across 3 training runs with a smoothing window of 40. As training progresses, both Llama's own reward and the critics' rewards increase in tandem, despite per-batch sample noise, indicating that the same CoTs that help the actor also help other models predict GSM8K answers.}}{9}{figure.caption.9}\protected@file@percent }
-\newlabel{fig:original_vs_llama}{{3}{9}{Cross-model evaluation comparing how different models (Mistral, GPT2, and Phi 3.5 Mini Instruct) utilize Llama 8B's CoT on GSM8K. Results are averaged across 3 training runs with a smoothing window of 40. As training progresses, both Llama's own reward and the critics' rewards increase in tandem, despite per-batch sample noise, indicating that the same CoTs that help the actor also help other models predict GSM8K answers}{figure.caption.9}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {6}Discussion and Limitations}{9}{section.6}\protected@file@percent }
 \newlabel{sec:disc}{{6}{9}{Discussion and Limitations}{section.6}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Algorithmic Ablations}{10}{subsection.6.1}\protected@file@percent }
-\newlabel{subsec:ablations}{{6.1}{10}{Algorithmic Ablations}{subsection.6.1}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Algorithmic ablations (accuracy). \textbf  {Markovian} uses our full GRPO-style training with actor-reward gradients; \textbf  {No Reward Grad} removes the $\nabla _\theta R_\theta $ term; \textbf  {EI} (Expert Iteration) replaces GRPO with rejection sampling; \textbf  {Non-Markovian} allows the answer predictor to see the original question (upper bound).}}{10}{table.caption.10}\protected@file@percent }
-\newlabel{tab:ablations}{{2}{10}{Algorithmic ablations (accuracy). \textbf {Markovian} uses our full GRPO-style training with actor-reward gradients; \textbf {No Reward Grad} removes the $\nabla _\theta R_\theta $ term; \textbf {EI} (Expert Iteration) replaces GRPO with rejection sampling; \textbf {Non-Markovian} allows the answer predictor to see the original question (upper bound)}{table.caption.10}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {6.1}Algorithmic Ablations}{9}{subsection.6.1}\protected@file@percent }
+\newlabel{subsec:ablations}{{6.1}{9}{Algorithmic Ablations}{subsection.6.1}{}}
+\bibstyle{iclr2026_conference}
 \bibdata{iclr2026_conference}
-\bibcite{proto_pomdp1965}{{1}{1965}{{\r A~str\"{o}m}}{{}}}
-\bibcite{abdin2024phi3technicalreporthighly}{{2}{2024}{{Abdin et~al.}}{{Abdin, Aneja, Awadalla, Awadallah, Awan, Bach, Bahree, Bakhtiari, Bao, et~al.}}}
-\bibcite{bai2022constitutional}{{3}{2022}{{Bai et~al.}}{{Bai, Kadavath, Kundu, Askell, Kernion, Jones, Chen, Goldie, Mirhoseini, McKinnon, Chen, Olsson, Olah, Hernandez, Drain, Ganguli, Li, Tran-Johnson, Perez, Kerr, Mueller, Ladish, Landau, Ndousse, Lukosuite, Lovitt, Sellitto, Elhage, Schiefer, Mercado, DasSarma, Lasenby, Larson, Ringer, Johnston, Kravec, Showk, Fort, Lanham, Telleen-Lawton, Conerly, Henighan, Hume, Bowman, Hatfield-Dodds, Mann, Amodei, Joseph, McCandlish, Brown, and Kaplan}}}
-\bibcite{NEURIPS2020_1457c0d6}{{4}{2020}{{Brown et~al.}}{{Brown, Mann, Ryder, Subbiah, Kaplan, Dhariwal, et~al.}}}
-\bibcite{burns2024discovering}{{5}{2023}{{Burns et~al.}}{{Burns, Ye, Klein, and Steinhardt}}}
-\bibcite{raukur2022toward}{{6}{2023}{{Casper et~al.}}{{Casper, Rauker, Ho, and Hadfield-Menell}}}
-\bibcite{christiano2021eliciting}{{7}{2021}{{Christiano et~al.}}{{Christiano, Cotra, and Xu}}}
-\bibcite{christiano2023deepreinforcementlearninghuman}{{8}{2023}{{Christiano et~al.}}{{Christiano, Leike, Brown, Martic, Legg, and Amodei}}}
-\bibcite{DBLP:journals/corr/ChungKDGCB15}{{9}{2015}{{Chung et~al.}}{{Chung, Kastner, Dinh, Goel, Courville, and Bengio}}}
-\bibcite{clark2018arc}{{10}{2018}{{Clark et~al.}}{{Clark, Cowhey, Etzioni, Khot, Sabharwal, Schoenick, and Tafjord}}}
-\bibcite{cobbe2021gsm8k}{{11}{2021}{{Cobbe et~al.}}{{Cobbe, Kosaraju, Bavarian, Chen, Jun, Kaiser, Plappert, Tworek, Hilton, Nakano, Hesse, and Schulman}}}
-\bibcite{deepseekai2025}{{12}{2025}{{DeepSeek-AI et~al.}}{{DeepSeek-AI, Guo, Yang, Zhang, Song, Zhang, Xu, et~al.}}}
-\bibcite{ferreira2025truthful}{{13}{2025}{{Ferreira et~al.}}{{Ferreira, Aziz, and Titov}}}
-\bibcite{wikipediadump}{{14}{2024}{{Foundation}}{{}}}
-\bibcite{geiger2022inducing}{{15}{2022}{{Geiger et~al.}}{{Geiger, Wu, Lu, Rozner, Kreiss, Icard, Goodman, and Potts}}}
-\@writefile{toc}{\contentsline {section}{\numberline {7}Reproducibility Statement}{11}{section.7}\protected@file@percent }
-\bibcite{geva2022transformer}{{16}{2022}{{Geva et~al.}}{{Geva, Caciularu, Wang, and Goldberg}}}
-\bibcite{Grabb2024.04.07.24305462}{{17}{2024}{{Grabb et~al.}}{{Grabb, Lamparth, and Vasan}}}
-\bibcite{gu2024mamba}{{18}{2024}{{Gu \& Dao}}{{Gu and Dao}}}
-\bibcite{gu2022efficientlymodelinglongsequences}{{19}{2022}{{Gu et~al.}}{{Gu, Goel, and Ré}}}
-\bibcite{gurnee2024language}{{20}{2024}{{Gurnee \& Tegmark}}{{Gurnee and Tegmark}}}
-\bibcite{hendrycks2020mmlu}{{21}{2020}{{Hendrycks et~al.}}{{Hendrycks, Burns, Basart, Zou, Mazeika, Song, and Steinhardt}}}
-\bibcite{hu2022lora}{{22}{2022}{{Hu et~al.}}{{Hu, Shen, Wallis, Allen-Zhu, Li, Wang, Wang, and Chen}}}
+\bibcite{abdin2024phi3technicalreporthighly}{{1}{2024}{{Abdin et~al.}}{{Abdin, Aneja, Awadalla, Awadallah, Awan, Bach, Bahree, Bakhtiari, Bao, et~al.}}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Cross-model evaluation comparing how different models (Mistral, GPT-2, and Phi 3.5 Mini Instruct) utilize Llama 8B's CoT on GSM8K. Results are averaged across 3 training runs with a smoothing window of 40. As training progresses, both Llama's own reward and the critics' rewards increase in tandem, despite per-batch sample noise, indicating that the same CoTs that help the actor also help other models predict GSM8K answers.}}{10}{figure.caption.8}\protected@file@percent }
+\newlabel{fig:original_vs_llama}{{3}{10}{Cross-model evaluation comparing how different models (Mistral, GPT-2, and Phi 3.5 Mini Instruct) utilize Llama 8B's CoT on GSM8K. Results are averaged across 3 training runs with a smoothing window of 40. As training progresses, both Llama's own reward and the critics' rewards increase in tandem, despite per-batch sample noise, indicating that the same CoTs that help the actor also help other models predict GSM8K answers}{figure.caption.8}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Algorithmic ablations (accuracy). \textbf  {Markovian} uses our full GRPO-style training with actor-reward gradients; \textbf  {No Reward Grad} removes the $\nabla _\theta R_\theta $ term; \textbf  {EI} (Expert Iteration) replaces GRPO with rejection sampling; \textbf  {Non-Markovian} allows the answer predictor to see the original question.}}{10}{table.caption.9}\protected@file@percent }
+\newlabel{tab:ablations}{{3}{10}{Algorithmic ablations (accuracy). \textbf {Markovian} uses our full GRPO-style training with actor-reward gradients; \textbf {No Reward Grad} removes the $\nabla _\theta R_\theta $ term; \textbf {EI} (Expert Iteration) replaces GRPO with rejection sampling; \textbf {Non-Markovian} allows the answer predictor to see the original question}{table.caption.9}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {7}Reproducibility Statement}{10}{section.7}\protected@file@percent }
+\bibcite{bai2022constitutional}{{2}{2022}{{Bai et~al.}}{{Bai, Kadavath, Kundu, Askell, Kernion, Jones, Chen, Goldie, Mirhoseini, McKinnon, Chen, Olsson, Olah, Hernandez, Drain, Ganguli, Li, Tran-Johnson, Perez, Kerr, Mueller, Ladish, Landau, Ndousse, Lukosuite, Lovitt, Sellitto, Elhage, Schiefer, Mercado, DasSarma, Lasenby, Larson, Ringer, Johnston, Kravec, Showk, Fort, Lanham, Telleen-Lawton, Conerly, Henighan, Hume, Bowman, Hatfield-Dodds, Mann, Amodei, Joseph, McCandlish, Brown, and Kaplan}}}
+\bibcite{NEURIPS2020_1457c0d6}{{3}{2020}{{Brown et~al.}}{{Brown, Mann, Ryder, Subbiah, Kaplan, Dhariwal, Neelakantan, Shyam, Sastry, Askell, Agarwal, Herbert-Voss, Krueger, Henighan, Child, Ramesh, Ziegler, Wu, Winter, Hesse, Chen, Sigler, Litwin, Gray, Chess, Clark, Berner, McCandlish, Radford, Sutskever, and Amodei}}}
+\bibcite{burns2024discovering}{{4}{2023}{{Burns et~al.}}{{Burns, Ye, Klein, and Steinhardt}}}
+\bibcite{raukur2022toward}{{5}{2023}{{Casper et~al.}}{{Casper, Rauker, Ho, and Hadfield-Menell}}}
+\bibcite{christiano2021eliciting}{{6}{2021}{{Christiano et~al.}}{{Christiano, Cotra, and Xu}}}
+\bibcite{christiano2023deepreinforcementlearninghuman}{{7}{2017}{{Christiano et~al.}}{{Christiano, Leike, Brown, Martic, Legg, and Amodei}}}
+\bibcite{DBLP:journals/corr/ChungKDGCB15}{{8}{2015}{{Chung et~al.}}{{Chung, Kastner, Dinh, Goel, Courville, and Bengio}}}
+\bibcite{clark2018arc}{{9}{2018}{{Clark et~al.}}{{Clark, Cowhey, Etzioni, Khot, Sabharwal, Schoenick, and Tafjord}}}
+\bibcite{cobbe2021gsm8k}{{10}{2021}{{Cobbe et~al.}}{{Cobbe, Kosaraju, Bavarian, Chen, Jun, Kaiser, Plappert, Tworek, Hilton, Nakano, Hesse, and Schulman}}}
+\bibcite{ferreira2025truthful}{{11}{2026}{{Ferreira et~al.}}{{Ferreira, Aziz, and Titov}}}
+\bibcite{geiger2022inducing}{{12}{2022}{{Geiger et~al.}}{{Geiger, Wu, Lu, Rozner, Kreiss, Icard, Goodman, and Potts}}}
+\bibcite{geva2022transformer}{{13}{2022}{{Geva et~al.}}{{Geva, Caciularu, Wang, and Goldberg}}}
+\bibcite{Grabb2024.04.07.24305462}{{14}{2024}{{Grabb et~al.}}{{Grabb, Lamparth, and Vasan}}}
+\bibcite{dubey2024llama3herdmodels}{{15}{2024}{{Grattafiori et~al.}}{{Grattafiori, Dubey, Jauhri, Pandey, Kadian, Al-Dahle, Letman, Mathur, Schelten, Vaughan, Yang, Fan, Goyal, Hartshorn, Yang, Mitra, Sravankumar, Korenev, Hinsvark, Rao, Zhang, Rodriguez, Gregerson, Spataru, Roziere, Biron, Tang, Chern, Caucheteux, Nayak, Bi, Marra, McConnell, Keller, Touret, Wu, Wong, Ferrer, et~al.}}}
+\bibcite{gu2024mamba}{{16}{2024}{{Gu \& Dao}}{{Gu and Dao}}}
+\bibcite{gu2022efficientlymodelinglongsequences}{{17}{2022}{{Gu et~al.}}{{Gu, Goel, and Re}}}
+\bibcite{deepseekai2025}{{18}{2025}{{Guo et~al.}}{{Guo, Yang, Zhang, Song, Wang, Zhu, Xu, Zhang, Ma, Bi, Zhang, Yu, Wu, Wu, Gou, Shao, Li, Gao, Liu, Xue, Wang, Wu, Feng, Lu, Zhao, Deng, Ruan, Dai, Chen, Ji, Li, Lin, Dai, Luo, Hao, Chen, Li, Zhang, et~al.}}}
+\bibcite{gurnee2024language}{{19}{2024}{{Gurnee \& Tegmark}}{{Gurnee and Tegmark}}}
+\bibcite{hendrycks2020mmlu}{{20}{2021}{{Hendrycks et~al.}}{{Hendrycks, Burns, Basart, Zou, Mazeika, Song, and Steinhardt}}}
+\bibcite{hu2022lora}{{21}{2022}{{Hu et~al.}}{{Hu, yelong shen, Wallis, Allen-Zhu, Li, Wang, Wang, and Chen}}}
+\bibcite{jiang2023mistral}{{22}{2023}{{Jiang et~al.}}{{Jiang, Sablayrolles, Mensch, Bamford, Chaplot, de~las Casas, Bressand, Lengyel, Lample, Saulnier, Lavaud, Lachaux, Stock, Scao, Lavril, Wang, Lacroix, and Sayed}}}
 \bibcite{Joshi2024}{{23}{2024}{{Joshi et~al.}}{{Joshi, Rando, Saparov, Kim, and He}}}
 \bibcite{karl2017deepvariationalbayesfilters}{{24}{2017}{{Karl et~al.}}{{Karl, Soelch, Bayer, and van~der Smagt}}}
 \bibcite{krishnan2015deepkalmanfilters}{{25}{2015}{{Krishnan et~al.}}{{Krishnan, Shalit, and Sontag}}}
-\bibcite{lamparth2023analyzing}{{26}{2023}{{Lamparth \& Reuel}}{{Lamparth and Reuel}}}
-\bibcite{lamparth2024human}{{27}{2024}{{Lamparth et~al.}}{{Lamparth, Corso, Ganz, Mastro, Schneider, and Trinkunas}}}
+\bibcite{lamparth2023analyzing}{{26}{2024}{{Lamparth \& Reuel}}{{Lamparth and Reuel}}}
+\bibcite{lamparth2024human}{{27}{2025}{{Lamparth et~al.}}{{Lamparth, Corso, Ganz, Mastro, Schneider, and Trinkunas}}}
 \bibcite{lanham2023measuring}{{28}{2023}{{Lanham et~al.}}{{Lanham, Chen, Radhakrishnan, Steiner, Denison, Hernandez, Li, Durmus, Hubinger, Kernion, Lukošiūtė, Nguyen, Cheng, Joseph, Schiefer, Rausch, Larson, McCandlish, Kundu, Kadavath, Yang, Henighan, Maxwell, Telleen-Lawton, Hume, Hatfield-Dodds, Kaplan, Brauner, Bowman, and Perez}}}
-\bibcite{Levin1973}{{29}{1973}{{Levin}}{{}}}
+\bibcite{LiVitanyi2019}{{29}{2019}{{Li \& Vit{\'a}nyi}}{{Li and Vit{\'a}nyi}}}
 \bibcite{lin_truthfulqa2022}{{30}{2022}{{Lin et~al.}}{{Lin, Hilton, and Evans}}}
 \bibcite{lyu2023faithful}{{31}{2023}{{Lyu et~al.}}{{Lyu, Havaldar, Stein, Zhang, Rao, Wong, Apidianaki, and Callison-Burch}}}
 \bibcite{meng2022locating}{{32}{2022}{{Meng et~al.}}{{Meng, Bau, Andonian, and Belinkov}}}
@@ -128,60 +132,59 @@
 \bibcite{nye2022show}{{34}{2022}{{Nye et~al.}}{{Nye, Andreassen, Gur-Ari, Michalewski, Austin, Bieber, Dohan, Lewkowycz, Bosma, Luan, Sutton, and Odena}}}
 \bibcite{patel2021svamp}{{35}{2021}{{Patel et~al.}}{{Patel, Bhattamishra, and Goyal}}}
 \bibcite{paul2024makingreasoningmatter}{{36}{2024}{{Paul et~al.}}{{Paul, West, Bosselut, and Faltings}}}
-\bibcite{rivera2024escalation}{{37}{2024}{{Rivera et~al.}}{{Rivera, Mukobi, Reuel, Lamparth, Smith, and Schneider}}}
-\bibcite{rumelhart1986learning}{{38}{1986}{{Rumelhart et~al.}}{{Rumelhart, Hinton, and Williams}}}
-\bibcite{shao2024deepseekmath}{{39}{2024}{{Shao et~al.}}{{Shao, Wang, Zhu, Xu, Song, Bi, Zhang, Zhang, Li, Wu, and Guo}}}
-\bibcite{Silver2016}{{40}{2016}{{Silver et~al.}}{{Silver, Huang, Maddison, et~al.}}}
-\bibcite{Silver2017}{{41}{2017}{{Silver et~al.}}{{Silver, Hubert, Schrittwieser, Antonoglou, Lai, Guez, Lanctot, Sifre, Kumaran, Graepel, Lillicrap, Simonyan, and Hassabis}}}
-\bibcite{policy_gradient}{{42}{1999}{{Sutton et~al.}}{{Sutton, McAllester, Singh, and Mansour}}}
-\bibcite{Tian2023}{{43}{2023}{{Tian et~al.}}{{Tian, Mitchell, Yao, Manning, and Finn}}}
-\bibcite{turpin2023language}{{44}{2023}{{Turpin et~al.}}{{Turpin, Michael, Perez, and Bowman}}}
-\bibcite{wang2022interpretability}{{45}{2022}{{Wang et~al.}}{{Wang, Variengien, Conmy, Shlegeris, and Steinhardt}}}
-\bibcite{wei2022chain}{{46}{2022}{{Wei et~al.}}{{Wei, Wang, Schuurmans, Bosma, brian ichter, Xia, Chi, Le, and Zhou}}}
-\bibcite{yang-etal-2017-reference}{{47}{2017}{{Yang et~al.}}{{Yang, Blunsom, Dyer, and Ling}}}
-\bibcite{eric_star2022}{{48}{2022}{{Zelikman et~al.}}{{Zelikman, Wu, Mu, and Goodman}}}
-\bibcite{zelikman2024quietstar}{{49}{2024}{{Zelikman et~al.}}{{Zelikman, Harik, Shao, Jayasiri, Haber, and Goodman}}}
-\bibcite{zhou2023understanding}{{50}{2023}{{Zhou et~al.}}{{Zhou, Zhou, Han, and Kambadur}}}
-\bibstyle{iclr2026_conference}
+\bibcite{yang2025qwen3technicalreport}{{37}{2025}{{Qwen Team}}{{}}}
+\bibcite{radford2019language}{{38}{2019}{{Radford et~al.}}{{Radford, Wu, Child, Luan, Amodei, and Sutskever}}}
+\bibcite{rivera2024escalation}{{39}{2024}{{Rivera et~al.}}{{Rivera, Mukobi, Reuel, Lamparth, Smith, and Schneider}}}
+\bibcite{rumelhart1986learning}{{40}{1986}{{Rumelhart et~al.}}{{Rumelhart, Hinton, and Williams}}}
+\bibcite{shao2024deepseekmath}{{41}{2024}{{Shao et~al.}}{{Shao, Wang, Zhu, Xu, Song, Bi, Zhang, Zhang, Li, Wu, and Guo}}}
+\bibcite{Silver2016}{{42}{2016}{{Silver et~al.}}{{Silver, Huang, Maddison, Guez, Sifre, van~den Driessche, Schrittwieser, Antonoglou, Panneershelvam, Lanctot, Dieleman, Grewe, Nham, Kalchbrenner, Sutskever, Lillicrap, Leach, Kavukcuoglu, Graepel, and Hassabis}}}
+\bibcite{Silver2017}{{43}{2018}{{Silver et~al.}}{{Silver, Hubert, Schrittwieser, Antonoglou, Lai, Guez, Lanctot, Sifre, Kumaran, Graepel, Lillicrap, Simonyan, and Hassabis}}}
+\bibcite{policy_gradient}{{44}{1999}{{Sutton et~al.}}{{Sutton, McAllester, Singh, and Mansour}}}
+\bibcite{Tian2023}{{45}{2024}{{Tian et~al.}}{{Tian, Mitchell, Yao, Manning, and Finn}}}
+\bibcite{zhou2023understanding}{{46}{2025}{{Ton et~al.}}{{Ton, Taufiq, and Liu}}}
+\bibcite{turpin2023language}{{47}{2023}{{Turpin et~al.}}{{Turpin, Michael, Perez, and Bowman}}}
+\bibcite{wang2022interpretability}{{48}{2023}{{Wang et~al.}}{{Wang, Variengien, Conmy, Shlegeris, and Steinhardt}}}
+\bibcite{wei2022chain}{{49}{2022}{{Wei et~al.}}{{Wei, Wang, Schuurmans, Bosma, Ichter, Xia, Chi, Le, and Zhou}}}
+\bibcite{wikipediadump}{{50}{2023}{{Wikimedia Foundation}}{{}}}
+\bibcite{yang-etal-2017-reference}{{51}{2017}{{Yang et~al.}}{{Yang, Blunsom, Dyer, and Ling}}}
+\bibcite{eric_star2022}{{52}{2022}{{Zelikman et~al.}}{{Zelikman, Wu, Mu, and Goodman}}}
+\bibcite{zelikman2024quietstar}{{53}{2024}{{Zelikman et~al.}}{{Zelikman, Harik, Shao, Jayasiri, Haber, and Goodman}}}
+\bibcite{proto_pomdp1965}{{54}{1965}{{Åström}}{{}}}
 \citation{hu2022lora}
-\@writefile{toc}{\contentsline {section}{\numberline {A}Training Stability and Implementation Details}{13}{appendix.A}\protected@file@percent }
-\newlabel{subsec:stability}{{A}{13}{Training Stability and Implementation Details}{appendix.A}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {B}Extended Perturbation Analysis}{14}{appendix.B}\protected@file@percent }
-\newlabel{app:extended_perturbation}{{B}{14}{Extended Perturbation Analysis}{appendix.B}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces QA Tasks Fragility (Accuracy $\Delta $). Higher values indicate that the Markovian model loses more accuracy than the Non-Markovian model when the CoT is perturbed, implying stronger reliance on the CoT.}}{14}{table.caption.12}\protected@file@percent }
-\newlabel{tab:qa_fragility_detailed}{{3}{14}{QA Tasks Fragility (Accuracy $\Delta $). Higher values indicate that the Markovian model loses more accuracy than the Non-Markovian model when the CoT is perturbed, implying stronger reliance on the CoT}{table.caption.12}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {C}Multi-Model Performance and Ablations}{14}{appendix.C}\protected@file@percent }
-\newlabel{app:multi_model}{{C}{14}{Multi-Model Performance and Ablations}{appendix.C}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {C.1}Qwen Adaptation Performance}{15}{subsection.C.1}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Qwen 4B performance snapshot (Baseline $\to $ Trained). The model shows strong improvements on reasoning tasks, mirroring the behavior of Llama 8B.}}{15}{table.caption.13}\protected@file@percent }
-\newlabel{tab:qwen_performance}{{4}{15}{Qwen 4B performance snapshot (Baseline $\to $ Trained). The model shows strong improvements on reasoning tasks, mirroring the behavior of Llama 8B}{table.caption.13}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {C.2}Cross-Model Training Dynamics}{15}{subsection.C.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {C.3}Cross-Model Fragility}{15}{subsection.C.3}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Perturbation effects on Mistral 7B arithmetic reasoning, showing three types of CoT modifications: digit changes, character deletions, and right truncation. Averaged over 4 runs.}}{15}{figure.caption.14}\protected@file@percent }
-\newlabel{fig:faith_mistral}{{4}{15}{Perturbation effects on Mistral 7B arithmetic reasoning, showing three types of CoT modifications: digit changes, character deletions, and right truncation. Averaged over 4 runs}{figure.caption.14}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {C.4}Full Algorithmic Results with Confidence Intervals}{15}{subsection.C.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {D}Additional Training Dynamics}{15}{appendix.D}\protected@file@percent }
-\newlabel{app:additional_figures}{{D}{15}{Additional Training Dynamics}{appendix.D}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Full sweep results across optimization variants. Top: mean accuracy or normalized log-likelihood (Wiki); bottom: approximate half-widths of bootstrap confidence intervals for the accuracy rows. Column abbreviations: EI = Expert Iteration; Mk = Markovian; BL = Llama baseline; Q3 = Qwen3 Markovian; Un = Unnorm; EM = EMA; NM = Non-Markovian; BQ = Qwen3 baseline; NR = NoReward.}}{16}{table.caption.15}\protected@file@percent }
-\newlabel{tab:full_sweep_results}{{5}{16}{Full sweep results across optimization variants. Top: mean accuracy or normalized log-likelihood (Wiki); bottom: approximate half-widths of bootstrap confidence intervals for the accuracy rows. Column abbreviations: EI = Expert Iteration; Mk = Markovian; BL = Llama baseline; Q3 = Qwen3 Markovian; Un = Unnorm; EM = EMA; NM = Non-Markovian; BQ = Qwen3 baseline; NR = NoReward}{table.caption.15}{}}
-\newlabel{fig:wikiloss}{{5a}{16}{Training progress on Wikipedia continuation task for Llama 8B. The plot displays four independent training runs (different random seeds) to illustrate the consistency of convergence despite high per-batch variance}{figure.caption.16}{}}
-\newlabel{sub@fig:wikiloss}{{a}{16}{Training progress on Wikipedia continuation task for Llama 8B. The plot displays four independent training runs (different random seeds) to illustrate the consistency of convergence despite high per-batch variance}{figure.caption.16}{}}
-\newlabel{fig:cross_model_reward}{{5b}{16}{Cross-model normalized reward on Wikipedia continuation for multiple base models (Llama 3.1 8B, Phi-3.5 Mini, Qwen3 4B, Mistral 7B)}{figure.caption.16}{}}
-\newlabel{sub@fig:cross_model_reward}{{b}{16}{Cross-model normalized reward on Wikipedia continuation for multiple base models (Llama 3.1 8B, Phi-3.5 Mini, Qwen3 4B, Mistral 7B)}{figure.caption.16}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Additional training dynamics. (a) Training performance on Wikipedia. (b) Cross-model normalized reward.}}{16}{figure.caption.16}\protected@file@percent }
-\newlabel{fig:additional_analysis}{{5}{16}{Additional training dynamics. (a) Training performance on Wikipedia. (b) Cross-model normalized reward}{figure.caption.16}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {E}Training Algorithm Implementation and Comparison}{16}{appendix.E}\protected@file@percent }
-\newlabel{app:training_algorithms}{{E}{16}{Training Algorithm Implementation and Comparison}{appendix.E}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {E.1}Alternate Training Algorithms Tested}{16}{subsection.E.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {E.2}Cross-Model Interpretability Analysis}{17}{subsection.E.2}\protected@file@percent }
-\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Cross-model evaluation showing Llama-3.1-8B-Instruct's evaluation of Mistral's CoT quality throughout training on Wikipedia text prediction. The correlation between improvements in both models' evaluations suggests the learned reasoning patterns generalize across architectures rather than being model-specific artifacts. Each plot is averaged across 6 independent training runs.}}{17}{figure.caption.17}\protected@file@percent }
-\newlabel{fig:wiki_cross_model}{{6}{17}{Cross-model evaluation showing Llama-3.1-8B-Instruct's evaluation of Mistral's CoT quality throughout training on Wikipedia text prediction. The correlation between improvements in both models' evaluations suggests the learned reasoning patterns generalize across architectures rather than being model-specific artifacts. Each plot is averaged across 6 independent training runs}{figure.caption.17}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {F}Qualitative Analysis of Generated CoTs}{17}{appendix.F}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {F.1}Arithmetic Task Example}{17}{subsection.F.1}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {F.2}GSM8K Example}{18}{subsection.F.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {F.3}Wikipedia Continuation Example}{18}{subsection.F.3}\protected@file@percent }
-\newlabel{app:case}{{F.3}{18}{Wikipedia Continuation Example}{subsection.F.3}{}}
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {F.3.1}CoT after Markovian Training (Actor):}{18}{subsubsection.F.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {A}Training Stability and Implementation Details}{15}{appendix.A}\protected@file@percent }
+\newlabel{sec:stability}{{A}{15}{Training Stability and Implementation Details}{appendix.A}{}}
+\citation{yang2025qwen3technicalreport}
+\@writefile{toc}{\contentsline {section}{\numberline {B}Multi-Model Performance and Ablations}{16}{appendix.B}\protected@file@percent }
+\newlabel{app:multi_model}{{B}{16}{Multi-Model Performance and Ablations}{appendix.B}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.1}Qwen Adaptation Performance}{16}{subsection.B.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Qwen3 4B performance snapshot (Baseline $\to $ Trained). The model shows strong improvements on GSM8K, ARC, and MMLU, though gains on SVAMP, Arithmetic, and Wiki are modest.}}{16}{table.caption.12}\protected@file@percent }
+\newlabel{tab:qwen_performance}{{4}{16}{Qwen3 4B performance snapshot (Baseline $\to $ Trained). The model shows strong improvements on GSM8K, ARC, and MMLU, though gains on SVAMP, Arithmetic, and Wiki are modest}{table.caption.12}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.2}Cross-Model Training Dynamics}{16}{subsection.B.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.3}Cross-Model Fragility}{16}{subsection.B.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Perturbation effects on Mistral 7B arithmetic reasoning, showing three types of CoT modifications: digit changes, character deletions, and right truncation. Averaged over 4 runs.}}{16}{figure.caption.13}\protected@file@percent }
+\newlabel{fig:faith_mistral}{{4}{16}{Perturbation effects on Mistral 7B arithmetic reasoning, showing three types of CoT modifications: digit changes, character deletions, and right truncation. Averaged over 4 runs}{figure.caption.13}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {B.4}Full Algorithmic Results with Confidence Intervals}{16}{subsection.B.4}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Full sweep results across optimization variants. Top: mean accuracy or normalized log-likelihood (Wiki); bottom: approximate half-widths of bootstrap confidence intervals for the accuracy rows. Column abbreviations: EI = Expert Iteration; Mk = Markovian; BL = Llama baseline; Q3 = Qwen3 Markovian; Un = Unnorm; EM = EMA; NM = Non-Markovian; BQ = Qwen3 baseline; NR = NoReward. EM entries of 0.000 on SVAMP and GSM8K reflect training collapse.}}{17}{table.caption.14}\protected@file@percent }
+\newlabel{tab:full_sweep_results}{{5}{17}{Full sweep results across optimization variants. Top: mean accuracy or normalized log-likelihood (Wiki); bottom: approximate half-widths of bootstrap confidence intervals for the accuracy rows. Column abbreviations: EI = Expert Iteration; Mk = Markovian; BL = Llama baseline; Q3 = Qwen3 Markovian; Un = Unnorm; EM = EMA; NM = Non-Markovian; BQ = Qwen3 baseline; NR = NoReward. EM entries of 0.000 on SVAMP and GSM8K reflect training collapse}{table.caption.14}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {C}Additional Training Dynamics}{17}{appendix.C}\protected@file@percent }
+\newlabel{app:additional_figures}{{C}{17}{Additional Training Dynamics}{appendix.C}{}}
+\newlabel{fig:wikiloss}{{5a}{17}{Training progress on Wikipedia continuation task for Llama 8B. The plot displays four independent training runs (different random seeds) to illustrate the consistency of convergence despite high per-batch variance}{figure.caption.15}{}}
+\newlabel{sub@fig:wikiloss}{{a}{17}{Training progress on Wikipedia continuation task for Llama 8B. The plot displays four independent training runs (different random seeds) to illustrate the consistency of convergence despite high per-batch variance}{figure.caption.15}{}}
+\newlabel{fig:cross_model_reward}{{5b}{17}{Cross-model normalized reward on Wikipedia continuation for multiple base models (Llama 3.1 8B, Phi-3.5 Mini, Qwen3 4B, Mistral 7B)}{figure.caption.15}{}}
+\newlabel{sub@fig:cross_model_reward}{{b}{17}{Cross-model normalized reward on Wikipedia continuation for multiple base models (Llama 3.1 8B, Phi-3.5 Mini, Qwen3 4B, Mistral 7B)}{figure.caption.15}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Additional training dynamics. (a) Training performance on Wikipedia. (b) Cross-model normalized reward.}}{17}{figure.caption.15}\protected@file@percent }
+\newlabel{fig:additional_analysis}{{5}{17}{Additional training dynamics. (a) Training performance on Wikipedia. (b) Cross-model normalized reward}{figure.caption.15}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {D}Training Algorithm Implementation and Comparison}{17}{appendix.D}\protected@file@percent }
+\newlabel{app:training_algorithms}{{D}{17}{Training Algorithm Implementation and Comparison}{appendix.D}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {D.1}Alternate Training Algorithms Tested}{18}{subsection.D.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {D.2}Cross-Model Interpretability Analysis}{18}{subsection.D.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Cross-model evaluation showing Llama-3.1-8B-Instruct's evaluation of Mistral's CoT quality throughout training on Wikipedia text prediction. The correlation between improvements in both models' evaluations suggests the learned reasoning patterns generalize across architectures rather than being model-specific artifacts. Each plot is averaged across 6 independent training runs.}}{18}{figure.caption.16}\protected@file@percent }
+\newlabel{fig:wiki_cross_model}{{6}{18}{Cross-model evaluation showing Llama-3.1-8B-Instruct's evaluation of Mistral's CoT quality throughout training on Wikipedia text prediction. The correlation between improvements in both models' evaluations suggests the learned reasoning patterns generalize across architectures rather than being model-specific artifacts. Each plot is averaged across 6 independent training runs}{figure.caption.16}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {E}Qualitative Analysis of Generated CoTs}{19}{appendix.E}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {E.1}Arithmetic Task Example}{19}{subsection.E.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {E.2}GSM8K Example}{19}{subsection.E.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {E.3}Wikipedia Continuation Example}{19}{subsection.E.3}\protected@file@percent }
+\newlabel{app:case}{{E.3}{19}{Wikipedia Continuation Example}{subsection.E.3}{}}
 \citation{yang-etal-2017-reference}
 \citation{lyu2023faithful}
 \citation{Joshi2024}
@@ -191,12 +194,13 @@
 \citation{Silver2016}
 \citation{Silver2017}
 \citation{christiano2021eliciting}
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {E.3.1}CoT after Markovian Training (Actor):}{20}{subsubsection.E.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {E.3.2}CoT from Baseline Critic:}{20}{subsubsection.E.3.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsubsection}{\numberline {E.3.3}Ground-Truth Continuation:}{20}{subsubsection.E.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {F}Truthfulness and Eliciting Latent Knowledge}{20}{appendix.F}\protected@file@percent }
+\newlabel{app:truth}{{F}{20}{Truthfulness and Eliciting Latent Knowledge}{appendix.F}{}}
 \citation{christiano2023deepreinforcementlearninghuman}
 \citation{bai2022constitutional}
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {F.3.2}CoT from Baseline Critic:}{19}{subsubsection.F.3.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsubsection}{\numberline {F.3.3}Ground-Truth Continuation:}{19}{subsubsection.F.3.3}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {G}Truthfulness and Eliciting Latent Knowledge}{19}{appendix.G}\protected@file@percent }
-\newlabel{app:truth}{{G}{19}{Truthfulness and Eliciting Latent Knowledge}{appendix.G}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {H}Impact Statement}{20}{appendix.H}\protected@file@percent }
-\newlabel{sec:ethics}{{H}{20}{Impact Statement}{appendix.H}{}}
-\gdef \@abspage@last{20}
+\@writefile{toc}{\contentsline {section}{\numberline {G}Impact Statement}{21}{appendix.G}\protected@file@percent }
+\newlabel{sec:ethics}{{G}{21}{Impact Statement}{appendix.G}{}}
+\gdef \@abspage@last{21}

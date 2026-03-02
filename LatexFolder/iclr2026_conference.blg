@@ -3,44 +3,46 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: iclr2026_conference.aux
 The style file: iclr2026_conference.bst
 Database file #1: iclr2026_conference.bib
-You've used 50 entries,
+Warning--empty journal in radford2019language
+You've used 54 entries,
             2773 wiz_defined-function locations,
-            807 strings with 16110 characters,
-and the built_in function-call counts, 29161 in all, are:
-= -- 2113
-> -- 3128
-< -- 6
-+ -- 1046
-- -- 996
-* -- 2677
-:= -- 4686
-add.period$ -- 104
-call.type$ -- 50
-change.case$ -- 478
-chr.to.int$ -- 50
-cite$ -- 100
-duplicate$ -- 819
-empty$ -- 1667
-format.name$ -- 1052
-if$ -- 5816
+            910 strings with 22195 characters,
+and the built_in function-call counts, 42667 in all, are:
+= -- 3400
+> -- 4381
+< -- 22
++ -- 1462
+- -- 1408
+* -- 3982
+:= -- 6799
+add.period$ -- 220
+call.type$ -- 54
+change.case$ -- 625
+chr.to.int$ -- 54
+cite$ -- 109
+duplicate$ -- 1353
+empty$ -- 2234
+format.name$ -- 1470
+if$ -- 8718
 int.to.chr$ -- 1
 int.to.str$ -- 1
-missing$ -- 4
-newline$ -- 212
-num.names$ -- 200
-pop$ -- 1146
+missing$ -- 43
+newline$ -- 318
+num.names$ -- 220
+pop$ -- 1349
 preamble$ -- 1
-purify$ -- 428
+purify$ -- 572
 quote$ -- 0
-skip$ -- 985
+skip$ -- 1364
 stack$ -- 0
-substring$ -- 125
-swap$ -- 52
-text.length$ -- 0
+substring$ -- 637
+swap$ -- 273
+text.length$ -- 15
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 550
-warning$ -- 0
-while$ -- 152
+type$ -- 584
+warning$ -- 1
+while$ -- 201
 width$ -- 0
-write$ -- 516
+write$ -- 796
+(There was 1 warning)
