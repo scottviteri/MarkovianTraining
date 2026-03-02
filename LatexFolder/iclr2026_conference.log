@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2026/dev/Arch Linux) (preloaded format=pdflatex 2026.1.8)  2 MAR 2026 03:03
+This is pdfTeX, Version 3.141592653-2.6-1.40.27 (TeX Live 2026/dev/Arch Linux) (preloaded format=pdflatex 2026.1.8)  2 MAR 2026 03:45
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -948,11 +948,14 @@ File: ts1ptm.fd 2001/06/04 font definitions for TS1/ptm.
 [4]
 
 [5]
+
+[6]
 Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on in
 put line 315.
 
+Underfull \vbox (badness 2181) has occurred while \output is active []
 
-[6]
+
 
 [7]
 
@@ -966,9 +969,10 @@ Package pdftex.def Info: Figures/gsm8k_multiple_critics_comparison.png  used on
 (pdftex.def)             Requested size: 389.53358pt x 194.71246pt.
 
 
-[9] (./iclr2026_conference.bbl
+[9]
 
 [10 <./Figures/gsm8k_multiple_critics_comparison.png>]
+(./iclr2026_conference.bbl
 Underfull \hbox (badness 5189) in paragraph at lines 73--78
 \OT1/ptm/m/n/10 your eyes de-ceive you, 2021.  URL []$\OT1/pcr/m/n/10 https : /
  / docs . google . com / document /
@@ -1007,14 +1011,14 @@ Package pdftex.def Info: Figures/average_perturbation_results_plot_smooth40.png
 (pdftex.def)             Requested size: 238.49341pt x 118.39008pt.
 
 
-[16 <./Figures/average_perturbation_results_plot_smooth40.png>]
-<Figures/combined_metrics_wiki_continuation.png, id=546, 722.7pt x 361.35pt>
+[16]
+<Figures/combined_metrics_wiki_continuation.png, id=545, 722.7pt x 361.35pt>
 File: Figures/combined_metrics_wiki_continuation.png Graphic file (type png)
 <use Figures/combined_metrics_wiki_continuation.png>
 Package pdftex.def Info: Figures/combined_metrics_wiki_continuation.png  used o
 n input line 615.
 (pdftex.def)             Requested size: 194.76982pt x 97.38385pt.
-<Figures/combined_normalized_reward_gp_smoothed.png, id=547, 859.5312pt x 570.9
+<Figures/combined_normalized_reward_gp_smoothed.png, id=546, 859.5312pt x 570.9
 33pt>
 File: Figures/combined_normalized_reward_gp_smoothed.png Graphic file (type png
 )
@@ -1024,9 +1028,8 @@ ed on input line 622.
 (pdftex.def)             Requested size: 194.76982pt x 129.36911pt.
 
 
-[17 <./Figures/combined_metrics_wiki_continuation.png> <./Figures/combined_norm
-alized_reward_gp_smoothed.png>]
-<Figures/wiki_multi_critic_comparison.png, id=555, 860.7357pt x 430.2474pt>
+[17 <./Figures/average_perturbation_results_plot_smooth40.png>]
+<Figures/wiki_multi_critic_comparison.png, id=554, 860.7357pt x 430.2474pt>
 File: Figures/wiki_multi_critic_comparison.png Graphic file (type png)
 <use Figures/wiki_multi_critic_comparison.png>
 Package pdftex.def Info: Figures/wiki_multi_critic_comparison.png  used on inpu
@@ -1034,9 +1037,10 @@ t line 661.
 (pdftex.def)             Requested size: 389.53358pt x 194.71246pt.
 
 
-[18 <./Figures/wiki_multi_critic_comparison.png>]
+[18 <./Figures/combined_metrics_wiki_continuation.png> <./Figures/combined_norm
+alized_reward_gp_smoothed.png>]
 
-[19]
+[19 <./Figures/wiki_multi_critic_comparison.png>]
 
 [20]
 
@@ -1045,6 +1049,10 @@ t line 661.
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
  ***********
+
+
+LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
+
 Package rerunfilecheck Info: File `iclr2026_conference.out' has not changed.
 (rerunfilecheck)             Checksum: 15FB47C5E10B3083A1FF3C8E59A911F0;9648.
  ) 
@@ -1059,22 +1067,22 @@ Here is how much of TeX's memory you used:
 </usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmex10.pfb></usr/share/
 texmf-dist/fonts/type1/public/amsfonts/cm/cmmi10.pfb></usr/share/texmf-dist/fon
 ts/type1/public/amsfonts/cm/cmmi5.pfb></usr/share/texmf-dist/fonts/type1/public
-/amsfonts/cm/cmmi6.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cm
-mi7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi9.pfb></usr/s
-hare/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/share/texmf-dist
-/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/share/texmf-dist/fonts/type1/pub
-lic/amsfonts/cm/cmr9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/
-cmsy10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy5.pfb></us
+/amsfonts/cm/cmmi7.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cm
+mi9.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmr10.pfb></usr/s
+hare/texmf-dist/fonts/type1/public/amsfonts/cm/cmr7.pfb></usr/share/texmf-dist/
+fonts/type1/public/amsfonts/cm/cmr9.pfb></usr/share/texmf-dist/fonts/type1/publ
+ic/amsfonts/cm/cmsy10.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm
+/cmsy5.pfb></usr/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy6.pfb></us
 r/share/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy7.pfb></usr/share/texmf-d
 ist/fonts/type1/public/amsfonts/cm/cmsy9.pfb></usr/share/texmf-dist/fonts/type1
 /public/amsfonts/symbols/msbm10.pfb></usr/share/texmf-dist/fonts/type1/urw/cour
 ier/ucrr8a.pfb></usr/share/texmf-dist/fonts/type1/urw/times/utmb8a.pfb></usr/sh
 are/texmf-dist/fonts/type1/urw/times/utmr8a.pfb></usr/share/texmf-dist/fonts/ty
 pe1/urw/times/utmri8a.pfb>
-Output written on iclr2026_conference.pdf (21 pages, 2726349 bytes).
+Output written on iclr2026_conference.pdf (21 pages, 2728719 bytes).
 PDF statistics:
- 712 PDF objects out of 1000 (max. 8388607)
- 636 compressed objects within 7 object streams
+ 713 PDF objects out of 1000 (max. 8388607)
+ 637 compressed objects within 7 object streams
  162 named destinations out of 1000 (max. 500000)
  390 words of extra memory for PDF output out of 10000 (max. 10000000)
 

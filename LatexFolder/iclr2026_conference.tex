@@ -215,7 +215,7 @@ Here we provide our formalism for Markovian Language Models (MLMs) and define \e
 
 \subsection{Markovian Language Models (MLM)}
 
-A traditional LM can attend to the entire context when predicting the next token. This makes it possible for an LM to disregard the CoT or only partially rely on it. We impose a stricter, \emph{Markovian} structure\footnote{This structure can be viewed as a stochastic variant of a Moore machine where both the transition function ($u$) and output function ($\pi$) are probabilistic, and the input and output alphabets are identical ($O$). Alternatively, an MLM can be formalized as an F-coalgebra where F(S) = P(O) $\times$ P(S)$^O$, with P representing probability distributions.}:
+A traditional LM can attend to the entire context when predicting the next token. This makes it possible for an LM to disregard the CoT or only partially rely on it. We impose a stricter, \emph{Markovian} structure\footnote{This structure can be viewed as a stochastic variant of a Moore machine where both the transition function ($u$) and output function ($\pi$) are probabilistic, and the input and output alphabets are identical ($\mathcal{O}$). Alternatively, an MLM can be formalized as an F-coalgebra where $F(\mathcal{S}) = \Delta(\mathcal{O}) \times \Delta(\mathcal{S})^{\mathcal{O}}$, with $\Delta$ denoting the set of probability distributions.}:
 \begin{definition}[Markovian LM]
 A Markovian Language Model is a tuple $M=(\mathcal{O}, \mathcal{S}, \pi, u, s_1)$, where
 \begin{itemize}
@@ -281,9 +281,9 @@ R_\theta = \ln \pi_\theta(\text{ans} \mid \text{CoT}) \;-\; \ln \pi'(\text{ans} 
 The discrete CoT bottleneck blocks direct backpropagation through token sampling, so we rely on reinforcement learning techniques for gradient estimation.
 
 \subsubsection{Actor Reward Gradients: An Important Innovation}
-Our approach differs from standard policy gradient setups, where the reward $R(\tau)$ is treated as independent of the policy parameters (or any $\theta$-dependence is stopped by gradient detachment). Here the same transformer with weights $\theta$ defines both the sampling distribution $P_\theta(\tau)$ via $u_\theta$ and the reward $R_\theta$ defined above, and we explicitly backpropagate through $R_\theta$ in addition to the usual REINFORCE term.
+Our approach differs from standard policy gradient setups, where the reward $R(\tau)$ is treated as independent of the policy parameters (or any $\theta$-dependence is stopped by gradient detachment). Here the same transformer with weights $\theta$ defines both the CoT sampling distribution via $u_\theta$ and the reward $R_\theta$ defined above, and we explicitly backpropagate through $R_\theta$ in addition to the usual REINFORCE term.
 
-Since $R_\theta$ depends on $\theta$ via the actor term $\ln \pi_\theta(\text{ans}\mid\text{CoT})$, applying the chain rule gives:
+Write $P_\theta(\tau)$ for the trajectory distribution; since observations $x_t$ are drawn from the data distribution $P$ (not from the policy), $\theta$ enters only through $u_\theta$, so $\nabla_\theta \ln P_\theta(\tau) = \sum_t \nabla_\theta \ln u_\theta(s_{t+1}\mid x_t, s_t)$. Since $R_\theta$ also depends on $\theta$ via the actor term $\ln \pi_\theta(\text{ans}\mid\text{CoT})$, applying the chain rule gives:
 \[\nabla_\theta \,\mathbb{E}_{\tau \sim P_\theta}[R_\theta(\tau)]
 = \mathbb{E}_{\tau \sim P_\theta}\!\big[R_\theta(\tau)\, \nabla_\theta \ln P_\theta(\tau) + \nabla_\theta R_\theta(\tau)\big].\]
 
@@ -305,7 +305,7 @@ Our implementation combines both gradient terms from the chain rule derivation a
 \mathcal{L}_{\text{AR}}=-A,\\
 \mathcal{L}_{\text{KL}}=\beta_{\text{KL}}\, D_{\!KL}\!\big(u_\theta(\cdot\mid q,\text{CoT}_{\text{init}})\,\Vert\,u'(\cdot\mid q,\text{CoT}_{\text{init}})\big),
 \end{gather*}
-where $A$ is the standardized advantage (after local baseline subtraction and GRPO-style batch averaging) and $A^{\text{detach}}$ blocks gradients to isolate the policy gradient term, enabling simultaneous optimization of CoT generation (via $\mathcal{L}_{\text{PG}}$) and answer prediction (via $\mathcal{L}_{\text{AR}}$), while $\mathcal{L}_{\text{KL}}$ (with $\beta_{\text{KL}}=0.1$) penalizes deviation from the frozen model's CoT distribution.
+where $A$ is the standardized advantage (after local baseline subtraction and GRPO-style batch averaging, with the batch mean $\mu$ and standard deviation $\sigma$ treated as constants, i.e., stop-gradient) and $A^{\text{detach}}$ blocks gradients to isolate the policy gradient term, enabling simultaneous optimization of CoT generation (via $\mathcal{L}_{\text{PG}}$) and answer prediction (via $\mathcal{L}_{\text{AR}}$), while $\mathcal{L}_{\text{KL}}$ (with $\beta_{\text{KL}}=0.1$) penalizes deviation from the frozen model's CoT distribution.
 
 \subsubsection{Within-Batch Advantage Standardization}
 Instead of historical exponential moving averages, we standardize advantages within each batch so that they have zero mean and unit variance (Algorithm~\ref{alg:markovian_training}), which stabilizes training regardless of the absolute reward scale.
@@ -436,7 +436,7 @@ To probe how well the reasoning generalizes, we evaluated the informativeness of
     \label{fig:original_vs_llama}
 \end{figure}
 
-We test across three distinct model families (Phi \citep{abdin2024phi3technicalreporthighly}, Mistral \citep{jiang2023mistral}, and GPT-2 \citep{radford2019language}). GPT-2 is a significantly smaller model and should not be able to decode sophisticated steganography. The fact that trained CoTs transfer effectively across this diverse set (Figure~\ref{fig:original_vs_llama}) confirms they encode reasoning in natural language rather than model-specific encodings, consistent with the autoencoder argument of Section~\ref{sec:intro}.
+We test across three distinct model families (Phi-3.5 Mini Instruct \citep{abdin2024phi3technicalreporthighly}, Mistral \citep{jiang2023mistral}, and GPT-2 \citep{radford2019language}). GPT-2 is a significantly smaller model and should not be able to decode sophisticated steganography. The fact that trained CoTs transfer effectively across this diverse set (Figure~\ref{fig:original_vs_llama}) confirms they encode reasoning in natural language rather than model-specific encodings, consistent with the autoencoder argument of Section~\ref{sec:intro}.
 
 
 \section{Discussion and Limitations}
@@ -469,7 +469,7 @@ Our experiments confirm that Markovian training can learn informative CoT reason
 
 \textbf{Algorithmic ablations.} Across datasets, Markovian training is competitive with or better than the ablations and is competitive with the Non-Markovian variant (Table~\ref{tab:ablations}); full sweeps appear in Appendix~\ref{app:multi_model}.
 
-We currently verify interpretability on QA and continuation settings using perturbation fragility and cross-model transfer; direct human studies of CoTs remain future work.
+We emphasize that the Markovian constraint ensures the CoT is \emph{sufficient} for the answer, not that it mirrors the model's internal computation: the model could in principle compute the answer during the question-reading forward passes and then generate a post-hoc CoT that happens to be correct. The KL penalty and bounded CoT length make this unlikely in practice, but we do not claim full faithfulness. We currently verify interpretability using perturbation fragility and cross-model transfer; direct human studies of CoTs remain future work.
 
 
 \section{Reproducibility Statement}
@@ -631,7 +631,7 @@ This section presents additional training curves. Figure~\ref{fig:wikiloss} show
 \section{Training Algorithm Implementation and Comparison}
 \label{app:training_algorithms}
 
-This section provides detailed descriptions of the reinforcement learning algorithms implemented in our codebase for Markovian CoT training. Our core contribution is the Markovian training paradigm that optimizes P(answer | CoT) rather than P(answer | question, CoT), creating a text bottleneck where the CoT must be causally load-bearing. We implement multiple optimization approaches to support this paradigm, enabling comprehensive algorithmic comparison.
+This section provides detailed descriptions of the reinforcement learning algorithms implemented in our codebase for Markovian CoT training. Our core contribution is the Markovian training paradigm that optimizes $P(\text{answer}\mid\text{CoT})$ rather than $P(\text{answer}\mid\text{question},\text{CoT})$, creating a text bottleneck where the CoT must be causally load-bearing. We implement multiple optimization approaches to support this paradigm, enabling comprehensive algorithmic comparison.
 
 \subsection{Alternate Training Algorithms Tested}
 
