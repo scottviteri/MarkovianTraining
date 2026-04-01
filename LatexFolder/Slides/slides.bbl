@@ -1,0 +1,479 @@
+% $ biblatex auxiliary file $
+% $ biblatex bbl format version 3.3 $
+% Do not modify the above lines!
+%
+% This is an auxiliary file used by the 'biblatex' package.
+% This file may safely be deleted. It will be recreated as
+% required.
+%
+\begingroup
+\makeatletter
+\@ifundefined{ver@biblatex.sty}
+  {\@latex@error
+     {Missing 'biblatex' package}
+     {The bibliography requires the 'biblatex' package.}
+      \aftergroup\endinput}
+  {}
+\endgroup
+
+\datalist[entry]{nyt/global//global/global/global}
+  \entry{lanham2023measuring}{misc}{}{}
+    \name{author}{30}{}{%
+      {{hash=LT}{%
+         family={Lanham},
+         familyi={L\bibinitperiod},
+         given={Tamera},
+         giveni={T\bibinitperiod},
+      }}%
+      {{hash=CA}{%
+         family={Chen},
+         familyi={C\bibinitperiod},
+         given={Anna},
+         giveni={A\bibinitperiod},
+      }}%
+      {{hash=RA}{%
+         family={Radhakrishnan},
+         familyi={R\bibinitperiod},
+         given={Ansh},
+         giveni={A\bibinitperiod},
+      }}%
+      {{hash=SB}{%
+         family={Steiner},
+         familyi={S\bibinitperiod},
+         given={Benoit},
+         giveni={B\bibinitperiod},
+      }}%
+      {{hash=DC}{%
+         family={Denison},
+         familyi={D\bibinitperiod},
+         given={Carson},
+         giveni={C\bibinitperiod},
+      }}%
+      {{hash=HD}{%
+         family={Hernandez},
+         familyi={H\bibinitperiod},
+         given={Danny},
+         giveni={D\bibinitperiod},
+      }}%
+      {{hash=LD}{%
+         family={Li},
+         familyi={L\bibinitperiod},
+         given={Dustin},
+         giveni={D\bibinitperiod},
+      }}%
+      {{hash=DE}{%
+         family={Durmus},
+         familyi={D\bibinitperiod},
+         given={Esin},
+         giveni={E\bibinitperiod},
+      }}%
+      {{hash=HE}{%
+         family={Hubinger},
+         familyi={H\bibinitperiod},
+         given={Evan},
+         giveni={E\bibinitperiod},
+      }}%
+      {{hash=KJ}{%
+         family={Kernion},
+         familyi={K\bibinitperiod},
+         given={Jackson},
+         giveni={J\bibinitperiod},
+      }}%
+      {{hash=LK}{%
+         family={Lukošiūtė},
+         familyi={L\bibinitperiod},
+         given={Kamilė},
+         giveni={K\bibinitperiod},
+      }}%
+      {{hash=NK}{%
+         family={Nguyen},
+         familyi={N\bibinitperiod},
+         given={Karina},
+         giveni={K\bibinitperiod},
+      }}%
+      {{hash=CN}{%
+         family={Cheng},
+         familyi={C\bibinitperiod},
+         given={Newton},
+         giveni={N\bibinitperiod},
+      }}%
+      {{hash=JN}{%
+         family={Joseph},
+         familyi={J\bibinitperiod},
+         given={Nicholas},
+         giveni={N\bibinitperiod},
+      }}%
+      {{hash=SN}{%
+         family={Schiefer},
+         familyi={S\bibinitperiod},
+         given={Nicholas},
+         giveni={N\bibinitperiod},
+      }}%
+      {{hash=RO}{%
+         family={Rausch},
+         familyi={R\bibinitperiod},
+         given={Oliver},
+         giveni={O\bibinitperiod},
+      }}%
+      {{hash=LR}{%
+         family={Larson},
+         familyi={L\bibinitperiod},
+         given={Robin},
+         giveni={R\bibinitperiod},
+      }}%
+      {{hash=MS}{%
+         family={McCandlish},
+         familyi={M\bibinitperiod},
+         given={Sam},
+         giveni={S\bibinitperiod},
+      }}%
+      {{hash=KS}{%
+         family={Kundu},
+         familyi={K\bibinitperiod},
+         given={Sandipan},
+         giveni={S\bibinitperiod},
+      }}%
+      {{hash=KS}{%
+         family={Kadavath},
+         familyi={K\bibinitperiod},
+         given={Saurav},
+         giveni={S\bibinitperiod},
+      }}%
+      {{hash=YS}{%
+         family={Yang},
+         familyi={Y\bibinitperiod},
+         given={Shannon},
+         giveni={S\bibinitperiod},
+      }}%
+      {{hash=HT}{%
+         family={Henighan},
+         familyi={H\bibinitperiod},
+         given={Thomas},
+         giveni={T\bibinitperiod},
+      }}%
+      {{hash=MT}{%
+         family={Maxwell},
+         familyi={M\bibinitperiod},
+         given={Timothy},
+         giveni={T\bibinitperiod},
+      }}%
+      {{hash=TLT}{%
+         family={Telleen-Lawton},
+         familyi={T\bibinithyphendelim L\bibinitperiod},
+         given={Timothy},
+         giveni={T\bibinitperiod},
+      }}%
+      {{hash=HT}{%
+         family={Hume},
+         familyi={H\bibinitperiod},
+         given={Tristan},
+         giveni={T\bibinitperiod},
+      }}%
+      {{hash=HDZ}{%
+         family={Hatfield-Dodds},
+         familyi={H\bibinithyphendelim D\bibinitperiod},
+         given={Zac},
+         giveni={Z\bibinitperiod},
+      }}%
+      {{hash=KJ}{%
+         family={Kaplan},
+         familyi={K\bibinitperiod},
+         given={Jared},
+         giveni={J\bibinitperiod},
+      }}%
+      {{hash=BJ}{%
+         family={Brauner},
+         familyi={B\bibinitperiod},
+         given={Jan},
+         giveni={J\bibinitperiod},
+      }}%
+      {{hash=BSR}{%
+         family={Bowman},
+         familyi={B\bibinitperiod},
+         given={Samuel\bibnamedelima R.},
+         giveni={S\bibinitperiod\bibinitdelim R\bibinitperiod},
+      }}%
+      {{hash=PE}{%
+         family={Perez},
+         familyi={P\bibinitperiod},
+         given={Ethan},
+         giveni={E\bibinitperiod},
+      }}%
+    }
+    \strng{namehash}{LT+1}
+  \strng{fullhash}{LTCARASBDCHDLDDEHEKJLKNKCNJNSNROLRMSKSKSYSHTMTTLTHTHDZKJBJBSRPE1}
+    \field{labelnamesource}{author}
+    \field{labeltitlesource}{title}
+    \field{labelyear}{2023}
+    \field{labeldatesource}{}
+    \field{sortinit}{L}
+    \field{sortinithash}{L}
+    \verb{eprint}
+    \verb 2307.13702
+    \endverb
+    \field{note}{arXiv:2307.13702}
+    \field{title}{Measuring Faithfulness in Chain-of-Thought Reasoning}
+    \field{eprinttype}{arXiv}
+    \field{eprintclass}{cs.AI}
+    \field{year}{2023}
+  \endentry
+
+  \entry{nye2022show}{misc}{}{}
+    \name{author}{12}{}{%
+      {{hash=NM}{%
+         family={Nye},
+         familyi={N\bibinitperiod},
+         given={Maxwell},
+         giveni={M\bibinitperiod},
+      }}%
+      {{hash=AAJ}{%
+         family={Andreassen},
+         familyi={A\bibinitperiod},
+         given={Anders\bibnamedelima Johan},
+         giveni={A\bibinitperiod\bibinitdelim J\bibinitperiod},
+      }}%
+      {{hash=GAG}{%
+         family={Gur-Ari},
+         familyi={G\bibinithyphendelim A\bibinitperiod},
+         given={Guy},
+         giveni={G\bibinitperiod},
+      }}%
+      {{hash=MH}{%
+         family={Michalewski},
+         familyi={M\bibinitperiod},
+         given={Henryk},
+         giveni={H\bibinitperiod},
+      }}%
+      {{hash=AJ}{%
+         family={Austin},
+         familyi={A\bibinitperiod},
+         given={Jacob},
+         giveni={J\bibinitperiod},
+      }}%
+      {{hash=BD}{%
+         family={Bieber},
+         familyi={B\bibinitperiod},
+         given={David},
+         giveni={D\bibinitperiod},
+      }}%
+      {{hash=DD}{%
+         family={Dohan},
+         familyi={D\bibinitperiod},
+         given={David},
+         giveni={D\bibinitperiod},
+      }}%
+      {{hash=LA}{%
+         family={Lewkowycz},
+         familyi={L\bibinitperiod},
+         given={Aitor},
+         giveni={A\bibinitperiod},
+      }}%
+      {{hash=BM}{%
+         family={Bosma},
+         familyi={B\bibinitperiod},
+         given={Maarten},
+         giveni={M\bibinitperiod},
+      }}%
+      {{hash=LD}{%
+         family={Luan},
+         familyi={L\bibinitperiod},
+         given={David},
+         giveni={D\bibinitperiod},
+      }}%
+      {{hash=SC}{%
+         family={Sutton},
+         familyi={S\bibinitperiod},
+         given={Charles},
+         giveni={C\bibinitperiod},
+      }}%
+      {{hash=OA}{%
+         family={Odena},
+         familyi={O\bibinitperiod},
+         given={Augustus},
+         giveni={A\bibinitperiod},
+      }}%
+    }
+    \strng{namehash}{NM+1}
+    \strng{fullhash}{NMAAJGAGMHAJBDDDLABMLDSCOA1}
+    \field{labelnamesource}{author}
+    \field{labeltitlesource}{title}
+    \field{labelyear}{2022}
+    \field{labeldatesource}{}
+    \field{sortinit}{N}
+    \field{sortinithash}{N}
+    \field{title}{Show Your Work: Scratchpads for Intermediate Computation with
+  Language Models}
+    \verb{url}
+    \verb https://openreview.net/forum?id=iedYJm92o0a
+    \endverb
+    \field{year}{2022}
+  \endentry
+
+  \entry{turpin2023language}{inproceedings}{}{}
+    \name{author}{4}{}{%
+      {{hash=TM}{%
+         family={Turpin},
+         familyi={T\bibinitperiod},
+         given={Miles},
+         giveni={M\bibinitperiod},
+      }}%
+      {{hash=MJ}{%
+         family={Michael},
+         familyi={M\bibinitperiod},
+         given={Julian},
+         giveni={J\bibinitperiod},
+      }}%
+      {{hash=PE}{%
+         family={Perez},
+         familyi={P\bibinitperiod},
+         given={Ethan},
+         giveni={E\bibinitperiod},
+      }}%
+      {{hash=BSR}{%
+         family={Bowman},
+         familyi={B\bibinitperiod},
+         given={Samuel\bibnamedelima R.},
+         giveni={S\bibinitperiod\bibinitdelim R\bibinitperiod},
+      }}%
+    }
+    \list{publisher}{1}{%
+      {Curran Associates Inc.}%
+    }
+    \strng{namehash}{TM+1}
+    \strng{fullhash}{TMMJPEBSR1}
+    \field{labelnamesource}{author}
+    \field{labeltitlesource}{title}
+    \field{labelyear}{2023}
+    \field{labeldatesource}{}
+    \field{sortinit}{T}
+    \field{sortinithash}{T}
+    \field{abstract}{%
+    Large Language Models (LLMs) can achieve strong performance on many tasks
+  by producing step-by-step reasoning before giving a final output, often
+  referred to as chain-of-thought reasoning (CoT). It is tempting to interpret
+  these CoT explanations as the LLM's process for solving a task. This level of
+  transparency into LLMs' predictions would yield significant safety benefits.
+  However, we find that CoT explanations can systematically misrepresent the
+  true reason for a model's prediction. We demonstrate that CoT explanations
+  can be heavily influenced by adding biasing features to model inputs—e.g.,
+  by reordering the multiple-choice options in a few-shot prompt to make the
+  answer always "(A)"—which models systematically fail to mention in their
+  explanations. When we bias models toward incorrect answers, they frequently
+  generate CoT explanations rationalizing those answers. This causes accuracy
+  to drop by as much as 36\% on a suite of 13 tasks from BIG-Bench Hard, when
+  testing with GPT-3.5 from OpenAI and Claude 1.0 from Anthropic. On a
+  social-bias task, model explanations justify giving answers in line with
+  stereotypes without mentioning the influence of these social biases. Our
+  findings indicate that CoT explanations can be plausible yet misleading,
+  which risks increasing our trust in LLMs without guaranteeing their safety.
+  Building more transparent and explainable systems will require either
+  improving CoT faithfulness through targeted efforts or abandoning CoT in
+  favor of alternative methods.%
+    }
+    \field{booktitle}{Proceedings of the 37th International Conference on
+  Neural Information Processing Systems}
+    \field{series}{NIPS '23}
+    \field{title}{Language models don't always say what they think: unfaithful
+  explanations in chain-of-thought prompting}
+    \list{location}{1}{%
+      {New Orleans, LA, USA}%
+    }
+    \field{year}{2023}
+    \warn{\item Can't use 'location' + 'address'}
+  \endentry
+
+  \entry{wei2022chain}{inproceedings}{}{}
+    \name{author}{9}{}{%
+      {{hash=WJ}{%
+         family={Wei},
+         familyi={W\bibinitperiod},
+         given={Jason},
+         giveni={J\bibinitperiod},
+      }}%
+      {{hash=WX}{%
+         family={Wang},
+         familyi={W\bibinitperiod},
+         given={Xuezhi},
+         giveni={X\bibinitperiod},
+      }}%
+      {{hash=SD}{%
+         family={Schuurmans},
+         familyi={S\bibinitperiod},
+         given={Dale},
+         giveni={D\bibinitperiod},
+      }}%
+      {{hash=BM}{%
+         family={Bosma},
+         familyi={B\bibinitperiod},
+         given={Maarten},
+         giveni={M\bibinitperiod},
+      }}%
+      {{hash=IB}{%
+         family={Ichter},
+         familyi={I\bibinitperiod},
+         given={Brian},
+         giveni={B\bibinitperiod},
+      }}%
+      {{hash=XF}{%
+         family={Xia},
+         familyi={X\bibinitperiod},
+         given={Fei},
+         giveni={F\bibinitperiod},
+      }}%
+      {{hash=CEH}{%
+         family={Chi},
+         familyi={C\bibinitperiod},
+         given={Ed\bibnamedelima H.},
+         giveni={E\bibinitperiod\bibinitdelim H\bibinitperiod},
+      }}%
+      {{hash=LQV}{%
+         family={Le},
+         familyi={L\bibinitperiod},
+         given={Quoc\bibnamedelima V.},
+         giveni={Q\bibinitperiod\bibinitdelim V\bibinitperiod},
+      }}%
+      {{hash=ZD}{%
+         family={Zhou},
+         familyi={Z\bibinitperiod},
+         given={Denny},
+         giveni={D\bibinitperiod},
+      }}%
+    }
+    \list{publisher}{1}{%
+      {Curran Associates Inc.}%
+    }
+    \strng{namehash}{WJ+1}
+    \strng{fullhash}{WJWXSDBMIBXFCEHLQVZD1}
+    \field{labelnamesource}{author}
+    \field{labeltitlesource}{title}
+    \field{labelyear}{2022}
+    \field{labeldatesource}{}
+    \field{sortinit}{W}
+    \field{sortinithash}{W}
+    \field{abstract}{%
+    We explore how generating a chain of thought—a series of intermediate
+  reasoning steps—significantly improves the ability of large language models
+  to perform complex reasoning. In particular, we show how such reasoning
+  abilities emerge naturally in sufficiently large language models via a simple
+  method called chain-of-thought prompting, where a few chain of thought
+  demonstrations are provided as exemplars in prompting.Experiments on three
+  large language models show that chain-of-thought prompting improves
+  performance on a range of arithmetic, commonsense, and symbolic reasoning
+  tasks. The empirical gains can be striking. For instance, prompting a PaLM
+  540B with just eight chain-of-thought exemplars achieves state-of-the-art
+  accuracy on the GSM8K benchmark of math word problems, surpassing even
+  finetuned GPT-3 with a verifier.%
+    }
+    \field{booktitle}{Proceedings of the 36th International Conference on
+  Neural Information Processing Systems}
+    \field{series}{NIPS '22}
+    \field{title}{Chain-of-thought prompting elicits reasoning in large
+  language models}
+    \list{location}{1}{%
+      {New Orleans, LA, USA}%
+    }
+    \field{year}{2022}
+    \warn{\item Can't use 'location' + 'address'}
+  \endentry
+\enddatalist
+\endinput
