@@ -1,8 +1,22 @@
 # MarkovianTraining
 
-This project implements and evaluates Markovian Transformers for informative language modeling, focusing on chain-of-thought (CoT) reasoning through reinforcement learning. The codebase supports the research presented in "Markovian Transformers for Informative Language Modeling" and provides comprehensive tools for training, evaluation, and analysis of language models using Group Relative Policy Optimization (GRPO) and related techniques.
+Code and artifacts for the ICLR 2026 paper
+**[Markovian Transformers for Informative Language Modeling](https://openreview.net/forum?id=OMjcX1Z6Uu)**.
+The project studies reinforcement-learning objectives that reward a chain of
+thought for being useful context for the model's own answer, and evaluates
+whether the trained model actually depends on that context.
 
-##  Key Features
+> **Status: complete research artifact.** The repository contains the paper's
+> training and evaluation code, analyses, figures, paper source, slides, and
+> poster. It is preserved for reproducibility and follow-up research rather
+> than maintained as a stable general-purpose library; the GPU and dependency
+> requirements reflect the original experiments.
+
+> **Licensing status:** a project-wide reuse license has not yet been agreed by
+> all contributors. Public visibility permits reading and GitHub's normal fork
+> workflow, but does not by itself grant broader redistribution rights.
+
+## Key Features
 
 - **Markovian vs Non-Markovian Training**: Compare P(answer|CoT) vs P(answer|question,CoT) reward formulations
 - **Group Relative Policy Optimization (GRPO)**: Parallel sampling with standardized batch baselines
